@@ -29,6 +29,7 @@ import {
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import { CallId } from '@deepseek-ai/dsh-llm/brand'
+import type {} from '@deepseek-ai/dsh-fs'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { canonicalHeader, type Session, type SessionId, type TurnEndReason, type UserMessage } from '@deepseek-ai/dsh-session'
@@ -294,6 +295,9 @@ export class AcpAgent implements Agent {
   private imageInput = false
   private activeProjection: AcpTurnProjection | undefined
   private readonly steeringTasks = new Set<Promise<void>>()
+  private lifecycleSignal: AbortSignal | undefined
+  private runtimeGeneration: AbortController | undefined
+  private runtimeNeedsRestart = false
   private pendingSessionLink: {
     provider: 'codex' | 'claude'
     externalSessionId: string
@@ -338,27 +342,11 @@ export class AcpAgent implements Agent {
    * @param signal Cancels provider process startup and ACP initialization.
    */
   async start(signal: AbortSignal): Promise<void> {
-    let previousExternalSessionId: string | undefined
-    for (let index = this.session.events.length - 1; index >= 0; index -= 1) {
-      const event = this.session.events[index]
-      if (event?.type !== 'paperai/acp/session' || event.data.provider !== this.provider.id) continue
-      previousExternalSessionId = event.data.externalSessionId
-      break
-    }
-    const runtime = this.runtime = new AcpRuntime(
-      this.hostCtx,
-      this.provider,
-      this.session.header.cwd ?? process.cwd(),
-      {
-        update: update => this.activeProjection?.update(update),
-        modelChanged: (model) => { this.modelChanged(model) },
-        permission: (request, requestId) => this.permission(request, requestId),
-      },
-      this.runtimeOptions,
-    )
+    this.lifecycleSignal = signal
+    const previousExternalSessionId = this.previousExternalSessionId()
+    const runtime = this.createRuntime(signal)
     const started = await runtime.start(previousExternalSessionId, signal)
-    this.modelChanged(runtime.currentModel)
-    this.imageInput = started.initialized.agentCapabilities?.promptCapabilities?.image === true
+    this.applyRuntimeStart(started)
     if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
       this.pendingSessionLink = {
         provider: this.provider.id,
@@ -401,6 +389,8 @@ export class AcpAgent implements Agent {
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
     if (!options.keepInbox) this.inbox.clear()
     if (this.phase.kind === 'idle') return
+    this.runtimeGeneration?.abort(cause)
+    this.runtimeNeedsRestart = true
     this.runtime?.cancel()
     this.phase.abort.abort(cause)
   }
@@ -441,6 +431,7 @@ export class AcpAgent implements Agent {
   async close(): Promise<void> {
     this.cancel({ kind: 'disposed' })
     await this.whenIdle()
+    this.runtimeGeneration?.abort(new Error(`agent "${this.id}" lifecycle closed`))
     await this.runtime?.close()
     await this.scope.dispose()
   }
@@ -464,7 +455,9 @@ export class AcpAgent implements Agent {
 
   private async drive(): Promise<void> {
     try {
-      while (this.inbox.hasPending) await this.turn()
+      while (this.inbox.hasPending
+        && this.phase.kind === 'running'
+        && !this.phase.abort.signal.aborted) await this.turn()
     } catch {
       // Turn-level failures are logged and emitted at their exact boundary.
     } finally {
@@ -510,7 +503,8 @@ export class AcpAgent implements Agent {
       )
       let response: PromptResponse | undefined
       try {
-        response = await this.requireRuntime().prompt(await this.promptBlocks(claimed, signal), signal)
+        const runtime = await this.runtimeForTurn(signal)
+        response = await runtime.prompt(await this.promptBlocks(claimed, signal), signal)
       } finally {
         const interrupted = signal.aborted || response?.stopReason === 'cancelled'
         if (response !== undefined) projection.finish(response, interrupted)
@@ -566,6 +560,116 @@ export class AcpAgent implements Agent {
       }
     }
     return blocks
+  }
+
+  private async readTextFile(path: string, signal: AbortSignal): Promise<string> {
+    const target = await this.hostCtx.fs.resolve(path, {
+      cwd: this.session.header.cwd ?? process.cwd(),
+      signal,
+    })
+    return await this.hostCtx.fs.readText(target, signal)
+  }
+
+  private async writeTextFile(path: string, content: string, signal: AbortSignal): Promise<void> {
+    const target = await this.hostCtx.fs.resolve(path, {
+      cwd: this.session.header.cwd ?? process.cwd(),
+      signal,
+    })
+    await this.hostCtx.fs.writeText(
+      target,
+      content,
+      undefined,
+      signal,
+      this.hostCtx.sandboxPolicy.resolve({ session: this.session }),
+    )
+  }
+
+  private fileOperationSignal(
+    lifecycleSignal: AbortSignal,
+    generationSignal: AbortSignal,
+    requestSignal: AbortSignal,
+  ): AbortSignal {
+    const activitySignal = this.phase.kind === 'idle' ? undefined : this.phase.abort.signal
+    return AbortSignal.any([
+      lifecycleSignal,
+      generationSignal,
+      requestSignal,
+      ...activitySignal === undefined ? [] : [activitySignal],
+    ])
+  }
+
+  private createRuntime(lifecycleSignal: AbortSignal): AcpRuntime {
+    const generation = new AbortController()
+    this.runtimeGeneration = generation
+    const runtime = new AcpRuntime(
+      this.hostCtx,
+      this.provider,
+      this.session.header.cwd ?? process.cwd(),
+      {
+        update: update => this.activeProjection?.update(update),
+        modelChanged: (model) => { this.modelChanged(model) },
+        readTextFile: (path, requestSignal) => this.readTextFile(
+          path,
+          this.fileOperationSignal(lifecycleSignal, generation.signal, requestSignal),
+        ),
+        writeTextFile: (path, content, requestSignal) => this.writeTextFile(
+          path,
+          content,
+          this.fileOperationSignal(lifecycleSignal, generation.signal, requestSignal),
+        ),
+        permission: (request, requestId) => this.permission(request, requestId),
+      },
+      this.runtimeOptions,
+    )
+    this.runtime = runtime
+    return runtime
+  }
+
+  private async runtimeForTurn(signal: AbortSignal): Promise<AcpRuntime> {
+    if (!this.runtimeNeedsRestart) return this.requireRuntime()
+    const lifecycleSignal = this.lifecycleSignal
+    if (lifecycleSignal === undefined) throw new Error(`${this.provider.name} ACP lifecycle is unavailable`)
+    const previousExternalSessionId = this.previousExternalSessionId()
+    const previousRuntime = this.runtime
+    await previousRuntime?.close()
+    signal.throwIfAborted()
+    const runtime = this.createRuntime(lifecycleSignal)
+    try {
+      const started = await runtime.start(
+        previousExternalSessionId,
+        AbortSignal.any([lifecycleSignal, signal]),
+      )
+      this.applyRuntimeStart(started)
+      if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
+        this.session.append('paperai/acp/session', {
+          provider: this.provider.id,
+          externalSessionId: started.externalSessionId,
+          resumed: started.resumed,
+        })
+      }
+      this.runtimeNeedsRestart = false
+      return runtime
+    } catch (error: unknown) {
+      this.runtimeGeneration?.abort(error)
+      await runtime.close()
+      this.runtime = undefined
+      throw error
+    }
+  }
+
+  private previousExternalSessionId(): string | undefined {
+    for (let index = this.session.events.length - 1; index >= 0; index -= 1) {
+      const event = this.session.events[index]
+      if (event?.type === 'paperai/acp/session' && event.data.provider === this.provider.id) {
+        return event.data.externalSessionId
+      }
+    }
+    return undefined
+  }
+
+  private applyRuntimeStart(started: Awaited<ReturnType<AcpRuntime['start']>>): void {
+    this.modelChanged(this.requireRuntime().currentModel)
+    this.imageInput = started.initialized.agentCapabilities?.promptCapabilities?.image === true
   }
 
   private async forwardSteering(

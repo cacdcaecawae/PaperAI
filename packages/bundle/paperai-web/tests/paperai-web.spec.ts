@@ -34,6 +34,8 @@ describe('PaperAI web profile bundle', () => {
     expect(patches.find(row => row.id === 'agent-presets')).toMatchObject({
       config: { default: 'codex' },
     })
+    expect(patches.find(row => row.id === 'sandbox-policy')).toBeUndefined()
+    expect(patches.find(row => row.id === 'approval')).toBeUndefined()
     expect(patches.find(row => row.id === 'ui-settings-models')).toMatchObject({
       config: {
         onboarding: { welcomeNotice: false, deepSeekCredential: false },

@@ -38,6 +38,20 @@ async function runBuiltBin(
   return { stdout: result.stdout, code: result.exitCode ?? -1, stderr: result.stderr }
 }
 
+/** Extract one rendered config row together with its bundle-provenance heading. */
+function dumpedEntry(stdout: string, id: string): string {
+  const entryStart = stdout.indexOf(`- id: ${id}\n`)
+  if (entryStart < 0) throw new Error(`dumped config has no entry ${JSON.stringify(id)}`)
+  const headingStart = stdout.lastIndexOf('# == ', entryStart)
+  if (headingStart < 0) throw new Error(`dumped config entry ${JSON.stringify(id)} has no provenance heading`)
+  const headingEnd = stdout.indexOf('\n', headingStart)
+  const nextHeading = stdout.indexOf('\n# == ', entryStart)
+  const nextEntry = stdout.indexOf('\n- id: ', entryStart + 1)
+  const entryEnd = [nextHeading, nextEntry].filter(index => index >= 0)
+    .reduce((closest, index) => Math.min(closest, index), stdout.length)
+  return `${stdout.slice(headingStart, headingEnd)}\n${stdout.slice(entryStart, entryEnd)}\n`
+}
+
 async function waitForFile(file: string): Promise<void> {
   const deadline = Date.now() + 20_000
   while (!existsSync(file)) {
@@ -721,6 +735,34 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
       expect(stdout).toContain('agents: []')
       expect(stdout).toContain('# == @deepseek-ai/dsh-base')
       expect(stdout).toContain("name: '@deepseek-ai/dsh-host-webserver'")
+    }, 30_000)
+
+    it('keeps the PaperAI profile on the DSH confined-access default', async () => {
+      const { stdout, code, stderr } = await runBuiltBin(
+        ['--profile', 'paperai', '--dump-default-config'],
+        { DSH_HOME: home, DSH_PERMISSION_MODE: undefined },
+      )
+      expect(code).toBe(0)
+      expect(stderr).toBe('')
+      expect(dumpedEntry(stdout, 'sandbox-policy')).toMatchInlineSnapshot(`
+        "# == @deepseek-ai/dsh-base
+        - id: sandbox-policy
+          name: '@deepseek-ai/dsh-sandbox-policy'
+          config:
+            mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+            workspaceRoot: !!js process.cwd()
+        "
+      `)
+      expect(dumpedEntry(stdout, 'approval')).toMatchInlineSnapshot(`
+        "# == @deepseek-ai/dsh-base
+        - id: approval
+          name: '@deepseek-ai/dsh-user-approval'
+          config:
+            policy: !!js >-
+              (process.env.DSH_PERMISSION_MODE ?? 'workspace-write') ===
+              'danger-full-access' ? 'never' : 'ask'
+        "
+      `)
     }, 30_000)
 
     it('prints the headless profile without Host or browser layers', async () => {

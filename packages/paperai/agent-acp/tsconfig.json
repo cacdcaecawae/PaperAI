@@ -11,6 +11,7 @@
     { "path": "../../core/agent" },
     { "path": "../../core/scope" },
     { "path": "../../core/session" },
+    { "path": "../../fs/fs" },
     { "path": "../../llm/llm" },
     { "path": "../../sandbox/sandbox-policy" },
     { "path": "../../session/session-persistence" },

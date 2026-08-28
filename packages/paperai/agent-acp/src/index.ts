@@ -161,7 +161,7 @@ class ProviderFactory implements AgentFactory {
 
 /** Owns the two exact ACP factory routes and every lifecycle they create. */
 export class PaperAiAcpAgents extends Service {
-  static inject = ['agents', 'sessions', 'subprocess', 'paperMcp']
+  static inject = ['agents', 'sessions', 'subprocess', 'fs', 'sandboxPolicy', 'paperMcp']
 
   private accepting = true
   private readonly teardown = new AbortController()

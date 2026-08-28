@@ -1,7 +1,6 @@
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
-import { readFile, writeFile } from 'node:fs/promises'
 import * as acp from '@agentclientprotocol/sdk'
 import type {
   ClientCapabilities,
@@ -46,6 +45,8 @@ export interface AcpProviderDefinition {
 export interface AcpRuntimeCallbacks {
   readonly update: (update: SessionUpdate) => void
   readonly modelChanged: (model: string) => void
+  readonly readTextFile: (path: string, signal: AbortSignal) => Promise<string>
+  readonly writeTextFile: (path: string, content: string, signal: AbortSignal) => Promise<void>
   readonly permission: (
     request: RequestPermissionRequest,
     requestId: string,
@@ -163,10 +164,10 @@ export class AcpRuntime {
         this.callbacks.permission(context.params, String(context.requestId))
       ))
       .onRequest(acp.methods.client.fs.readTextFile, async context => ({
-        content: await readFile(context.params.path, 'utf8'),
+        content: await this.callbacks.readTextFile(context.params.path, context.signal),
       }))
       .onRequest(acp.methods.client.fs.writeTextFile, async (context) => {
-        await writeFile(context.params.path, context.params.content, 'utf8')
+        await this.callbacks.writeTextFile(context.params.path, context.params.content, context.signal)
         return {}
       })
       .onNotification(acp.methods.client.session.update, (context) => {

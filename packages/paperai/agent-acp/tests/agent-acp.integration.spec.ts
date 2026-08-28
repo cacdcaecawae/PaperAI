@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentHandle } from '@deepseek-ai/dsh-agent'
+import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import SandboxPolicyService, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, {
   SessionId,
   type Session,
@@ -186,6 +187,7 @@ class TestPaperMcp extends Service {
 interface Harness {
   readonly ctx: Context
   readonly root: string
+  readonly fallbackRoot: string
   readonly logPath: string
   readonly acpFiber: Awaited<ReturnType<Context['plugin']>>
   readonly persistence: TestPersistence
@@ -208,14 +210,20 @@ async function mountHarness(options: {
   readonly approvalOutcome?: ApprovalOutcome
   readonly records?: Map<string, StoredSession>
   readonly settingsDocument?: Record<string, unknown>
+  readonly writePath?: (workspaceRoot: string, fallbackRoot: string) => string
 } = {}): Promise<Harness> {
-  const root = await mkdtemp(join(tmpdir(), 'paperai-agent-acp-'))
-  const logPath = join(root, 'fake-acp.jsonl')
+  const scratchRoot = await mkdtemp(join(homedir(), 'paperai-agent-acp-'))
+  const root = join(scratchRoot, 'workspace')
+  const fallbackRoot = join(scratchRoot, 'fallback')
+  await Promise.all([mkdir(root), mkdir(fallbackRoot)])
+  const logPath = join(scratchRoot, 'fake-acp.jsonl')
   const ctx = new Context()
-  cleanup.push({ ctx, root })
+  cleanup.push({ ctx, root: scratchRoot })
   await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LocalSubprocessRuntime)
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fallbackRoot })
+  await ctx.plugin(SandboxedFileSystem, { cwd: fallbackRoot })
   await ctx.plugin(TestPaperMcp)
   const records = options.records ?? new Map<string, StoredSession>()
   await ctx.plugin(TestPersistence, records)
@@ -234,6 +242,9 @@ async function mountHarness(options: {
   const commonEnv = {
     FAKE_ACP_LOG: logPath,
     FAKE_ACP_SESSION_ID: 'external-paper-session',
+    ...options.writePath === undefined
+      ? {}
+      : { FAKE_ACP_WRITE_PATH: options.writePath(root, fallbackRoot) },
     ...options.env,
   }
   const acpFiber = await ctx.plugin(PaperAiAcpAgents, {
@@ -251,6 +262,7 @@ async function mountHarness(options: {
   return {
     ctx,
     root,
+    fallbackRoot,
     logPath,
     acpFiber,
     persistence,
@@ -449,6 +461,104 @@ describe('ACP permission policy projection', { concurrent: false }, () => {
     const permission = (await readLog(harness.logPath)).find(entry => entry.event === 'permission-response')
     expect(permission?.['outcome']).toEqual({ outcome: 'selected', optionId: 'reject-once' })
     expect(handle.agent.session.events.some(event => event.type === 'approval/asked')).toBe(false)
+  }, 20_000)
+})
+
+describe('ACP client filesystem enforcement', { concurrent: false }, () => {
+  it('reads a relative ACP path from the Session workspace through the DSH filesystem', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_READ_PATH: 'source.txt' } })
+    await writeFile(join(harness.root, 'source.txt'), 'workspace source', 'utf8')
+    const handle = await createAgent(harness, 'workspace-file-read')
+
+    await runTurn(handle, 'Read the workspace source')
+
+    expect((await readLog(harness.logPath)).find(entry => entry.event === 'read-text-file'))
+      .toMatchObject({ path: 'source.txt', content: 'workspace source' })
+  }, 20_000)
+
+  it('writes through the DSH filesystem inside the session workspace', async () => {
+    const harness = await mountHarness({
+      writePath: root => join(root, 'agent-written.txt'),
+      env: { FAKE_ACP_WRITE_CONTENT: 'workspace revision' },
+    })
+    const handle = await createAgent(harness, 'workspace-file-write')
+    setSandboxMode(handle.agent.session, 'workspace-write')
+
+    await runTurn(handle, 'Write the workspace revision')
+
+    await expect(readFile(join(harness.root, 'agent-written.txt'), 'utf8')).resolves.toBe('workspace revision')
+    expect((await readLog(harness.logPath)).some(entry => entry.event === 'write-text-file')).toBe(true)
+  }, 20_000)
+
+  it('denies an ACP write outside the session workspace at the final filesystem operation', async () => {
+    const harness = await mountHarness({
+      writePath: (_root, fallbackRoot) => join(fallbackRoot, 'fallback-denied.txt'),
+    })
+    const handle = await createAgent(harness, 'workspace-file-denied')
+    setSandboxMode(handle.agent.session, 'workspace-write')
+
+    await runTurn(handle, 'Try to write outside the workspace')
+
+    const outsidePath = join(harness.fallbackRoot, 'fallback-denied.txt')
+    await expect(readFile(outsidePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await readLog(harness.logPath)).find(entry => entry.event === 'write-text-file-error'))
+      .toMatchObject({ path: outsidePath })
+  }, 20_000)
+
+  it('denies an ACP write inside the workspace when the session is read-only', async () => {
+    const harness = await mountHarness({ writePath: root => join(root, 'read-only.txt') })
+    const handle = await createAgent(harness, 'read-only-file-denied')
+    setSandboxMode(handle.agent.session, 'read-only')
+
+    await runTurn(handle, 'Try to write in read-only mode')
+
+    await expect(readFile(join(harness.root, 'read-only.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await readLog(harness.logPath)).some(entry => entry.event === 'write-text-file-error')).toBe(true)
+  }, 20_000)
+
+  it('revokes an already-dispatched write before starting the next runtime generation', async () => {
+    const harness = await mountHarness({
+      writePath: root => join(root, 'cancelled-write.txt'),
+      env: {
+        FAKE_ACP_WRITE_CONTENT_FROM_PROMPT: '1',
+      },
+    })
+    const handle = await createAgent(harness, 'cancelled-file-write')
+    setSandboxMode(handle.agent.session, 'workspace-write')
+    const originalWriteText = harness.ctx.fs.writeText.bind(harness.ctx.fs)
+    const firstWriteEntered = Promise.withResolvers<AbortSignal | undefined>()
+    const releaseFirstWrite = Promise.withResolvers<undefined>()
+    let writeCalls = 0
+    harness.ctx.fs.writeText = async (target, content, expected, signal, sandboxPolicy) => {
+      writeCalls += 1
+      if (writeCalls === 1) {
+        firstWriteEntered.resolve(signal)
+        await releaseFirstWrite.promise
+      }
+      return await originalWriteText(target, content, expected, signal, sandboxPolicy)
+    }
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Start an in-flight write' }],
+      source: { kind: 'user' },
+    }))
+    const cancelledWriteSignal = await firstWriteEntered.promise
+
+    handle.agent.cancel({ kind: 'user' })
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Replacement turn' }],
+      source: { kind: 'user' },
+    }))
+    expect(cancelledWriteSignal?.aborted).toBe(true)
+    releaseFirstWrite.resolve(undefined)
+    await handle.agent.whenIdle()
+
+    const log = await readLog(harness.logPath)
+    expect(log.filter(entry => entry.event === 'prompt')).toHaveLength(2)
+    await expect(readFile(join(harness.root, 'cancelled-write.txt'), 'utf8'))
+      .resolves.toBe('Replacement turn')
+    const successfulWrites = log.filter(entry => entry.event === 'write-text-file')
+    expect(successfulWrites).toHaveLength(1)
+    expect(successfulWrites[0]).toMatchObject({ promptText: 'Replacement turn' })
   }, 20_000)
 })
 

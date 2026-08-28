@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
+import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import PaperAiAcpAgents from '../../src/index.ts'
@@ -17,6 +19,8 @@ try {
   await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LocalSubprocessRuntime)
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: root })
+  await ctx.plugin(SandboxedFileSystem, { cwd: root })
   ctx.provide('paperMcp', {
     issueDescriptor: (actor: Record<string, unknown>) => ({
       descriptor: {

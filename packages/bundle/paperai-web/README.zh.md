@@ -6,7 +6,9 @@ PaperAI 是固定版本 DeepSeek Harness Web profile 之上的产品层。它在
 
 [`cordis.patch.yml`](cordis.patch.yml) 只禁用上游官方品牌 contribution，并通过既有客户端 slot 插入 PaperAI 品牌与文档工作台插件。文档服务和 UI 插件以各自拥有的独立配置行加入这一层；通用 DSH 行为不会被复制进产品组合包。
 
-同一 patch 将既有 `ui-layout` 配置为 420–960 px 的详情栏范围、600 px 的打开宽度、560 px 的中栏下限，以及 `current-session` 详情可见条件。
+PaperAI 工作台通过既有 `ui-layout` 服务配置 420–960 px 的详情栏范围、600 px 的打开宽度、560 px 的中栏下限，以及 `current-session` 详情可见条件。
+
+权限继续由 `@deepseek-ai/dsh-base` 负责。当用户保存的权限默认值以及部署或 profile 配置都没有选择其他 preset 时，新的 PaperAI 会话以 `workspace-write` 和 `ask` 启动：Agent 可以修改所选 Workspace，超出该权限的操作需要请求批准。用户仍可通过标准 DSH 权限选择器主动开启完全访问，并完成既有风险确认；部署方也可以通过明确配置覆盖默认值。
 
 使用 `pnpm paperai` 运行源码 profile。profile 自有的 `cordis.patch.yml` 与 DSH home patch 仍然应用在本组合包之上，因此标准 DSH 配置和插件管理继续可用。
 

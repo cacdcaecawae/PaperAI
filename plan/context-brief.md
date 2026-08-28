@@ -1,6 +1,6 @@
 # Context Brief
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 ## Current stage
 
@@ -17,7 +17,7 @@ The functional PaperAI v1 vertical product is released. `main` starts from a tre
 - One revocable PaperAI MCP descriptor is issued per Codex/Claude ACP session; model changes update commit provenance and Agent disposal revokes access.
 - Codex/Claude preset routes fail loudly when unavailable. Blank idle sessions may replace their real factory driver with persistence-backed rollback; a preset label can never silently retain another Agent driver.
 - Template sources are evidence-only documents excluded from the user Working-document list. Template binding is accepted only through a validated Document Commit.
-- New PaperAI sessions default to local Codex ACP with full access; restored sessions keep and display their actual Agent/permission/model state.
+- New PaperAI sessions default to local Codex ACP. Without a stored user or deployment override, they inherit DSH `workspace-write` plus `ask`; restored sessions keep and display their actual Agent/permission/model state.
 - Optional DSH onboarding is controlled through a live client service so PaperAI can omit the DeepSeek key prompt without forking or removing the Models settings UI.
 - Commit publication uses a durable recovery journal, and a failed root commit compensates its uncommitted derived import without deleting the browser upload, institutional source, committed document, or template evidence.
 - Settings path writes retry one freshly read revision conflict, so a concurrent namespace update cannot silently drop a later user preference.

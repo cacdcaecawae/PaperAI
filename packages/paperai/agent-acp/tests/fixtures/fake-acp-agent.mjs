@@ -95,6 +95,10 @@ function makeAgent(connection) {
 
     async prompt(params) {
       log('prompt', { sessionId: params.sessionId, prompt: params.prompt })
+      const promptText = params.prompt
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
       const delayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS ?? 0)
       if (Number.isFinite(delayMs) && delayMs > 0) {
         await new Promise(resolve => setTimeout(resolve, delayMs))
@@ -117,6 +121,42 @@ function makeAgent(connection) {
           ],
         })
         log('permission-response', { outcome: response.outcome })
+      }
+
+      const readPath = process.env.FAKE_ACP_READ_PATH
+      if (readPath !== undefined) {
+        try {
+          const response = await connection.readTextFile({
+            sessionId: params.sessionId,
+            path: readPath,
+          })
+          log('read-text-file', { path: readPath, content: response.content })
+        } catch (error) {
+          log('read-text-file-error', {
+            path: readPath,
+            message: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      const writePath = process.env.FAKE_ACP_WRITE_PATH
+      if (writePath !== undefined) {
+        try {
+          await connection.writeTextFile({
+            sessionId: params.sessionId,
+            path: writePath,
+            content: process.env.FAKE_ACP_WRITE_CONTENT_FROM_PROMPT === '1'
+              ? promptText
+              : process.env.FAKE_ACP_WRITE_CONTENT ?? 'written by fake ACP',
+          })
+          log('write-text-file', { path: writePath, promptText })
+        } catch (error) {
+          log('write-text-file-error', {
+            path: writePath,
+            promptText,
+            message: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
 
       if (process.env.FAKE_ACP_FULL_UPDATES === '1') {
