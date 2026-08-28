@@ -749,7 +749,7 @@ export class PaperAIWorkbenchController {
   }
 
   /**
-   * Load a pending durable head; a dirty draft is discarded only by this explicit action.
+   * Load a pending durable head, rebasing an unchanged selected node without losing its local draft.
    * @param sessionId - Session whose pending external head should replace the local projection.
    * @returns the settled local action result after the refreshed document is published.
    */
@@ -763,6 +763,9 @@ export class PaperAIWorkbenchController {
     }
     if (state.externalUpdate === null) return { ok: false, error: 'no external document update' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    const localDraft = state.dirty && state.selectedNode !== null
+      ? { buffer: state.selectedNode, value: state.draft }
+      : null
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'reloading-external'
@@ -781,7 +784,39 @@ export class PaperAIWorkbenchController {
       || result.value.document.resourceId !== target.resourceId) {
       return this.failAction(entry.store, 'paperaiWorkbench returned an invalid external document projection')
     }
+    let rebasedBuffer: PaperAISelectedNodeBuffer | null = null
+    if (localDraft !== null) {
+      const document = result.value.document
+      if (!document.nodes.some(node => node.nodeId === localDraft.buffer.nodeId && node.editable)) {
+        return this.failAction(entry.store, 'selected node no longer exists in the external version; local draft preserved')
+      }
+      const rebased = await callRemote(() => this.remote.readNode({
+        sessionId,
+        documentId: document.documentId,
+        nodeId: localDraft.buffer.nodeId,
+        revision: document.revision,
+        headCommitId: document.headCommitId,
+      }, request.signal))
+      if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
+      if (!rebased.ok) return this.failAction(entry.store, remoteError(rebased.error))
+      if (rebased.value.nodeId !== localDraft.buffer.nodeId
+        || !bufferMatchesDocument(rebased.value, document)) {
+        return this.failAction(entry.store, 'paperaiWorkbench returned a mismatched rebased node buffer')
+      }
+      if (bufferValue(rebased.value) !== bufferValue(localDraft.buffer)) {
+        return this.failAction(entry.store, 'selected node changed externally; local draft preserved for conflict resolution')
+      }
+      rebasedBuffer = rebased.value
+    }
     this.publishOpenResult(entry.store, result.value)
+    if (localDraft !== null && rebasedBuffer !== null) {
+      entry.store.update((draft) => {
+        draft.nodePhase = 'ready'
+        draft.selectedNode = rebasedBuffer
+        draft.draft = localDraft.value
+        draft.dirty = localDraft.value !== bufferValue(rebasedBuffer)
+      })
+    }
     return OK
   }
 

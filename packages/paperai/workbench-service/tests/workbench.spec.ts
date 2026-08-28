@@ -653,6 +653,19 @@ describe('PaperAiWorkbenchService', () => {
       createdCommitId: 'commit-1',
     })
     expect(exported.document.versions[0]?.summary).toBe('版本 commit-1')
+
+    const reexported = await harness.service.exportDocument({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: exported.document.revision,
+      baseCommitId: exported.document.headCommitId,
+      mode: 'draft-export',
+    })
+    expect(reexported.status).toBe('success')
+    const gateCache: unknown = Reflect.get(harness.service, 'gateCache')
+    expect(gateCache).toBeInstanceOf(Map)
+    if (!(gateCache instanceof Map)) throw new Error('workbench gate cache is not a Map')
+    expect(gateCache.size).toBe(1)
   })
 
   it('returns a projectable blocked delivery without creating an export commit', async () => {

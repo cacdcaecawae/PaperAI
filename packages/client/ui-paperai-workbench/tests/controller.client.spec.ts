@@ -908,7 +908,7 @@ describe('PaperAIWorkbenchController', () => {
     controller.dispose()
   })
 
-  it('preserves a dirty draft until the user explicitly loads an external commit', async () => {
+  it('rebases a dirty draft when its selected node did not change externally', async () => {
     const remote = successfulRemote()
     const open = vi.fn<PaperAIWorkbenchRemote['open']>()
       .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
@@ -937,11 +937,46 @@ describe('PaperAIWorkbenchController', () => {
 
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
     expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
-      dirty: false,
+      dirty: true,
+      draft: 'Unsaved local draft',
       externalUpdate: null,
       document: { revision: REVISION_2, headCommitId: COMMIT_2 },
+      selectedNode: { baseRevision: REVISION_2, baseCommitId: COMMIT_2 },
     })
     expect(open).toHaveBeenCalledTimes(2)
+    controller.dispose()
+  })
+
+  it('keeps a dirty draft on the old base when the selected node changed externally', async () => {
+    const remote = successfulRemote()
+    remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_2) })
+    remote.readNode = vi.fn<PaperAIWorkbenchRemote['readNode']>(async () => ({
+      ok: true,
+      value: textNodeBuffer(REVISION_2, 'External rewrite'),
+    }))
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, 'Unsaved local draft')
+    const change = {
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_2,
+      updatedAt: '2026-08-28T12:00:00.000Z',
+    } as const
+    controller.handleDocumentChanged(change)
+
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({
+      ok: false,
+      error: 'selected node changed externally; local draft preserved for conflict resolution',
+    })
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      action: null,
+      dirty: true,
+      draft: 'Unsaved local draft',
+      externalUpdate: change,
+      document: { revision: documentSnapshot().revision, headCommitId: COMMIT_1 },
+    })
     controller.dispose()
   })
 

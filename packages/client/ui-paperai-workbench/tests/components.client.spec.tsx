@@ -328,7 +328,7 @@ describe('DocumentWorkbench', () => {
     expect(b.selectTab).toHaveBeenCalledWith('edit')
   })
 
-  it('preserves a dirty draft when another conversation commits and exposes an explicit reload', () => {
+  it('offers a conflict-aware external reload while preserving a dirty draft', () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready',
       document: documentSnapshot(),
@@ -343,8 +343,10 @@ describe('DocumentWorkbench', () => {
       },
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByText('其他会话或 Agent 已提交修改；你的本地临时修改仍被保留。')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '加载新版本' }))
+    expect(screen.getByText('其他会话或 Agent 已提交修改。加载时会保留本地草稿；若同一节点也被修改，将提示冲突。')).not.toBeNull()
+    const reload = screen.getByRole('button', { name: '加载新版本' })
+    expect(reload.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(reload)
     expect(b.reloadExternal).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '保留当前内容' }))
     expect(b.dismissExternal).toHaveBeenCalledOnce()

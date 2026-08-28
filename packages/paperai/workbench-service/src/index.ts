@@ -101,6 +101,11 @@ type DurableDomainChange = {
   | { readonly operation: 'deleted'; readonly value?: never }
 )
 
+interface CachedGateReport {
+  readonly revision: PaperAIDocumentRevision
+  readonly report: PaperAITemplateGateReport
+}
+
 function pathResourceId(
   category: FilesystemResourceCategory,
   path: string,
@@ -376,7 +381,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     maxUploadBytes: z.number().default(DEFAULT_MAX_UPLOAD_BYTES),
   })
 
-  private readonly gateCache = new Map<string, PaperAITemplateGateReport>()
+  private readonly gateCache = new Map<DocumentId, CachedGateReport>()
   private readonly maxUploadBytes: number
 
   constructor(ctx: Context, config: Config = {}) {
@@ -679,7 +684,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         ...projectGate(error.report, contract),
         status: 'failed',
       }
-      this.gateCache.set(this.gateKey(current.document), gate)
+      this.rememberGate(current.document, gate)
       return {
         status: 'blocked',
         documentId: current.document.id,
@@ -694,7 +699,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       ? undefined
       : this.ctx.paperTemplates.getContract(after.document.templateId)
     const gate = projectGate(exported.report, contract)
-    this.gateCache.set(this.gateKey(after.document), gate)
+    this.rememberGate(after.document, gate)
     const opened = await this.projectOpen(project, after.document, after.nodes, request.sessionId, signal)
     return {
       status: 'success',
@@ -810,7 +815,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       ? undefined
       : this.ctx.paperTemplates.getContract(snapshot.document.templateId)
     const gate = projectGate(report, contract)
-    this.gateCache.set(this.gateKey(snapshot.document), gate)
+    this.rememberGate(snapshot.document, gate)
     return {
       documentId: snapshot.document.id,
       revision: revisionOf(snapshot.document),
@@ -1011,7 +1016,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       nodes: nodes.map(nodeSummary),
       versions: history.map(commit => versionOf(commit, document.headCommitId)),
       template: templateSummary(contract),
-      gate: this.gateCache.get(this.gateKey(document)) ?? { status: 'not-run', findings: [] },
+      gate: this.gateFor(document) ?? { status: 'not-run', findings: [] },
     }
     const selected = selectedNodeId === undefined
       ? nodes.find(node => nodeSummary(node).editable)
@@ -1022,15 +1027,17 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
   }
 
-  private gateKey(document: DocumentRecord): string {
-    return `${document.id}\0${revisionOf(document)}`
+  private gateFor(document: DocumentRecord): PaperAITemplateGateReport | undefined {
+    const cached = this.gateCache.get(document.id)
+    return cached?.revision === revisionOf(document) ? cached.report : undefined
+  }
+
+  private rememberGate(document: DocumentRecord, report: PaperAITemplateGateReport): void {
+    this.gateCache.set(document.id, { revision: revisionOf(document), report })
   }
 
   private dropGate(documentId: DocumentId): void {
-    const prefix = `${documentId}\0`
-    for (const key of this.gateCache.keys()) {
-      if (key.startsWith(prefix)) this.gateCache.delete(key)
-    }
+    this.gateCache.delete(documentId)
   }
 }
 

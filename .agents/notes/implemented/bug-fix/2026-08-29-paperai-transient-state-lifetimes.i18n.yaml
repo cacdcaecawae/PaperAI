@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-29-paperai-transient-state-lifetimes.md
+2026-08-29-paperai-transient-state-lifetimes.md: 2907d85b2bc2c1445f482c076ab992469fe6df63
+2026-08-29-paperai-transient-state-lifetimes.zh.md: e33543bda05632b2d8aa81a0af9ec97865d0421c

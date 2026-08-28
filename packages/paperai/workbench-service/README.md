@@ -10,7 +10,7 @@ The Working DOCX is authoritative. Preview HTML is output-only and is never acce
 
 Document import and root-version creation form one workbench operation. If root submission rejects or is cancelled, the Host awaits non-cancellable document rollback before rejecting; the original upload or template source remains untouched. Once root submission succeeds, a later preview/open failure does not remove the committed document.
 
-`exportDocument()` returns a discriminated result. Draft publication and accepted delivery return `status: 'success'` with the output and milestone-backed workbench state. A delivery blocked by template errors returns `status: 'blocked'` with the unchanged revision and projected gate report; it creates neither an output nor an export milestone. Other export failures still reject.
+`exportDocument()` returns a discriminated result. Draft publication and accepted delivery return `status: 'success'` with the output and milestone-backed workbench state. A delivery blocked by template errors returns `status: 'blocked'` with the unchanged revision and projected gate report; it creates neither an output nor an export milestone. Other export failures still reject. The service retains at most one gate report per document and projects it only while its recorded revision matches the document.
 
 ## Model Experience
 
