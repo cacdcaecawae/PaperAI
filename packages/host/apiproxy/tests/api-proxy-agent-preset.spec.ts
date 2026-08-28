@@ -11,7 +11,12 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentFactory } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import SessionStore, {
+  SessionId,
+  type Session,
+  type SessionEvent,
+  type SessionHeader,
+} from '@deepseek-ai/dsh-session'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { RpcId, type RpcRequest } from '../src/api/rpc.ts'
 import type { HostFrame } from '../src/api/events.ts'
@@ -21,7 +26,7 @@ import {
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { createApiProxy } from '../src/api-proxy.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 let nextRpc = 0
 function request<P>(payload: P): RpcRequest<P> {
@@ -143,6 +148,102 @@ async function harness(
   return { api, ctx, cwd }
 }
 
+interface DriverSnapshot {
+  readonly meta: SessionHeader
+  readonly events: SessionEvent[]
+}
+
+/** Minimal persisted factory bench that exposes which top-level driver is live. */
+async function routingHarness() {
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-apiproxy-routing-')))
+  const ctx = new Context()
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(UserQuestionService)
+  ctx.provide('agentPresets', roster(['standard', 'codex', 'claude']) as never)
+  const snapshots = new Map<SessionId, DriverSnapshot>()
+  const calls = new Map<string, { create: number; resume: number }>()
+  const save = (session: Session): void => {
+    snapshots.set(session.id, {
+      meta: structuredClone(session.header),
+      events: structuredClone([...session.events]),
+    })
+  }
+  ctx.on('session/flush', (session) => { save(session) })
+  ctx.provide('sessionPersistence', {
+    list: () => Promise.resolve([...snapshots.values()].map(value => structuredClone(value.meta))),
+    inspect: (id: SessionId) => {
+      const source = snapshots.get(id)
+      if (source === undefined) return Promise.reject(new Error(`missing persisted session "${id}"`))
+      return Promise.resolve(structuredClone(source))
+    },
+    locate: () => undefined,
+  } as never)
+
+  const factory = (driver: string): AgentFactory => {
+    calls.set(driver, { create: 0, resume: 0 })
+    const publish = async (
+      ownerCtx: Context,
+      session: Session,
+      setup: Parameters<AgentFactory['createAgent']>[1]['setup'],
+    ) => {
+      const agent = stubAgent(session)
+      const agentCtx = ownerCtx.extend({ agent })
+      Object.assign(agent, { ctx: agentCtx, driver })
+      const commit = await setup?.(agentCtx)
+      commit?.commit()
+      const detachSession = ctx.sessions.enter(session)
+      const detachAgent = ctx.agents.enter(agent, ownerCtx.agent)
+      try {
+        ctx.sessions.announce(session)
+        ctx.agents.announce(agent)
+      } catch (error: unknown) {
+        detachAgent()
+        detachSession()
+        throw error
+      }
+      let disposal: Promise<void> | undefined
+      return {
+        agent,
+        dispose: () => disposal ??= Promise.resolve().then(() => {
+          save(session)
+          detachAgent()
+          detachSession()
+        }),
+      }
+    }
+    return {
+      createAgent(ownerCtx, options) {
+        calls.get(driver)!.create++
+        const session = ctx.sessions.prepare(options.sessionId, {
+          ...options.seed === undefined ? {} : { seed: options.seed },
+          ...options.meta === undefined ? {} : { meta: options.meta },
+        })
+        return publish(ownerCtx, session, options.setup)
+      },
+      resume(ownerCtx, options) {
+        calls.get(driver)!.resume++
+        const source = snapshots.get(options.resumeSessionId)
+        if (source === undefined) return Promise.reject(new Error('persisted source is missing'))
+        const session = ctx.sessions.prepare(options.resumeSessionId, {
+          seed: structuredClone(source.events),
+          meta: structuredClone(source.meta),
+          seedSource: 'persistence',
+        })
+        return publish(ownerCtx, session, options.setup)
+      },
+    }
+  }
+  ctx.agents.setFactory(factory('dsh'))
+  ctx.agents.registerFactory('codex', factory('codex'))
+  ctx.agents.registerFactory('claude', factory('claude'))
+  const api = createApiProxy(ctx, {
+    defaultModelSelection: () => ({ provider: 'test', model: 'test-model' }),
+    cwd,
+  })
+  return { api, calls, ctx, cwd }
+}
+
 describe('session.create with an agent preset', () => {
   it('records the resolved preset on the session header', async () => {
     const { api, ctx } = await harness(['standard', 'minimal'])
@@ -251,6 +352,84 @@ describe('session.create with an agent preset', () => {
   })
 })
 
+describe('required peer Agent factory routes', () => {
+  it('lets a peer Agent factory choose its own provider model', async () => {
+    const { api, ctx } = await routingHarness()
+    const create = vi.spyOn(ctx.agents, 'create')
+
+    const response = await api.sessions.create(request({
+      sessionId: SessionId('peer-owned-model'),
+      agentPreset: 'codex',
+    }))
+
+    expect(response.result.ok).toBe(true)
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      factoryRoute: 'codex',
+      agentOptions: {},
+    }))
+  })
+
+  it.each(['codex', 'claude'] as const)('fails fresh %s creation when its route is absent', async (agentPreset) => {
+    const { api, ctx } = await harness([agentPreset])
+    const sessionId = SessionId(`missing-${agentPreset}-create`)
+    const create = vi.spyOn(ctx.agents, 'create')
+
+    const response = await api.sessions.create(request({ sessionId, agentPreset }))
+
+    expect(response.result.ok).toBe(false)
+    if (!response.result.ok) {
+      expect(response.result.error.code).toBe('internal')
+      expect(response.result.error.message).toContain(`requires factory route "${agentPreset}"`)
+    }
+    expect(create).not.toHaveBeenCalled()
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+  })
+
+  it('fails persisted create/resume before calling the default DSH factory', async () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-apiproxy-missing-resume-')))
+    const sessionId = SessionId('missing-codex-resume')
+    const meta: SessionHeader = { version: 0, id: sessionId, createdAt: 1, cwd, agentPreset: 'codex' }
+    const { api, ctx } = await harness(['codex'], {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events: [] as SessionEvent[] }),
+      locate: () => undefined,
+    }, { defaults: { cwd } })
+    const resume = vi.spyOn(ctx.agents, 'resume')
+
+    const response = await api.sessions.create(request({ sessionId, agentPreset: 'codex' }))
+
+    expect(response.result.ok).toBe(false)
+    if (!response.result.ok) {
+      expect(response.result.error.code).toBe('internal')
+      expect(response.result.error.message).toContain('requires factory route "codex"')
+    }
+    expect(resume).not.toHaveBeenCalled()
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+  })
+
+  it('fails a Claude fork before creating a child on the default DSH factory', async () => {
+    const { api, ctx, cwd } = await harness(['claude'])
+    ctx.provide('workspaceRegistry', { list: () => [] } as never)
+    const source = ctx.sessions.create(SessionId('missing-claude-fork'), {
+      seed: [
+        { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+        { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+      ] as SessionEvent[],
+      meta: { cwd, agentPreset: 'claude' },
+    })
+    const create = vi.spyOn(ctx.agents, 'create')
+
+    const response = await api.sessions.fork(request({ sessionId: source.id }))
+
+    expect(response.result.ok).toBe(false)
+    if (!response.result.ok) {
+      expect(response.result.error.code).toBe('internal')
+      expect(response.result.error.message).toContain('requires factory route "claude"')
+    }
+    expect(create).not.toHaveBeenCalled()
+  })
+})
+
 /**
  * A capability a preset mounts is reachable from nowhere the host normally
  * looks: an `isolate` realm is what makes it per session. The gateway serves
@@ -352,6 +531,31 @@ describe('agentPreset.select', () => {
     expect(response.result.ok).toBe(true)
     if (!response.result.ok) throw new Error('unreachable')
     expect(response.result.value.agentPreset).toBe('minimal')
+  })
+
+  it('rebuilds one blank session across the DSH, Codex, and Claude drivers', async () => {
+    const { api, calls, ctx } = await routingHarness()
+    const sessionId = SessionId('sel-driver-routes')
+    const created = await api.sessions.create(request({ sessionId, agentPreset: 'standard' }))
+    expect(created.result.ok).toBe(true)
+    expect((ctx.agents.get(sessionId) as Agent & { driver: string }).driver).toBe('dsh')
+
+    for (const [agentPreset, driver] of [
+      ['codex', 'codex'],
+      ['claude', 'claude'],
+      ['standard', 'dsh'],
+    ] as const) {
+      const response = await api.agentPresets.select(request({ sessionId, agentPreset }))
+      expect(response.result.ok).toBe(true)
+      expect((ctx.agents.get(sessionId) as Agent & { driver: string }).driver).toBe(driver)
+    }
+
+    expect(calls.get('codex')?.resume).toBe(1)
+    expect(calls.get('claude')?.resume).toBe(1)
+    expect(calls.get('dsh')?.resume).toBe(1)
+    const session = ctx.sessions.get(sessionId)
+    if (session === undefined) throw new Error('route switch did not publish the replacement Session')
+    expect(resolveSessionPreset(session)).toBe('standard')
   })
 
   it('records the switch in the log, and the list reads it back', async () => {

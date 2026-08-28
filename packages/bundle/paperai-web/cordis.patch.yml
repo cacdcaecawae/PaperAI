@@ -1,0 +1,86 @@
+# PaperAI is a product layer over the complete DSH web composition. It replaces
+# only product-owned presentation and inserts PaperAI capabilities; the DSH
+# Host, Harness/Loop, sessions, settings, credentials, models, permissions,
+# workspace, transport, and remaining UI rows stay untouched.
+
+- id: ui-brand-official
+  disabled: true
+
+# PaperAI opens on the local Codex ACP runtime and the user's requested full
+# access mode. Both remain ordinary DSH selectors: Settings or
+# DSH_PERMISSION_MODE can switch them without a PaperAI-only control path.
+- id: agent-presets
+  config:
+    default: codex
+
+- id: sandbox-policy
+  config:
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'danger-full-access'
+    workspaceRoot: !!js process.cwd()
+
+- id: approval
+  config:
+    policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'danger-full-access') === 'danger-full-access' ? 'never' : 'ask'"
+
+# PaperAI starts with local ACP Agents, so a DeepSeek API key is optional and
+# belongs in Settings rather than a blocking first-run dialog. The Models page
+# itself remains the stock DSH surface.
+- id: ui-settings-models
+  config:
+    onboarding:
+      welcomeNotice: false
+      deepSeekCredential: false
+
+- id: storage-domain
+  config:
+    backend: json
+    routes:
+      paperai: sqlite
+
+- insert:
+    - id: paperai-storage-sqlite
+      name: '@deepseek-ai/dsh-storage-sqlite'
+      config:
+        path: !!js dshHomePath('paperai', 'paperai.sqlite')
+        journalMode: wal
+
+    - id: paperai-repository
+      name: '@paperai/repository'
+
+    - id: paperai-document-engine-officecli
+      name: '@paperai/document-engine-officecli'
+
+    - id: paperai-project-service
+      name: '@paperai/project-service'
+
+    - id: paperai-document-service
+      name: '@paperai/document-service'
+
+    - id: paperai-template-service
+      name: '@paperai/template-service'
+      config:
+        storageRoot: !!js dshHomePath('paperai', 'templates')
+
+    - id: paperai-template-pack-hit
+      name: '@paperai/template-pack-hit'
+
+    - id: paperai-commit-service
+      name: '@paperai/commit-service'
+
+    - id: paperai-mcp
+      name: '@paperai/mcp'
+
+    - id: paperai-export-service
+      name: '@paperai/export-service'
+
+    - id: paperai-workbench-service
+      name: '@paperai/workbench-service'
+
+    - id: paperai-agent-acp
+      name: '@paperai/agent-acp'
+
+    - id: ui-paperai-brand
+      name: '@paperai/ui-brand'
+
+    - id: ui-paperai-workbench
+      name: '@paperai/ui-workbench'

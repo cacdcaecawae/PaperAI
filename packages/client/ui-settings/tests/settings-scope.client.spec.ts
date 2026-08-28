@@ -34,6 +34,20 @@ function rejected<T>(): RpcResponse<T> {
   }
 }
 
+function conflicted<T>(): RpcResponse<T> {
+  return {
+    rpcId: `scope-${rpc++}` as never,
+    result: {
+      ok: false,
+      error: {
+        code: 'settings-conflict',
+        message: 'settings namespace changed since it was read',
+        details: { ns: 'ui-test', expected: 2, actual: 3 },
+      },
+    },
+  }
+}
+
 function view(value: unknown, revision = 0): SettingsNamespaceView {
   return {
     ns: 'ui-test',
@@ -223,6 +237,35 @@ describe('SettingsScopeController', () => {
     await scope.set('preference', 'dark')
     await scope.set('preference', 'system')
     expect(published.map(section => section?.preference)).toEqual([undefined, 'system', 'light'])
+  })
+
+  it('re-reads and reapplies the latest path write once after a revision conflict', async () => {
+    const describeCall = vi.fn()
+      .mockResolvedValueOnce(described({ preference: 'system' }, 2))
+      .mockResolvedValueOnce(described({ preference: 'light' }, 3))
+    const mutate = vi.fn()
+      .mockResolvedValueOnce(conflicted())
+      .mockResolvedValueOnce(ok(view({ preference: 'dark' }, 4)))
+    const { mirror, scope } = derivedScope({ describe: describeCall, mutate })
+    await mirror.load()
+
+    await scope.set('preference', 'dark')
+
+    expect(mutate).toHaveBeenNthCalledWith(1, {
+      ns: 'ui-test',
+      ops: [{ op: 'set', path: ['preference'], value: 'dark' }],
+      expectedRevision: 2,
+    })
+    expect(mutate).toHaveBeenNthCalledWith(2, {
+      ns: 'ui-test',
+      ops: [{ op: 'set', path: ['preference'], value: 'dark' }],
+      expectedRevision: 3,
+    })
+    expect(scope.getSnapshot()).toMatchObject({
+      status: 'ready',
+      value: { preference: 'dark' },
+      revision: 4,
+    })
   })
 
   it('does not recover superseded rejected or thrown writes', async () => {

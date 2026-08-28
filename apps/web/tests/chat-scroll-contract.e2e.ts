@@ -45,6 +45,11 @@ const FLING_SESSION_ID = 'chat-scroll-fling-e2e'
 const LIVE_FLING_PROMPT = 'CHAT_SCROLL_FLING_USER Keep streaming while I fling back through older output.'
 const LIVE_FLING_FIRST = 'CHAT_SCROLL_FLING_STREAM_FIRST'
 const LIVE_FLING_DONE = 'CHAT_SCROLL_FLING_STREAM_DONE'
+const NATIVE_SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
+const NATIVE_SHELL_DISCLOSURE = process.platform === 'win32'
+  ? '[data-disclosure-row][role="button"]'
+  : '[data-sample="bash"]'
+const DOCUMENT_END_KEY = 'End'
 
 const HISTORY_FIXTURE = createChatScrollFixture({
   markerPrefix: 'HISTORY',
@@ -112,12 +117,18 @@ function textStream(first: string, done: string, deltaCount: number): StreamChun
 }
 
 function toolStream(): StreamChunk[] {
-  const command = [
-    `: > ${TOOL_READY_FILE}`,
-    `while [ ! -f ${TOOL_RELEASE_FILE} ]; do sleep 0.02; done`,
-    'line=1',
-    `while [ "$line" -le 64 ]; do printf '${LIVE_TOOL_RESULT} line %02d\\n' "$line"; line=$((line + 1)); done`,
-  ].join('; ')
+  const command = process.platform === 'win32'
+    ? [
+      `New-Item -ItemType File -Path '${TOOL_READY_FILE}' -Force | Out-Null`,
+      `while (-not (Test-Path -LiteralPath '${TOOL_RELEASE_FILE}')) { Start-Sleep -Milliseconds 20 }`,
+      `1..64 | ForEach-Object { Write-Output ('${LIVE_TOOL_RESULT} line {0:D2}' -f $_) }`,
+    ].join('; ')
+    : [
+      `: > ${TOOL_READY_FILE}`,
+      `while [ ! -f ${TOOL_RELEASE_FILE} ]; do sleep 0.02; done`,
+      'line=1',
+      `while [ "$line" -le 64 ]; do printf '${LIVE_TOOL_RESULT} line %02d\\n' "$line"; line=$((line + 1)); done`,
+    ].join('; ')
   const args = JSON.stringify({ command, description: LIVE_TOOL_RESULT })
   return [
     { type: 'block-start', index: 0, blockType: 'tool-call' },
@@ -125,13 +136,13 @@ function toolStream(): StreamChunk[] {
       type: 'tool-call-delta',
       index: 0,
       id: LIVE_TOOL_CALL_ID,
-      name: 'bash',
+      name: NATIVE_SHELL_TOOL,
       argumentsDelta: args,
     },
     {
       type: 'block-end',
       index: 0,
-      block: { type: 'tool-call', id: LIVE_TOOL_CALL_ID, name: 'bash', arguments: args },
+      block: { type: 'tool-call', id: LIVE_TOOL_CALL_ID, name: NATIVE_SHELL_TOOL, arguments: args },
     },
     { type: 'usage', usage: { inputTokens: 256, outputTokens: 48 } },
     { type: 'finish', reason: { kind: 'tool-calls' } },
@@ -563,9 +574,13 @@ describe('web e2e: long Chat scroll contract', () => {
         await composer.fill(LIVE_TOOL_PROMPT)
         await world.page.getByRole('button', { name: 'Send message', exact: true }).click()
         await expect.poll(() => fileExists(readyPath), { timeout: 15_000 }).toBe(true)
-        const liveRow = world.page.locator(`[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] [data-sample="bash"]`)
+        const liveTool = world.page.locator(`[data-chat-call-id="${LIVE_TOOL_CALL_ID}"]`)
+        const liveRow = liveTool.locator(NATIVE_SHELL_DISCLOSURE)
         await liveRow.waitFor({ timeout: 15_000 })
-        expect(await liveRow.getAttribute('data-state')).toBe('running')
+        const stateRow = process.platform === 'win32'
+          ? liveTool.locator('[data-tool="pwsh"]')
+          : liveRow
+        expect(await stateRow.getAttribute('data-state')).toBe('running')
         await expectBottom(world.page)
 
         await wheelTranscript(world.page, -1_200)
@@ -606,7 +621,7 @@ describe('web e2e: long Chat scroll contract', () => {
       await expectBottom(world.page)
       await expectMarkerAboveComposer(world.page, LIVE_TOOL_DONE)
 
-      const liveRowSelector = `[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] [data-sample="bash"]`
+      const liveRowSelector = `[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] ${NATIVE_SHELL_DISCLOSURE}`
       const liveRow = world.page.locator(liveRowSelector)
       await wheelUntilVisible(world.page, liveRowSelector, -300)
       const toolAnchor = await liveRow.evaluate((row) => {
@@ -749,14 +764,12 @@ describe('web e2e: long Chat scroll contract', () => {
       await expectBottom(world.page)
       const backToBottom = world.page.getByRole('button', { name: 'Back to bottom', exact: true })
 
-      // Focus rides the last seeded tool row (a tabbable button whose keydown
-      // handler passes scrolling keys through). End first normalizes the
-      // focus-driven scrollIntoView back to the floor.
-      const lastToolRow = world.page.locator(
-        `[data-chat-call-id="chat-scroll-${String(INPUTS_FIXTURE.turns).padStart(3, '0')}-1"] [data-sample="bash"]`,
-      )
-      await lastToolRow.focus()
-      await world.page.keyboard.press('End')
+      // Focus the actual scroll owner. It is programmatically focusable but
+      // stays out of the Tab order, so paging keys do not depend on whether a
+      // platform-specific tool row happens to expose a disclosure button.
+      const scrollHost = world.page.locator('[data-conversation-scroll]')
+      await scrollHost.focus()
+      await world.page.keyboard.press(DOCUMENT_END_KEY)
       await expectBottom(world.page)
       await expect.poll(() => backToBottom.count(), { timeout: 10_000 }).toBe(0)
       for (let press = 0; press < 3; press += 1) {
@@ -766,7 +779,7 @@ describe('web e2e: long Chat scroll contract', () => {
       await backToBottom.waitFor({ timeout: 10_000 })
       await expect.poll(async () => (await scrollGeometry(world.page)).distanceFromBottom, { timeout: 10_000 })
         .toBeGreaterThan(100)
-      await world.page.keyboard.press('End')
+      await world.page.keyboard.press(DOCUMENT_END_KEY)
       await expectBottom(world.page)
       await expect.poll(() => backToBottom.count(), { timeout: 10_000 }).toBe(0)
       assertClean(world)

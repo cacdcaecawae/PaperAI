@@ -54,6 +54,7 @@ describe('apply wiring', () => {
   it('provides the conversation service', async () => {
     const b = await bench()
     expect(b.runtime.ctx.get('conversation')).toBeDefined()
+    expect(b.runtime.ctx.get('conversationDetails')).toBeDefined()
     await b.runtime.dispose()
   })
 
@@ -94,6 +95,8 @@ describe('apply wiring', () => {
     expect(b.slots.spec('conversation.hero.brand.mark')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('conversation.hero.workspace')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('conversation.hero.agentPreset')).toEqual({ kind: 'single', scope: 'root' })
+    expect(b.slots.spec('conversation.details.view')).toEqual({ kind: 'list', scope: 'session' })
+    expect(b.slots.spec('conversation.details.tool')).toEqual({ kind: 'single', scope: 'session' })
     expect(b.slots.spec('conversation.session.header.lineage'))
       .toEqual({ kind: 'single', scope: 'session' })
     expect(b.slots.entries('settings.general.item').map(entry => entry.options.id)).toEqual(['composer-enter'])
@@ -124,6 +127,7 @@ describe('apply wiring', () => {
     expect(b.slots.entries('details')).toHaveLength(0)
     expect(b.slots.entries('settings.general.item')).toHaveLength(0)
     expect(b.runtime.ctx.get('conversation')).toBeUndefined()
+    expect(b.runtime.ctx.get('conversationDetails')).toBeUndefined()
     await b.runtime.dispose()
   })
 })

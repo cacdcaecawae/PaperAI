@@ -8,7 +8,8 @@
 // is asserted from the persisted assistant/chunk events, not transient DOM.
 // Record: DSH_SNAPSHOT=record rewrites session.jsonl, then a keyless
 // DSH_SNAPSHOT=refresh regenerates ui.expected.md.
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
@@ -27,11 +28,52 @@ const FIXTURE = fileURLToPath(new URL('./snapshots/fresh-round-trip/session.json
 const UI_EXPECTED = fileURLToPath(new URL('./snapshots/fresh-round-trip/ui.expected.md', import.meta.url))
 const SYSTEM_PROMPT_EXPECTED = fileURLToPath(new URL('./snapshots/fresh-round-trip/system-prompt.expected.md', import.meta.url))
 const MODE = webSnapshotMode()
+const NATIVE_SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
+const NATIVE_SHELL_COMMAND = process.platform === 'win32' ? 'Write-Output WEB_E2E_OK' : 'echo WEB_E2E_OK'
 
 // The scenario's one drive prompt. Record sends it; replay asserts the
 // committed fixture recorded exactly it, so drive script and fixture cannot
 // drift apart.
-const PROMPT = 'Use the bash tool to run exactly: echo WEB_E2E_OK. Then reply with the single word DONE and stop.'
+const PROMPT = `Use the ${NATIVE_SHELL_TOOL} tool to run exactly: ${NATIVE_SHELL_COMMAND}. Then reply with the single word DONE and stop.`
+
+function mapStrings(value: unknown, transform: (text: string) => string): unknown {
+  if (typeof value === 'string') return transform(value)
+  if (Array.isArray(value)) return value.map(item => mapStrings(item, transform))
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapStrings(item, transform)]))
+}
+
+function windowsReplayFixture(fixture: string): string {
+  return fixture.split(/\r?\n/).map((line) => {
+    if (line.length === 0) return line
+    const value = mapStrings(JSON.parse(line) as unknown, text => text
+      .replaceAll('bash', 'pwsh')
+      .replaceAll('echo', 'Write-Output'))
+    return JSON.stringify(value)
+  }).join('\n')
+}
+
+function normalizeSnapshotPaths(value: string, paths: ReadonlyArray<readonly [string, string]>): string {
+  let normalized = value
+  for (const [path, token] of paths) {
+    normalized = normalized
+      .split(path).join(token)
+      .split(path.replaceAll('\\', '/')).join(token)
+  }
+  return normalized
+}
+
+function normalizeShellSnapshot(value: string): string {
+  if (process.platform !== 'win32') return value
+  return value
+    .replaceAll('Write-Output', 'echo')
+    .replaceAll('pwsh', 'bash')
+    .replaceAll('Pwsh', 'Bash')
+}
+
+function normalizeLineEndings(value: string): string {
+  return value.replaceAll('\r\n', '\n')
+}
 
 describe('web e2e: fresh round trip through the real assembly', () => {
   let scaffold: WebScaffold
@@ -39,11 +81,18 @@ describe('web e2e: fresh round trip through the real assembly', () => {
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
   let settledSessionId: SessionId | undefined
+  let replayFixture = FIXTURE
+  let derivedFixtureDir: string | undefined
   const sessionEvents: SessionEvent[] = []
 
   beforeAll(async () => {
+    if (MODE !== 'record' && process.platform === 'win32') {
+      derivedFixtureDir = await mkdtemp(join(tmpdir(), 'dsh-web-pwsh-replay-'))
+      replayFixture = join(derivedFixtureDir, 'session.jsonl')
+      await writeFile(replayFixture, windowsReplayFixture(await readFile(FIXTURE, 'utf8')))
+    }
     scaffold = await launchWebScaffold({
-      ...(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15 }),
+      ...(MODE === 'record' ? {} : { replayFixture, paceMs: 15 }),
     })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
@@ -56,15 +105,21 @@ describe('web e2e: fresh round trip through the real assembly', () => {
   }, 120_000)
 
   afterAll(async () => {
-    await browser?.close()
-    await scaffold?.close()
+    const failures: unknown[] = []
+    await browser?.close().catch((error: unknown) => failures.push(error))
+    await scaffold?.close().catch((error: unknown) => failures.push(error))
+    if (derivedFixtureDir !== undefined) {
+      await rm(derivedFixtureDir, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
+    }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'fresh round-trip teardown failed')
   })
 
   it('drives the recorded prompt to a settled turn (all modes)', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-round-trip'))
     if (MODE !== 'record') {
       // Drift guard: the committed fixture must carry exactly the drive prompt.
-      expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT])
+      expect(fixtureUserPrompts(await readFile(replayFixture, 'utf8'))).toEqual([PROMPT])
     }
     const input = page.locator('textarea').first()
     await input.waitFor({ timeout: 10_000 })
@@ -85,29 +140,32 @@ describe('web e2e: fresh round trip through the real assembly', () => {
     if (agent === undefined) throw new Error(`the settled Web agent ${settledSessionId} is no longer live`)
     const system = agent.session.requestHeader()?.system
     if (system === undefined) throw new Error('the settled Web request has no system prompt')
-    const prefix = system.split('\n\n').slice(0, 4).join('\n\n')
-      .split(REPO_ROOT).join('{{sourceRoot}}')
-      .split(join(scaffold.workspaceCwd, 'workspace')).join('{{cwd}}')
+    const prefix = normalizeSnapshotPaths(system.split('\n\n').slice(0, 4).join('\n\n'), [
+      [REPO_ROOT, '{{sourceRoot}}'],
+      [join(scaffold.workspaceCwd, 'workspace'), '{{cwd}}'],
+    ])
       .split(scaffold.baseUrl).join('{{webUrl}}')
     await compareOrRefreshGolden(SYSTEM_PROMPT_EXPECTED, prefix, MODE)
   })
 
-  it('exposes the assembled Web URL to the real bash tool', async () => {
+  it('exposes the assembled Web URL to the native shell tool', async () => {
     if (settledSessionId === undefined) throw new Error('the drive turn did not publish a session id')
     const agent = scaffold.ctx.agents.get(settledSessionId)
     if (agent === undefined) throw new Error(`the settled Web agent ${settledSessionId} is no longer live`)
     const result = await scaffold.ctx.tools.execute({
       signal: AbortSignal.timeout(5_000),
       callId: CallId('web-url-probe'),
-      name: 'bash',
+      name: NATIVE_SHELL_TOOL,
       arguments: {
-        command: 'printf \'%s\\n\' "$DSH_WEB_URL"',
+        command: process.platform === 'win32'
+          ? 'Write-Output $env:DSH_WEB_URL'
+          : 'printf \'%s\\n\' "$DSH_WEB_URL"',
         description: 'Print current Web runtime',
       },
       agent,
     })
     expect(result.isError).toBe(false)
-    expect(result.content.filter(block => block.type === 'text').map(block => block.text).join(''))
+    expect(normalizeLineEndings(result.content.filter(block => block.type === 'text').map(block => block.text).join('')))
       .toBe(`${scaffold.baseUrl}\n`)
   })
 
@@ -119,15 +177,16 @@ describe('web e2e: fresh round trip through the real assembly', () => {
       // legal — the chunk-event assertions below carry incrementality.
     })
     await expect.poll(() => page.getByText('DONE', { exact: true }).count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
-    // World state, not self-report: the real bash executor returned the exact
+    // World state, not self-report: the native shell executor returned the exact
     // command output, and the turn closed cleanly.
-    const bashCall = sessionEvents.find(event => event.type === 'tool/call' && event.data.name === 'bash')
-    if (bashCall?.type !== 'tool/call') throw new Error('the replayed turn did not call the bash tool')
-    const bashResult = sessionEvents.find(event =>
-      event.type === 'tool/result' && event.data.message.source.callId === bashCall.data.callId)
-    if (bashResult?.type !== 'tool/result') throw new Error('the bash tool call produced no durable result')
-    expect(bashResult.data.message.content[0].isError).toBe(false)
-    expect(bashResult.data.message.content[0].content.filter(block => block.type === 'text').map(block => block.text).join(''))
+    const shellCall = sessionEvents.find(event => event.type === 'tool/call' && event.data.name === NATIVE_SHELL_TOOL)
+    if (shellCall?.type !== 'tool/call') throw new Error(`the replayed turn did not call the ${NATIVE_SHELL_TOOL} tool`)
+    const shellResult = sessionEvents.find(event =>
+      event.type === 'tool/result' && event.data.message.source.callId === shellCall.data.callId)
+    if (shellResult?.type !== 'tool/result') throw new Error('the native shell tool call produced no durable result')
+    expect(shellResult.data.message.content[0].isError).toBe(false)
+    expect(normalizeLineEndings(shellResult.data.message.content[0].content
+      .filter(block => block.type === 'text').map(block => block.text).join('')))
       .toBe('WEB_E2E_OK\n')
     const turnEnds = sessionEvents.filter(e => e.type === 'turn/end')
     expect(turnEnds.length).toBe(1)
@@ -145,7 +204,10 @@ describe('web e2e: fresh round trip through the real assembly', () => {
     await page.getByRole('button', {
       name: 'Select model, current DeepSeek-V4-Flash',
     }).waitFor({ timeout: 10_000 })
-    const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
+    const snapshot = normalizeShellSnapshot(normalizeSnapshotPaths(
+      await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd),
+      [[scaffold.workspaceCwd, '{{cwd}}']],
+    ))
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
   })
 

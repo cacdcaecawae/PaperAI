@@ -49,6 +49,39 @@ export interface CancelOptions {
  */
 export type AgentStatus = 'idle' | 'running'
 
+/** One model advertised by a non-DSH Agent driver. */
+export interface AgentDriverModel {
+  /** Provider-owned model identifier accepted by {@link AgentModelController.selectModel}. */
+  readonly id: string
+  /** Human-facing model label. */
+  readonly name: string
+  /** Optional provider description. */
+  readonly description?: string
+  /** Optional visual grouping from the provider's own catalog. */
+  readonly group?: string
+}
+
+/**
+ * Optional model-control capability implemented by peer Agent drivers such as
+ * ACP clients. The DSH Agent Loop continues to use the LLM registry and does
+ * not expose this capability.
+ */
+export interface AgentModelController {
+  /** Stable provider/driver identity rendered as one model-catalog group. */
+  readonly provider: { readonly id: string; readonly name: string }
+  /** Current provider-owned model identifier. */
+  readonly currentModel: string
+  /** Read the provider's live session model options. */
+  listModels(): Promise<readonly AgentDriverModel[]>
+  /** Switch this live Agent session and return the accepted current model. */
+  selectModel(model: string): Promise<string>
+  /**
+   * Input modalities advertised for a model, when the driver knows them.
+   * Undefined means the Host should defer validation to the driver.
+   */
+  inputModalities?(model: string): Promise<readonly ('text' | 'image')[] | undefined>
+}
+
 /** Whether and with which messages the loop enters a proposed step. */
 export type PreStepDecision =
   | { kind: 'reject' }
@@ -74,6 +107,8 @@ export interface Agent {
   readonly status: AgentStatus
   /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
   readonly ctx: Context
+  /** Driver-owned model selection, present only when models do not route through `ctx.llm`. */
+  readonly modelController?: AgentModelController
 
   /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active

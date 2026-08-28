@@ -9,6 +9,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { AgentPresetLabel } from '../src/client/AgentPresetLabel.tsx'
@@ -17,6 +18,7 @@ import { AgentPresetRow } from '../src/client/AgentPresetRow.tsx'
 import type { AgentPresetRowProps } from '../src/client/AgentPresetRow.tsx'
 import { AgentPresetSeat } from '../src/client/AgentPresetSeat.tsx'
 import type { AgentPresetSeatProps } from '../src/client/AgentPresetSeat.tsx'
+import type { AgentPresetBrandMarkOwnerProps } from '../src/client/brand-slot.ts'
 import type { AgentPresetSettingsState } from '../src/client/settings-store.ts'
 import type { AgentPresetSeatState } from '../src/client/seat-store.ts'
 import { en } from '../src/client/locales.ts'
@@ -55,19 +57,34 @@ function renderRow(state: Partial<AgentPresetSettingsState> = {}) {
   return actions
 }
 
-function renderSeat(state: Partial<AgentPresetSeatState> = {}) {
+type BrandMarkRenderer = (props: AgentPresetBrandMarkOwnerProps) => ReactNode
+
+function renderSeat(
+  state: Partial<AgentPresetSeatState> = {},
+  brands: Readonly<Record<string, BrandMarkRenderer>> = {},
+) {
   const store = createSnapshotStore<AgentPresetSeatState>({ ...SEAT_READY, ...state })
   const actions = {
     load: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => Promise.resolve()),
     introduced: vi.fn(),
   }
+  const renderSlot = vi.fn((
+    name: string,
+    owner: AgentPresetBrandMarkOwnerProps,
+    options?: { entryKey?: string; fallback?: ReactNode },
+  ): ReactNode => {
+    if (name !== 'conversation.hero.agentPreset.mark') throw new Error(`unexpected slot ${name}`)
+    const renderer = options?.entryKey === undefined ? undefined : brands[options.entryKey]
+    return renderer === undefined ? (options?.fallback ?? null) : renderer(owner)
+  })
   render(<AgentPresetSeat {...({
     ...actions,
+    renderSlot,
     useAgentPresetSeat: bindSnapshotSelector(store),
     t: (key: keyof typeof en) => en[key],
   } as unknown as AgentPresetSeatProps)} />)
-  return actions
+  return { ...actions, renderSlot }
 }
 
 function renderLabel(
@@ -207,6 +224,33 @@ describe('the new-session chip', () => {
     await waitFor(() => { expect(actions.load).toHaveBeenCalledTimes(1) })
     expect(screen.getByRole('button').textContent).toContain(en.presetStandardName)
     expect(screen.getByRole('button').getAttribute('title')).toBe(en.seatHint)
+    // Without a keyed occupant, the selected preset keeps the shipped generic
+    // mark; the other SVG is the unchanged menu chevron.
+    expect(screen.getByRole('button').querySelectorAll('svg')).toHaveLength(2)
+  })
+
+  it('dispatches a contributed mark by preset id in the trigger and menu', () => {
+    const mark = vi.fn(({ presetId, size, className }: AgentPresetBrandMarkOwnerProps) => (
+      <span data-testid={`brand-${presetId}`} data-size={size} className={className} />
+    ))
+    const { renderSlot } = renderSeat({}, { standard: mark })
+
+    const trigger = screen.getByRole('button')
+    expect(screen.getAllByTestId('brand-standard')).toHaveLength(1)
+    // The contributed mark replaces only the generic preset glyph; the menu
+    // chevron and all selection behavior stay owned by this package.
+    expect(trigger.querySelectorAll('svg')).toHaveLength(1)
+    expect(mark).toHaveBeenCalledWith(expect.objectContaining({ presetId: 'standard', size: 16 }))
+
+    fireEvent.click(trigger)
+
+    expect(screen.getAllByTestId('brand-standard')).toHaveLength(2)
+    expect(screen.getByText('mine')).toBeTruthy()
+    expect(renderSlot).toHaveBeenCalledWith(
+      'conversation.hero.agentPreset.mark',
+      expect.objectContaining({ presetId: 'mine', size: 16 }),
+      expect.objectContaining({ entryKey: 'mine' }),
+    )
   })
 
   it('offers each preset with what it is for', () => {

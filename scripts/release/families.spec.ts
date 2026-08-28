@@ -46,6 +46,7 @@ describe('release families', () => {
 
     expect(members.some(member => member.directory.startsWith('packages/experimental/'))).toBe(false)
     expect(members.map(member => member.name)).not.toContain('@deepseek-ai/dsh-experimental-agent-team')
+    expect(members.some(member => member.name.startsWith('@paperai/'))).toBe(false)
   })
 
   it('bumps private dsh packages without adding release tags', () => {

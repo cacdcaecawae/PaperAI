@@ -21,6 +21,7 @@ import { AgentPresetSection } from '../src/client/AgentPresetSection.tsx'
 import type { AgentPresetSectionInjected } from '../src/client/AgentPresetSection.tsx'
 import { AgentPresetSeat } from '../src/client/AgentPresetSeat.tsx'
 import type { AgentPresetSeatInjected } from '../src/client/AgentPresetSeat.tsx'
+import type { AgentPresetBrandMarkOwnerProps } from '../src/client/brand-slot.ts'
 
 // These specs assert the shipped Chinese copy. The lane has no jsdom `window`,
 // so browser-language detection never runs and a fresh LocaleRuntime opens on
@@ -179,6 +180,11 @@ function sessionsDouble(state: {
   }
 }
 
+/** Third-party mark used to prove keyed registration without component imports. */
+function ExternalPresetMark(_props: AgentPresetBrandMarkOwnerProps) {
+  return null
+}
+
 describe('ui-agent-preset apply', () => {
   it('declares the services it uses', () => {
     expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'settingsScope'])
@@ -324,6 +330,43 @@ describe('ui-agent-preset apply', () => {
     conversation()
   })
 
+  it('declares a keyed mark child and activates an independently ordered contributor', async () => {
+    const { ctx, slots } = await bench()
+    declareRoot(slots)
+    const conversation = declareConversation(slots)
+    ctx.provide('conversation', {} as never)
+    ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
+    ctx.provide('workspaces', workspacesDouble() as never)
+
+    // A product brand plugin may load before this package. It waits on the
+    // child declaration itself and supplies only its own mark component.
+    const registrantApply = (brandCtx: typeof ctx): void => {
+      brandCtx.slots.inject('conversation.hero.agentPreset.mark', () => brandCtx.slots.register({
+        name: 'conversation.hero.agentPreset.mark',
+        key: 'codex',
+      }, ExternalPresetMark))
+    }
+    const brand = ctx.plugin({ name: 'external-agent-preset-brand', inject: ['slots'], apply: registrantApply })
+    await brand.await()
+    expect(slots.entries('conversation.hero.agentPreset.mark')).toHaveLength(0)
+
+    const owner = ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'workspaces'], apply })
+    await owner.await()
+
+    expect(slots.spec('conversation.hero.agentPreset.mark')).toMatchObject({ kind: 'keyed', scope: 'root' })
+    expect(slots.entries('conversation.hero.agentPreset.mark')).toHaveLength(1)
+    expect(slots.entries('conversation.hero.agentPreset.mark')[0]).toMatchObject({
+      component: ExternalPresetMark,
+      options: { key: 'codex' },
+    })
+
+    await owner.dispose()
+    expect(slots.spec('conversation.hero.agentPreset.mark')).toBeUndefined()
+    expect(slots.entries('conversation.hero.agentPreset.mark')).toHaveLength(0)
+    await brand.dispose()
+    conversation()
+  })
+
   it('moves the chip when the default changes on the settings surface', async () => {
     const { ctx, slots, moveDefault } = await bench()
     declareRoot(slots)
@@ -372,6 +415,26 @@ describe('ui-agent-preset apply', () => {
     ctx.remote.$dispatch('agent-preset/selected', ['s1', 'minimal'])
 
     expect(state.byId.s1.agentPreset).toBe('minimal')
+  })
+
+  it('reconciles a session that was already current before the plugin activated', async () => {
+    const { ctx, slots } = await bench()
+    declareRoot(slots)
+    declareConversation(slots)
+    ctx.provide('conversation', {} as never)
+    ctx.provide('sessions', sessionsDouble({
+      current: 's1',
+      byId: { s1: { id: 's1', blank: true, agentPreset: 'minimal' } },
+    }) as never)
+    ctx.provide('workspaces', workspacesDouble() as never)
+
+    await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'workspaces'], apply }).await()
+
+    const seat = (slots.entries('conversation.hero.agentPreset')[0]!
+      .inject as unknown as () => AgentPresetSeatInjected)()
+    expect(seat.hooks.agentPresetSeat.getSnapshot().current).toBe('minimal')
+    await seat.load()
+    expect(seat.hooks.agentPresetSeat.getSnapshot().current).toBe('minimal')
   })
 
   it('offers a just-authored preset on the new-session chip', async () => {

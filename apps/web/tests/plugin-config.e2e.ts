@@ -20,11 +20,21 @@ const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/plugin-config', import.m
 const SECTION_EXPECTED = join(SNAPSHOT_DIR, 'section.expected.md')
 const MODE = webSnapshotMode()
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value)
+}
+
 describe('web e2e: plugin configuration section', () => {
   let scaffold: WebScaffold
   let browser: Browser
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
+  let composedTimeout: string
+  let savedTimeout: string
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({})
@@ -35,6 +45,8 @@ describe('web e2e: plugin configuration section', () => {
     tripwire = watchConsole(page)
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    composedTimeout = await readComposedTimeout()
+    savedTimeout = composedTimeout === '12000' ? '13000' : '12000'
   }, 120_000)
 
   afterAll(async () => {
@@ -71,6 +83,37 @@ describe('web e2e: plugin configuration section', () => {
     return readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8').catch(() => '')
   }
 
+  /** Read the shell timeout from the Host's composition layer, independently of the rendered form. */
+  async function readComposedTimeout(): Promise<string> {
+    const response = await fetch(`${scaffold.baseUrl}/api/settings.describe`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request', rpcId: 'plugin-config-composed-timeout', method: 'settings.describe', payload: {},
+      }),
+    })
+    if (!response.ok) throw new Error(`settings.describe failed with HTTP ${String(response.status)}`)
+    const body: unknown = await response.json()
+    if (!isRecord(body) || !isRecord(body.result) || !isRecord(body.result.value)
+      || !isUnknownArray(body.result.value.namespaces)) {
+      throw new Error('settings.describe returned an invalid response')
+    }
+    const shell = body.result.value.namespaces.find(
+      namespace => isRecord(namespace) && namespace.ns === 'shell',
+    )
+    if (!isRecord(shell) || !isRecord(shell.base)) {
+      throw new Error('settings.describe did not expose the composed shell settings')
+    }
+    if (isRecord(shell.user) && Reflect.has(shell.user, 'timeoutMs')) {
+      throw new Error('fresh plugin-config scaffold unexpectedly started with a shell timeout override')
+    }
+    const timeout = shell.base.timeoutMs
+    if (typeof timeout !== 'number' || !Number.isFinite(timeout)) {
+      throw new Error('composed shell settings did not expose a finite timeoutMs')
+    }
+    return String(timeout)
+  }
+
   it('shows one card per exposed host-plane namespace', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-config-cards'))
     const dialog = await openPlugins()
@@ -96,8 +139,8 @@ describe('web e2e: plugin configuration section', () => {
     const timeout = dialog.getByLabel('命令超时（毫秒）')
     await timeout.waitFor({ timeout: 10_000 })
     // The composed default this deployment ships, before any user layer.
-    expect(await timeout.inputValue()).toBe('60000')
-    await timeout.fill('12000')
+    expect(await timeout.inputValue()).toBe(composedTimeout)
+    await timeout.fill(savedTimeout)
     await timeout.blur()
 
     // Nothing crosses the wire until the user saves: leaving the control is
@@ -107,7 +150,7 @@ describe('web e2e: plugin configuration section', () => {
     await expect.poll(() => save.isEnabled(), { timeout: 5_000 }).toBe(true)
     await save.click()
 
-    await expect.poll(async () => (await settingsDocument()).includes('timeoutMs: 12000'), { timeout: 10_000 })
+    await expect.poll(async () => (await settingsDocument()).includes(`timeoutMs: ${savedTimeout}`), { timeout: 10_000 })
       .toBe(true)
     // Presence in the user layer is what the badge reports, and the reset is
     // offered only for a field that has one.
@@ -128,8 +171,8 @@ describe('web e2e: plugin configuration section', () => {
     await timeout.fill('7000')
     await dialog.getByRole('button', { name: '放弃修改' }).click()
 
-    await expect.poll(() => timeout.inputValue(), { timeout: 5_000 }).toBe('12000')
-    expect(await settingsDocument()).toContain('timeoutMs: 12000')
+    await expect.poll(() => timeout.inputValue(), { timeout: 5_000 }).toBe(savedTimeout)
+    expect(await settingsDocument()).toContain(`timeoutMs: ${savedTimeout}`)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
@@ -155,19 +198,19 @@ describe('web e2e: plugin configuration section', () => {
     await dialog.getByText('终端', { exact: true }).click()
     const timeout = dialog.getByLabel('命令超时（毫秒）')
     await timeout.waitFor({ timeout: 10_000 })
-    expect(await timeout.inputValue()).toBe('12000')
+    expect(await timeout.inputValue()).toBe(savedTimeout)
 
     // The reset stages the composed default; the document still carries the
     // override until the save lands.
     await dialog.getByRole('button', { name: '恢复默认' }).click()
-    await expect.poll(() => timeout.inputValue(), { timeout: 5_000 }).toBe('60000')
-    expect(await settingsDocument()).toContain('timeoutMs: 12000')
+    await expect.poll(() => timeout.inputValue(), { timeout: 5_000 }).toBe(composedTimeout)
+    expect(await settingsDocument()).toContain(`timeoutMs: ${savedTimeout}`)
 
     await dialog.getByRole('button', { name: '保存', exact: true }).click()
 
     await expect.poll(async () => (await settingsDocument()).includes('timeoutMs'), { timeout: 10_000 })
       .toBe(false)
-    expect(await timeout.inputValue()).toBe('60000')
+    expect(await timeout.inputValue()).toBe(composedTimeout)
     expect(await dialog.getByText('已覆盖').count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)

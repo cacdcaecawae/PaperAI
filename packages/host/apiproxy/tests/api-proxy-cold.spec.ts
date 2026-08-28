@@ -367,6 +367,44 @@ describe('Remote Agent and Session lookup policy', () => {
     expect(inspect).toHaveBeenCalledOnce()
   })
 
+  it('fails a cold Codex resume before calling the default DSH factory', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(UserQuestionService)
+    const sessionId = sid('session-cold-missing-codex')
+    const meta = header(sessionId, 1000, { agentPreset: 'codex' })
+    ctx.provide('sessionPersistence', {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events: [] as SessionEvent[] }),
+      locate: () => undefined,
+    } as never)
+    ctx.provide('agentPresets', {
+      defaultId: 'codex',
+      resolve: () => Promise.resolve({ id: 'codex', trust: 'system', path: '/presets/codex' }),
+      mount: () => Promise.resolve({ id: 'codex', trust: 'system', path: '/presets/codex' }),
+    } as never)
+    const resume = vi.spyOn(ctx.agents, 'resume')
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
+      cwd: '/tmp',
+    })
+
+    const response = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: 'resume with Codex' }],
+    }))
+
+    expect(response.result.ok).toBe(false)
+    if (!response.result.ok) {
+      expect(response.result.error.code).toBe('internal')
+      expect(response.result.error.message).toContain('requires factory route "codex"')
+    }
+    expect(resume).not.toHaveBeenCalled()
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+  })
+
   it('preserves the subagent ownership fence for cold and live Remote lookups', async () => {
     const ctx = new Context()
     await ctx.plugin(TypertRegistry)

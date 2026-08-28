@@ -78,6 +78,23 @@ export class Inbox {
   }
 
   /**
+   * Claim one identified pending message without consuming its neighbours.
+   * Native runtimes use this when a provider accepts one live steering item
+   * before the ordinary step boundary reaches the rest of the inbox.
+   * @param messageId - identity of the pending message accepted by the runtime.
+   * @param turn - turn that now owns the message.
+   * @returns the claimed message, or `undefined` when it was already removed.
+   */
+  claimMessage(messageId: MessageId, turn: number): UserMessage | undefined {
+    const location = this.locate(messageId)
+    if (location === undefined) return undefined
+    const [message] = this.mutate(location.target, location.index, 1, [], false)
+    if (message === undefined) return undefined
+    this.notifications.claimed(message, turn)
+    return message
+  }
+
+  /**
    * Append one message to a pending list and durably record the insertion.
    * @param target - pending list to extend.
    * @param message - message to append.

@@ -31,16 +31,19 @@
 /**
  * An owned agent plus its disposer, returned by {@link AgentRegistry.create} /
  * {@link AgentRegistry.resume}. The disposer is a CAPABILITY: among consumers,
- * only the holder can tear this agent down. The registered factory provider is
+ * only the holder can tear this agent down. The registry retains factory API
+ * handles internally only so {@link AgentRegistry.recreate} can perform an
+ * explicit persisted-session replacement. The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
  * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes
  * its session from the store, and finally unwinds its scoped world.
  *
  * `ctx.agents.get(id)` still returns a bare {@link Agent} — the handle is
- * exposed only to the consumer owner that created it; the structural provider
- * reaches the same teardown internally. Config-created agents (the loop's own
- * startup) are owned by the loop fiber and never need a handle.
+ * exposed only to the consumer owner that created it; the registry and
+ * structural provider reach the same teardown internally. Config-created
+ * agents (the loop's own startup) are owned by the loop fiber and never need a
+ * handle.
  */
 interface AgentHandle {
   agent: Agent
@@ -58,7 +61,7 @@ interface AgentHandle {
 
 `Agent` 是每个插件（UI、钩子、orchestrator）面向编程的 surface；`ctx.agents.get(id)` 返回它，[发起者作用域](#initiating-agent)携带它。具体实现为 dsh-agent-loop 包内部细节；循环外没有任何组件依赖它。统一的 `send` 方法直接暴露 target 与 wakeup 路由；`followup`、`steer` 与 `inject` 是固定预设的别名方法。
 
-源码：[`packages/core/agent/src/types.ts`](../../packages/core/agent/src/types.ts)
+源码：[`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
 
 ```ts type-equiv
 /** Public live-agent handle. */
@@ -75,6 +78,8 @@ interface Agent {
   readonly status: AgentStatus
   /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
   readonly ctx: Context
+  /** Driver-owned model selection, present only when models do not route through `ctx.llm`. */
+  readonly modelController?: AgentModelController
 
   /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active
@@ -633,6 +638,32 @@ withoutInitiator<T>(operation: () => T): T
 setFactory(factory: AgentFactory): () => void
 
 /**
+ * Register one named Agent factory beside the default loop factory.
+ * Routes are exact and effect-scoped: requesting an absent route fails
+ * instead of changing the session's driver by falling back to the default.
+ * @param route - stable non-empty route named by the owning Host composition.
+ * @param factory - factory that creates and resumes Agents on this route.
+ * @returns the exact Cordis effect disposer for the registration.
+ */
+registerFactory(route: string, factory: AgentFactory): () => void
+
+/**
+ * Test whether one exact named factory route is currently available.
+ * @param route - exact route to inspect.
+ * @returns whether a factory is registered for that route.
+ */
+hasFactoryRoute(route: string): boolean
+
+/**
+ * Read the factory route that created one exact live Agent. `undefined`
+ * identifies the default factory, not an unknown route.
+ * @param agent - exact live Agent returned by this registry's factory API.
+ * @returns its named route, or `undefined` for the default factory.
+ * @throws when the Agent is stale or was registered without a factory handle.
+ */
+factoryRouteFor(agent: Agent): string | undefined
+
+/**
  * Create and publish a new agent through the registered factory.
  * Distinct from {@link register} (which records an already-constructed
  * agent): this constructs the agent and its session. Rejects if no factory is
@@ -651,6 +682,18 @@ async create(options: CreateAgentOptions): Promise<AgentHandle>
  * @returns the handle after setup, rollback-covered publication, and loop start complete.
  */
 async resume(options: ResumeAgentOptions): Promise<AgentHandle>
+
+/**
+ * Replace one idle, persisted Agent with another factory driver under the
+ * same session id. Both routes are validated before teardown. Replacement
+ * failure resumes the supplied rollback composition before the original
+ * error is rethrown; failure of both attempts rejects with both causes.
+ * @param options - current Agent plus replacement and rollback resume requests.
+ * @returns the replacement handle after publication.
+ * @throws when the current Agent is stale, running, not factory-created, an
+ *   id or route is invalid, disposal fails, or replacement and recovery fail.
+ */
+async recreate(options: RecreateAgentOptions): Promise<AgentHandle>
 
 /**
  * Register a live agent. Throws if an agent with the same id is already

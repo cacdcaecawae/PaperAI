@@ -203,8 +203,32 @@ flowchart LR
   pkg_cordis_host_runner["cordis-host-runner"]
   svc_dynamicCordisRunner["ctx.dynamicCordisRunner<br/>Dynamic Cordis package host runner"]
   svc_cordisInspect["ctx.cordisInspect<br/>Dynamic Cordis inspect registry"]
+  pkg_document_engine["document-engine"]
+  svc_documentEngine["ctx.documentEngine<br/>PaperAI Word document seam"]
+  pkg_document_engine_officecli["document-engine-officecli"]
+  pkg_commit_service["commit-service"]
+  pkg_document_service["document-service"]
+  pkg_template_service["template-service"]
+  pkg_repository["repository"]
+  svc_paperRepository["ctx.paperRepository<br/>PaperAI durable domain repository"]
+  pkg_project_service["project-service"]
+  pkg_workbench_service["workbench-service"]
+  svc_paperProjects["ctx.paperProjects<br/>PaperAI project lifecycle"]
+  pkg_mcp["mcp"]
+  svc_paperDocuments["ctx.paperDocuments<br/>PaperAI Working DOCX lifecycle"]
+  svc_paperTemplates["ctx.paperTemplates<br/>PaperAI template and delivery checks"]
+  pkg_export_service["export-service"]
+  pkg_template_pack_hit["template-pack-hit"]
+  svc_paperCommits["ctx.paperCommits<br/>PaperAI recoverable document commits"]
+  svc_paperMcp["ctx.paperMcp<br/>PaperAI authenticated MCP bridge"]
+  pkg_agent_acp["agent-acp"]
+  svc_paperExports["ctx.paperExports<br/>PaperAI checked DOCX publication"]
+  svc_paperAiAcpAgents["ctx.paperAiAcpAgents<br/>PaperAI ACP Agent factories"]
+  svc_paperaiWorkbench["ctx.paperaiWorkbench<br/>PaperAI browser workbench Remote"]
+  pkg_ui_paperai_workbench["ui-paperai-workbench"]
   pkg_acp --> svc_approval
   pkg_agent --> svc_agents
+  pkg_agent_acp --> svc_paperAiAcpAgents
   pkg_agent_default_model --> svc_agentDefaultModel
   pkg_agent_loop --> svc_agentLoop
   pkg_agent_presets --> svc_agentPresets
@@ -220,6 +244,7 @@ flowchart LR
   pkg_code_runtime --> svc_codeRuntime
   pkg_code_runtime_worker --> svc_codeRuntime
   pkg_commands --> svc_commands
+  pkg_commit_service --> svc_paperCommits
   pkg_compaction --> svc_compaction
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
@@ -230,7 +255,11 @@ flowchart LR
   pkg_directory_picker --> svc_directoryPicker
   pkg_directory_picker_browse --> svc_directoryPicker
   pkg_directory_picker_native --> svc_directoryPicker
+  pkg_document_engine --> svc_documentEngine
+  pkg_document_engine_officecli --> svc_documentEngine
+  pkg_document_service --> svc_paperDocuments
   pkg_e2b --> svc_e2b
+  pkg_export_service --> svc_paperExports
   pkg_file_reference --> svc_fileReferences
   pkg_file_reference_local --> svc_fileReferences
   pkg_fs --> svc_fs
@@ -247,11 +276,14 @@ flowchart LR
   pkg_llm_replay --> svc_llm
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
+  pkg_mcp --> svc_paperMcp
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
   pkg_permission_presets --> svc_permissionPresets
   pkg_plan_mode --> svc_planMode
+  pkg_project_service --> svc_paperProjects
   pkg_pwsh_local --> svc_shell
+  pkg_repository --> svc_paperRepository
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -293,6 +325,7 @@ flowchart LR
   pkg_subprocess_e2b --> svc_subprocess
   pkg_subprocess_local --> svc_subprocess
   pkg_system_prompt --> svc_systemPrompt
+  pkg_template_service --> svc_paperTemplates
   pkg_terminal --> svc_terminals
   pkg_terminal_bash --> svc_terminals
   pkg_token_meter --> svc_tokenMeter
@@ -305,6 +338,7 @@ flowchart LR
   pkg_web_search_exa --> svc_web
   pkg_web_search_perplexity --> svc_web
   pkg_webserver --> svc_webServer
+  pkg_workbench_service --> svc_paperaiWorkbench
   pkg_workflow --> svc_workflowEngine
   pkg_workflow_worker_thread --> svc_workflowEngine
   pkg_workspace --> svc_workspaceRegistry
@@ -329,6 +363,9 @@ flowchart LR
   svc_credentials --> pkg_llm_deepseek
   svc_credentials --> pkg_llm_pi_ai
   svc_directoryPicker --> pkg_apiproxy
+  svc_documentEngine --> pkg_commit_service
+  svc_documentEngine --> pkg_document_service
+  svc_documentEngine --> pkg_template_service
   svc_dynamicCordisRunner --> pkg_tool_cordis
   svc_e2b --> pkg_fs_e2b
   svc_e2b --> pkg_subprocess_e2b
@@ -344,6 +381,28 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_paperCommits --> pkg_export_service
+  svc_paperCommits --> pkg_mcp
+  svc_paperCommits --> pkg_workbench_service
+  svc_paperDocuments --> pkg_commit_service
+  svc_paperDocuments --> pkg_mcp
+  svc_paperDocuments --> pkg_workbench_service
+  svc_paperExports --> pkg_workbench_service
+  svc_paperMcp --> pkg_agent_acp
+  svc_paperMcp --> pkg_export_service
+  svc_paperProjects --> pkg_mcp
+  svc_paperProjects --> pkg_workbench_service
+  svc_paperRepository --> pkg_commit_service
+  svc_paperRepository --> pkg_document_service
+  svc_paperRepository --> pkg_project_service
+  svc_paperRepository --> pkg_template_service
+  svc_paperRepository --> pkg_workbench_service
+  svc_paperTemplates --> pkg_commit_service
+  svc_paperTemplates --> pkg_export_service
+  svc_paperTemplates --> pkg_mcp
+  svc_paperTemplates --> pkg_template_pack_hit
+  svc_paperTemplates --> pkg_workbench_service
+  svc_paperaiWorkbench --> pkg_ui_paperai_workbench
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -486,5 +545,15 @@ flowchart LR
 | `ctx.apiProxy` | `core` | `apiproxy` | - | `connection` | - | 与传输无关的 Host 网关接口：它分派浏览器 API 调用，每条打开的 Host 流自行订阅转发事件，而不是由广播方法向其推送。 |
 | `ctx.dynamicCordisRunner` | `core` | [`cordis-host-runner`](../packages/extensions/cordis-host-runner) | - | [`tool-cordis`](../packages/extensions/tool-cordis) | - | 拥有内存定义注册表、Host 半的 vm 沙箱和 request-run 往返流程；浏览器页面通过其 Remote 命名空间在线访问同一服务。 |
 | `ctx.cordisInspect` | `core` | [`cordis-host-runner`](../packages/extensions/cordis-host-runner) | - | [`tool-cordis`](../packages/extensions/tool-cordis) | - | 注册 Host inspect 提供方、镜像 Client 提供方 manifest，并通过动态 Cordis 传输路由 Client 查询。 |
+| `ctx.documentEngine` | `seam` | `document-engine` | `document-engine-officecli` | `commit-service`, `document-service`, `template-service` | - | 定义公开串行化检查、预览、修改与验证；OfficeCLI 提供方负责本地进程和 Word 格式行为。 |
+| `ctx.paperRepository` | `core` | `repository` | - | `commit-service`, `document-service`, `project-service`, `template-service`, `workbench-service` | - | 通过 storage-domain 持有经过验证的 PaperAI 记录，并只在持久写入完成后发布变更。 |
+| `ctx.paperProjects` | `core` | `project-service` | - | `mcp`, `workbench-service` | - | 幂等接管一个目录，关联其 DSH Workspace，发布项目记录，并在 Git 可用时完成初始化。 |
+| `ctx.paperDocuments` | `core` | `document-service` | - | `commit-service`, `mcp`, `workbench-service` | - | 将不可变导入与权威 Working DOCX 分离，持有语义索引，并提供预览和候选索引操作。 |
+| `ctx.paperTemplates` | `core` | `template-service` | - | `commit-service`, `export-service`, `mcp`, `template-pack-hit`, `workbench-service` | - | 注册模板包，把不可变 Word 来源编译成经过审阅的要求，验证关联，并执行草稿或交付检查。 |
+| `ctx.paperCommits` | `core` | `commit-service` | - | `export-service`, `mcp`, `workbench-service` | - | 串行执行 Working DOCX 修改，记录操作者与模型来源，并通过可崩溃恢复的日志发布可恢复快照。 |
+| `ctx.paperMcp` | `core` | `mcp` | - | `agent-acp`, `export-service` | - | 签发绑定操作者的回环 descriptor，公开有界文档工具目录，并接受一个可选导出适配器注册。 |
+| `ctx.paperExports` | `core` | `export-service` | - | `workbench-service` | - | 重新检查当前模板要求，记录导出里程碑，并原子发布经过验证的不可变快照。 |
+| `ctx.paperAiAcpAgents` | `bundle` | `agent-acp` | - | - | - | 注册精确的 Codex 与 Claude Agent factory，同时保留 DSH 原生 factory，并持有每个本地 ACP 与 MCP 生命周期。 |
+| `ctx.paperaiWorkbench` | `core` | `workbench-service` | - | `ui-paperai-workbench` | - | 把领域投影到浏览器，并把导入、编辑、模板检查、导出、历史和恢复操作路由到各自的所属服务。 |
 
 维护模式：混合模式。服务从 Cordis 声明中发现；接口、实现和消费方角色在 `scripts/gen-doc-graphs.ts` 中分类，并设有完整性守卫。

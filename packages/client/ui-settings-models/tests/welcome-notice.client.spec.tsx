@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { Context } from '@deepseek-ai/cordis'
 import { SettingsSchemaService } from '@deepseek-ai/dsh-client-ui-settings/src/client/schema.ts'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
@@ -45,6 +46,7 @@ function mount(
   version?: string,
   mutateImpl: () => Promise<unknown> = () =>
     Promise.resolve(response(welcomeView({ [WELCOME_NOTICE_ACK_FIELD]: WELCOME_NOTICE_VERSION }, 1))),
+  onboardingEnabled = true,
 ) {
   const appRoot = document.createElement('div')
   appRoot.id = 'root'
@@ -80,6 +82,10 @@ function mount(
     useWorkspaces: unusedHook,
     controller,
     useWelcome: bindSnapshotSelector(controller.store),
+    usePolicy: bindSnapshotSelector(createSnapshotStore({
+      welcomeNotice: onboardingEnabled,
+      deepSeekCredential: true,
+    })),
     t: key => zh[key],
   }
   return { ...render(<WelcomeNotice {...props} />), complete, controller, mirror, mutate, appRoot }
@@ -94,6 +100,15 @@ describe('WelcomeNotice', () => {
     })
     expect(en.welcomeBody).toBe(WELCOME_NOTICE_COPY.en.body)
     expect(zh.welcomeBody).toBe(WELCOME_NOTICE_COPY.zh.body)
+  })
+
+  it('completes without loading or painting when a product disables the step', async () => {
+    const h = mount(undefined, undefined, false)
+    const load = vi.spyOn(h.controller, 'load')
+    await act(async () => { await Promise.resolve() })
+    expect(h.complete).toHaveBeenCalledOnce()
+    expect(load).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('renders one blocking modal action and focuses the title', async () => {

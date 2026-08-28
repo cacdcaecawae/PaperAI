@@ -1,0 +1,46 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "paths": {
+      "@deepseek-ai/cordis": ["../../../vendor/cordis/src"],
+      "@deepseek-ai/schemastery": ["../../../vendor/schemastery/src"],
+      "@deepseek-ai/dsh-invariants": ["../../runtime-diagnostics/invariants/src/index.ts"],
+      "@deepseek-ai/dsh-storage-domain": ["../../storage/storage-domain/src/index.ts"],
+      "@deepseek-ai/dsh-subprocess": ["../../subprocess/subprocess/src/index.ts"],
+      "@deepseek-ai/dsh-workspace": ["../../workspace/workspace/src/index.ts"],
+      "@paperai/domain": ["../domain/src/index.ts"],
+      "@paperai/repository": ["../repository/src/index.ts"]
+    }
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../storage/storage-domain"
+    },
+    {
+      "path": "../../subprocess/subprocess"
+    },
+    {
+      "path": "../../workspace/workspace"
+    },
+    {
+      "path": "../domain"
+    },
+    {
+      "path": "../repository"
+    }
+  ]
+}

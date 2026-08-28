@@ -9,6 +9,8 @@
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+import type { Config as LayoutConfig } from '../config.ts'
+import { resolveLayoutConfig } from '../config.ts'
 import type { PanelActions } from './service.ts'
 import { AppFrame } from './AppFrame.tsx'
 import { createLayoutStore } from './stores.ts'
@@ -22,6 +24,7 @@ import { ThemePresenter } from './theme-presenter.ts'
 // against; the frame components and the store factory are package-internal.
 export { LayoutController } from './service.ts'
 export type { ILayout } from './service.ts'
+export type { Config, DetailsNarrowMode, DetailsVisibility, LayoutGeometry } from '../config.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -112,9 +115,17 @@ export const inject = ['slots', 'theme']
  * into 'root' with the four child-slot declarations, the layout store seat,
  * and the inject hook that hands the store's bound actions to the service.
  * @param ctx - client root context.
+ * @param config - deployment-controlled geometry, details eligibility, and narrow behavior.
  */
-export function apply(ctx: ClientContext): void {
-  const layout = new LayoutController()
+export function apply(ctx: ClientContext, config?: LayoutConfig): void {
+  const resolved = resolveLayoutConfig(config)
+  const geometry = Object.freeze({
+    centerMin: resolved.centerMin,
+    detailsMin: resolved.detailsMin,
+    detailsDefault: resolved.detailsDefault,
+    detailsMax: resolved.detailsMax,
+  })
+  const layout = new LayoutController(resolved)
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
@@ -127,12 +138,14 @@ export function apply(ctx: ClientContext): void {
       },
       // Exclusive store: the factory itself — the framework instantiates per
       // entry and delivers useStore/actions to AppFrame as standard props.
-      store: createLayoutStore,
+      store: () => createLayoutStore(geometry),
       // The hook's only side effect connects the root store to ctx.layout;
       // conversation business actions belong to their registrants.
       inject: (actions: PanelActions) => {
         layout.attachPanels(actions)
-        return {}
+        return {
+          hooks: { layoutConfiguration: layout.configuration },
+        }
       },
     }, AppFrame)
     return () => {

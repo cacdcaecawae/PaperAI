@@ -142,6 +142,18 @@ export class AgentPresetSeatController {
   }
 
   /**
+   * Reconcile the chip with the session that currently occupies the new-session
+   * flow. A roster load can finish before the session list arrives; without
+   * this follow-up the chip claims the deployment default while a reused blank
+   * session still runs another preset. A deliberate staged pick remains the
+   * stronger pending intent and is never overwritten here.
+   */
+  syncCurrentSession(): void {
+    if (this.staged !== undefined || this.store.getSnapshot().busy) return
+    this.set({ current: this.currentSession()?.agentPreset ?? this.fallback })
+  }
+
+  /**
    * Hand the staged choice to the current session, if there is one to take it.
    *
    * Called both by `select()` and by whoever observes the current session

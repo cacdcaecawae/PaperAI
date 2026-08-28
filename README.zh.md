@@ -1,80 +1,45 @@
-# DeepSeek Harness
+# PaperAI
 
 [English](README.md) | 中文
 
-DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
+PaperAI 是一个本地运行、由 Agent 驱动的学术 Word 工作台。产品始终以一份 Working DOCX 作为可编辑权威，让 Codex、Claude 或内置 DeepSeek Harness Agent 通过同一套带版本的文档工具协作，并在正式导出前按照已确认的学校模板执行门禁检查。
 
-它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。
+产品建立在固定版本的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 客户端、Host、会话、设置、模型、权限和插件底座上。PaperAI 增加文档、模板、提交、MCP、ACP 与工作台产品层，同时保留 DSH 原有的交互语言。
 
-## 开发者预览
+## 第一版工作流
 
-DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
+- 选择本地工作区；PaperAI 会幂等初始化项目目录和 Git 仓库。
+- 直接导入 `.docx`；Windows 下可通过只读 Microsoft Word 自动化把旧版 `.doc` 规范化为独立 DOCX。
+- 选择内置“HIT 硕士毕设”模板包，或上传自定义 Word 模板，审阅解析出的合同并确认。
+- 每次只编辑一个语义段落，也可以让本地 Codex/Claude ACP Agent 使用经过身份验证的 PaperAI MCP 工具。
+- 每次人工或 Agent 文档修改都会形成可恢复版本，并记录操作者、客户端、Provider 与模型来源。
+- 草稿可随时导出；正式交付必须先通过已确认模板的门禁。
 
-<a id="run"></a>
-
-## 运行
-
-### 通过 `npm` 运行
-
-安装 `Node.js`，然后运行：
-
-```sh
-npx @deepseek-ai/dsh web
-```
-
-该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
+原始 Word 文件和模板始终保留不变。OfficeCLI 只对派生的 Working 副本生成预览并执行结构化修改。
 
 <a id="run-from-source"></a>
 
-### 从源码运行
+## 从源码运行
 
-如需从仓库源码运行：
+需要 Node.js、pnpm、Git，以及准备使用的本地 ACP Provider。只有在 Windows 上规范化旧版 `.doc` 时才需要 Microsoft Word 桌面版。
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/cacdcaecawae/PaperAI.git
+cd PaperAI
 pnpm install
 pnpm run build
-pnpm dsh web
+pnpm paperai
 ```
 
-`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
+Provider API Key 与接口地址可直接在 DSH 原生设置页面配置。无法使用的本地依赖会显示明确的降级状态，不会留下无效按钮。
 
-## 社区与支持
+## 架构与开发
 
-- 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
-- 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
-- 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
+- 产品决策：[PaperAI 产品 Profile ADR](.agents/notes/implemented/architecture/2026-08-28-paperai-product-profile.zh.md)
+- DSH 架构：[docs/architecture.zh.md](docs/architecture.zh.md)
+- 开发指南：[docs/development.zh.md](docs/development.zh.md)
+- Agent 约定：[AGENTS.md](AGENTS.md)
 
-<table>
-  <thead>
-    <tr>
-      <th align="center">企微小助手</th>
-      <th align="center">入群问卷</th>
-      <th align="center">微信公众号</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness 企微小助手二维码" width="180" height="180"></td>
-      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
+## 许可证与署名
 
-## 参与贡献
-
-参见 [CONTRIBUTING.md](CONTRIBUTING.zh.md)。
-
-## 开发
-
-请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
-
-面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
-
-## 许可证
-
-[MIT](LICENSE)
-
-第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+PaperAI 代码与保留的 DeepSeek Harness 底座按 [MIT](LICENSE) 分发。DeepSeek Harness 署名及直接依赖许可证完整保留在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。学校模板资产不由 PaperAI 重新授权，详见模板包的[资产说明](packages/paperai/template-pack-hit/ASSET_NOTICE.md)。

@@ -1,5 +1,5 @@
 // Web e2e scenario: the session-header background-job list over the real
-// host. No model call is involved — a genuine `run_in_background` bash call
+// host. No model call is involved — a genuine platform-shell background call
 // registers with `ctx.jobs`, and the assertion chain is the whole delivery
 // path: registry change feed → api-proxy `session/jobs` frame → the client's
 // `jobsBySession` mirror → the header action.
@@ -25,9 +25,21 @@ const RUNNING_EXPECTED = join(SNAPSHOT_DIR, 'running.expected.md')
 const SETTLED_EXPECTED = join(SNAPSHOT_DIR, 'settled.expected.md')
 const MODE = webSnapshotMode()
 const SEED_ID = 'background-job-list-web-e2e'
+const NATIVE_SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
 // Long enough that the running assertions never race the process exiting on
 // their own; the test kills it explicitly to reach the settled state.
-const COMMAND = 'sleep 45'
+const COMMAND = process.platform === 'win32' ? 'Start-Sleep -Seconds 45' : 'sleep 45'
+
+function normalizeShellSnapshot(snapshot: string): string {
+  if (process.platform !== 'win32') return snapshot
+  return snapshot
+    .replaceAll('pwsh', 'bash')
+    .replaceAll('Start-Sleep -Seconds 45', 'sleep 45')
+    .replace(
+      '  - listitem: bash sleep 45 killed before exit {{duration}}',
+      '  - listitem: "bash sleep 45 signal: SIGTERM {{duration}}"',
+    )
+}
 
 /**
  * Wait for the Host to publish the live Agent that opening a session resumes.
@@ -91,13 +103,13 @@ describe.skipIf(MODE === 'record')('web e2e: background job list', () => {
     const started = await scaffold.ctx.tools.execute({
       signal: new AbortController().signal,
       callId: CallId('background-job-list-e2e'),
-      name: 'bash',
+      name: NATIVE_SHELL_TOOL,
       arguments: { command: COMMAND, description: 'Hold a background slot open', run_in_background: true },
       agent,
     })
     const reported = started.content.map(block => block.type === 'text' ? block.text : '').join('')
-    const matched = /\bbash-\d+\b/.exec(reported)
-    if (matched === null) throw new Error(`background bash reported no job id: ${reported}`)
+    const matched = new RegExp(`\\b${NATIVE_SHELL_TOOL}-\\d+\\b`).exec(reported)
+    if (matched === null) throw new Error(`background ${NATIVE_SHELL_TOOL} reported no job id: ${reported}`)
     jobId = JobId(matched[0])
 
     await trigger.waitFor({ timeout: 15_000 })
@@ -106,7 +118,9 @@ describe.skipIf(MODE === 'record')('web e2e: background job list', () => {
     await row.waitFor({ timeout: 10_000 })
     await expect.poll(() => row.textContent()).toContain(COMMAND)
 
-    const snapshot = await captureStableAria(page, '[class*="menu"]', scaffold.workspaceCwd)
+    const snapshot = normalizeShellSnapshot(
+      await captureStableAria(page, '[class*="menu"]', scaffold.workspaceCwd),
+    )
     await compareOrRefreshGolden(RUNNING_EXPECTED, snapshot, MODE)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -115,13 +129,19 @@ describe.skipIf(MODE === 'record')('web e2e: background job list', () => {
   it('flips the open list to the cancelled outcome when the registry settles it', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-background-job-settled'))
     expect(scaffold.ctx.jobs.kill(jobId, agent, 'web e2e cancellation')).toBe('requested')
+    await expect(scaffold.ctx.jobs.wait(jobId, 20_000, agent)).resolves.toMatchObject({
+      id: jobId,
+      status: 'killed',
+    })
 
     // The trigger drops its live count once the task leaves running/stopping,
     // which is also the proof that settlement reached the browser unprompted.
     const idle = page.getByRole('button', { name: '1 background job' })
     await idle.waitFor({ timeout: 20_000 })
 
-    const snapshot = await captureStableAria(page, '[class*="menu"]', scaffold.workspaceCwd)
+    const snapshot = normalizeShellSnapshot(
+      await captureStableAria(page, '[class*="menu"]', scaffold.workspaceCwd),
+    )
     await compareOrRefreshGolden(SETTLED_EXPECTED, snapshot, MODE)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])

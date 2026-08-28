@@ -16,6 +16,12 @@ chip 以部署默认值打开，其选择是**暂存**的——该界面先于�
 
 已经开始的会话会被直接拒绝而非排队：宿主返回 `agent-preset-locked`，暂存值随之丢弃，而不是去等一个永远不会接受它的会话。
 
+## Preset 品牌标记
+
+新建会话 chip 声明了根作用域 keyed 子 slot `conversation.hero.agentPreset.mark`。品牌插件以精确的 preset id 作为 `key` 注册一个组件，并使用 `ctx.slots.inject`，从而不依赖本包的加载顺序。每次 dispatch 都会提供 `AgentPresetBrandMarkOwnerProps`：`presetId`、请求的正方形边长 `size`，以及可选的宿主 `className`；占用组件需将该类名应用于标记的最外层元素。相邻文本已经给出 preset 名称，因此标记属于装饰内容。
+
+选中的 key 没有占用组件时继续显示既有的通用 Agent-preset 图标；菜单中未被占用的行仍保持纯文本。该 slot 只改变展示：名单元数据、暂存选择、空白会话应用过程以及宿主的 `agent-preset-locked` 规则均保持不变。
+
 ## 会话标题旁的标签
 
 第三个表层，位于会话标题旁：**本会话**所运行的 preset，作为静态装饰呈现。在那里放一个控件，等于承诺一次宿主会断然拒绝的切换。它从会话自身的摘要读取 preset，并在 General 行所读的同一份名单上解析显示名称。转发的 owner 事件 `agent-preset/selected` 会在每个标签页中把已经提交的空会话切换折进这份共享摘要；发起方标签页可能已经采用 RPC 回执，而合并是幂等的。

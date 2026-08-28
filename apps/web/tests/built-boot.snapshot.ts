@@ -37,13 +37,17 @@ function isBuildRecordReader(value: unknown): value is (root: string) => unknown
   return typeof value === 'function'
 }
 
+/** Read one optional public value embedded in the built client artifacts. */
+function clientBuildValue(name: string): string | undefined {
+  const value = (clientBuildEnvironment as Record<string, unknown>)[name]
+  return typeof value === 'string' ? value : undefined
+}
+
 it('boots the built plugin graph and renders a fixture session end to end', async () => {
   mountAssembledApp()
 
   // The sidebar renders from the boot graph: every inject layer activated.
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
-  expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
-  expect(screen.queryByText('DSH Local Build')).toBeNull()
   // The compact layout dropped group session counts; the fixture workspace
   // group row renders immediately with its sessions beneath it.
   const fixtureGroup = (await within(tree).findAllByText('fixture'))
@@ -125,6 +129,35 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
   // Every bundle injected its plugin-owned style tag (the loader's CSS path).
   const styleOwners = [...document.head.querySelectorAll('style[data-plugin]')]
     .map(style => style.getAttribute('data-plugin'))
+  const boot = (window as unknown as {
+    __DSH_BOOT__?: { entries: Array<{ id: string }> }
+  }).__DSH_BOOT__
+  if (boot === undefined) throw new Error('built client did not retain its boot plugin metadata')
+  const pluginIds = boot.entries.map(entry => entry.id)
+  const paperAIGraph = pluginIds.some(id => id.startsWith('@paperai/'))
+
+  // Product branding is an ordinary plugin-graph outcome. A PaperAI graph
+  // must render its wordmark and document mark; official DSH artifacts retain
+  // their shipped lockup; an unbranded local build must render the revisioned
+  // shell fallback. Each branch is selected from plugin/build metadata rather
+  // than assuming one product profile for every built-artifact run.
+  if (paperAIGraph) {
+    expect(pluginIds).toContain('@paperai/ui-brand')
+    expect(styleOwners).toContain('@paperai/ui-brand')
+    const productName = screen.getByText('paperai')
+    screen.getByText('论文工作台')
+    expect(productName.closest('button')?.querySelector('svg[viewBox="0 0 24 24"]')).not.toBeNull()
+    expect(screen.queryByText('DSH Local Build')).toBeNull()
+  } else if (clientBuildValue('DSH_CLIENT_BUILD_PROFILE') === 'official') {
+    expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
+    expect(screen.queryByText('DSH Local Build')).toBeNull()
+  } else {
+    screen.getByText('DSH Local Build')
+    const revision = clientBuildValue('DSH_CLIENT_COMMIT_HASH')
+    if (revision === undefined) throw new Error('local built client is missing DSH_CLIENT_COMMIT_HASH')
+    screen.getByText(revision)
+  }
+
   for (const plugin of ['@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-ui-tool']) {
     expect(styleOwners).toContain(plugin)
   }

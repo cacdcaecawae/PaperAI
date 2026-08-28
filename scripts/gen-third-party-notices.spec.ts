@@ -26,7 +26,8 @@ describe('THIRD_PARTY_NOTICES.md', () => {
   // this assertion means the notices were committed without that hook.
   it('matches what the generator produces from the current manifests', () => {
     const generated = render()
-    expect(generated).toContain('It depends on the third-party software listed below.')
+    expect(generated).toContain('PaperAI retains the MIT-licensed DeepSeek Harness foundation')
+    expect(generated).toContain('b150a551b8d465e31e418e1b2eaf5e79bbb7d28e')
     expect(readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), 'stale notices — run `pnpm run gen-third-party-notices`').toBe(generated)
   })
 })
@@ -123,6 +124,23 @@ describe('virtualManifest', () => {
       writeFileSync(join(other, 'package.json'), JSON.stringify({ name: 'other-pkg', version: '1.0.0' }))
 
       expect(virtualManifest(store, '@scope/missing')).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('selects an exact version when the virtual store contains multiple releases', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-notices-multi-version-'))
+    try {
+      const name = '@scope/pkg'
+      const store = join(root, 'store')
+      for (const version of ['1.0.0', '2.0.0']) {
+        const manifestDir = join(store, `${name.replace('/', '+')}@${version}`, 'node_modules', name)
+        mkdirSync(manifestDir, { recursive: true })
+        writeFileSync(join(manifestDir, 'package.json'), JSON.stringify({ name, version, license: 'MIT' }))
+      }
+
+      expect(virtualManifest(store, name, '2.0.0')).toMatchObject({ name, version: '2.0.0' })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

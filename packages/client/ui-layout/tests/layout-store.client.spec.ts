@@ -85,6 +85,17 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().details).toBe(0)
   })
 
+  it('uses configured details bounds and opening width', () => {
+    const geometry = { centerMin: 520, detailsMin: 400, detailsDefault: 600, detailsMax: 960 }
+    const { store, actions } = createLayoutStore(geometry).create()
+    actions.openDetails()
+    expect(store.getSnapshot().details).toBe(600)
+    actions.setDetails(1)
+    expect(store.getSnapshot().details).toBe(400)
+    actions.setDetails(9999)
+    expect(store.getSnapshot().details).toBe(960)
+  })
+
   it('does not persist panel geometry', () => {
     const first = createLayoutStore().create()
     first.actions.setSidebar(400)

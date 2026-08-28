@@ -1,0 +1,54 @@
+{
+  "name": "@paperai/document-engine-officecli",
+  "description": "OfficeCLI Provider for the PaperAI document-engine seam",
+  "version": "0.1.1-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cacdcaecawae/PaperAI.git",
+    "directory": "packages/paperai/document-engine-officecli"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "assets/convert-legacy-doc.ps1",
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/legacy-doc.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "workspace:^",
+    "@officecli/officecli": "1.0.145"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-subprocess": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
+    "@paperai/document-engine": "workspace:*",
+    "@paperai/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-subprocess": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
+    "@paperai/document-engine": "workspace:*",
+    "@paperai/domain": "workspace:*"
+  }
+}

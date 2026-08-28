@@ -26,6 +26,9 @@ import { ModelsSettingsStore } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
 import { en, zh, type ModelsKey } from './locales.ts'
 import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
+import type { Config } from '../config.ts'
+import { resolveModelsOnboardingConfig } from '../config.ts'
+import { ModelsOnboardingController } from './onboarding-policy.ts'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
 export type { ModelsKey } from './locales.ts'
@@ -40,6 +43,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin. */
 const NS = 'settings.models'
 export type { ModelsSettingsState, ProviderRow } from './store.ts'
+export { ModelsOnboardingController } from './onboarding-policy.ts'
+export type { IModelsOnboarding } from './onboarding-policy.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Product-level policy for optional Models onboarding surfaces. */
+    modelsOnboarding: import('./onboarding-policy.ts').IModelsOnboarding
+  }
+}
 
 /**
  * Refetch the page snapshot only after its first load: an unopened Models
@@ -64,7 +76,13 @@ export const inject = ['slots', 'locale', 'connection', 'remote', 'settingsScope
  * pushed invalidation (settings, credentials, or provider topology).
  * @param ctx - client root context.
  */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: ClientContext, config?: Config): void {
+  const onboarding = resolveModelsOnboardingConfig(config)
+  const onboardingPolicy = new ModelsOnboardingController(onboarding)
+  ctx.effect(() => {
+    const dispose = ctx.reflect.provide('modelsOnboarding', onboardingPolicy)
+    return () => { void dispose() }
+  }, 'ui-settings-models: onboarding policy')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-models: copy dictionaries')
 
   const connection = ctx.get('connection') as ConnectionHandle
@@ -82,7 +100,7 @@ export function apply(ctx: ClientContext): void {
   })
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
     controller,
-    hooks: { models: controller.store },
+    hooks: { models: controller.store, policy: onboardingPolicy.configuration },
     api: connection.api,
     schema,
     t,
@@ -95,7 +113,7 @@ export function apply(ctx: ClientContext): void {
   }))
   const welcomeInjected = (): WelcomeNoticeInjected => ({
     controller: welcomeController,
-    hooks: { welcome: welcomeController.store },
+    hooks: { welcome: welcomeController.store, policy: onboardingPolicy.configuration },
     t,
   })
 
@@ -125,16 +143,20 @@ export function apply(ctx: ClientContext): void {
     label: () => t('nav'),
     inject: injected,
   }, ModelsSection))
-  ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
-    name: 'settings.onboarding',
-    id: 'welcome-notice',
-    order: -100,
-    inject: welcomeInjected,
-  }, WelcomeNotice))
-  ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
-    name: 'settings.onboarding',
-    id: 'deepseek-official',
-    order: 0,
-    inject: deepSeekOnboardingInjected,
-  }, DeepSeekOnboardingDialog))
+  if (onboarding.welcomeNotice) {
+    ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+      name: 'settings.onboarding',
+      id: 'welcome-notice',
+      order: -100,
+      inject: welcomeInjected,
+    }, WelcomeNotice))
+  }
+  if (onboarding.deepSeekCredential) {
+    ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+      name: 'settings.onboarding',
+      id: 'deepseek-official',
+      order: 0,
+      inject: deepSeekOnboardingInjected,
+    }, DeepSeekOnboardingDialog))
+  }
 }

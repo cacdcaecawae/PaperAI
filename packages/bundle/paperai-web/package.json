@@ -1,0 +1,68 @@
+{
+  "name": "@paperai/bundle-web",
+  "description": "PaperAI product profile layer over the pinned DeepSeek Harness web application",
+  "version": "0.1.1-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cacdcaecawae/PaperAI.git",
+    "directory": "packages/bundle/paperai-web"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "cordis.patch.yml",
+    "config",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@paperai/agent-acp": "workspace:*",
+    "@paperai/commit-service": "workspace:*",
+    "@paperai/document-service": "workspace:*",
+    "@paperai/document-engine-officecli": "workspace:*",
+    "@paperai/export-service": "workspace:*",
+    "@paperai/mcp": "workspace:*",
+    "@paperai/project-service": "workspace:*",
+    "@paperai/repository": "workspace:*",
+    "@paperai/template-pack-hit": "workspace:*",
+    "@paperai/template-service": "workspace:*",
+    "@paperai/workbench-service": "workspace:*",
+    "@deepseek-ai/dsh-storage-sqlite": "workspace:^",
+    "@paperai/ui-brand": "workspace:*",
+    "@paperai/ui-workbench": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis-plugin-include": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
+    "js-yaml": "^4.2.0"
+  }
+}

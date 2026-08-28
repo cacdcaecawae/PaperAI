@@ -8,9 +8,10 @@
  * receives the bound actions through the registration's inject hook.
  */
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
+import type { LayoutGeometry } from '../config.ts'
+import { DEFAULT_LAYOUT_GEOMETRY } from '../config.ts'
 import {
-  clampWidth, DETAILS_DEFAULT, DETAILS_MAX, DETAILS_MIN,
-  SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
+  clampWidth, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
 } from './columns.ts'
 
 /**
@@ -28,10 +29,10 @@ type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowEx
  */
 type LayoutActions = {
   setSidebar: (draft: LayoutState, px: number) => void
-  setDetails: (draft: LayoutState, px: number) => void
+  setDetails: (draft: LayoutState, px: number, activeGeometry?: LayoutGeometry) => void
   toggleSidebar: (draft: LayoutState) => void
   setNarrow: (draft: LayoutState, narrow: boolean) => void
-  openDetails: (draft: LayoutState) => void
+  openDetails: (draft: LayoutState, activeGeometry?: LayoutGeometry) => void
   closeDetails: (draft: LayoutState) => void
 }
 
@@ -43,14 +44,19 @@ type LayoutActions = {
  * open/close transitions write 0 / the default explicitly. Below the
  * auto-collapse breakpoint (AppFrame feeds setNarrow) the sidebar toggle
  * flips the narrowExpanded override instead of the preference.
+ * @param geometry - validated center/details geometry; omitted for the original DSH values.
  * @returns the store handle (spec + type + identity + factory in one).
  */
-export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutActions>  {
+export function createLayoutStore(
+  geometry: LayoutGeometry = DEFAULT_LAYOUT_GEOMETRY,
+): EngineStoreHandle<LayoutState, LayoutActions>  {
   const handle = defineStore({
     init: (): LayoutState => ({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false }),
     actions: {
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
-      setDetails: (d, px: number) => { d.details = clampWidth(px, DETAILS_MIN, DETAILS_MAX) },
+      setDetails: (d, px: number, activeGeometry: LayoutGeometry = geometry) => {
+        d.details = clampWidth(px, activeGeometry.detailsMin, activeGeometry.detailsMax)
+      },
       // Narrow toggles flip only the override: the width preference survives
       // untouched, so re-widening restores the pre-squeeze layout.
       toggleSidebar: (d) => {
@@ -64,7 +70,9 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
         d.narrow = narrow
         d.narrowExpanded = false
       },
-      openDetails: (d) => { if (d.details === 0) d.details = DETAILS_DEFAULT },
+      openDetails: (d, activeGeometry: LayoutGeometry = geometry) => {
+        if (d.details === 0) d.details = activeGeometry.detailsDefault
+      },
       closeDetails: (d) => { d.details = 0 },
     },
   })

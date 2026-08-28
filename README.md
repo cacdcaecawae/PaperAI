@@ -1,59 +1,43 @@
-# DeepSeek Harness
+# PaperAI
 
 English | [中文](README.zh.md)
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+PaperAI is a local, Agent-driven academic Word workbench. It keeps one Working DOCX as the editable authority, lets Codex, Claude, or the built-in DeepSeek Harness Agent work through the same versioned document tools, and validates formal exports against confirmed institutional templates.
 
-It uses an architecture where **everything is a plugin**, and is powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper).
+The product is built on the pinned [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) client, Host, session, settings, model, permission, and plugin foundation. PaperAI adds the document, template, commit, MCP, ACP, and workbench product layer while preserving the upstream DSH interaction language.
 
-## Developer preview
+## V1 workflow
 
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+- Select a local workspace; PaperAI initializes the project layout and Git repository idempotently.
+- Import `.docx` directly or normalize legacy `.doc` through read-only Microsoft Word automation on Windows.
+- Use the built-in `HIT 硕士毕设` pack or upload a custom Word template, review its parsed contract, and confirm it.
+- Edit one semantic section at a time or let a local Codex/Claude ACP Agent use authenticated PaperAI MCP tools.
+- Recover, compare, and restore every human or Agent document commit with actor, client, provider, and model provenance.
+- Export drafts at any time; formal delivery runs the confirmed template gate first.
 
-## Run
+The source Word files and templates are preserved. OfficeCLI generates previews and applies structured mutations to derived Working copies only.
 
-### Run from `npm`
+## Run from source
 
-Install `Node.js`, then run:
-
-```sh
-npx @deepseek-ai/dsh web
-```
-
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
-
-### Run from source
-
-To run from a repository checkout:
+Requirements: Node.js, pnpm, Git, and the local ACP provider you intend to use. Microsoft Word Desktop is required only for legacy `.doc` normalization on Windows.
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/cacdcaecawae/PaperAI.git
+cd PaperAI
 pnpm install
 pnpm run build
-pnpm dsh web
+pnpm paperai
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+Provider API keys and endpoints can be configured in the stock DSH settings surface. The UI reports unavailable local dependencies explicitly instead of presenting inert controls.
 
-## Community and support
+## Architecture and development
 
-- Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
+- Product decision: [PaperAI product profile ADR](.agents/notes/implemented/architecture/2026-08-28-paperai-product-profile.md)
+- DSH architecture: [docs/architecture.md](docs/architecture.md)
+- Contributor setup: [docs/development.md](docs/development.md)
+- Agent instructions: [AGENTS.md](AGENTS.md)
 
-## Contributing
+## License and attribution
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Development
-
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
-
-For agents, follow [AGENTS.md](AGENTS.md).
-
-## License
-
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+PaperAI code and the retained DeepSeek Harness foundation are distributed under [MIT](LICENSE). DeepSeek Harness attribution and all direct dependency licenses are retained in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Institutional template assets are not relicensed by PaperAI; see the template pack's [asset notice](packages/paperai/template-pack-hit/ASSET_NOTICE.md).

@@ -378,6 +378,13 @@
   margin-top: 4px;
 }
 
+/* Additive Workspace content follows the same 22px tree indentation as
+   Session rows. Occupants own their rows and loading/error presentation. */
+.workspaceContent {
+  min-width: 0;
+  margin-left: 22px;
+}
+
 .listTopDropIndicator,
 .workspaceDropBefore::before,
 .workspaceDropAfter::after {

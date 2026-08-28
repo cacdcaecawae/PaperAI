@@ -74,6 +74,7 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(declarations(".searchTree > [role='treeitem'] + [role='treeitem']")?.get('margin-top')).toBe('2px')
     expect(declarations('.groupSection > * + *')?.get('margin-top')).toBe('2px')
     expect(declarations('.groupSection + .groupSection')?.get('margin-top')).toBe('4px')
+    expect(declarations('.workspaceContent')?.get('margin-left')).toBe('22px')
   })
 
   it('draws drag targets as a leading chevron joined to the insertion line', () => {

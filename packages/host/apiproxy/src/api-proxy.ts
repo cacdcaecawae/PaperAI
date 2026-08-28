@@ -114,6 +114,9 @@ import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-
 /** Page size when history is called without maxMessages. */
 const DEFAULT_MAX_MESSAGES = 50
 
+/** Product presets whose ids name mandatory peer Agent factory routes. */
+const REQUIRED_AGENT_FACTORY_ROUTES = new Set(['codex', 'claude'])
+
 /** Provider work budget: at most 100 calls and 2,000 inspected hits. */
 const SESSION_SEARCH_PROVIDER_CALL_LIMIT = 100
 
@@ -1049,21 +1052,21 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ?? DEFAULT_SESSION_LOG_COMPRESSION_LEVEL
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
-  /** The seed model each create/resume declares; re-read so it never goes stale. */
-  const agentOptions = (): AgentOptions => {
+  /**
+   * The seed model each default-loop create/resume declares. A named peer
+   * factory (Codex/Claude ACP today, any independently controlled driver
+   * later) owns its own provider and model catalog, so feeding it the DSH
+   * default would select an unrelated model before the session can start.
+   */
+  const agentOptions = (factoryRoute?: string): AgentOptions => {
+    if (factoryRoute !== undefined) return {}
     const { provider, model } = defaults.defaultModelSelection()
     return { provider, model }
   }
   type WebModelSelectionRef = ModelSelectionRef & { current: ModelSelection }
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
-  /**
-   * Serializes `agentPreset.select` per session. Two concurrent selects both
-   * pass the blank check, and the second `unmountPresetFor` then finds nothing
-   * to unmount because the first already removed the record — leaving two
-   * compositions registered into one agent layer. The client's `busy` flag is
-   * not enforcement: the wire is reachable directly.
-   */
-  const presetSwitches = new Map<SessionId, Promise<unknown>>()
+  /** Serializes prompt admission and Agent-driver replacement per session. */
+  const sessionAdmissionChains = new Map<SessionId, Promise<void>>()
   /** Client-chosen identity creation/resume, deduplicated across concurrent retries. */
   const sessionCreations = new Map<SessionId, Promise<Agent>>()
   /** Serializes path ownership and explicit title checks with Workspace mutations. */
@@ -1078,6 +1081,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const result = (imageAdmissionChains.get(agent) ?? Promise.resolve()).then(operation)
     imageAdmissionChains.set(agent, result.then(() => undefined, () => undefined))
     return result
+  }
+
+  /** Keep a prompt from entering an Agent while its preset may replace that Agent. */
+  async function serializeSessionAdmission<T>(sessionId: SessionId, operation: () => Promise<T>): Promise<T> {
+    const result = (sessionAdmissionChains.get(sessionId) ?? Promise.resolve()).then(operation)
+    const tail = result.then(() => undefined, () => undefined)
+    sessionAdmissionChains.set(sessionId, tail)
+    try {
+      return await result
+    } finally {
+      if (sessionAdmissionChains.get(sessionId) === tail) sessionAdmissionChains.delete(sessionId)
+    }
   }
 
   /**
@@ -1099,6 +1114,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const selection: WebModelSelectionRef = {
       get current(): ModelSelection {
         if (picked !== undefined) return picked
+        const controlled = agent.modelController
+        if (controlled !== undefined) {
+          return { provider: controlled.provider.id, model: controlled.currentModel }
+        }
         // Incrementally folded by the session, so a per-step read costs
         // O(new events) rather than a rescan.
         const logged = agent.session.requestHeader()?.config
@@ -1149,6 +1168,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     throw new AgentPresetConflict(sessionId, requested, existing)
   }
 
+  /** Resolve a preset's exact peer driver without falling back to the DSH loop. */
+  function factoryRouteForPreset(presetId: string): string | undefined {
+    if (ctx.agents.hasFactoryRoute(presetId)) return presetId
+    if (REQUIRED_AGENT_FACTORY_ROUTES.has(presetId)) {
+      throw new Error(
+        `agent preset "${presetId}" requires factory route "${presetId}", but that route is not registered`,
+      )
+    }
+    return undefined
+  }
+
   /**
    * Resolve the preset an agent will be composed from, and the setup that
    * installs it.
@@ -1167,6 +1197,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
    */
   async function composeAgent(presetId: string | undefined): Promise<{
     agentPreset?: string
+    factoryRoute?: string
     setup: (agentCtx: Context) => Promise<void>
   }> {
     const presets = ctx.get('agentPresets')
@@ -1179,8 +1210,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
     }
     const resolvedId = (await presets.resolve(presetId)).id
+    const factoryRoute = factoryRouteForPreset(resolvedId)
     return {
       agentPreset: resolvedId,
+      ...factoryRoute === undefined ? {} : { factoryRoute },
       setup: async (agentCtx: Context) => {
         installSelection(agentCtx)
         await presets.mount(agentCtx, resolvedId)
@@ -1206,7 +1239,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   // header here would silently undo the switch on the next restart and
   // restore that history under the old tool set.
   const agentFor = createApiRemoteAgentResolver(ctx, {
-    agentOptions,
+    agentOptions: (_session, factoryRoute) => agentOptions(factoryRoute),
+    factoryRoute: ({ meta, events }) => {
+      const preset = resolveSessionPreset({ header: meta, events })
+      return preset === undefined ? undefined : factoryRouteForPreset(preset)
+    },
     setup: async ({ meta, events }) =>
       (await composeAgent(resolveSessionPreset({ header: meta, events }))).setup,
   })
@@ -1595,10 +1632,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // session's history was produced under that composition, and
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
+          const composition = await composeAgent(storedPreset)
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
-            agentOptions: agentOptions(),
-            setup: (await composeAgent(storedPreset)).setup,
+            ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
+            agentOptions: agentOptions(composition.factoryRoute),
+            setup: composition.setup,
           })).agent
         }
 
@@ -1610,7 +1649,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const composition = await composeAgent(presetId)
         return (await ctx.agents.create({
           sessionId,
-          agentOptions: agentOptions(),
+          ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
+          agentOptions: agentOptions(composition.factoryRoute),
           meta: {
             cwd,
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
@@ -2185,6 +2225,44 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const { sessionId } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
+        const controlled = found.agent.modelController
+        if (controlled !== undefined) {
+          try {
+            const models = await controlled.listModels()
+            const current: ModelSelection = {
+              provider: controlled.provider.id,
+              model: controlled.currentModel,
+            }
+            return ok(request, {
+              current,
+              routable: true,
+              groups: [{
+                id: controlled.provider.id,
+                name: controlled.provider.name,
+                models: models.map(model => ({
+                  id: model.id,
+                  name: model.name,
+                  ...model.description === undefined ? {} : { description: model.description },
+                })),
+              }],
+              failures: [],
+            })
+          } catch (error: unknown) {
+            return ok(request, {
+              current: {
+                provider: controlled.provider.id,
+                model: controlled.currentModel,
+              },
+              routable: false,
+              groups: [],
+              failures: [{
+                id: controlled.provider.id,
+                name: controlled.provider.name,
+                message: error instanceof Error ? error.message : String(error),
+              }],
+            })
+          }
+        }
         const current = selectionFor(found.agent).current
         const { groups, failures } = await buildModelCatalog(ctx)
         const routable = routeServed(current.provider)
@@ -2197,6 +2275,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if ('error' in found) return err(request, found.error)
         return serializeImageAdmission(found.agent, async () => {
           try {
+            const controlled = found.agent.modelController
+            if (controlled !== undefined) {
+              if (provider !== controlled.provider.id) {
+                throw new Error(`Agent driver "${controlled.provider.name}" does not serve provider "${provider}"`)
+              }
+              if (reasoningEffort !== undefined) {
+                throw new Error(`Agent driver "${controlled.provider.name}" does not expose reasoning-effort selection`)
+              }
+              const accepted = await controlled.selectModel(model)
+              const selected: ModelSelection = { provider: controlled.provider.id, model: accepted }
+              return ok(request, { selected })
+            }
             const resolved = await ctx.llm.resolveCallConfig({
               provider,
               model,
@@ -2318,10 +2408,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // those tools, and composing anything else would strand the tool calls
         // it already carries. Now that no model-facing row sits in the host
         // plane, composing nothing would leave the child with no tools at all.
-        const forkComposition = await composeAgent(resolveSessionPreset(source))
         try {
+          const forkComposition = await composeAgent(resolveSessionPreset(source))
           await ctx.agents.create({
             sessionId: childId,
+            ...forkComposition.factoryRoute === undefined ? {} : { factoryRoute: forkComposition.factoryRoute },
             seed: events.slice(0, cut),
             meta: {
               ...source.header.cwd === undefined ? {} : { cwd: source.header.cwd },
@@ -2331,7 +2422,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                 ? {}
                 : { agentPreset: forkComposition.agentPreset },
             },
-            agentOptions: agentOptions(),
+            agentOptions: agentOptions(forkComposition.factoryRoute),
             setup: forkComposition.setup,
           })
         } catch (error: unknown) {
@@ -2370,50 +2461,55 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { value: clientTimeZone },
           })
         }
-        const resolved = await turnAgentFor<{ accepted: true }>(request, sessionId)
-        if ('refused' in resolved) return resolved.refused
-        const agent = resolved.agent
-        // Request identity and optional browser zone ride the exact durable user message.
-        const source: MessageSource = {
-          kind: 'user',
-          rpcId: request.rpcId,
-          ...(canonicalTimeZone === undefined ? {} : { clientTimeZone: canonicalTimeZone }),
-        }
-        const hasImage = content.some(part => part.type === 'image')
-        const admit = async (): Promise<RpcResponse<{ accepted: true }>> => {
-          try {
-            if (hasImage) {
-              const current = selectionFor(agent).current
-              const modelInfo = await ctx.llm.resolveModelInfo(current.provider, current.model)
-              if (modelInfo.inputModalities !== undefined && !modelInfo.inputModalities.includes('image')) {
+        return serializeSessionAdmission(sessionId, async () => {
+          const resolved = await turnAgentFor<{ accepted: true }>(request, sessionId)
+          if ('refused' in resolved) return resolved.refused
+          const agent = resolved.agent
+          // Request identity and optional browser zone ride the exact durable user message.
+          const source: MessageSource = {
+            kind: 'user',
+            rpcId: request.rpcId,
+            ...(canonicalTimeZone === undefined ? {} : { clientTimeZone: canonicalTimeZone }),
+          }
+          const hasImage = content.some(part => part.type === 'image')
+          const admit = async (): Promise<RpcResponse<{ accepted: true }>> => {
+            try {
+              if (hasImage) {
+                const controlled = agent.modelController
+                const current = selectionFor(agent).current
+                const inputModalities = controlled === undefined
+                  ? (await ctx.llm.resolveModelInfo(current.provider, current.model)).inputModalities
+                  : await controlled.inputModalities?.(current.model)
+                if (inputModalities !== undefined && !inputModalities.includes('image')) {
+                  return err(request, {
+                    code: 'attachment-error',
+                    message: `Model "${current.model}" does not support image input.`,
+                    details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+                  })
+                }
+              }
+              const durable = await durablePromptContent(ctx, content)
+              const message: UserMessage = createUserMessage({ content: durable, source })
+              if (mode === 'steer') agent.steer(message)
+              else agent.followup(message)
+            } catch (error: unknown) {
+              if (error instanceof AttachmentError) {
                 return err(request, {
                   code: 'attachment-error',
-                  message: `Model "${current.model}" does not support image input.`,
-                  details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+                  message: error.message,
+                  details: { reason: error.code },
                 })
               }
-            }
-            const durable = await durablePromptContent(ctx, content)
-            const message: UserMessage = createUserMessage({ content: durable, source })
-            if (mode === 'steer') agent.steer(message)
-            else agent.followup(message)
-          } catch (error: unknown) {
-            if (error instanceof AttachmentError) {
               return err(request, {
-                code: 'attachment-error',
-                message: error.message,
-                details: { reason: error.code },
+                code: 'agent-busy',
+                message: 'prompt rejected',
+                details: { reason: String(error) },
               })
             }
-            return err(request, {
-              code: 'agent-busy',
-              message: 'prompt rejected',
-              details: { reason: String(error) },
-            })
+            return ok(request, { accepted: true as const })
           }
-          return ok(request, { accepted: true as const })
-        }
-        return hasImage ? serializeImageAdmission(agent, admit) : admit()
+          return hasImage ? serializeImageAdmission(agent, admit) : admit()
+        })
       },
 
       async attachment(request) {
@@ -2981,9 +3077,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         })
       },
 
-      // Recomposing is limited to a blank session because a started
-      // conversation's history was produced under its preset's tools; the
-      // agent and the session survive, only the composition is swapped.
+      // Switching is limited to a blank, idle session because a started
+      // conversation's history was produced under its preset's tools. A
+      // same-driver switch recomposes the live scope; a peer-driver switch
+      // checkpoints the Session and replaces the Agent around that identity.
       async select(request) {
         const { sessionId, agentPreset } = request.payload
         const presets = ctx.get('agentPresets')
@@ -2994,25 +3091,66 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { agentPreset, available: [] },
           })
         }
-        const found = await agentFor(sessionId)
-        if ('error' in found) return err(request, found.error)
-        const { agent } = found
-        const swap = async (): Promise<RpcResponse<{ agentPreset: string }>> => {
-          // Re-read inside the queue: an earlier switch may have run, and a
-          // conversation may have started, since this request arrived.
-          if (!sessionBlank(agent.session)) {
+        return serializeSessionAdmission(sessionId, async () => {
+          const found = await agentFor(sessionId)
+          if ('error' in found) return err(request, found.error)
+          const { agent } = found
+          if (!sessionBlank(agent.session) || agent.status !== 'idle') {
             return err(request, {
               code: 'agent-preset-locked',
-              message: `session "${sessionId}" has already started; its agent preset is fixed`,
+              message: `session "${sessionId}" has started or has admitted work; its agent preset is fixed`,
               details: { sessionId, agentPreset },
             })
           }
           try {
-            const preset = await presets.recompose(agent.ctx, agentPreset)
-            // Recorded only after the swap committed: the log states what the
-            // agent runs, and a rejected mount leaves the previous composition.
-            agent.session.append('agent-preset/selected', { agentPreset: preset.id })
-            return ok(request, { agentPreset: preset.id })
+            const target = await composeAgent(agentPreset)
+            if (target.agentPreset === undefined) {
+              throw new Error(`agent preset "${agentPreset}" resolved without a preset id`)
+            }
+            const currentRoute = ctx.agents.factoryRouteFor(agent)
+            if (currentRoute === target.factoryRoute) {
+              const preset = await presets.recompose(agent.ctx, target.agentPreset)
+              agent.session.append('agent-preset/selected', { agentPreset: preset.id })
+              return ok(request, { agentPreset: preset.id })
+            }
+
+            if (ctx.get('sessionPersistence') === undefined) {
+              throw new Error(
+                `cannot switch session "${sessionId}" from factory route ${JSON.stringify(currentRoute ?? 'default')} `
+                + `to ${JSON.stringify(target.factoryRoute ?? 'default')}: session persistence is not configured`,
+              )
+            }
+            const rollback = await composeAgent(resolveSessionPreset(agent.session))
+            if (rollback.factoryRoute !== currentRoute) {
+              throw new Error(
+                `session "${sessionId}" runs factory route ${JSON.stringify(currentRoute ?? 'default')}, `
+                + `but its recorded preset resolves to ${JSON.stringify(rollback.factoryRoute ?? 'default')}`,
+              )
+            }
+            const participated = await ctx.sessions.flush(agent.session)
+            if (!participated) {
+              throw new Error(
+                `cannot switch session "${sessionId}" between Agent factory routes: `
+                + 'no session persistence checkpoint listener is active',
+              )
+            }
+            const replacement = await ctx.agents.recreate({
+              current: agent,
+              replacement: {
+                resumeSessionId: sessionId,
+                ...target.factoryRoute === undefined ? {} : { factoryRoute: target.factoryRoute },
+                agentOptions: agentOptions(target.factoryRoute),
+                setup: target.setup,
+              },
+              rollback: {
+                resumeSessionId: sessionId,
+                ...rollback.factoryRoute === undefined ? {} : { factoryRoute: rollback.factoryRoute },
+                agentOptions: agentOptions(rollback.factoryRoute),
+                setup: rollback.setup,
+              },
+            })
+            replacement.agent.session.append('agent-preset/selected', { agentPreset: target.agentPreset })
+            return ok(request, { agentPreset: target.agentPreset })
           } catch (error: unknown) {
             const refused = presetFailure(request, error)
             if (refused !== undefined) return refused
@@ -3022,15 +3160,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               details: {},
             })
           }
-        }
-        const queued = presetSwitches.get(sessionId) ?? Promise.resolve()
-        const turn = queued.then(swap)
-        presetSwitches.set(sessionId, turn.catch(() => undefined))
-        try {
-          return await turn
-        } finally {
-          if (presetSwitches.get(sessionId) === turn) presetSwitches.delete(sessionId)
-        }
+        })
       },
 
       // Authoring is privileged (see PRIVILEGED_METHODS in dsh-client-connection):

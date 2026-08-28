@@ -14,7 +14,7 @@ import type { ViewTab } from './contract/views.ts'
 import type {
   ApprovalWait, ChatNodeTurnDataInjected, ChatScrollPosition, ChatViewInjected, ComposerBarInjected,
   ComposerChainProps, ConversationInjected, ConversationSessionHeaderInjected, ConversationSessionInjected,
-  DetailsInjected,
+  DetailsHostInjected,
 } from './contract/slots.ts'
 import type { InputNotice } from './input/contract.ts'
 import { createChatStore } from './stores.ts'
@@ -34,7 +34,8 @@ import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { queueDockEntry } from './queue/QueueDock.tsx'
 import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
-import { DetailsPanel } from './skeleton/DetailsPanel.tsx'
+import { DetailsViewHost } from './skeleton/DetailsViewHost.tsx'
+import { ConversationDetailsController, TOOL_DETAILS_VIEW_ID } from './details-controller.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
@@ -117,6 +118,25 @@ export function apply(ctx: Context): void {
   const workspaces = ctx.workspaces
   const layout = ctx.layout
   const slots = ctx.slots
+  const details = new ConversationDetailsController({
+    currentSession: () => sessions.list.getSnapshot().current,
+    hasView: viewId => slots.entries('conversation.details.view')
+      .some(entry => entry.options.id === viewId),
+    openPanel: () => { layout.openDetails() },
+    closePanel: () => { layout.closeDetails() },
+  })
+
+  ctx.effect(() => {
+    const release = ctx.reflect.provide('conversationDetails', details)
+    return () => {
+      details.dispose()
+      void release()
+    }
+  }, 'ui-conversation: details view controller')
+  ctx.effect(
+    () => slots.subscribe('conversation.details.view', () => { details.reconcile() }),
+    'ui-conversation: details view reconciliation',
+  )
 
   registerConversationNodes(ctx)
   registerChatNodeRenderers(ctx)
@@ -394,7 +414,7 @@ export function apply(ctx: Context): void {
       return {
         openDetails: (target) => {
           actions.select(target)
-          layout.openDetails()
+          details.open(TOOL_DETAILS_VIEW_ID, sessionId)
         },
         fileMentions: owner => ctx.get('chatFileMentions')?.forClosing(owner),
         openFile: (path) => {
@@ -448,11 +468,13 @@ export function apply(ctx: Context): void {
     locale: NS,
     children: {
       'conversation.details.tool': { kind: 'single', scope: 'session' },
+      'conversation.details.view': { kind: 'list', scope: 'session' },
     },
     store: chatStore,
-    inject: (): DetailsInjected => ({
-      closeDetails: () => { layout.closeDetails() },
+    inject: (sessionId: SessionId): DetailsHostInjected => ({
+      closeDetails: () => { details.close() },
+      hooks: { detailsView: details.source(sessionId) },
     }),
-  }, DetailsPanel)
+  }, DetailsViewHost)
 
 }

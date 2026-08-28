@@ -17,6 +17,8 @@ export type {} from './conversation-nodes/turn-tail.ts'
 export { apply, inject } from './apply.ts'
 export { ConversationController } from './service.ts'
 export type { IConversation } from './service.ts'
+export { ConversationDetailsController, TOOL_DETAILS_VIEW_ID } from './details-controller.ts'
+export type { IConversationDetails } from './details-controller.ts'
 export type { DraftAttachmentId } from './input/contract.ts'
 
 export type {
@@ -33,7 +35,8 @@ export type {
   ComposerAttachment, ComposerAttachmentsOwnerProps, ComposerAttachmentsProps, ComposerChainProps, ConversationInjected,
   ConversationHeaderLineageOwnerProps, ConversationSessionHeaderInjected, ConversationSessionInjected,
   ConversationSlotProps, ConvViewOwnerProps,
-  ConvViewProps, DetailsInjected, DetailsSlotProps, DetailsToolOwnerProps, EmptyWorkspaceOwnerProps, HeroBrandMarkOwnerProps,
+  ConvViewProps, DetailsHostInjected, DetailsHostSlotProps, DetailsInjected, DetailsSlotProps,
+  DetailsToolOwnerProps, DetailsViewOwnerProps, EmptyWorkspaceOwnerProps, HeroBrandMarkOwnerProps,
   MessageImagesOwnerProps, MessageImagesProps, RenderMessageImages, TurnTailOwnerProps, UseChatNodeTurnData,
 } from './contract/slots.ts'
 // Export discipline: packages/client/AGENTS.md.
@@ -42,5 +45,7 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** The outward face only; the concrete service stays inside this plugin. */
     conversation: import('./service.ts').IConversation
+    /** Generic full-column details view selection and layout actions. */
+    conversationDetails: import('./details-controller.ts').IConversationDetails
   }
 }

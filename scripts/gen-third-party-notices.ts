@@ -255,35 +255,42 @@ export function claudeDistributionFromManifest(
  * @returns the parsed manifest, or `undefined` when neither the prefix match
  *   nor the content scan finds the package's `package.json`.
  */
-export function virtualManifest(virtual: string, name: string): VirtualManifest | undefined {
+export function virtualManifest(
+  virtual: string,
+  name: string,
+  version?: string,
+): VirtualManifest | undefined {
   const prefix = `${name.replace('/', '+')}@`
-  const entry = readdirSync(virtual).find(dir => dir.startsWith(prefix))
-  if (entry !== undefined) {
-    return JSON.parse(readFileSync(resolve(virtual, entry, 'node_modules', name, 'package.json'), 'utf8')) as VirtualManifest
-  }
-  for (const dir of readdirSync(virtual)) {
+  const directories = readdirSync(virtual)
+  const preferred = directories.filter(dir => dir.startsWith(prefix))
+  const fallback = directories.filter(dir => !dir.startsWith(prefix))
+  for (const dir of [...preferred, ...fallback]) {
     const candidate = resolve(virtual, dir, 'node_modules', name, 'package.json')
     if (existsSync(candidate)) {
-      return JSON.parse(readFileSync(candidate, 'utf8')) as VirtualManifest
+      const manifest = JSON.parse(readFileSync(candidate, 'utf8')) as VirtualManifest
+      if (manifest.name === name && (version === undefined || manifest.version === version)) return manifest
     }
   }
   return undefined
 }
 
 /** Resolve one installed external package manifest from either pnpm store. */
-function installedManifest(name: string): VirtualManifest | undefined {
+function installedManifest(name: string, version?: string): VirtualManifest | undefined {
   let manifest: (Manifest & { license?: string; repository?: string | { url?: string }; homepage?: string }) | undefined
   // Workspace-local link farms can expose a dependency that is not linked at
   // the repository root; both are backed by the root workspace's lockfile.
   for (const store of ['node_modules', 'native/landlock-run/node_modules']) {
     const direct = resolve(root, store, name, 'package.json')
     if (existsSync(direct)) {
-      manifest = JSON.parse(readFileSync(direct, 'utf8')) as typeof manifest
-      break
+      const directManifest = JSON.parse(readFileSync(direct, 'utf8')) as typeof manifest
+      if (version === undefined || directManifest?.version === version) {
+        manifest = directManifest
+        break
+      }
     }
     const virtual = resolve(root, store, '.pnpm')
     if (!existsSync(virtual)) continue
-    manifest = virtualManifest(virtual, name)
+    manifest = virtualManifest(virtual, name, version)
     if (manifest !== undefined) break
   }
   return manifest
@@ -312,7 +319,7 @@ function collectClaudeDistribution(): ClaudeDistribution {
   const distribution = claudeDistributionFromManifest(manifest)
   let installedPayloads = 0
   for (const payload of distribution.payloads) {
-    const installed = installedManifest(payload.name)
+    const installed = installedManifest(payload.name, payload.version)
     if (installed === undefined) continue
     installedPayloads += 1
     if (
@@ -690,7 +697,11 @@ export function render(): string {
 
 # Third-Party Notices
 
-DeepSeek Harness is licensed under [MIT](LICENSE). It depends on the third-party software listed below. Each project remains under its own license; nothing in this file changes those terms.
+PaperAI retains the MIT-licensed DeepSeek Harness foundation and adds its own MIT-licensed product packages. Each project listed below remains under its own license; nothing in this file changes those terms.
+
+## Upstream product foundation
+
+PaperAI's DSH client, Host, Harness/Loop, session, settings, permission, and plugin foundation starts from DeepSeek Harness commit [\`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e\`](https://github.com/deepseek-ai/deepseek-harness/commit/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e) (MIT). PaperAI's modifications remain visible in this repository's Git history; upstream files keep their original package scope and attribution.
 
 This file lists **direct** dependencies declared by the workspace and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests by \`scripts/gen-third-party-notices.ts\`: a pre-commit hook regenerates it whenever a staged file changes one of its inputs, and \`scripts/gen-third-party-notices.spec.ts\` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run \`pnpm run verify-third-party-notices\` for the standalone check.
 

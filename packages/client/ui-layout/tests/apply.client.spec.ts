@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Client apply wiring under the terminal register form: ctx.layout provided,
-// ONE register() call declares the three child slots + seats the store factory
+// ONE register() call declares the four child slots + seats the store factory
 // + wires the panel actions through the inject hook; teardown cascades
 // (service unprovided + declarations gone + registration cleared). Node half
 // and the invariant companion ride along — one line exposes the aggregate
@@ -40,31 +40,60 @@ describe('ui-layout client apply', () => {
     expect(inject).toEqual(['slots', 'theme'])
   })
 
-  it('provides ctx.layout and registers AppFrame into root with the three child declarations', async () => {
+  it('provides ctx.layout and registers AppFrame into root with the four child declarations', async () => {
     const { ctx, slots } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     expect(ctx.get('layout')).toBeInstanceOf(LayoutController)
     // The one register() call occupied 'root'…
     expect(slots.entries('root')).toHaveLength(1)
-    // …and declared the three children in the ledger.
+    // …and declared the four children in the ledger.
     expect(slots.spec('sidebar')).toEqual({ kind: 'single', scope: 'root' })
     expect(slots.spec('conversation')).toEqual({ kind: 'single', scope: 'session-maybe' })
     expect(slots.spec('details')).toEqual({ kind: 'single', scope: 'session' })
+    expect(slots.spec('shell.overlay')).toEqual({ kind: 'list', scope: 'root' })
   })
 
-  it('injects no business face and attaches the layout actions', async () => {
+  it('injects the default geometry and visibility while attaching layout actions', async () => {
     const { ctx, slots } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     const actions = {
-      setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
+      setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), setNarrow: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
     }
     const injected = (slots.entries('root')[0]!.inject as (actions: never) => object)(actions as never)
-    expect(injected).toEqual({})
+    expect((injected as { hooks: { layoutConfiguration: { getSnapshot: () => unknown } } })
+      .hooks.layoutConfiguration.getSnapshot()).toEqual({
+      centerMin: 640, detailsMin: 300, detailsDefault: 360, detailsMax: 520,
+      detailsVisibility: 'nonblank-session', detailsNarrowMode: 'close',
+    })
     const layout = ctx.get('layout') as LayoutController
     layout.toggleSidebar()
     expect(actions.toggleSidebar).toHaveBeenCalledOnce()
+  })
+
+  it('passes configured geometry and blank-Session eligibility through the root registration', async () => {
+    const { ctx, slots } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply }, {
+      centerMin: 520,
+      detailsMin: 400,
+      detailsDefault: 600,
+      detailsMax: 960,
+      detailsVisibility: 'current-session',
+      detailsNarrowMode: 'focus',
+    })
+    await fiber.await()
+    const actions = {
+      setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), setNarrow: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
+    }
+    const entry = slots.entries('root')[0]!
+    const injected = (entry.inject as (actions: never) => {
+      hooks: { layoutConfiguration: { getSnapshot: () => unknown } }
+    })(actions as never)
+    expect(injected.hooks.layoutConfiguration.getSnapshot()).toEqual({
+      centerMin: 520, detailsMin: 400, detailsDefault: 600, detailsMax: 960,
+      detailsVisibility: 'current-session', detailsNarrowMode: 'focus',
+    })
   })
 
   it('theme presenter applies the initial snapshot, follows theme/change, and unwinds on dispose', async () => {
@@ -106,9 +135,22 @@ describe('ui-layout client apply', () => {
 })
 
 describe('node half + invariant companion', () => {
-  it('node apply is an intentional no-op (loader-managed lifecycle only)', () => {
+  it('node apply validates config without mounting Host behavior', () => {
     nodeApply()
-    expect(true).toBe(true) // reaching here without throw is the contract
+    expect(() => {
+      nodeApply(undefined, {
+        centerMin: 520,
+        detailsMin: 400,
+        detailsDefault: 600,
+        detailsMax: 960,
+        detailsVisibility: 'current-session',
+        detailsNarrowMode: 'focus',
+      })
+    }).not.toThrow()
+    expect(() => {
+      nodeApply(undefined, { detailsMin: 500, detailsDefault: 400 })
+    })
+      .toThrow(/detailsMin \(500\) must not exceed detailsDefault \(400\)/)
   })
 
   it('invariant companion registers under the package name', async () => {

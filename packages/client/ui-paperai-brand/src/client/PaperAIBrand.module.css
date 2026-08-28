@@ -1,0 +1,67 @@
+.mark {
+  display: block;
+  flex: none;
+}
+
+.page,
+.fold,
+.rule,
+.accentRule {
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.page,
+.fold {
+  stroke-width: 1.55;
+}
+
+.rule,
+.accentRule {
+  stroke-width: 1.35;
+}
+
+.rule {
+  opacity: 0.62;
+}
+
+.accentRule {
+  stroke: var(--dsw-alias-state-business-primary);
+}
+
+.wordmark {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.productName {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: -0.02em;
+}
+
+.divider {
+  width: 1px;
+  height: 10px;
+  margin: 0 7px;
+  flex: none;
+  background: var(--dsw-alias-border-l3);
+}
+
+.descriptor {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  text-overflow: ellipsis;
+}

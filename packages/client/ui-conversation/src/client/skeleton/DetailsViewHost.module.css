@@ -1,0 +1,7 @@
+.message {
+  margin: 0;
+  padding: 20px 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}

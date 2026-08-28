@@ -31,6 +31,18 @@ const DAMAGED_EXPECTED = join(SNAPSHOT_DIR, 'damaged.expected.md')
 const SHIPPED_PRESETS = fileURLToPath(new URL('../../cli/config/agent-presets', import.meta.url))
 const OVERLAY = fileURLToPath(new URL('./agent-preset-authoring.overlay.yml', import.meta.url))
 const MODE = webSnapshotMode()
+const DEFAULT_PRESET_ID = 'standard'
+const COPY_SOURCE_PRESET_ID = 'minimal'
+const CREATOR_PRESET_ID = 'cordis'
+
+/** Read one required plain scalar from a shipped preset's stable metadata. */
+async function presetMetadataField(id: string, field: 'name' | 'description'): Promise<string> {
+  const source = await readFile(join(SHIPPED_PRESETS, id, 'preset.yml'), 'utf8')
+  const prefix = `${field}: `
+  const line = source.split(/\r?\n/u).find(candidate => candidate.startsWith(prefix))
+  if (line === undefined) throw new Error(`shipped preset ${id} is missing ${field} metadata`)
+  return line.slice(prefix.length)
+}
 
 describe('web e2e: agent-preset authoring is a host-side copy', () => {
   let scaffold: WebScaffold
@@ -38,6 +50,10 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
   let userRoot: string
+  let defaultPresetName: string
+  let copySourcePresetName: string
+  let copySourceDescription: string
+  let creatorPresetName: string
 
   /** The settings dialog, opened on the Agent-presets section. */
   function settingsDialog(): Locator {
@@ -46,17 +62,18 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
 
   /** Tokenize the lane-owned preset root after general aria normalization. */
   function withPresetRoot(snapshot: string): string {
-    const rootSuffix = `/${userRoot.split('/').pop()!}`
-    return snapshot.split('\n').map((line) => {
-      const rootStart = line.indexOf(rootSuffix)
-      if (rootStart === -1) return line
-      const pathStart = line.lastIndexOf(' ', rootStart) + 1
-      return `${line.slice(0, pathStart)}{{presetRoot}}${line.slice(rootStart + rootSuffix.length)}`
-    }).join('\n')
+    const normalizedRoot = userRoot.replaceAll('\\', '/')
+    return snapshot.replaceAll('\\', '/').replaceAll(normalizedRoot, '{{presetRoot}}')
   }
 
   beforeAll(async () => {
     userRoot = await realpath(await mkdtemp(join(tmpdir(), 'dsh-web-e2e-presets-')))
+    ;[defaultPresetName, copySourcePresetName, copySourceDescription, creatorPresetName] = await Promise.all([
+      presetMetadataField(DEFAULT_PRESET_ID, 'name'),
+      presetMetadataField(COPY_SOURCE_PRESET_ID, 'name'),
+      presetMetadataField(COPY_SOURCE_PRESET_ID, 'description'),
+      presetMetadataField(CREATOR_PRESET_ID, 'name'),
+    ])
     scaffold = await launchWebScaffold({
       extraOverlayPath: OVERLAY,
       agentPresets: {
@@ -64,7 +81,7 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
           { path: SHIPPED_PRESETS, trust: 'system' },
           { path: userRoot, trust: 'user' },
         ],
-        default: 'standard',
+        default: DEFAULT_PRESET_ID,
       },
     })
     browser = await chromium.launch()
@@ -87,7 +104,7 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
     await dialog.waitFor({ timeout: 10_000 })
     await dialog.getByRole('button', { name: 'Agent 预设' }).click()
     await dialog.getByRole('heading', { name: 'Agent 预设' }).waitFor({ timeout: 10_000 })
-    await dialog.getByText('标准模式').first().waitFor({ timeout: 10_000 })
+    await dialog.getByText(defaultPresetName).first().waitFor({ timeout: 10_000 })
 
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
 
@@ -97,21 +114,21 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
     // install is overwritten by upgrades and is not the user's to manage.
     expect(snapshot).toContain('或用「创造模式」让 Agent 帮你创建')
     expect(snapshot).not.toContain('新建预设')
-    expect(snapshot).toContain('查看: 标准模式')
-    expect(snapshot).not.toContain('删除: 标准模式')
+    expect(snapshot).toContain(`查看: ${defaultPresetName}`)
+    expect(snapshot).not.toContain(`删除: ${defaultPresetName}`)
     expect(snapshot).not.toContain('打开目录')
   }, 60_000)
 
   it('views a shipped composition read-only instead of editing it', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-preset-authoring-view'))
     const dialog = settingsDialog()
-    await dialog.getByRole('button', { name: '查看: 标准模式' }).click()
-    const viewer = page.getByRole('dialog', { name: '查看 · 标准模式' })
+    await dialog.getByRole('button', { name: `查看: ${defaultPresetName}` }).click()
+    const viewer = page.getByRole('dialog', { name: `查看 · ${defaultPresetName}` })
     await viewer.waitFor({ timeout: 10_000 })
 
     // The real shipped composition, not a golden: the viewer shows whatever
     // the deployment ships, and this lane only asserts it is shown read-only.
-    const shipped = await readFile(join(SHIPPED_PRESETS, 'standard', 'agent.cordis.yml'), 'utf8')
+    const shipped = await readFile(join(SHIPPED_PRESETS, DEFAULT_PRESET_ID, 'agent.cordis.yml'), 'utf8')
     expect(await viewer.locator('pre').textContent()).toBe(shipped)
     expect(await viewer.getByRole('textbox').count()).toBe(0)
     // The header X and the footer button share the 关闭 name; the footer one
@@ -123,8 +140,8 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
   it('copies 极简模式 whole under a new id and lands in its files', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-preset-authoring-copy'))
     const dialog = settingsDialog()
-    await dialog.getByRole('button', { name: '复制: 极简模式' }).click()
-    const copyDialog = page.getByRole('dialog', { name: '复制预设 · 复制自 极简模式' })
+    await dialog.getByRole('button', { name: `复制: ${copySourcePresetName}` }).click()
+    const copyDialog = page.getByRole('dialog', { name: `复制预设 · 复制自 ${copySourcePresetName}` })
     await copyDialog.waitFor({ timeout: 10_000 })
 
     const dialogSnapshot = await captureStableAria(
@@ -158,10 +175,10 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
     // description rides along for the user to edit in place, and neither the
     // source's name nor its roster order survives into the copy.
     const composition = await readFile(join(userRoot, 'my-agent', 'agent.cordis.yml'), 'utf8')
-    expect(composition).toBe(await readFile(join(SHIPPED_PRESETS, 'minimal', 'agent.cordis.yml'), 'utf8'))
+    expect(composition).toBe(await readFile(join(SHIPPED_PRESETS, COPY_SOURCE_PRESET_ID, 'agent.cordis.yml'), 'utf8'))
     const metadata = await readFile(join(userRoot, 'my-agent', 'preset.yml'), 'utf8')
     expect(metadata).toContain('name: 我的模式')
-    expect(metadata).toContain('description: 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。')
+    expect(metadata).toContain(`description: ${copySourceDescription}`)
     expect(metadata).not.toContain('order:')
   }, 60_000)
 
@@ -180,7 +197,7 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
     // creator entry so the place to author a preset never disappears.
     expect(await dialog.getByRole('heading', { name: '自定义' }).count()).toBe(1)
     expect(await dialog.getByRole('button', { name: '用「创造模式」创作自定义预设' }).count()).toBe(1)
-    expect(await dialog.getByText('标准模式').count()).toBeGreaterThan(0)
+    expect(await dialog.getByText(defaultPresetName).count()).toBeGreaterThan(0)
   }, 60_000)
 
   it('marks damaged presets broken and clears a ghost through delete', async () => {
@@ -257,7 +274,7 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
     // new-session screen with the self-referential preset staged, and the
     // blank session the flow produces composes from it on the host.
     await dialog.waitFor({ state: 'detached', timeout: 10_000 })
-    await page.getByRole('button', { name: '创造模式' }).waitFor({ timeout: 10_000 })
+    await page.getByRole('button', { name: creatorPresetName }).waitFor({ timeout: 10_000 })
     await expect.poll(async () => {
       const response = await fetch(`${scaffold.baseUrl}/api/session.list`, {
         method: 'POST',
@@ -270,7 +287,7 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
         result: { value?: { sessions: unknown[] } }
       }
       return JSON.stringify(body.result.value?.sessions ?? body.result)
-    }, { timeout: 15_000 }).toContain('"agentPreset":"cordis"')
+    }, { timeout: 15_000 }).toContain(`"agentPreset":"${CREATOR_PRESET_ID}"`)
   }, 60_000)
 
   it('drove every surface without a page error or a stream warning', () => {

@@ -16,9 +16,10 @@ export const inject = ['invariants']
 
 /**
  * No runtime invariant: the conversation service emits no cordis events, and
- * both rings this package owns (the 'conversation.view' tab ring and the
- * 'conversation.chat.node' business renderer seat) ride the slot system, whose ledger
- * invariants live with the runtime slots package.
+ * its view rings and business-renderer seats ride the slot system, whose
+ * ledger invariants live with the runtime slots package. The details view
+ * controller retains browser-local selection only; lifecycle and fallback
+ * reconciliation are covered by its package tests.
  */
 const install: InvariantInstaller = () => {}
 

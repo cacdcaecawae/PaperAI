@@ -249,6 +249,25 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the disposer that clears the factory slot. The exact Cordis effect disposer (single-shot): composite (generator) effects may yield it directly — exact identity nests the teardown in order.',
       },
       {
+        signature: 'registerFactory(route: string, factory: AgentFactory): () => void',
+        description: 'Register one named Agent factory beside the default loop factory. Routes are exact and effect-scoped: requesting an absent route fails instead of changing the session\'s driver by falling back to the default.',
+        parameters: [{ name: 'route', description: 'stable non-empty route named by the owning Host composition.' }, { name: 'factory', description: 'factory that creates and resumes Agents on this route.' }],
+        returns: 'the exact Cordis effect disposer for the registration.',
+      },
+      {
+        signature: 'hasFactoryRoute(route: string): boolean',
+        description: 'Test whether one exact named factory route is currently available.',
+        parameters: [{ name: 'route', description: 'exact route to inspect.' }],
+        returns: 'whether a factory is registered for that route.',
+      },
+      {
+        signature: 'factoryRouteFor(agent: Agent): string | undefined',
+        description: 'Read the factory route that created one exact live Agent. `undefined` identifies the default factory, not an unknown route.',
+        parameters: [{ name: 'agent', description: 'exact live Agent returned by this registry\'s factory API.' }],
+        returns: 'its named route, or `undefined` for the default factory.',
+        throws: ['when the Agent is stale or was registered without a factory handle.'],
+      },
+      {
         signature: 'async create(options: CreateAgentOptions): Promise<AgentHandle>',
         description: 'Create and publish a new agent through the registered factory. Distinct from register (which records an already-constructed agent): this constructs the agent and its session. Rejects if no factory is registered or creation/setup fails. The resolved AgentHandle lets the owner tear down exactly this agent.',
         parameters: [{ name: 'options', description: 'shared identity, session seed/metadata, and agent options.' }],
@@ -259,6 +278,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Load a persisted session and resume an agent on it through the registered factory. Rejects if no factory is registered; the factory rejects if session persistence is not configured or persistence/setup fails.',
         parameters: [{ name: 'options', description: 'persisted identity, configuration, and optional setup.' }],
         returns: 'the handle after setup, rollback-covered publication, and loop start complete.',
+      },
+      {
+        signature: 'async recreate(options: RecreateAgentOptions): Promise<AgentHandle>',
+        description: 'Replace one idle, persisted Agent with another factory driver under the same session id. Both routes are validated before teardown. Replacement failure resumes the supplied rollback composition before the original error is rethrown; failure of both attempts rejects with both causes.',
+        parameters: [{ name: 'options', description: 'current Agent plus replacement and rollback resume requests.' }],
+        returns: 'the replacement handle after publication.',
+        throws: ['when the current Agent is stale, running, not factory-created, an id or route is invalid, disposal fails, or replacement and recovery fail.'],
       },
       {
         signature: 'register(agent: Agent): () => void',
@@ -691,6 +717,53 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'documentEngine',
+    summary: 'Word document engine.',
+    description: 'Word document engine. Every method addresses an explicit file path; the provider must serialize operations for the same canonical Working DOCX.',
+    methods: [
+      {
+        signature: 'abstract health(signal?: AbortSignal): Promise<CapabilityHealth>',
+        description: 'Probe the configured engine without mutating a document.',
+        parameters: [{ name: 'signal', description: 'optional cancellation signal for the provider probe.' }],
+        returns: 'capability availability and provider diagnostic details.',
+      },
+      {
+        signature: 'abstract readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]>',
+        description: 'Read the complete text-node index in document order.',
+        parameters: [{ name: 'filePath', description: 'canonical DOCX path to inspect.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        returns: 'all text-bearing nodes in document order.',
+        throws: ['when cancelled or the provider cannot read or parse the document.'],
+      },
+      {
+        signature: 'abstract previewHtml(filePath: string, signal?: AbortSignal): Promise<string>',
+        description: 'Produce generated HTML preview; HTML is never an editable authority.',
+        parameters: [{ name: 'filePath', description: 'canonical DOCX path to render.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        returns: 'generated preview HTML for the current document bytes.',
+        throws: ['when cancelled or the provider cannot render the document.'],
+      },
+      {
+        signature: 'abstract inspect(filePath: string, officePath: string, depth?: number, signal?: AbortSignal): Promise<Record<string, unknown>>',
+        description: 'Read structured properties from one Office path.',
+        parameters: [{ name: 'filePath', description: 'canonical DOCX path to inspect.' }, { name: 'officePath', description: 'provider-defined Office node path.' }, { name: 'depth', description: 'optional traversal depth; the provider chooses its default when omitted.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        returns: 'the structured property tree rooted at the Office path.',
+        throws: ['when cancelled or the document, Office path, or response cannot be read.'],
+      },
+      {
+        signature: 'abstract applyMutations(filePath: string, mutations: readonly EngineMutation[], signal?: AbortSignal): Promise<void>',
+        description: 'Apply a batch under one exclusive file lease and save before returning.',
+        parameters: [{ name: 'filePath', description: 'canonical Working DOCX path to mutate.' }, { name: 'mutations', description: 'ordered Office-path mutations in the batch.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        throws: ['when cancelled or any mutation or save operation fails.'],
+      },
+      {
+        signature: 'abstract validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation>',
+        description: 'Run structural Office validation and return all available evidence.',
+        parameters: [{ name: 'filePath', description: 'canonical DOCX path to validate.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        returns: 'structural success and the provider\'s complete validation evidence.',
+        throws: ['when cancelled or the provider cannot produce structured validation evidence.'],
+      },
+    ],
+  },
+  {
     key: 'e2b',
     summary: 'Creates one lazily consumable E2B SDK handle and deletes the sandbox at timeout or disposal.',
     description: 'Creates one lazily consumable E2B SDK handle and deletes the sandbox at timeout or disposal. Creation begins at plugin construction; adapters await getSandbox before their first operation.',
@@ -1074,6 +1147,492 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Delete one feedback item. Absence is successful regardless of the supplied version; an existing item requires an exact version match.',
         parameters: [{ name: 'request', description: 'Session, message, and observed item version.' }],
         returns: 'the stable absent postcondition, or an explicit failure.',
+      },
+    ],
+  },
+  {
+    key: 'paperAiAcpAgents',
+    summary: 'Owns the two exact ACP factory routes and every lifecycle they create.',
+    description: 'Owns the two exact ACP factory routes and every lifecycle they create.',
+    methods: [
+      {
+        signature: 'resolveProvider(definition: AcpProviderDefinition): AcpProviderDefinition',
+        description: 'Resolve secrets and endpoint overrides at session creation time.',
+        parameters: [{ name: 'definition', description: 'pinned provider definition to combine with the current settings.' }],
+        returns: 'the provider definition with current command, credential, and endpoint overrides applied.',
+      },
+      {
+        signature: 'async publish( ownerCtx: Context, provider: AcpProviderDefinition, preparation: SessionPreparation, options: CreateAgentOptions | ResumeAgentOptions, ): Promise<AgentHandle>',
+        description: 'Complete setup, atomically publish the DSH lifecycle, and return its owner capability.',
+        parameters: [{ name: 'ownerCtx', description: 'active Context whose lifetime owns the published Agent and Session.' }, { name: 'provider', description: 'configured ACP provider definition to launch.' }, { name: 'preparation', description: 'exclusive prepared Session consumed and disposed by this call.' }, { name: 'options', description: 'create or resume options, including cancellation, model selection, and setup.' }],
+        returns: 'the Agent handle after startup, setup, Session entry, and Agent entry complete.',
+        throws: ['when ownership, cancellation, ACP startup, model selection, or setup fails; partial resources are disposed before rejection.'],
+      },
+    ],
+  },
+  {
+    key: 'paperaiWorkbench',
+    summary: 'Strict Remote that keeps the DSH client free of PaperAI Host dependencies.',
+    description: 'Strict Remote that keeps the DSH client free of PaperAI Host dependencies.',
+    methods: [
+      {
+        signature: '@Remote(\'list\') async list(request: PaperAIListResourcesRequest, signal?: AbortSignal): Promise<PaperAIResourceList>',
+        description: 'Lazily initialize and list the selected Workspace\'s PaperAI resources.',
+        parameters: [{ name: 'request', description: 'Workspace whose project resources should be listed.' }, { name: 'signal', description: 'optional cancellation signal for project and filesystem discovery.' }],
+        returns: 'the flattened document, template, and non-empty filesystem resources.',
+        throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
+      },
+      {
+        signature: '@Remote(\'importDocument\') async importDocument( request: PaperAIImportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>',
+        description: 'Import one browser-selected `.doc` or `.docx` and establish its root version. A rejected root submission is followed by non-cancellable import rollback before this method settles.',
+        parameters: [{ name: 'request', description: 'Workspace, Session, upload bytes, document role, and optional display name.' }, { name: 'signal', description: 'optional cancellation signal for import, indexing, commit, and preview work.' }],
+        returns: 'the opened imported document and root commit, or an explicit native-engine downgrade.',
+        throws: ['when upload, project, import, or commit work fails; an AggregateError includes any rollback failure.'],
+      },
+      {
+        signature: '@Remote(\'listTemplates\') async listTemplates(request: PaperAIListTemplatesRequest): Promise<PaperAITemplateCatalog>',
+        description: 'List registered institutional packs and this project\'s compiled contracts.',
+        parameters: [{ name: 'request', description: 'Workspace whose template catalog should be projected.' }],
+        returns: 'built-in pack choices and the project\'s installed contracts.',
+        throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
+      },
+      {
+        signature: '@Remote(\'installTemplatePack\') async installTemplatePack( request: PaperAIInstallTemplatePackRequest, signal?: AbortSignal, ): Promise<PaperAITemplateCatalog>',
+        description: 'Install selected built-in pack members as reviewable draft contracts.',
+        parameters: [{ name: 'request', description: 'Workspace, pack identity, and optional member selection.' }, { name: 'signal', description: 'optional cancellation signal for asset import and template compilation.' }],
+        returns: 'the refreshed template catalog after installation.',
+        throws: ['when the Workspace, pack, or member is unknown, or template compilation fails.'],
+      },
+      {
+        signature: '@Remote(\'uploadTemplate\') async uploadTemplate( request: PaperAIUploadTemplateRequest, signal?: AbortSignal, ): Promise<PaperAITemplateCatalog>',
+        description: 'Upload a custom Word template without mutating the selected source.',
+        parameters: [{ name: 'request', description: 'Workspace, upload bytes, display name, document roles, and template usage.' }, { name: 'signal', description: 'optional cancellation signal for staging, normalization, and compilation.' }],
+        returns: 'the refreshed template catalog containing the reviewable draft.',
+        throws: ['when the upload or template metadata is invalid, or normalization or compilation fails.'],
+      },
+      {
+        signature: '@Remote(\'confirmTemplate\') async confirmTemplate(request: PaperAIConfirmTemplateRequest): Promise<PaperAITemplateCatalog>',
+        description: 'Confirm parsed template requirements before a document may use them.',
+        parameters: [{ name: 'request', description: 'Workspace and installed template identity selected by the user.' }],
+        returns: 'the refreshed template catalog containing the confirmed contract.',
+        throws: ['when the Workspace is missing or the template does not belong to its project.'],
+      },
+      {
+        signature: '@Remote(\'associateTemplate\') async associateTemplate( request: PaperAIAssociateTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
+        description: 'Associate a confirmed compatible template through the document commit path.',
+        parameters: [{ name: 'request', description: 'document projection, Session provenance, and template identity to associate.' }, { name: 'signal', description: 'optional cancellation signal for commit and refreshed projection work.' }],
+        returns: 'the refreshed document projection and the new association commit identity.',
+        throws: ['when the projection is stale or the template is missing, foreign, unconfirmed, incompatible, or already associated.'],
+      },
+      {
+        signature: '@Remote(\'exportDocument\') async exportDocument( request: PaperAIExportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIExportDocumentResult>',
+        description: 'Export a draft or gated delivery DOCX into the project\'s output tree.',
+        parameters: [{ name: 'request', description: 'observed document projection, export mode, Session provenance, and optional file name.' }, { name: 'signal', description: 'optional cancellation signal for validation, snapshot, publication, and refreshed projection work.' }],
+        returns: 'export success with its milestone commit, or a delivery-gate rejection with no output or commit.',
+        throws: ['when the projection or file name is invalid, or export work fails for a reason other than delivery-gate rejection.'],
+      },
+      {
+        signature: '@Remote(\'open\') async open(request: PaperAIOpenDocumentRequest, signal?: AbortSignal): Promise<PaperAIDocumentOpenResult>',
+        description: 'Open a read-only Working DOCX projection and its first editable node.',
+        parameters: [{ name: 'request', description: 'Workspace, Session, and document resource to open.' }, { name: 'signal', description: 'optional cancellation signal for preview generation.' }],
+        returns: 'the current document projection and optional first editable-node buffer.',
+        throws: ['when the Workspace or document is missing, mismatched, or cannot be projected.'],
+      },
+      {
+        signature: '@Remote(\'readNode\') readNode(request: PaperAIReadNodeRequest): Promise<PaperAISelectedNodeBuffer>',
+        description: 'Read one semantic node into a temporary plain-text edit buffer.',
+        parameters: [{ name: 'request', description: 'document projection identity and semantic node to read.' }],
+        returns: 'a fresh buffer tied to the observed revision and head commit.',
+        throws: ['when the document or node is missing or the observed projection is stale.'],
+      },
+      {
+        signature: '@Remote(\'commit\') async commit( request: PaperAICommitDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
+        description: 'Apply selected-node mutations and create one immediate human commit.',
+        parameters: [{ name: 'request', description: 'observed document projection, Session provenance, and node text replacements.' }, { name: 'signal', description: 'optional cancellation signal for mutation, commit, indexing, and preview work.' }],
+        returns: 'the refreshed document projection and the new content commit identity.',
+        throws: ['when no mutation is supplied, the projection is stale, or mutation or commit work fails.'],
+      },
+      {
+        signature: '@Remote(\'validate\') async validate( request: PaperAIValidateDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIValidateResult>',
+        description: 'Run the live continuous template gate for one unchanged revision.',
+        parameters: [{ name: 'request', description: 'observed document projection to validate.' }, { name: 'signal', description: 'optional cancellation signal for document-engine checks.' }],
+        returns: 'the gate report tied to the unchanged revision and head commit.',
+        throws: ['when the document is missing, the projection is stale, or gate evaluation fails.'],
+      },
+      {
+        signature: '@Remote(\'restore\') async restore( request: PaperAIRestoreDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
+        description: 'Restore one reachable version through a new human commit.',
+        parameters: [{ name: 'request', description: 'current document projection, target commit, and Session provenance.' }, { name: 'signal', description: 'optional cancellation signal for restore, indexing, and preview work.' }],
+        returns: 'the refreshed document projection and the new restoration commit identity.',
+        throws: ['when the document has no head, the projection is stale, or the target is unreachable or cannot be restored.'],
+      },
+    ],
+  },
+  {
+    key: 'paperCommits',
+    summary: 'FIFO commit controller and the only authoritative Working DOCX mutation path.',
+    description: 'FIFO commit controller and the only authoritative Working DOCX mutation path.',
+    methods: [
+      {
+        signature: 'submit(request: SubmitDocumentCommitRequest): Promise<DocumentCommit>',
+        description: 'Apply mutations to a temporary copy and publish one recoverable commit. Cancellation remains effective through staging; once publication starts, the method completes publication or rollback before it settles.',
+        parameters: [{ name: 'request', description: 'base head, provenance, message, and ordered mutations.' }],
+        returns: 'the completed commit after its Working DOCX and head are durable.',
+      },
+      {
+        signature: 'revert(request: RevertDocumentCommitRequest): Promise<DocumentCommit>',
+        description: 'Restore a reachable snapshot and record the restoration as a new commit.',
+        parameters: [{ name: 'request', description: 'current head, historical target, provenance, and message.' }],
+        returns: 'the new revert commit; the historical target remains unchanged.',
+      },
+      {
+        signature: 'getCommit(commitId: DocumentCommitIdType): DocumentCommit | undefined',
+        description: 'Read one stored commit object by id, including an unreachable recovery object.',
+        parameters: [{ name: 'commitId', description: 'exact commit identity.' }],
+        returns: 'an isolated copy, or `undefined` when no object exists.',
+      },
+      {
+        signature: 'listHistory(documentId: DocumentId): DocumentCommitHistory',
+        description: 'Read the user-visible history from the current head toward the root. Unreachable objects retained after failed publication are excluded.',
+        parameters: [{ name: 'documentId', description: 'document whose reachable history is requested.' }],
+        returns: 'newest-first isolated commit records.',
+      },
+    ],
+  },
+  {
+    key: 'paperDocuments',
+    summary: 'Immutable-source and Working-DOCX service backed by repository and engine Providers.',
+    description: 'Immutable-source and Working-DOCX service backed by repository and engine Providers.',
+    methods: [
+      {
+        signature: 'async importDocument(request: ImportDocumentRequest, signal?: AbortSignal): Promise<ImportDocumentResult>',
+        description: 'Snapshot and index a Word source. No files or records are published when the configured engine reports a degraded capability.',
+        parameters: [{ name: 'request', description: 'project, source path, role, and optional display stem.' }, { name: 'signal', description: 'optional cancellation propagated to engine operations.' }],
+        returns: 'a complete imported snapshot or an explicit capability downgrade.',
+        throws: ['PaperDocumentError for invalid input, missing records, or invalid engine nodes.'],
+      },
+      {
+        signature: 'async rollbackImport(documentId: DocumentId): Promise<void>',
+        description: 'Remove a Working import after its root-commit attempt has settled without a commit. Cleanup is non-cancellable, deletes only service-published copies, and removes the document record last so a failed attempt can be retried with the same identity.',
+        parameters: [{ name: 'documentId', description: 'identity returned by a successful {@link importDocument} call.' }],
+        returns: 'after the record, semantic nodes, immutable copy, and Working copy are absent.',
+        throws: ['PaperDocumentError when the record is not a Working import or has acquired a head commit.'],
+      },
+      {
+        signature: 'listDocuments(projectId: ProjectId, role?: DocumentRole): DocumentRecord[]',
+        description: 'List project documents, optionally restricted to one academic role.',
+        parameters: [{ name: 'projectId', description: 'owning project identity.' }, { name: 'role', description: 'optional exact role filter.' }],
+        returns: 'deterministic creation/name/id order.',
+      },
+      {
+        signature: 'readDocument(documentId: DocumentId): PaperDocumentSnapshot | undefined',
+        description: 'Read one repository snapshot.',
+        parameters: [{ name: 'documentId', description: 'document identity.' }],
+        returns: 'document metadata and ordered nodes, or undefined when absent.',
+      },
+      {
+        signature: 'async verifyImmutableSource(documentId: DocumentId, signal?: AbortSignal): Promise<string>',
+        description: 'Verify the immutable source before a Consumer reads or copies its bytes.',
+        parameters: [{ name: 'documentId', description: 'document identity whose source should be verified.' }, { name: 'signal', description: 'optional hash cancellation.' }],
+        returns: 'the verified lowercase SHA-256 digest.',
+        throws: ['PaperDocumentError when the document is absent, writable, replaced, or corrupted.'],
+      },
+      {
+        signature: 'readNodes(documentId: DocumentId): readonly DocumentNode[]',
+        description: 'Read the current ordered semantic index without exposing repository aliases.',
+        parameters: [{ name: 'documentId', description: 'document identity.' }],
+        returns: 'an isolated node snapshot.',
+        throws: ['PaperDocumentError when the document does not exist.'],
+      },
+      {
+        signature: 'buildCandidateIndex(request: BuildCandidateDocumentIndexRequest): Promise<readonly DocumentNode[]>',
+        description: 'Build, but do not publish, the semantic index for a staged commit DOCX. The commit service remains the sole owner of Working DOCX and repository publication; this method only projects candidate bytes through OfficeCLI.',
+        parameters: [{ name: 'request', description: 'candidate file, observed metadata, and stable prior nodes.' }],
+        returns: 'isolated nodes carrying the prospective commit identity.',
+      },
+      {
+        signature: 'async previewHtml(documentId: DocumentId, signal?: AbortSignal): Promise<string>',
+        description: 'Render the current Working DOCX as generated preview HTML.',
+        parameters: [{ name: 'documentId', description: 'document identity.' }, { name: 'signal', description: 'optional engine cancellation.' }],
+        returns: 'generated preview HTML; it is never an editable authority.',
+        throws: ['PaperDocumentError when the document does not exist.'],
+      },
+      {
+        signature: 'rebuildIndex(documentId: DocumentId, signal?: AbortSignal): Promise<PaperDocumentSnapshot>',
+        description: 'Re-read the Working DOCX and replace its semantic index while preserving prior node identity where content or structure still identifies lineage.',
+        parameters: [{ name: 'documentId', description: 'document identity.' }, { name: 'signal', description: 'optional engine cancellation.' }],
+        returns: 'updated repository snapshot.',
+        throws: ['PaperDocumentError when the document is missing or engine nodes are invalid.'],
+      },
+    ],
+  },
+  {
+    key: 'paperExports',
+    summary: 'Template-checked atomic publisher and MCP export provider.',
+    description: 'Template-checked atomic publisher and MCP export provider.',
+    methods: [
+      {
+        signature: 'exportDocument(request: ExportDocumentRequest): Promise<ExportDocumentResult & PaperMcpExportResult>',
+        description: 'Check template requirements, record an optimistic milestone, and publish its immutable snapshot. Draft findings are returned without blocking; delivery errors reject before any commit or output is created. Cancellation is observed before milestone publication. Once the commit completes, file publication reaches success or cleanup before settlement.',
+        parameters: [{ name: 'request', description: 'observed document, destination, mode, and provenance.' }],
+        returns: 'canonical output path, fresh report, and recoverable commit.',
+      },
+    ],
+  },
+  {
+    key: 'paperMcp',
+    summary: 'Authenticated PaperAI MCP route and descriptor registry.',
+    description: 'Authenticated PaperAI MCP route and descriptor registry.',
+    methods: [
+      {
+        signature: 'issueDescriptor(actor: PaperMcpAgentIdentity): PaperMcpDescriptorLease',
+        description: 'Issue one revocable HTTP descriptor bound to one Agent client and session. The caller must retain and dispose the lease with the ACP Agent session.',
+        parameters: [{ name: 'actor', description: 'Local Codex or Claude identity recorded on every commit.' }],
+        returns: 'the ACP-compatible descriptor and its idempotent disposer.',
+      },
+      {
+        signature: 'registerExportAdapter(adapter: PaperMcpExportAdapter): () => void',
+        description: 'Register the sole provider for file-producing export tools. The caller must retain the returned disposer through a Cordis effect.',
+        parameters: [{ name: 'adapter', description: 'Provider that checks publication and records a commit.' }],
+        returns: 'a disposer that hides the export tool for future connections.',
+      },
+    ],
+  },
+  {
+    key: 'paperProjects',
+    summary: 'Idempotent PaperAI project lifecycle with no separate open-project action.',
+    description: 'Idempotent PaperAI project lifecycle with no separate open-project action.',
+    methods: [
+      {
+        signature: 'create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult>',
+        description: 'Create or adopt one directory, initialize missing project artifacts, and publish exactly one ProjectRecord associated with its DSH workspace. Repeating the operation for the same canonical path preserves the first record identity, name, creation time, and all existing files.',
+        parameters: [{ name: 'input', description: 'Selected directory and optional first-use display name.' }],
+        returns: 'the durable record, context-file outcome, and Git readiness.',
+      },
+      {
+        signature: 'get(id: ProjectId): ProjectRecord | undefined',
+        description: 'Read one durable project.',
+        parameters: [{ name: 'id', description: 'PaperAI project id.' }],
+        returns: 'the record, or `undefined` when unknown.',
+      },
+      {
+        signature: 'list(): ProjectRecord[]',
+        description: 'List durable projects in repository order.',
+        parameters: [],
+        returns: 'a fresh record array.',
+      },
+      {
+        signature: 'async findByPath(rootPath: string): Promise<ProjectRecord | undefined>',
+        description: 'Resolve a project by an existing directory spelling.',
+        parameters: [{ name: 'rootPath', description: 'Existing directory path.' }],
+        returns: 'the unique record for its canonical path, or `undefined`.',
+      },
+    ],
+  },
+  {
+    key: 'paperRepository',
+    summary: 'Typed repository with synchronous reads and durable queued writes.',
+    description: 'Typed repository with synchronous reads and durable queued writes. Returned records are retained storage values and must be replaced rather than mutated; calls outside the initialized service lifetime fail and writes propagate storage errors.',
+    methods: [
+      {
+        signature: 'getProject(id: ProjectId): ProjectRecord | undefined',
+        description: 'Read one project from the in-memory domain snapshot.',
+        parameters: [{ name: 'id', description: 'project identity to read.' }],
+        returns: 'the stored project, or `undefined` when absent.',
+      },
+      {
+        signature: 'listProjects(): ProjectRecord[]',
+        description: 'List all projects from a stable domain snapshot.',
+        parameters: [],
+        returns: 'projects in repository insertion order.',
+      },
+      {
+        signature: 'putProject(record: ProjectRecord): Promise<void>',
+        description: 'Durably insert or replace one complete project record.',
+        parameters: [{ name: 'record', description: 'complete project record keyed by its identity.' }],
+      },
+      {
+        signature: 'getDocument(id: DocumentId): DocumentRecord | undefined',
+        description: 'Read one document from the in-memory domain snapshot.',
+        parameters: [{ name: 'id', description: 'document identity to read.' }],
+        returns: 'the stored document, or `undefined` when absent.',
+      },
+      {
+        signature: 'listDocuments(projectId?: ProjectId): DocumentRecord[]',
+        description: 'List all documents or those owned by one project.',
+        parameters: [{ name: 'projectId', description: 'optional project identity used to filter the snapshot.' }],
+        returns: 'matching documents in repository insertion order.',
+      },
+      {
+        signature: 'putDocument(record: DocumentRecord): Promise<void>',
+        description: 'Durably insert or replace one complete document record.',
+        parameters: [{ name: 'record', description: 'complete document record keyed by its identity.' }],
+      },
+      {
+        signature: 'updateDocument(id: DocumentId, update: (record: DocumentRecord) => DocumentRecord): Promise<DocumentRecord>',
+        description: 'Atomically replace one document from the value current at its write-queue slot.',
+        parameters: [{ name: 'id', description: 'existing document identity to update.' }, { name: 'update', description: 'synchronous transform from the current record to its replacement.' }],
+        returns: 'the durably stored replacement record.',
+        throws: ['when the document is absent at the update\'s queue slot.'],
+      },
+      {
+        signature: 'deleteDocument(id: DocumentId): Promise<boolean>',
+        description: 'Durably delete one document record without cascading to related tables.',
+        parameters: [{ name: 'id', description: 'document identity to delete.' }],
+        returns: '`true` when a record was deleted, or `false` when it was absent.',
+      },
+      {
+        signature: 'listNodes(documentId: DocumentId): DocumentNode[]',
+        description: 'List one document\'s semantic nodes in document order.',
+        parameters: [{ name: 'documentId', description: 'owning document identity.' }],
+        returns: 'matching nodes sorted by ascending ordinal.',
+      },
+      {
+        signature: 'putNode(record: DocumentNode): Promise<void>',
+        description: 'Durably insert or replace one complete semantic node.',
+        parameters: [{ name: 'record', description: 'complete node record keyed by its identity.' }],
+      },
+      {
+        signature: 'deleteNode(id: DocumentNodeId): Promise<boolean>',
+        description: 'Durably delete one semantic node when present.',
+        parameters: [{ name: 'id', description: 'node identity to delete.' }],
+        returns: '`true` when a record was deleted, or `false` when it was absent.',
+      },
+      {
+        signature: 'getCommit(id: DocumentCommitId): DocumentCommit | undefined',
+        description: 'Read one document commit from the in-memory domain snapshot.',
+        parameters: [{ name: 'id', description: 'commit identity to read.' }],
+        returns: 'the stored commit, or `undefined` when absent.',
+      },
+      {
+        signature: 'listCommits(documentId: DocumentId): DocumentCommit[]',
+        description: 'List one document\'s commits in chronological order.',
+        parameters: [{ name: 'documentId', description: 'owning document identity.' }],
+        returns: 'matching commits sorted by ascending creation timestamp.',
+      },
+      {
+        signature: 'putCommit(record: DocumentCommit): Promise<void>',
+        description: 'Durably insert or replace one complete document commit.',
+        parameters: [{ name: 'record', description: 'complete commit record keyed by its identity.' }],
+      },
+      {
+        signature: 'getCommitPublication(documentId: DocumentId): DocumentCommitPublication | undefined',
+        description: 'Read one document\'s interrupted commit publication.',
+        parameters: [{ name: 'documentId', description: 'document identity that owns the journal slot.' }],
+        returns: 'the retained publication record, or `undefined` when no recovery is pending.',
+      },
+      {
+        signature: 'listCommitPublications(): DocumentCommitPublication[]',
+        description: 'List interrupted commit publications from a stable domain snapshot.',
+        parameters: [],
+        returns: 'publication records in repository insertion order.',
+      },
+      {
+        signature: 'putCommitPublication(record: DocumentCommitPublication): Promise<void>',
+        description: 'Durably insert or replace one document\'s commit publication intent.',
+        parameters: [{ name: 'record', description: 'complete write-ahead record keyed by its document identity.' }],
+      },
+      {
+        signature: 'deleteCommitPublication(documentId: DocumentId): Promise<boolean>',
+        description: 'Durably clear one resolved commit publication.',
+        parameters: [{ name: 'documentId', description: 'document identity whose journal slot is resolved.' }],
+        returns: '`true` when a record was deleted, or `false` when it was already absent.',
+      },
+      {
+        signature: 'getTemplate(id: TemplateContractId): TemplateContract | undefined',
+        description: 'Read one template contract from the in-memory domain snapshot.',
+        parameters: [{ name: 'id', description: 'template contract identity to read.' }],
+        returns: 'the stored contract, or `undefined` when absent.',
+      },
+      {
+        signature: 'listTemplates(projectId?: ProjectId): TemplateContract[]',
+        description: 'List all template contracts or those owned by one project.',
+        parameters: [{ name: 'projectId', description: 'optional project identity used to filter the snapshot.' }],
+        returns: 'matching contracts in repository insertion order.',
+      },
+      {
+        signature: 'putTemplate(record: TemplateContract): Promise<void>',
+        description: 'Durably insert or replace one complete template contract.',
+        parameters: [{ name: 'record', description: 'complete template contract keyed by its identity.' }],
+      },
+      {
+        signature: 'listConflicts(documentId: DocumentId): ChangeConflict[]',
+        description: 'List unresolved or resolved conflicts recorded for one document.',
+        parameters: [{ name: 'documentId', description: 'owning document identity.' }],
+        returns: 'matching conflicts in repository insertion order.',
+      },
+      {
+        signature: 'putConflict(record: ChangeConflict): Promise<void>',
+        description: 'Durably insert or replace one complete change-conflict record.',
+        parameters: [{ name: 'record', description: 'complete conflict record keyed by its identity.' }],
+      },
+    ],
+  },
+  {
+    key: 'paperTemplates',
+    summary: 'Host service owning institutional and uploaded template lifecycle.',
+    description: 'Host service owning institutional and uploaded template lifecycle.',
+    methods: [
+      {
+        signature: 'registerPack(manifest: TemplatePackManifest): () => void',
+        description: 'Register one immutable built-in pack until the returned disposer runs.',
+        parameters: [{ name: 'manifest', description: 'validated same-process pack contribution.' }],
+        returns: 'disposer removing only this exact registration.',
+      },
+      {
+        signature: 'listPacks(): TemplatePackSummary[]',
+        description: 'List registered packs without exposing Host asset paths.',
+        parameters: [],
+        returns: 'deterministic display-name order with asset-free member summaries.',
+      },
+      {
+        signature: 'getContract(templateId: TemplateContractId): TemplateContract | undefined',
+        description: 'Return one installed draft or confirmed contract.',
+        parameters: [{ name: 'templateId', description: 'durable contract identity.' }],
+        returns: 'the stored contract, or `undefined` when absent.',
+      },
+      {
+        signature: 'listContracts(projectId: ProjectId): TemplateContract[]',
+        description: 'List installed contracts for one project.',
+        parameters: [{ name: 'projectId', description: 'owning PaperAI project.' }],
+        returns: 'all draft and confirmed contracts in repository order.',
+      },
+      {
+        signature: 'async installPack(input: InstallTemplatePackInput, signal?: AbortSignal): Promise<TemplateContract[]>',
+        description: 'Install selected members, verifying package bytes before OfficeCLI inspection. Repeating the same project, pack version, member, and source digest returns the existing draft or confirmed contract without another compilation.',
+        parameters: [{ name: 'input', description: 'project, pack, and optional member selection.' }, { name: 'signal', description: 'optional cancellation signal.' }],
+        returns: 'contracts in manifest order.',
+      },
+      {
+        signature: 'async upload(input: UploadTemplateInput, signal?: AbortSignal): Promise<TemplateContract>',
+        description: 'Import a custom `.doc` or `.docx` without mutating the selected file. The returned contract always remains draft until confirm is called.',
+        parameters: [{ name: 'input', description: 'project, display name, source path, roles, and usage.' }, { name: 'signal', description: 'optional cancellation signal.' }],
+        returns: 'the reviewable draft contract.',
+      },
+      {
+        signature: 'async confirm(templateId: TemplateContractId): Promise<TemplateContract>',
+        description: 'Perform the explicit user confirmation transition for a draft.',
+        parameters: [{ name: 'templateId', description: 'draft contract selected by the user.' }],
+        returns: 'the confirmed durable contract; confirming twice is idempotent.',
+      },
+      {
+        signature: 'validateAssociation(input: AssociateTemplateInput): DocumentRecord',
+        description: 'Validate a proposed template binding. Publication belongs exclusively to `paperCommits.submit({ mutations: [{ type: \'bind-template\', ... }] })` so the association always receives a recoverable version and provenance.',
+        parameters: [{ name: 'input', description: 'target document and confirmed contract identities.' }],
+        returns: 'isolated target metadata when the binding is valid.',
+      },
+      {
+        signature: 'async check(input: CheckTemplateInput, signal?: AbortSignal): Promise<GateReport>',
+        description: 'Check current Working DOCX content and styles against its attached contract. Draft export callers may continue with a failing report; `delivery-export` callers use the domain\'s `deliveryBlocked()` result before publishing.',
+        parameters: [{ name: 'input', description: 'document identity and requested check mode.' }, { name: 'signal', description: 'optional cancellation signal.' }],
+        returns: 'complete findings with the attached template identity when present.',
+      },
+      {
+        signature: 'async checkCandidate(input: CheckTemplateCandidateInput, signal?: AbortSignal): Promise<GateReport>',
+        description: 'Check an unpublished commit candidate against an explicit prospective template binding. Repository metadata and the authoritative Working DOCX remain unchanged while the gate runs.',
+        parameters: [{ name: 'input', description: 'current document metadata, candidate path, prospective template, and check mode.' }, { name: 'signal', description: 'optional cancellation signal for document-engine work.' }],
+        returns: 'complete findings for the isolated candidate and prospective binding.',
+        throws: ['when the document or template is missing, candidate metadata is inconsistent, or the template belongs to another project.'],
       },
     ],
   },
@@ -2622,6 +3181,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'paperai/document-changed',
+    mode: 'emit',
+    signature: '\'paperai/document-changed\'(change: PaperAIDocumentChangedEvent): void',
+    summary: 'A Working document head was durably stored after its commit.',
+    description: 'A Working document head was durably stored after its commit.',
+    parameters: [{ name: 'change', description: 'JSON-safe document id, committed head id, and update time.' }],
+  },
+  {
     name: 'session-telemetry/record',
     mode: 'waterfall',
     signature: '\'session-telemetry/record\'(record: SessionTelemetryRecord, next: () => SessionTelemetryRecord): SessionTelemetryRecord',
@@ -2842,16 +3409,28 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AcpProviderDefinition',
+    declaration: 'export interface AcpProviderDefinition {\n    readonly id: \'codex\' | \'claude\';\n    readonly name: string;\n    readonly packageName: string;\n    readonly binName: string;\n    readonly command?: string;\n    readonly args?: readonly string[];\n    readonly env?: Readonly<Record<string, string>>;\n}',
+  },
+  {
+    name: 'ActorIdentity',
+    declaration: 'export interface ActorIdentity {\n    kind: \'human\' | \'agent\' | \'system\';\n    name: string;\n    client?: string;\n    provider?: string;\n    model?: string;\n    modelRevision?: string;\n    sessionId?: string;\n    runId?: string;\n}',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
   {
     name: 'Agent',
-    declaration: 'export interface Agent {\n    readonly id: SessionId;\n    readonly options: AgentOptions;\n    readonly session: Session;\n    readonly inbox: Inbox;\n    readonly status: AgentStatus;\n    readonly ctx: Context;\n    cancel(cause: AgentCancelCause, options?: CancelOptions): void;\n    whenIdle(): Promise<void>;\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n    send(message: UserMessage, target: InboxTarget, wakeup: boolean): void;\n    followup(message: UserMessage): void;\n    steer(message: UserMessage): void;\n    inject(message: UserMessage): void;\n}',
+    declaration: 'export interface Agent {\n    readonly id: SessionId;\n    readonly options: AgentOptions;\n    readonly session: Session;\n    readonly inbox: Inbox;\n    readonly status: AgentStatus;\n    readonly ctx: Context;\n    readonly modelController?: AgentModelController;\n    cancel(cause: AgentCancelCause, options?: CancelOptions): void;\n    whenIdle(): Promise<void>;\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n    send(message: UserMessage, target: InboxTarget, wakeup: boolean): void;\n    followup(message: UserMessage): void;\n    steer(message: UserMessage): void;\n    inject(message: UserMessage): void;\n}',
   },
   {
     name: 'AgentCancelCause',
     declaration: 'export type AgentCancelCause = {\n    readonly kind: \'user\';\n} | {\n    readonly kind: \'parent\';\n} | {\n    readonly kind: \'hook\';\n    readonly reason: string;\n} | {\n    readonly kind: \'disposed\';\n};',
+  },
+  {
+    name: 'AgentDriverModel',
+    declaration: 'export interface AgentDriverModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly group?: string;\n}',
   },
   {
     name: 'AgentFactory',
@@ -2860,6 +3439,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AgentHandle',
     declaration: 'export interface AgentHandle {\n    agent: Agent;\n    dispose(): Promise<void>;\n}',
+  },
+  {
+    name: 'AgentModelController',
+    declaration: 'export interface AgentModelController {\n    readonly provider: {\n        readonly id: string;\n        readonly name: string;\n    };\n    readonly currentModel: string;\n    listModels(): Promise<readonly AgentDriverModel[]>;\n    selectModel(model: string): Promise<string>;\n    inputModalities?(model: string): Promise<readonly (\'text\' | \'image\')[] | undefined>;\n}',
   },
   {
     name: 'AgentOptions',
@@ -2946,6 +3529,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AssistantProvenance {\n    provider: string;\n    model: string;\n    replayState?: unknown;\n}',
   },
   {
+    name: 'AssociateTemplateInput',
+    declaration: 'export interface AssociateTemplateInput {\n    readonly documentId: import(\'@paperai/domain\').DocumentId;\n    readonly templateId: TemplateContractId;\n}',
+  },
+  {
     name: 'AttachmentId',
     declaration: 'export type AttachmentId = Branded<\'AttachmentId\'>;',
   },
@@ -3018,8 +3605,32 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
   },
   {
+    name: 'BuildCandidateDocumentIndexRequest',
+    declaration: 'export interface BuildCandidateDocumentIndexRequest {\n    readonly document: DocumentRecord;\n    readonly candidatePath: string;\n    readonly commitId: DocumentCommitId;\n    readonly currentNodes: readonly DocumentNode[];\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
     name: 'CancelOptions',
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
+  },
+  {
+    name: 'CapabilityHealth',
+    declaration: 'export interface CapabilityHealth {\n    status: \'ready\' | \'degraded\' | \'unavailable\';\n    version?: string;\n    detail?: string;\n}',
+  },
+  {
+    name: 'ChangeConflict',
+    declaration: 'export interface ChangeConflict {\n    id: ChangeConflictId;\n    documentId: DocumentId;\n    nodeId: DocumentNodeId;\n    baseCommitId: DocumentCommitId;\n    headCommitId: DocumentCommitId;\n    baseText: string;\n    currentText: string;\n    incomingText: string;\n    reason: string;\n}',
+  },
+  {
+    name: 'ChangeConflictId',
+    declaration: 'export type ChangeConflictId = Branded<\'PaperAI.ChangeConflictId\'>;',
+  },
+  {
+    name: 'CheckTemplateCandidateInput',
+    declaration: 'export interface CheckTemplateCandidateInput {\n    readonly document: DocumentRecord;\n    readonly candidatePath: string;\n    readonly templateId?: TemplateContractId;\n    readonly mode: GateMode;\n}',
+  },
+  {
+    name: 'CheckTemplateInput',
+    declaration: 'export interface CheckTemplateInput {\n    readonly documentId: import(\'@paperai/domain\').DocumentId;\n    readonly mode: import(\'@paperai/domain\').GateMode;\n}',
   },
   {
     name: 'ClientResponse',
@@ -3088,6 +3699,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CommandResult',
     declaration: 'export type CommandResult = {\n    readonly kind: \'success\';\n    readonly text?: string;\n    readonly sourceEventSeq?: number;\n} | {\n    readonly kind: \'error\';\n    readonly text: string;\n};',
+  },
+  {
+    name: 'CommitPublicationWorkingImage',
+    declaration: 'export interface CommitPublicationWorkingImage {\n    readonly snapshotPath: string;\n    readonly sha256: string;\n    readonly mode: number;\n}',
   },
   {
     name: 'CompactionAgentContext',
@@ -3183,7 +3798,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateAgentOptions',
-    declaration: 'export interface CreateAgentOptions {\n    readonly sessionId: SessionId;\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n    readonly seed?: readonly SessionEvent[];\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+    declaration: 'export interface CreateAgentOptions {\n    readonly sessionId: SessionId;\n    readonly factoryRoute?: string;\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n    readonly seed?: readonly SessionEvent[];\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
     name: 'CreateGoalRequest',
@@ -3192,6 +3807,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CreateGoalResult',
     declaration: 'export interface CreateGoalResult {\n    readonly ref: GoalRef;\n}',
+  },
+  {
+    name: 'CreatePaperProjectInput',
+    declaration: 'export interface CreatePaperProjectInput {\n    readonly rootPath: string;\n    readonly name?: string;\n}',
+  },
+  {
+    name: 'CreatePaperProjectResult',
+    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile: \'created\' | \'preserved\';\n    readonly git: ProjectGitStatus;\n}',
   },
   {
     name: 'CreateSessionOptions',
@@ -3226,6 +3849,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
   },
   {
+    name: 'DegradedDocumentImport',
+    declaration: 'export interface DegradedDocumentImport {\n    status: \'degraded\';\n    capability: \'document-engine\' | \'legacy-doc-normalization\';\n    health: CapabilityHealth;\n    detail: string;\n}',
+  },
+  {
     name: 'DiffCallView',
     declaration: 'export interface DiffCallView {\n    card: \'diff\';\n    title: string;\n    diffs: FileDiff[];\n    locations?: FileLocation[];\n}',
   },
@@ -3252,6 +3879,54 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DirectoryRegistrationHandle',
     declaration: 'export interface DirectoryRegistrationHandle {\n    (): void;\n    replace(entries: readonly LlmConfigurableProvider[]): void;\n}',
+  },
+  {
+    name: 'DocumentCommit',
+    declaration: 'export interface DocumentCommit {\n    id: DocumentCommitId;\n    documentId: DocumentId;\n    parentId?: DocumentCommitId;\n    message: string;\n    actor: ActorIdentity;\n    snapshotPath: string;\n    documentSha256: string;\n    gate: GateReport;\n    operations: DocumentOperation[];\n    createdAt: string;\n}',
+  },
+  {
+    name: 'DocumentCommitHistory',
+    declaration: 'export type DocumentCommitHistory = readonly DocumentCommit[];',
+  },
+  {
+    name: 'DocumentCommitId',
+    declaration: 'export type DocumentCommitId = Branded<\'PaperAI.DocumentCommitId\'>;',
+  },
+  {
+    name: 'DocumentCommitPublication',
+    declaration: 'export interface DocumentCommitPublication {\n    readonly version: 1;\n    readonly documentId: DocumentId;\n    readonly commit: DocumentCommit;\n    readonly before: {\n        readonly document: DocumentRecord;\n        readonly nodes: readonly DocumentNode[];\n        readonly working: CommitPublicationWorkingImage;\n    };\n    readonly after: {\n        readonly document: DocumentRecord;\n        readonly nodes: readonly DocumentNode[];\n    };\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'DocumentId',
+    declaration: 'export type DocumentId = Branded<\'PaperAI.DocumentId\'>;',
+  },
+  {
+    name: 'DocumentMutation',
+    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
+  },
+  {
+    name: 'DocumentNode',
+    declaration: 'export interface DocumentNode {\n    id: DocumentNodeId;\n    documentId: DocumentId;\n    officePath: string;\n    ordinal: number;\n    kind: DocumentNodeKind;\n    text: string;\n    style: Record<string, unknown>;\n    hash: string;\n    parentId?: DocumentNodeId;\n    lineage: DocumentNodeId[];\n    lastCommitId?: DocumentCommitId;\n    updatedAt: string;\n}',
+  },
+  {
+    name: 'DocumentNodeId',
+    declaration: 'export type DocumentNodeId = Branded<\'PaperAI.DocumentNodeId\'>;',
+  },
+  {
+    name: 'DocumentNodeKind',
+    declaration: 'export type DocumentNodeKind = \'paragraph\' | \'heading\' | \'table\' | \'table-cell\' | \'field\' | \'unknown\';',
+  },
+  {
+    name: 'DocumentOperation',
+    declaration: 'export interface DocumentOperation {\n    type: DocumentMutation[\'type\'];\n    nodeId?: DocumentNodeId;\n    officePath?: string;\n    before: unknown;\n    after: unknown;\n}',
+  },
+  {
+    name: 'DocumentRecord',
+    declaration: 'export interface DocumentRecord {\n    id: DocumentId;\n    projectId: ProjectId;\n    documentKind?: \'working\' | \'template-source\';\n    name: string;\n    role: DocumentRole;\n    immutableSourcePath: string;\n    workingPath: string;\n    mediaType: \'application/vnd.openxmlformats-officedocument.wordprocessingml.document\';\n    sourceSha256: string;\n    templateId?: TemplateContractId;\n    headCommitId?: DocumentCommitId;\n    nodeCount: number;\n    createdAt: string;\n    updatedAt: string;\n}',
+  },
+  {
+    name: 'DocumentRole',
+    declaration: 'export type DocumentRole = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
   },
   {
     name: 'Domain',
@@ -3334,8 +4009,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface EncodedImageAttachment {\n    mediaType: ImageMediaType;\n    data: string;\n    name?: string;\n}',
   },
   {
+    name: 'EngineMutation',
+    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    text: string;\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n};',
+  },
+  {
+    name: 'EngineTextNode',
+    declaration: 'export interface EngineTextNode {\n    officePath: string;\n    text: string;\n    kind: \'paragraph\' | \'table\' | \'unknown\';\n}',
+  },
+  {
+    name: 'EngineValidation',
+    declaration: 'export interface EngineValidation {\n    success: boolean;\n    details: Record<string, unknown>;\n}',
+  },
+  {
     name: 'EpochHeader',
     declaration: 'export interface EpochHeader {\n    config: LlmCallConfig;\n    adapterDefaults?: LlmCallConfigAdapterDefaults;\n    system?: string;\n    tools?: ToolSchema[];\n}',
+  },
+  {
+    name: 'ExportDocumentRequest',
+    declaration: 'export interface ExportDocumentRequest {\n    readonly document: DocumentRecord;\n    readonly destinationPath: string;\n    readonly mode: PaperExportMode;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly gate?: GateReport;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'ExportDocumentResult',
+    declaration: 'export interface ExportDocumentResult {\n    readonly outputPath: string;\n    readonly report: GateReport;\n    readonly gate: GateReport;\n    readonly commit: DocumentCommit;\n}',
   },
   {
     name: 'FileDiff',
@@ -3400,6 +4095,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'FsWriteOutcome',
     declaration: 'export interface FsWriteOutcome {\n    operation: \'create\' | \'update\';\n    version: FsVersion;\n    before: string | null;\n    after: string;\n}',
+  },
+  {
+    name: 'GateFinding',
+    declaration: 'export interface GateFinding {\n    id: string;\n    ruleId?: TemplateRuleId;\n    severity: RuleSeverity;\n    code: string;\n    message: string;\n    nodeId?: DocumentNodeId;\n    officePath?: string;\n    expected?: unknown;\n    actual?: unknown;\n    repairHint?: string;\n    overridden?: boolean;\n}',
+  },
+  {
+    name: 'GateMode',
+    declaration: 'export type GateMode = \'continuous\' | \'draft-export\' | \'delivery-export\';',
+  },
+  {
+    name: 'GateReport',
+    declaration: 'export interface GateReport {\n    status: \'pass\' | \'pass-with-exceptions\' | \'fail\';\n    mode: GateMode;\n    documentId: DocumentId;\n    templateId?: TemplateContractId;\n    findings: GateFinding[];\n    checkedAt: string;\n}',
   },
   {
     name: 'GenerateOptions',
@@ -3470,8 +4177,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ImageVariantId = Branded<\'ImageVariantId\'>;',
   },
   {
+    name: 'ImportDocumentRequest',
+    declaration: 'export interface ImportDocumentRequest {\n    projectId: ProjectId;\n    sourcePath: string;\n    role: DocumentRole;\n    name?: string;\n}',
+  },
+  {
+    name: 'ImportDocumentResult',
+    declaration: 'export type ImportDocumentResult = ImportedDocumentResult | DegradedDocumentImport;',
+  },
+  {
+    name: 'ImportedDocumentResult',
+    declaration: 'export interface ImportedDocumentResult {\n    status: \'imported\';\n    document: DocumentRecord;\n    nodes: readonly DocumentNode[];\n}',
+  },
+  {
     name: 'Inbox',
-    declaration: 'export class Inbox {\n    constructor(private readonly session: Session, private readonly notifications: InboxNotifications);\n    get nextTurn(): readonly UserMessage[];\n    get nextStep(): readonly UserMessage[];\n    get hasPending(): boolean;\n    clear(): void;\n    claim(target: InboxTarget, turn: number): UserMessage[];\n    append(target: InboxTarget, message: UserMessage): void;\n    prepend(target: InboxTarget, message: UserMessage): void;\n    replace(messageId: MessageId, newMessage: UserMessage): boolean;\n    remove(messageId: MessageId): boolean;\n    splice(target: InboxTarget, start: number, deleteCount: number, inserted: UserMessage[]): UserMessage[];\n}',
+    declaration: 'export class Inbox {\n    constructor(private readonly session: Session, private readonly notifications: InboxNotifications);\n    get nextTurn(): readonly UserMessage[];\n    get nextStep(): readonly UserMessage[];\n    get hasPending(): boolean;\n    clear(): void;\n    claim(target: InboxTarget, turn: number): UserMessage[];\n    claimMessage(messageId: MessageId, turn: number): UserMessage | undefined;\n    append(target: InboxTarget, message: UserMessage): void;\n    prepend(target: InboxTarget, message: UserMessage): void;\n    replace(messageId: MessageId, newMessage: UserMessage): boolean;\n    remove(messageId: MessageId): boolean;\n    splice(target: InboxTarget, start: number, deleteCount: number, inserted: UserMessage[]): UserMessage[];\n}',
   },
   {
     name: 'InboxNotifications',
@@ -3488,6 +4207,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'IndexInjectionPlacement',
     declaration: 'export type IndexInjectionPlacement = \'head\' | \'body\';',
+  },
+  {
+    name: 'InstallTemplatePackInput',
+    declaration: 'export interface InstallTemplatePackInput {\n    readonly projectId: ProjectId;\n    readonly packId: TemplatePackId;\n    readonly memberIds?: readonly TemplatePackMemberId[];\n}',
   },
   {
     name: 'InvariantFailure',
@@ -3806,6 +4529,246 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
+    name: 'PaperAIAssociateTemplateRequest',
+    declaration: 'export interface PaperAIAssociateTemplateRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly templateId: string;\n}',
+  },
+  {
+    name: 'PaperAICommitDocumentRequest',
+    declaration: 'export interface PaperAICommitDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly mutations: readonly PaperAIDocumentMutation[];\n}',
+  },
+  {
+    name: 'PaperAIConfirmTemplateRequest',
+    declaration: 'export interface PaperAIConfirmTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly templateId: string;\n}',
+  },
+  {
+    name: 'PaperAIDocumentChangedEvent',
+    declaration: 'export interface PaperAIDocumentChangedEvent {\n    readonly documentId: PaperAIDocumentId;\n    readonly headCommitId: PaperAIDocumentCommitId;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'PaperAIDocumentCommitId',
+    declaration: 'export type PaperAIDocumentCommitId = Branded<\'PaperAI.DocumentCommitId\'>;',
+  },
+  {
+    name: 'PaperAIDocumentCommitResult',
+    declaration: 'export interface PaperAIDocumentCommitResult extends PaperAIDocumentOpenResult {\n    readonly createdCommitId: PaperAIDocumentCommitId;\n}',
+  },
+  {
+    name: 'PaperAIDocumentId',
+    declaration: 'export type PaperAIDocumentId = Branded<\'PaperAI.DocumentId\'>;',
+  },
+  {
+    name: 'PaperAIDocumentMutation',
+    declaration: 'export type PaperAIDocumentMutation = PaperAIReplaceTextMutation;',
+  },
+  {
+    name: 'PaperAIDocumentNodeId',
+    declaration: 'export type PaperAIDocumentNodeId = Branded<\'PaperAI.DocumentNodeId\'>;',
+  },
+  {
+    name: 'PaperAIDocumentNodeKind',
+    declaration: 'export type PaperAIDocumentNodeKind = \'paragraph\' | \'heading\' | \'table\' | \'table-cell\' | \'field\' | \'unknown\';',
+  },
+  {
+    name: 'PaperAIDocumentNodeSummary',
+    declaration: 'export interface PaperAIDocumentNodeSummary {\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly kind: PaperAIDocumentNodeKind;\n    readonly label: string;\n    readonly depth: number;\n    readonly editable: boolean;\n}',
+  },
+  {
+    name: 'PaperAIDocumentOpenResult',
+    declaration: 'export interface PaperAIDocumentOpenResult {\n    readonly document: PaperAIDocumentSnapshot;\n    readonly selectedNode: PaperAISelectedNodeBuffer | null;\n}',
+  },
+  {
+    name: 'PaperAIDocumentRevision',
+    declaration: 'export type PaperAIDocumentRevision = Branded<\'PaperAI.DocumentRevision\'>;',
+  },
+  {
+    name: 'PaperAIDocumentRole',
+    declaration: 'export type PaperAIDocumentRole = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
+  },
+  {
+    name: 'PaperAIDocumentSnapshot',
+    declaration: 'export interface PaperAIDocumentSnapshot {\n    readonly documentId: PaperAIDocumentId;\n    readonly resourceId: PaperAIResourceId;\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly title: string;\n    readonly role: PaperAIDocumentRole;\n    readonly path: string;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly previewHtml: string;\n    readonly nodes: readonly PaperAIDocumentNodeSummary[];\n    readonly versions: readonly PaperAIDocumentVersion[];\n    readonly template: PaperAITemplateSummary | null;\n    readonly gate: PaperAITemplateGateReport;\n}',
+  },
+  {
+    name: 'PaperAIDocumentVersion',
+    declaration: 'export interface PaperAIDocumentVersion {\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly parentCommitId: PaperAIDocumentCommitId | null;\n    readonly revision: PaperAIDocumentRevision;\n    readonly createdAt: string;\n    readonly summary: string;\n    readonly actor: PaperAIVersionActor;\n    readonly restorable: boolean;\n}',
+  },
+  {
+    name: 'PaperAIExportBlockedResult',
+    declaration: 'export interface PaperAIExportBlockedResult {\n    readonly status: \'blocked\';\n    readonly documentId: PaperAIDocumentId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly fileName: string;\n    readonly gate: PaperAITemplateGateReport;\n}',
+  },
+  {
+    name: 'PaperAIExportDocumentRequest',
+    declaration: 'export interface PaperAIExportDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly mode: PaperAIExportMode;\n    readonly fileName?: string;\n}',
+  },
+  {
+    name: 'PaperAIExportDocumentResult',
+    declaration: 'export type PaperAIExportDocumentResult = PaperAIExportSuccessResult | PaperAIExportBlockedResult;',
+  },
+  {
+    name: 'PaperAIExportMode',
+    declaration: 'export type PaperAIExportMode = \'draft-export\' | \'delivery-export\';',
+  },
+  {
+    name: 'PaperAIExportSuccessResult',
+    declaration: 'export interface PaperAIExportSuccessResult extends PaperAIDocumentCommitResult {\n    readonly status: \'success\';\n    readonly outputPath: string;\n    readonly fileName: string;\n    readonly gate: PaperAITemplateGateReport;\n}',
+  },
+  {
+    name: 'PaperAIGateFinding',
+    declaration: 'export interface PaperAIGateFinding {\n    readonly id: PaperAIGateFindingId;\n    readonly severity: PaperAIGateSeverity;\n    readonly title: string;\n    readonly message: string;\n    readonly location?: string;\n    readonly passed: boolean;\n}',
+  },
+  {
+    name: 'PaperAIGateFindingId',
+    declaration: 'export type PaperAIGateFindingId = Branded<\'PaperAI.GateFindingId\'>;',
+  },
+  {
+    name: 'PaperAIGateSeverity',
+    declaration: 'export type PaperAIGateSeverity = \'error\' | \'warning\' | \'info\';',
+  },
+  {
+    name: 'PaperAIImportDocumentRequest',
+    declaration: 'export interface PaperAIImportDocumentRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly fileName: string;\n    readonly contentBase64: string;\n    readonly role: PaperAIDocumentRole;\n    readonly name?: string;\n}',
+  },
+  {
+    name: 'PaperAIImportDocumentResult',
+    declaration: 'export type PaperAIImportDocumentResult = {\n    readonly status: \'imported\';\n    readonly opened: PaperAIDocumentOpenResult;\n    readonly createdCommitId: PaperAIDocumentCommitId;\n} | {\n    readonly status: \'degraded\';\n    readonly capability: \'document-engine\' | \'legacy-doc-normalization\';\n    readonly detail: string;\n};',
+  },
+  {
+    name: 'PaperAIInstallTemplatePackRequest',
+    declaration: 'export interface PaperAIInstallTemplatePackRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly packId: string;\n    readonly memberIds?: readonly string[];\n}',
+  },
+  {
+    name: 'PaperAIListResourcesRequest',
+    declaration: 'export interface PaperAIListResourcesRequest {\n    readonly workspaceId: WorkspaceId;\n}',
+  },
+  {
+    name: 'PaperAIListTemplatesRequest',
+    declaration: 'export interface PaperAIListTemplatesRequest {\n    readonly workspaceId: WorkspaceId;\n}',
+  },
+  {
+    name: 'PaperAIOpenDocumentRequest',
+    declaration: 'export interface PaperAIOpenDocumentRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly resourceId: PaperAIResourceId;\n}',
+  },
+  {
+    name: 'PaperAIReadNodeRequest',
+    declaration: 'export interface PaperAIReadNodeRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n}',
+  },
+  {
+    name: 'PaperAIReplaceTextMutation',
+    declaration: 'export interface PaperAIReplaceTextMutation {\n    readonly type: \'replace-text\';\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly baseText: string;\n    readonly nextText: string;\n}',
+  },
+  {
+    name: 'PaperAIResourceCategory',
+    declaration: 'export type PaperAIResourceCategory = \'document\' | \'template\' | \'image\' | \'experiment\' | \'code\';',
+  },
+  {
+    name: 'PaperAIResourceId',
+    declaration: 'export type PaperAIResourceId = Branded<\'PaperAI.ResourceId\'>;',
+  },
+  {
+    name: 'PaperAIResourceKind',
+    declaration: 'export type PaperAIResourceKind = \'file\' | \'folder\';',
+  },
+  {
+    name: 'PaperAIResourceList',
+    declaration: 'export interface PaperAIResourceList {\n    readonly workspaceId: WorkspaceId;\n    readonly resources: readonly PaperAIResourceRow[];\n}',
+  },
+  {
+    name: 'PaperAIResourceRow',
+    declaration: 'export interface PaperAIResourceRow {\n    readonly id: PaperAIResourceId;\n    readonly category: PaperAIResourceCategory;\n    readonly kind: PaperAIResourceKind;\n    readonly name: string;\n    readonly path: string;\n    readonly depth: number;\n    readonly openable: boolean;\n    readonly status?: PaperAIResourceStatus;\n}',
+  },
+  {
+    name: 'PaperAIResourceStatus',
+    declaration: 'export type PaperAIResourceStatus = \'clean\' | \'modified\' | \'pending\' | \'blocked\';',
+  },
+  {
+    name: 'PaperAIRestoreDocumentRequest',
+    declaration: 'export interface PaperAIRestoreDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly targetCommitId: PaperAIDocumentCommitId;\n}',
+  },
+  {
+    name: 'PaperAISelectedNodeBuffer',
+    declaration: 'export interface PaperAISelectedNodeBuffer {\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly label: string;\n    readonly kind: PaperAIDocumentNodeKind;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly format: \'text\';\n    readonly text: string;\n}',
+  },
+  {
+    name: 'PaperAITemplateCatalog',
+    declaration: 'export interface PaperAITemplateCatalog {\n    readonly workspaceId: WorkspaceId;\n    readonly packs: readonly PaperAITemplatePackChoice[];\n    readonly contracts: readonly PaperAITemplateContractChoice[];\n}',
+  },
+  {
+    name: 'PaperAITemplateContractChoice',
+    declaration: 'export interface PaperAITemplateContractChoice {\n    readonly templateId: string;\n    readonly name: string;\n    readonly status: \'draft\' | \'confirmed\';\n    readonly source: \'built-in\' | \'uploaded\';\n    readonly appliesToRoles: readonly PaperAIDocumentRole[];\n    readonly usage: PaperAITemplateUsage;\n    readonly ruleCount: number;\n    readonly slotCount: number;\n    readonly originPackId?: string;\n    readonly originMemberId?: string;\n    readonly requirements: readonly PaperAITemplateRequirementChoice[];\n}',
+  },
+  {
+    name: 'PaperAITemplateGateReport',
+    declaration: 'export interface PaperAITemplateGateReport {\n    readonly status: \'not-run\' | \'passed\' | \'failed\';\n    readonly checkedAt?: string;\n    readonly findings: readonly PaperAIGateFinding[];\n}',
+  },
+  {
+    name: 'PaperAITemplatePackChoice',
+    declaration: 'export interface PaperAITemplatePackChoice {\n    readonly packId: string;\n    readonly name: string;\n    readonly description: string;\n    readonly version: string;\n    readonly members: readonly PaperAITemplatePackMemberChoice[];\n}',
+  },
+  {
+    name: 'PaperAITemplatePackMemberChoice',
+    declaration: 'export interface PaperAITemplatePackMemberChoice {\n    readonly memberId: string;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly PaperAIDocumentRole[];\n    readonly usage: PaperAITemplateUsage;\n    readonly originalFileName: string;\n}',
+  },
+  {
+    name: 'PaperAITemplateRequirementChoice',
+    declaration: 'export interface PaperAITemplateRequirementChoice {\n    readonly ruleId: string;\n    readonly kind: string;\n    readonly label: string;\n    readonly description: string;\n    readonly severity: PaperAIGateSeverity;\n    readonly confidence: number;\n    readonly enabled: boolean;\n}',
+  },
+  {
+    name: 'PaperAITemplateSummary',
+    declaration: 'export interface PaperAITemplateSummary {\n    readonly templateId: string;\n    readonly name: string;\n    readonly source: \'built-in\' | \'uploaded\';\n    readonly version?: string;\n}',
+  },
+  {
+    name: 'PaperAITemplateUsage',
+    declaration: 'export type PaperAITemplateUsage = \'form-template\' | \'format-reference\';',
+  },
+  {
+    name: 'PaperAIUploadTemplateRequest',
+    declaration: 'export interface PaperAIUploadTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly fileName: string;\n    readonly contentBase64: string;\n    readonly name: string;\n    readonly appliesToRoles: readonly PaperAIDocumentRole[];\n    readonly usage: PaperAITemplateUsage;\n}',
+  },
+  {
+    name: 'PaperAIValidateDocumentRequest',
+    declaration: 'export interface PaperAIValidateDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n}',
+  },
+  {
+    name: 'PaperAIValidateResult',
+    declaration: 'export interface PaperAIValidateResult {\n    readonly documentId: PaperAIDocumentId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly gate: PaperAITemplateGateReport;\n}',
+  },
+  {
+    name: 'PaperAIVersionActor',
+    declaration: 'export interface PaperAIVersionActor {\n    readonly kind: \'human\' | \'agent\' | \'system\';\n    readonly name: string;\n    readonly client?: string;\n    readonly provider?: string;\n    readonly model?: string;\n}',
+  },
+  {
+    name: 'PaperDocumentSnapshot',
+    declaration: 'export interface PaperDocumentSnapshot {\n    document: DocumentRecord;\n    nodes: readonly DocumentNode[];\n}',
+  },
+  {
+    name: 'PaperExportMode',
+    declaration: 'export type PaperExportMode = Extract<GateMode, \'draft-export\' | \'delivery-export\'>;',
+  },
+  {
+    name: 'PaperMcpAgentIdentity',
+    declaration: 'export interface PaperMcpAgentIdentity extends ActorIdentity {\n    readonly kind: \'agent\';\n    readonly client: \'codex\' | \'claude\';\n    readonly sessionId: string;\n}',
+  },
+  {
+    name: 'PaperMcpDescriptorLease',
+    declaration: 'export interface PaperMcpDescriptorLease {\n    readonly descriptor: PaperMcpHttpServerDescriptor;\n    readonly actor: PaperMcpAgentIdentity;\n    updateActor(actor: PaperMcpAgentIdentity): PaperMcpAgentIdentity;\n    dispose(): Promise<void>;\n}',
+  },
+  {
+    name: 'PaperMcpExportAdapter',
+    declaration: 'export interface PaperMcpExportAdapter {\n    exportDocument(request: PaperMcpExportRequest): Promise<PaperMcpExportResult>;\n}',
+  },
+  {
+    name: 'PaperMcpExportRequest',
+    declaration: 'export interface PaperMcpExportRequest {\n    readonly document: DocumentRecord;\n    readonly destinationPath: string;\n    readonly mode: \'draft-export\' | \'delivery-export\';\n    readonly gate: GateReport;\n    readonly actor: PaperMcpAgentIdentity;\n}',
+  },
+  {
+    name: 'PaperMcpExportResult',
+    declaration: 'export interface PaperMcpExportResult {\n    readonly outputPath: string;\n    readonly gate: GateReport;\n    readonly commit: DocumentCommit;\n}',
+  },
+  {
+    name: 'PaperMcpHttpServerDescriptor',
+    declaration: 'export interface PaperMcpHttpServerDescriptor {\n    readonly type: \'http\';\n    readonly name: string;\n    readonly url: string;\n    readonly headers: Array<{\n        readonly name: string;\n        readonly value: string;\n    }>;\n}',
+  },
+  {
     name: 'PermissionSelect',
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
   },
@@ -3850,6 +4813,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PreToolDecision = {\n    kind: \'allow\';\n} | {\n    kind: \'deny\';\n    reason: string;\n} | {\n    kind: \'ask\';\n    reason?: string;\n};',
   },
   {
+    name: 'ProjectGitStatus',
+    declaration: 'export type ProjectGitStatus = {\n    readonly status: \'ready\';\n    readonly state: \'existing\' | \'initialized\';\n} | {\n    readonly status: \'degraded\';\n    readonly detail: string;\n};',
+  },
+  {
+    name: 'ProjectId',
+    declaration: 'export type ProjectId = Branded<\'PaperAI.ProjectId\'>;',
+  },
+  {
     name: 'ProjectionChangeListener',
     declaration: 'export type ProjectionChangeListener = (session: Session, key: Extract<keyof SessionProjectionMap, string>, value: unknown, seq: number) => void;',
   },
@@ -3868,6 +4839,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ProjectionSnapshot',
     declaration: 'export interface ProjectionSnapshot {\n    asOfSeq: number;\n    values: Partial<SessionProjectionMap>;\n}',
+  },
+  {
+    name: 'ProjectRecord',
+    declaration: 'export interface ProjectRecord {\n    id: ProjectId;\n    workspaceId: string;\n    name: string;\n    rootPath: string;\n    createdAt: string;\n    updatedAt: string;\n}',
   },
   {
     name: 'PromptAssembly',
@@ -3908,6 +4883,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReasoningEffortId',
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
+  },
+  {
+    name: 'RecreateAgentOptions',
+    declaration: 'export interface RecreateAgentOptions {\n    readonly current: Agent;\n    readonly replacement: ResumeAgentOptions;\n    readonly rollback: ResumeAgentOptions;\n}',
   },
   {
     name: 'RedactedSecret',
@@ -3967,7 +4946,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResumeAgentOptions',
-    declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+    declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly factoryRoute?: string;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+  },
+  {
+    name: 'RevertDocumentCommitRequest',
+    declaration: 'export interface RevertDocumentCommitRequest {\n    readonly documentId: DocumentId;\n    readonly baseCommitId: DocumentCommitId;\n    readonly targetCommitId: DocumentCommitId;\n    readonly message?: string;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly signal?: AbortSignal;\n}',
   },
   {
     name: 'RpcError',
@@ -3992,6 +4975,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RpcResult',
     declaration: 'export type RpcResult<T> = {\n    ok: true;\n    value: T;\n} | {\n    ok: false;\n    error: RpcError;\n};',
+  },
+  {
+    name: 'RuleSeverity',
+    declaration: 'export type RuleSeverity = \'error\' | \'warning\' | \'info\';',
   },
   {
     name: 'RunnerFailureRule',
@@ -4530,6 +5517,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubagentStopReasonMap {\n    completed: \'completed\';\n    aborted: \'aborted\';\n    error: \'error\';\n    \'max-tokens\': \'max-tokens\';\n    refusal: \'refusal\';\n}',
   },
   {
+    name: 'SubmitDocumentCommitRequest',
+    declaration: 'export interface SubmitDocumentCommitRequest {\n    readonly documentId: DocumentId;\n    readonly baseCommitId?: DocumentCommitId;\n    readonly message: string;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly mutations: readonly DocumentMutation[];\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
     name: 'SubprocessCollect',
     declaration: 'export interface SubprocessCollect {\n    maxBytes: number;\n    spill?: {\n        maxBytes: number;\n    };\n}',
   },
@@ -4644,6 +5635,66 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TeamWaitResult',
     declaration: 'export interface TeamWaitResult {\n    readonly timedOut: boolean;\n}',
+  },
+  {
+    name: 'TemplateContract',
+    declaration: 'export interface TemplateContract {\n    id: TemplateContractId;\n    projectId: ProjectId;\n    name: string;\n    sourceDocumentId: DocumentId;\n    version: number;\n    rules: TemplateRule[];\n    slots: TemplateSlot[];\n    fixedNodeIds: DocumentNodeId[];\n    instructionNodeIds: DocumentNodeId[];\n    pageSetup: Record<string, unknown>;\n    styleMap: Record<string, unknown>;\n    origin: TemplateOrigin;\n    appliesToRoles: DocumentRole[];\n    usage: TemplateUsage;\n    status: \'draft\' | \'confirmed\';\n    createdAt: string;\n    updatedAt: string;\n}',
+  },
+  {
+    name: 'TemplateContractId',
+    declaration: 'export type TemplateContractId = Branded<\'PaperAI.TemplateContractId\'>;',
+  },
+  {
+    name: 'TemplateEvidence',
+    declaration: 'export interface TemplateEvidence {\n    documentId: DocumentId;\n    nodeId?: DocumentNodeId;\n    officePath?: string;\n    excerpt: string;\n    source: \'document\' | \'style\' | \'page-setup\' | \'user\';\n}',
+  },
+  {
+    name: 'TemplateOrigin',
+    declaration: 'export interface TemplateOrigin {\n    kind: \'upload\' | \'built-in\';\n    label: string;\n    originalFileName: string;\n    packId?: string;\n    memberId?: string;\n    sourceVersion?: string;\n    normalizedSha256?: string;\n}',
+  },
+  {
+    name: 'TemplatePackManifest',
+    declaration: 'export interface TemplatePackManifest {\n    readonly id: TemplatePackId;\n    readonly name: string;\n    readonly description: string;\n    readonly version: string;\n    readonly sourceLabel: string;\n    readonly members: readonly TemplatePackMember[];\n}',
+  },
+  {
+    name: 'TemplatePackMember',
+    declaration: 'export interface TemplatePackMember {\n    readonly id: TemplatePackMemberId;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n    readonly sourceVersion: string;\n    readonly source: TemplatePackSourceAsset;\n    readonly normalized: TemplatePackNormalizedAsset;\n}',
+  },
+  {
+    name: 'TemplatePackMemberSummary',
+    declaration: 'export interface TemplatePackMemberSummary {\n    readonly id: TemplatePackMemberId;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n    readonly sourceVersion: string;\n    readonly originalFileName: string;\n    readonly sourceSha256: string;\n}',
+  },
+  {
+    name: 'TemplatePackNormalizedAsset',
+    declaration: 'export interface TemplatePackNormalizedAsset {\n    readonly path: string;\n    readonly sha256: string;\n    readonly size: number;\n}',
+  },
+  {
+    name: 'TemplatePackSourceAsset',
+    declaration: 'export interface TemplatePackSourceAsset {\n    readonly path: string;\n    readonly originalFileName: string;\n    readonly sha256: string;\n    readonly size: number;\n}',
+  },
+  {
+    name: 'TemplatePackSummary',
+    declaration: 'export interface TemplatePackSummary {\n    readonly id: TemplatePackId;\n    readonly name: string;\n    readonly description: string;\n    readonly version: string;\n    readonly sourceLabel: string;\n    readonly members: readonly TemplatePackMemberSummary[];\n}',
+  },
+  {
+    name: 'TemplateRule',
+    declaration: 'export interface TemplateRule {\n    id: TemplateRuleId;\n    kind: TemplateRuleKind;\n    label: string;\n    description: string;\n    severity: RuleSeverity;\n    scope?: string;\n    expected?: unknown;\n    evidence: TemplateEvidence[];\n    confidence: number;\n    enabled: boolean;\n}',
+  },
+  {
+    name: 'TemplateRuleId',
+    declaration: 'export type TemplateRuleId = Branded<\'PaperAI.TemplateRuleId\'>;',
+  },
+  {
+    name: 'TemplateRuleKind',
+    declaration: 'export type TemplateRuleKind = \'file-integrity\' | \'template-identity\' | \'fixed-text\' | \'required-section\' | \'required-field\' | \'minimum-characters\' | \'reference-count\' | \'font\' | \'font-size\' | \'paragraph-spacing\' | \'page-setup\' | \'table-structure\' | \'placeholder\' | \'cross-document-fact\' | \'visual-layout\' | \'custom\';',
+  },
+  {
+    name: 'TemplateSlot',
+    declaration: 'export interface TemplateSlot {\n    id: string;\n    key: string;\n    label: string;\n    officePath: string;\n    type: \'text\' | \'long-text\' | \'date\' | \'number\' | \'image\' | \'table-row\';\n    required: boolean;\n    repeatable: boolean;\n}',
+  },
+  {
+    name: 'TemplateUsage',
+    declaration: 'export type TemplateUsage = \'form-template\' | \'format-reference\';',
   },
   {
     name: 'TerminalBackend',
@@ -4928,6 +5979,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'UpdateTeamTaskRequest',
     declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n}',
+  },
+  {
+    name: 'UploadTemplateInput',
+    declaration: 'export interface UploadTemplateInput {\n    readonly projectId: ProjectId;\n    readonly name: string;\n    readonly sourcePath: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n}',
   },
   {
     name: 'UserMessage',

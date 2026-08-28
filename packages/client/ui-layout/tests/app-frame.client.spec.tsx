@@ -15,6 +15,13 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
+import {
+  DEFAULT_DETAILS_NARROW_MODE, DEFAULT_DETAILS_VISIBILITY, DEFAULT_LAYOUT_GEOMETRY,
+  resolveLayoutConfig,
+} from '@deepseek-ai/dsh-client-ui-layout/src/config.ts'
+import type {
+  DetailsNarrowMode, DetailsVisibility, LayoutGeometry,
+} from '@deepseek-ai/dsh-client-ui-layout/src/config.ts'
 import { SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
 import type {
@@ -52,9 +59,17 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
   return function useSelector<S>(sel: (s: T) => S): S { return sel(useSyncExternalStore(inst.subscribe, inst.getSnapshot)) }
 }
 
-function mountFrame() {
+function mountFrame(options: {
+  geometry?: LayoutGeometry
+  detailsVisibility?: DetailsVisibility
+  detailsNarrowMode?: DetailsNarrowMode
+} = {}) {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
-  const instance = createLayoutStore().create()
+  const geometry = options.geometry ?? DEFAULT_LAYOUT_GEOMETRY
+  const detailsVisibility = options.detailsVisibility ?? DEFAULT_DETAILS_VISIBILITY
+  const detailsNarrowMode = options.detailsNarrowMode ?? DEFAULT_DETAILS_NARROW_MODE
+  const configuration = resolveLayoutConfig({ ...geometry, detailsVisibility, detailsNarrowMode })
+  const instance = createLayoutStore(geometry).create()
   const slotCalls: { key: string; props: unknown }[] = []
   const renderSlot = ((key: string, owner: object) => {
     slotCalls.push({ key, props: owner })
@@ -84,6 +99,7 @@ function mountFrame() {
     <AppFrame
       useStore={hookOf(instance)}
       actions={instance.actions}
+      useLayoutConfiguration={selector => selector(configuration)}
       renderSlot={renderSlot}
       useSessions={useSessions}
       useWorkspaces={((sel: (s: WorkspaceListState) => unknown) => sel(workspaceState)) as never}
@@ -212,6 +228,79 @@ describe('AppFrame', () => {
     selectedSession.current = 's-first' as SessionId
     act(() => { rerenderFrame() })
     expect(tracks(frame)).toEqual([280, 0])
+  })
+
+  it('keeps an opened details preference visible for a blank current Session when configured', () => {
+    selectedSessionBlank.current = true
+    const { frame, instance } = mountFrame({ detailsVisibility: 'current-session' })
+    act(() => { instance.actions.openDetails() })
+    expect(tracks(frame)).toEqual([280, 360])
+  })
+
+  it('preserves the default nonblank Session gate when visibility config is omitted', () => {
+    selectedSessionBlank.current = true
+    const { frame, instance } = mountFrame()
+    act(() => { instance.actions.openDetails() })
+    expect(instance.getSnapshot().details).toBe(360)
+    expect(tracks(frame)).toEqual([280, 0])
+  })
+
+  it('uses configured center and details geometry without changing the concession order', () => {
+    frameWidth = 1300
+    const geometry = { centerMin: 520, detailsMin: 400, detailsDefault: 600, detailsMax: 960 }
+    const { frame, instance } = mountFrame({ geometry })
+    act(() => { instance.actions.openDetails() })
+    expect(instance.getSnapshot().details).toBe(600)
+    expect(tracks(frame)).toEqual([280, 500])
+  })
+
+  it('keeps PaperAI details operable at 1259px and restores the three-column split at 1366px and 1440px', () => {
+    frameWidth = 1440
+    const geometry = { centerMin: 560, detailsMin: 420, detailsDefault: 600, detailsMax: 960 }
+    const { frame, instance, getByTestId, slotCalls } = mountFrame({
+      geometry,
+      detailsNarrowMode: 'focus',
+    })
+    act(() => { instance.actions.openDetails() })
+    expect(tracks(frame)).toEqual([280, 600])
+    expect(frame.hasAttribute('data-details-focused')).toBe(false)
+
+    frameWidth = 1366
+    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
+    expect(tracks(frame)).toEqual([280, 526])
+    expect(frame.hasAttribute('data-details-focused')).toBe(false)
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(2)
+
+    frameWidth = 1259
+    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
+    expect(tracks(frame)).toEqual([280, 979])
+    expect(frame.hasAttribute('data-details-focused')).toBe(true)
+    expect(instance.getSnapshot().details).toBe(600)
+    expect(getByTestId('center-content').parentElement?.hasAttribute('inert')).toBe(true)
+    expect(slotCalls.filter(c => c.key === 'sidebar').at(-1)?.props).toEqual({
+      collapsed: false,
+      width: 280,
+    })
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
+
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)).toEqual([SIDEBAR_COLLAPSED, 600])
+    expect(frame.hasAttribute('data-details-focused')).toBe(false)
+    expect(getByTestId('center-content').parentElement?.hasAttribute('inert')).toBe(false)
+    expect(slotCalls.filter(c => c.key === 'sidebar').at(-1)?.props).toEqual({
+      collapsed: true,
+      width: SIDEBAR_COLLAPSED,
+    })
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)).toEqual([280, 979])
+    expect(frame.hasAttribute('data-details-focused')).toBe(true)
+
+    frameWidth = 1440
+    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
+    expect(tracks(frame)).toEqual([280, 600])
+    expect(frame.hasAttribute('data-details-focused')).toBe(false)
+    expect(getByTestId('center-content').parentElement?.hasAttribute('inert')).toBe(false)
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(2)
   })
 
   it('sidebar slot receives live concession output as owner props', () => {

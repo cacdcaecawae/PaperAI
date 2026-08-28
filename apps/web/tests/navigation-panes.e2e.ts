@@ -3,7 +3,7 @@
 // two-turn seeded fixture rendered purely from the log (the seeded-history
 // pattern: zero model calls in replay, so every surface here is the client
 // fold + host history RPC, not replay binding). The seed is recorded live
-// under the standard discipline: turn 1 produces a bash call plus two
+// under the standard discipline: turn 1 produces a platform-shell call plus two
 // parallel reads in one assistant message (tool-call density for the
 // trajectory ledger/timing lanes), turn 2 a markdown-rich reply.
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -28,12 +28,44 @@ const SEARCH_EXPECTED = join(SNAPSHOT_DIR, 'search-results.expected.md')
 const TERMINAL_EXPECTED = join(SNAPSHOT_DIR, 'terminal-card.expected.md')
 const MODE = webSnapshotMode()
 const SEED_ID = 'navigation-panes-web-e2e'
+const NATIVE_SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
+const SHELL_ROW_SELECTOR = process.platform === 'win32'
+  ? `[data-tool="${NATIVE_SHELL_TOOL}"] [data-expandable]`
+  : '[data-sample="bash"]'
+const SHELL_CARD_SELECTOR = process.platform === 'win32'
+  ? `[data-tool="${NATIVE_SHELL_TOOL}"] [data-terminal]`
+  : '[data-sample="bash"] ~ div [data-terminal]'
 
 // Turn 1 leads with a distinctive word: the session-title fallback takes the
 // first words of the first message, so the sidebar-search scenario has a
 // known-matching query ('navscenario') without depending on a live title call.
-const PROMPT_TURN1 = 'NavScenario: first run bash to print exactly NAVIGATION_OK, then read nav-a.md and nav-b.md using two read calls in ONE assistant message, then reply with the single word FIRST_DONE and stop.'
+const PROMPT_TURN1 = `NavScenario: first run ${NATIVE_SHELL_TOOL} to print exactly NAVIGATION_OK, then read nav-a.md and nav-b.md using two read calls in ONE assistant message, then reply with the single word FIRST_DONE and stop.`
 const PROMPT_TURN2 = 'Reply in markdown with: a level-2 heading "Navigation Summary", a bulleted list of exactly two items, and a fenced code block containing echo WATERFALL. Then stop.'
+
+function mapStrings(value: unknown, transform: (text: string) => string): unknown {
+  if (typeof value === 'string') return transform(value)
+  if (Array.isArray(value)) return value.map(item => mapStrings(item, transform))
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapStrings(item, transform)]))
+}
+
+function windowsSeedFixture(fixture: string): string {
+  return fixture.split(/\r?\n/).map((line) => {
+    if (line.length === 0) return line
+    const value = mapStrings(JSON.parse(line) as unknown, text => text
+      .replaceAll('echo NAVIGATION_OK', 'Write-Output NAVIGATION_OK')
+      .replaceAll('bash', 'pwsh'))
+    return JSON.stringify(value)
+  }).join('\n')
+}
+
+function normalizeShellSnapshot(snapshot: string): string {
+  if (process.platform !== 'win32') return snapshot
+  return snapshot
+    .replaceAll('Write-Output', 'echo')
+    .replaceAll('pwsh', 'bash')
+    .replaceAll('Pwsh', 'Bash')
+}
 
 async function baselineResponse(
   page: Page,
@@ -94,7 +126,8 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await writeFile(join(sessionCwd, 'nav-a.md'), '# alpha nav\n')
     await writeFile(join(sessionCwd, 'nav-b.md'), '# beta nav\n')
     if (MODE !== 'record') {
-      const raw = await readFile(SEED, 'utf8')
+      const committed = await readFile(SEED, 'utf8')
+      const raw = process.platform === 'win32' ? windowsSeedFixture(committed) : committed
       expect(fixtureUserPrompts(raw), 'seed fixture must carry exactly the two drive prompts')
         .toEqual([PROMPT_TURN1, PROMPT_TURN2])
       await seedSession(scaffold, raw, SEED_ID)
@@ -179,7 +212,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const recorded = parseSessionLog(await readFile(SEED, 'utf8'))
     expect(recorded.filter(e => e.type === 'turn/end')).toHaveLength(2)
     const calls = recorded.filter((e): e is SessionEvent & { data: { name: string } } => e.type === 'tool/call')
-    expect(calls.map(e => e.data.name).sort()).toEqual(['bash', 'read', 'read'])
+    expect(calls.map(e => e.data.name).sort()).toEqual([NATIVE_SHELL_TOOL, 'read', 'read'].sort())
   }, 400_000)
 
   it.skipIf(MODE === 'record')('finds an unopened seeded session by message content and opens it', async () => {
@@ -282,8 +315,10 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     }))
     expect(assistantTimingStyle.background).toContain('linear-gradient')
     expect(assistantTimingStyle.ttft).toMatch(/%$/)
-    const snapshot = (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
-      .split(SEED_ID).join('{{seededId}}')
+    const snapshot = normalizeShellSnapshot(
+      (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
+        .split(SEED_ID).join('{{seededId}}'),
+    )
     await compareOrRefreshGolden(TRAJECTORY_EXPECTED, snapshot, MODE)
     await details.getByRole('button', { name: 'Close details' }).click()
   }, 60_000)
@@ -397,20 +432,20 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await expect.poll(() => page.locator('tr[data-timeline-focus]').count(), { timeout: 10_000 }).toBe(0)
   }, 60_000)
 
-  it.skipIf(MODE === 'record')('bash and file-path rows leave the default details column closed', async () => {
+  it.skipIf(MODE === 'record')('shell and file-path rows leave the default details column closed', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-details'))
     await ensureSeedOpen(page)
-    const bashRow = page.locator('[data-sample="bash"]').first()
-    await bashRow.waitFor({ timeout: 15_000 })
+    const shellRow = page.locator(SHELL_ROW_SELECTOR).first()
+    await shellRow.waitFor({ timeout: 15_000 })
     const frame = page.locator('[style*="grid-template-columns"]').first()
     expect(await frame.getAttribute('data-details-collapsed')).toBe('true')
     // The row click is the card's expand toggle (unified tool-row
     // interaction); it must not drive layout geometry either way.
-    await bashRow.click()
+    await shellRow.click()
     await expect.poll(() => frame.getAttribute('data-details-collapsed'), { timeout: 5_000 }).toBe('true')
     // The card's own controls are outside the summary row and must not open
     // details either — the expanded terminal card is read in place.
-    await page.locator('[data-sample="bash"] ~ div [data-terminal] [class*="_copyButton_"]').first().click()
+    await page.locator(`${SHELL_CARD_SELECTOR} [class*="_copyButton_"]`).first().click()
     await expect.poll(() => frame.getAttribute('data-details-collapsed'), { timeout: 5_000 }).toBe('true')
     // Read summaries are host-open file links; they also must not open details.
     const fileLink = page.locator('[data-variant="read"] button').first()
@@ -428,17 +463,17 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     }
   }, 60_000)
 
-  it.skipIf(MODE === 'record')('renders the bash row as a terminal card in the real browser', async () => {
+  it.skipIf(MODE === 'record')('renders the native shell row as a terminal card in the real browser', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-terminal'))
     await ensureSeedOpen(page)
     // The card is expand-gated behind the whole-row toggle (the unified
     // tool-row interaction): open it if this fresh view leaves it collapsed.
     // Expanded, the recorded command's own output sits in the message flow,
     // derived from the logged call/result presentations alone.
-    const bashRow = page.locator('[data-sample="bash"]').first()
-    await bashRow.waitFor({ timeout: 15_000 })
-    if (await bashRow.getAttribute('aria-expanded') !== 'true') await bashRow.click()
-    const card = page.locator('[data-sample="bash"] ~ div [data-terminal]').first()
+    const shellRow = page.locator(SHELL_ROW_SELECTOR).first()
+    await shellRow.waitFor({ timeout: 15_000 })
+    if (await shellRow.getAttribute('aria-expanded') !== 'true') await shellRow.click()
+    const card = page.locator(SHELL_CARD_SELECTOR).first()
     await card.waitFor({ timeout: 15_000 })
     // Real layout, not jsdom's stub (which computes no geometry at all):
     // squeeze the output pane below its content width and the line must keep
@@ -501,8 +536,10 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(dot.color).toBe(dot.success)
     // Golden of the card at rest — captured before the copy click, whose
     // confirmation label self-reverts on a timer and would not hold still.
-    const snapshot = (await captureStableAria(page, '[data-terminal]', scaffold.workspaceCwd))
-      .split(SEED_ID).join('{{seededId}}')
+    const snapshot = normalizeShellSnapshot(
+      (await captureStableAria(page, '[data-terminal]', scaffold.workspaceCwd))
+        .split(SEED_ID).join('{{seededId}}'),
+    )
     await compareOrRefreshGolden(TERMINAL_EXPECTED, snapshot, MODE)
     // Copy writes the raw output through the browser's own clipboard, which in
     // a real page is the async Clipboard API rather than the jsdom fallback.

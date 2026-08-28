@@ -124,28 +124,49 @@ export class SettingsScopeController<T> implements SettingsScope<T> {
   private write(op: SettingsPathOpView): Promise<void> {
     const generation = ++this.writeGeneration
     return this.enqueue(async () => {
-      const revision = this.pendingRevision ?? this.getSnapshot().revision
-      let response: Awaited<ReturnType<SettingsFace['settings']['mutate']>>
-      try {
-        response = await this.api.settings.mutate({
-          ns: this.spec.namespace,
-          ops: [op],
-          ...(revision === undefined ? {} : { expectedRevision: revision }),
-        })
-      } catch (_settingsWriteFailure) {
-        await this.recover(generation)
+      let retriedConflict = false
+      for (;;) {
+        const revision = this.pendingRevision ?? this.getSnapshot().revision
+        let response: Awaited<ReturnType<SettingsFace['settings']['mutate']>>
+        try {
+          response = await this.api.settings.mutate({
+            ns: this.spec.namespace,
+            ops: [op],
+            ...(revision === undefined ? {} : { expectedRevision: revision }),
+          })
+        } catch (_settingsWriteFailure) {
+          await this.recover(generation)
+          return
+        }
+        if (!response.result.ok) {
+          // Path mutations are safe to re-apply to the freshly read section:
+          // they address only the field the user changed and cannot overwrite
+          // a concurrent edit to another field. Retry one latest user action
+          // after a revision conflict; arbitrary validation/storage failures
+          // still recover without replaying the rejected intent.
+          if (
+            response.result.error.code === 'settings-conflict'
+            && !retriedConflict
+            && !this.disposed
+            && generation === this.writeGeneration
+          ) {
+            retriedConflict = true
+            this.pendingRevision = undefined
+            await this.mirror.load()
+            if (generation !== this.writeGeneration) return
+            continue
+          }
+          await this.recover(generation)
+          return
+        }
+        if (this.disposed) return
+        if (generation === this.writeGeneration) {
+          this.pendingRevision = undefined
+          this.mirror.acceptView(response.result.value)
+        } else {
+          this.pendingRevision = response.result.value.revision
+        }
         return
-      }
-      if (!response.result.ok) {
-        await this.recover(generation)
-        return
-      }
-      if (this.disposed) return
-      if (generation === this.writeGeneration) {
-        this.pendingRevision = undefined
-        this.mirror.acceptView(response.result.value)
-      } else {
-        this.pendingRevision = response.result.value.revision
       }
     })
   }

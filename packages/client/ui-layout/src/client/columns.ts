@@ -1,11 +1,10 @@
 /**
  * Pure concession-chain column solver for the three-column AppFrame.
- * Chain order is fixed by contract: keep center >= CENTER_MIN by shrinking
- * details, then auto-closing it (derived zero width — preferred width
- * preferences are never rewritten, so widening the window restores them).
- * The sidebar never concedes: its rendered width is always the drag
- * preference (or the collapsed rail), and center absorbs any remaining
- * deficit as the last resort. Inputs are the layout store's plain width
+ * Split mode keeps center at its configured floor by shrinking details. When
+ * the minimum split no longer fits, the configured narrow mode either closes
+ * details or focuses it beside the current sidebar. Width preferences
+ * are never rewritten, so widening the frame restores the split. Inputs are
+ * the layout store's plain width
  * preferences (0 = closed); a closed sidebar resolves to the fixed
  * SIDEBAR_COLLAPSED control rail while closed details resolve to zero width.
  * The SIDEBAR_AUTO_COLLAPSE breakpoint is consumed by AppFrame, which decides
@@ -13,12 +12,24 @@
  * breakpoint-free.
  */
 
-/** Resolved widths for one frame; center may drop below CENTER_MIN only at the final fallback. */
-export interface Columns { sidebar: number; center: number; details: number }
+import type { DetailsNarrowMode, LayoutGeometry } from '../config.ts'
+import { DEFAULT_DETAILS_NARROW_MODE, DEFAULT_LAYOUT_GEOMETRY } from '../config.ts'
 
-// Contract-frozen geometry: the three-column concession chain's fixed points.
-/** Center column floor; only the final fallback may go below it. */
-export const CENTER_MIN = 640
+export { CENTER_MIN, DETAILS_DEFAULT, DETAILS_MAX, DETAILS_MIN } from '../config.ts'
+
+/** Resolved widths and active presentation mode for one frame. */
+export interface Columns {
+  /** Rendered sidebar width. */
+  sidebar: number
+  /** Rendered center width. */
+  center: number
+  /** Rendered details width. */
+  details: number
+  /** Whether details owns the content area beside the current sidebar. */
+  detailsFocused: boolean
+}
+
+// Sidebar geometry stays fixed; center/details geometry comes from LayoutGeometry.
 /** Sidebar drag clamp floor. */
 export const SIDEBAR_MIN = 264
 /** Sidebar drag clamp ceiling. */
@@ -31,13 +42,6 @@ export const SIDEBAR_COLLAPSED = 56
  * LG breakpoint); a manual toggle below it re-expands over the squeezed center
  * (stores.ts narrowExpanded). */
 export const SIDEBAR_AUTO_COLLAPSE = 1024
-/** Details drag clamp floor. */
-export const DETAILS_MIN = 300
-/** Details drag clamp ceiling. */
-export const DETAILS_MAX = 520
-/** Details width before any user drag. */
-export const DETAILS_DEFAULT = 360
-
 /**
  * Clamp a panel width into its contract range.
  * @param px - requested width.
@@ -57,21 +61,47 @@ export function clampWidth(px: number, min: number, max: number): number {
  * @param viewport - available frame width in px.
  * @param sidebar - sidebar width preference in px (0 = closed).
  * @param details - details width preference in px (0 = closed).
- * @returns resolved widths; details 0 means visually closed (never unmounted), while a closed sidebar keeps its compact rail.
+ * @param geometry - validated center/details geometry; omitted for the original DSH values.
+ * @param detailsNarrowMode - behavior when the minimum split does not fit.
+ * @returns resolved widths and focus state; details 0 means visually closed but never unmounted.
  */
-export function computeColumns(viewport: number, sidebar: number, details: number): Columns {
+export function computeColumns(
+  viewport: number,
+  sidebar: number,
+  details: number,
+  geometry: LayoutGeometry = DEFAULT_LAYOUT_GEOMETRY,
+  detailsNarrowMode: DetailsNarrowMode = DEFAULT_DETAILS_NARROW_MODE,
+): Columns {
   // The sidebar is fixed at its preference (or the rail) — it never concedes.
   const s = sidebar === 0 ? SIDEBAR_COLLAPSED : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
-  const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, DETAILS_MAX)
+  const d0 = details === 0 ? 0 : clampWidth(details, geometry.detailsMin, geometry.detailsMax)
 
   // Step 1: everything fits at preferred widths.
-  if (s + d0 + CENTER_MIN <= viewport) return { sidebar: s, center: viewport - s - d0, details: d0 }
+  if (s + d0 + geometry.centerMin <= viewport) {
+    return { sidebar: s, center: viewport - s - d0, details: d0, detailsFocused: false }
+  }
 
   // Step 2: shrink details toward its minimum.
-  const d1 = d0 === 0 ? 0 : Math.max(DETAILS_MIN, viewport - s - CENTER_MIN)
-  if (s + d1 + CENTER_MIN <= viewport) return { sidebar: s, center: CENTER_MIN, details: d1 }
+  const d1 = d0 === 0 ? 0 : Math.max(geometry.detailsMin, viewport - s - geometry.centerMin)
+  if (s + d1 + geometry.centerMin <= viewport) {
+    return { sidebar: s, center: geometry.centerMin, details: d1, detailsFocused: false }
+  }
 
-  // Step 3: auto-close details (derived — preferences untouched); center
-  // absorbs any remaining deficit (may drop below CENTER_MIN).
-  return { sidebar: s, center: Math.max(0, viewport - s), details: 0 }
+  if (d0 > 0 && detailsNarrowMode === 'focus') {
+    return {
+      sidebar: s,
+      center: 0,
+      details: Math.max(0, viewport - s),
+      detailsFocused: true,
+    }
+  }
+
+  // Closing is derived from the current frame; the stored preference remains
+  // open and restores automatically when the minimum split fits again.
+  return {
+    sidebar: s,
+    center: Math.max(0, viewport - s),
+    details: 0,
+    detailsFocused: false,
+  }
 }

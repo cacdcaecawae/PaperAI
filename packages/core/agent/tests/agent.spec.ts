@@ -140,6 +140,34 @@ describe('Inbox', () => {
     inbox.clear()
     expect(session.events).toHaveLength(beforeClear + 2)
   })
+
+  it('claims one identified message without consuming adjacent pending work', () => {
+    const session = Session.create(SessionId('claim-one-inbox'))
+    const claimed: Array<{ message: UserMessage; turn: number }> = []
+    const discarded: UserMessage[] = []
+    const inbox = new Inbox(session, {
+      inserted: () => {},
+      discarded: message => void discarded.push(message),
+      claimed: (message, turn) => void claimed.push({ message, turn }),
+    })
+    const first = createUserMessage({ content: [{ type: 'text', text: 'first' }], source: { kind: 'user' } })
+    const steered = createUserMessage({ content: [{ type: 'text', text: 'steer' }], source: { kind: 'user' } })
+    const last = createUserMessage({ content: [{ type: 'text', text: 'last' }], source: { kind: 'user' } })
+    inbox.append('next-step', first)
+    inbox.append('next-step', steered)
+    inbox.append('next-turn', last)
+
+    expect(inbox.claimMessage(steered.id, 4)).toEqual(steered)
+    expect(inbox.nextStep).toEqual([first])
+    expect(inbox.nextTurn).toEqual([last])
+    expect(claimed).toEqual([{ message: steered, turn: 4 }])
+    expect(discarded).toEqual([])
+    expect(inbox.claimMessage(steered.id, 4)).toBeUndefined()
+    expect(session.events.at(-1)).toMatchObject({
+      type: 'agent/inbox/spliced',
+      data: { target: 'next-step', start: 1, removedCount: 1, inserted: [] },
+    })
+  })
 })
 
 describe('AgentRegistry', () => {
@@ -374,6 +402,40 @@ describe('AgentRegistry factory seam', () => {
     return { factory, calls }
   }
 
+  function publishingFactory(ctx: Context, label: string, failingResumes = 0) {
+    const calls: Array<{ kind: 'create' | 'resume'; id: SessionId }> = []
+    const disposed: SessionId[] = []
+    const publish = (id: SessionId) => {
+      const agent = stubAgent(id, { ctx })
+      ;(agent as Agent & { driver: string }).driver = label
+      const detach = ctx.agents.enter(agent, undefined)
+      ctx.agents.announce(agent)
+      let disposal: Promise<void> | undefined
+      return {
+        agent,
+        dispose: () => disposal ??= Promise.resolve().then(() => {
+          disposed.push(id)
+          detach()
+        }),
+      }
+    }
+    const factory: AgentFactory = {
+      createAgent(_ownerCtx, options) {
+        calls.push({ kind: 'create', id: options.sessionId })
+        return Promise.resolve(publish(options.sessionId))
+      },
+      resume(_ownerCtx, options) {
+        calls.push({ kind: 'resume', id: options.resumeSessionId })
+        if (failingResumes > 0) {
+          failingResumes--
+          return Promise.reject(new Error(`${label} resume failed`))
+        }
+        return Promise.resolve(publish(options.resumeSessionId))
+      },
+    }
+    return { factory, calls, disposed }
+  }
+
   it('requires a factory and delegates through the calling context', async () => {
     const ctx = new Context()
     await ctx.plugin(AgentRegistry)
@@ -401,6 +463,96 @@ describe('AgentRegistry factory seam', () => {
     await expect(ctx.agents.create({ sessionId: SessionId('before-s') })).resolves.toBeDefined()
     await owner.dispose()
     await expect(ctx.agents.create({ sessionId: SessionId('after-s') })).rejects.toThrow(/no agent factory/)
+  })
+
+  it('routes exact named factories without changing the default factory', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    const fallback = stubFactory()
+    const codex = stubFactory()
+    ctx.agents.setFactory(fallback.factory)
+    ctx.agents.registerFactory('codex', codex.factory)
+
+    await ctx.agents.create({ sessionId: SessionId('default-create') })
+    await ctx.agents.create({ sessionId: SessionId('codex-create'), factoryRoute: 'codex' })
+    await ctx.agents.resume({ resumeSessionId: SessionId('codex-resume'), factoryRoute: 'codex' })
+
+    expect(fallback.calls.create.map(call => call.options.sessionId)).toEqual(['default-create'])
+    expect(codex.calls.create.map(call => call.options.sessionId)).toEqual(['codex-create'])
+    expect(codex.calls.resume.map(call => call.options.resumeSessionId)).toEqual(['codex-resume'])
+    await expect(ctx.agents.create({
+      sessionId: SessionId('missing-create'),
+      factoryRoute: 'claude',
+    })).rejects.toThrow(/no agent factory registered for route "claude"/)
+  })
+
+  it('scopes named factory registrations and rejects duplicate or blank routes', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    expect(() => ctx.agents.registerFactory('  ', stubFactory().factory)).toThrow(/non-empty/)
+    const owner = await ctx.plugin(Object.assign((inner: Context) => {
+      inner.agents.registerFactory('codex', stubFactory().factory)
+      expect(inner.agents.hasFactoryRoute('codex')).toBe(true)
+      expect(() => inner.agents.registerFactory('codex', stubFactory().factory)).toThrow(/already registered/)
+    }, { inject: ['agents'] }))
+    await owner.dispose()
+    expect(ctx.agents.hasFactoryRoute('codex')).toBe(false)
+    await expect(ctx.agents.resume({
+      resumeSessionId: SessionId('after-route-dispose'),
+      factoryRoute: 'codex',
+    })).rejects.toThrow(/no agent factory registered for route "codex"/)
+  })
+
+  it('recreates an idle factory Agent on an exact route and retains the new route', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    const dsh = publishingFactory(ctx, 'dsh')
+    const codex = publishingFactory(ctx, 'codex')
+    ctx.agents.setFactory(dsh.factory)
+    ctx.agents.registerFactory('codex', codex.factory)
+    const initial = await ctx.agents.create({ sessionId: SessionId('switch-driver') })
+
+    const replacement = await ctx.agents.recreate({
+      current: initial.agent,
+      replacement: { resumeSessionId: initial.agent.id, factoryRoute: 'codex' },
+      rollback: { resumeSessionId: initial.agent.id },
+    })
+
+    expect(dsh.disposed).toEqual([SessionId('switch-driver')])
+    expect(ctx.agents.get(initial.agent.id)).toBe(replacement.agent)
+    expect((replacement.agent as Agent & { driver: string }).driver).toBe('codex')
+    expect(ctx.agents.factoryRouteFor(replacement.agent)).toBe('codex')
+    expect(codex.calls).toEqual([{ kind: 'resume', id: SessionId('switch-driver') }])
+  })
+
+  it('restores the prior factory when replacement fails and validates routes before teardown', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    const dsh = publishingFactory(ctx, 'dsh')
+    const claude = publishingFactory(ctx, 'claude', 1)
+    ctx.agents.setFactory(dsh.factory)
+    ctx.agents.registerFactory('claude', claude.factory)
+    const initial = await ctx.agents.create({ sessionId: SessionId('rollback-driver') })
+
+    await expect(ctx.agents.recreate({
+      current: initial.agent,
+      replacement: { resumeSessionId: initial.agent.id, factoryRoute: 'missing' },
+      rollback: { resumeSessionId: initial.agent.id },
+    })).rejects.toThrow(/no agent factory registered for route "missing"/)
+    expect(ctx.agents.get(initial.agent.id)).toBe(initial.agent)
+    expect(dsh.disposed).toEqual([])
+
+    await expect(ctx.agents.recreate({
+      current: initial.agent,
+      replacement: { resumeSessionId: initial.agent.id, factoryRoute: 'claude' },
+      rollback: { resumeSessionId: initial.agent.id },
+    })).rejects.toThrow('claude resume failed')
+    const restored = ctx.agents.get(initial.agent.id)
+    if (restored === undefined) throw new Error('rollback did not restore the Agent')
+    expect(restored).not.toBe(initial.agent)
+    expect((restored as Agent & { driver: string }).driver).toBe('dsh')
+    expect(ctx.agents.factoryRouteFor(restored)).toBeUndefined()
+    expect(dsh.calls.map(call => call.kind)).toEqual(['create', 'resume'])
   })
 
   it('canonicalizes an already traced Service before tracing it for the caller', async () => {

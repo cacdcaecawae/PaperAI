@@ -20,6 +20,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: pulls the settings shell's SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from './brand-slot.ts'
 import { AgentPresetLabel } from './AgentPresetLabel.tsx'
 import type { AgentPresetLabelInjected } from './AgentPresetLabel.tsx'
 import { AgentPresetRow } from './AgentPresetRow.tsx'
@@ -37,6 +38,7 @@ import { AGENT_PRESET_SETTINGS_NS, AgentPresetSettingsController } from './setti
 export type { AgentPresetLabelInjected, AgentPresetLabelProps } from './AgentPresetLabel.tsx'
 export type { AgentPresetRowInjected, AgentPresetRowProps } from './AgentPresetRow.tsx'
 export type { AgentPresetSeatInjected, AgentPresetSeatProps } from './AgentPresetSeat.tsx'
+export type { AgentPresetBrandMarkOwnerProps } from './brand-slot.ts'
 export type { AgentPresetSectionInjected, AgentPresetSectionProps } from './AgentPresetSection.tsx'
 export type { AgentPresetSeatState, SeatSessionSummary } from './seat-store.ts'
 export {
@@ -131,7 +133,16 @@ export function apply(ctx: ClientContext): void {
       // Connecting a workspace either creates a blank session or reuses one,
       // and either way the chip's pick predates it — so the stage is applied
       // when the session arrives, not when it was made.
-      const stop = scope.sessions.list.subscribe(() => { void seat.apply() })
+      const reconcileSession = (): void => {
+        seat.syncCurrentSession()
+        void seat.apply()
+      }
+      const stop = scope.sessions.list.subscribe(reconcileSession)
+      // This scoped plugin may activate after session restoration already
+      // settled. Subscriptions observe future writes only, so reconcile the
+      // stable snapshot once instead of displaying the deployment default as
+      // though an older blank session already used it.
+      reconcileSession()
       // The chip opens on the deployment default, so a default changed from
       // the settings surface moves it too — otherwise the screen that starts
       // the next session keeps offering the previous default until a reload,
@@ -166,6 +177,9 @@ export function apply(ctx: ClientContext): void {
         name: 'conversation.hero.agentPreset',
         locale: 'settings.agentPreset',
         inject: seatInjected,
+        children: {
+          'conversation.hero.agentPreset.mark': { kind: 'keyed', scope: 'root' },
+        },
       }, AgentPresetSeat)
       const label = scope.slots.register({
         name: 'conversation.session.header.actions',

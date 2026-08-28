@@ -500,6 +500,23 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src/types.ts)
 
+### `paperai/*`
+
+<a id="paperaiacpsession--log-only"></a>
+
+#### `paperai/acp/session` — log-only
+
+```ts persistence-catalog
+/** Durable link from one DSH session lifecycle to its provider-owned ACP session. */
+'paperai/acp/session': {
+  provider: 'codex' | 'claude'
+  externalSessionId: string
+  resumed: boolean
+}
+```
+
+来源：[`packages/paperai/agent-acp/src/agent.ts:42`](../packages/paperai/agent-acp/src/agent.ts)
+
 ### `permission/*`
 
 <a id="permissionpreset--log-only"></a>

@@ -98,6 +98,52 @@ describe('ui-settings-models apply', () => {
     expect(after.slots.entries('settings.section')).toHaveLength(1)
   })
 
+  it('keeps Models settings while a product profile disables first-run dialogs', async () => {
+    const b = await bench()
+    declare(b.slots)
+    await b.ctx.plugin({
+      inject: [...inject],
+      apply: (ctx) => {
+        apply(ctx, {
+          onboarding: { welcomeNotice: false, deepSeekCredential: false },
+        })
+      },
+    }).await()
+
+    expect(b.slots.entries('settings.section').map(entry => entry.options.id)).toEqual(['models'])
+    expect(b.slots.entries('settings.onboarding')).toEqual([])
+  })
+
+  it('exposes a stale-safe runtime policy for client-only product profiles', async () => {
+    const b = await bench()
+    declare(b.slots)
+    const fiber = b.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const policy = b.ctx.get('modelsOnboarding')
+    if (!policy) throw new Error('modelsOnboarding service was not registered')
+    expect(policy.configuration.getSnapshot()).toEqual({
+      welcomeNotice: true,
+      deepSeekCredential: true,
+    })
+    const disposeFirst = policy.configure({ welcomeNotice: false })
+    expect(policy.configuration.getSnapshot()).toEqual({
+      welcomeNotice: false,
+      deepSeekCredential: true,
+    })
+    const disposeSecond = policy.configure({ deepSeekCredential: false })
+    disposeFirst()
+    expect(policy.configuration.getSnapshot()).toEqual({
+      welcomeNotice: true,
+      deepSeekCredential: false,
+    })
+    disposeSecond()
+    expect(policy.configuration.getSnapshot()).toEqual({
+      welcomeNotice: true,
+      deepSeekCredential: true,
+    })
+    await fiber.dispose()
+  })
+
   it('the label thunk follows the active locale without re-registration', async () => {
     const b = await bench()
     declare(b.slots)

@@ -112,6 +112,9 @@ export abstract class ReleaseFamily {
   /** Glob patterns, relative to the repository root, that select this family's manifests. */
   abstract readonly patterns: readonly string[]
 
+  /** Glob patterns omitted from this release family after discovery. */
+  readonly exclusions: readonly string[] = []
+
   /** Git tag prefix this family publishes from. */
   abstract readonly tagPrefix: string
 
@@ -128,7 +131,10 @@ export abstract class ReleaseFamily {
    * @returns Members sorted by directory, with names validated and deduplicated.
    */
   members(root: string): ReleaseMember[] {
-    const manifestPaths = globSync([...this.patterns], { cwd: root }).sort()
+    const manifestPaths = globSync([...this.patterns], {
+      cwd: root,
+      exclude: [...this.exclusions],
+    }).sort()
     if (manifestPaths.length === 0) throw new Error(`release family ${this.id} matched no manifests`)
 
     const members: ReleaseMember[] = []
@@ -320,6 +326,11 @@ export abstract class ReleaseFamily {
 class DshFamily extends ReleaseFamily {
   readonly id = 'dsh'
   readonly patterns = ['packages/!(experimental)/*/package.json', 'apps/*/package.json'] as const
+  override readonly exclusions = [
+    'packages/paperai/**',
+    'packages/bundle/paperai-web/**',
+    'packages/client/ui-paperai-*/**',
+  ] as const
   readonly tagPrefix = 'dsh-v'
 
   /** Require current artifacts from a complete official client build. */

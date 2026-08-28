@@ -2,7 +2,7 @@
 import type { ReactNode, RefObject } from 'react'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {
-  InjectFace, MaybeSnapshotSelectorHook, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
+  HostObservable, InjectFace, MaybeSnapshotSelectorHook, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
   SlotHookFactory, SnapshotSelectorHook,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
@@ -161,6 +161,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * instead; this one is the whole panel.
      */
     'conversation.details.tool': { kind: 'single'; scope: 'session'; owner: DetailsToolOwnerProps }
+    /**
+     * Additive full-column details views selected through `ctx.conversationDetails`.
+     * The built-in `tool` id stays inside ui-conversation; external entries
+     * use unique list ids and receive only the close operation from the host.
+     */
+    'conversation.details.view': { kind: 'list'; scope: 'session'; owner: DetailsViewOwnerProps }
     /**
      * The composer takeover chain: entries are selector-routed replacements
      * of the default InputBar. Declared by this package's 'conversation'
@@ -806,9 +812,31 @@ export interface DetailsInjected {
   closeDetails: () => void
 }
 
+/** Owner operation supplied to every additive full-column details view. */
+export interface DetailsViewOwnerProps {
+  /** Close the layout-owned details column. */
+  closeDetails: () => void
+}
+
+/** Injected state and operations of the generic details host. */
+export interface DetailsHostInjected extends DetailsInjected {
+  hooks: {
+    /** Per-session active details view id. */
+    detailsView: HostObservable<string>
+  }
+}
+
 /** Full details-slot props: selection store, Tool output seat, injected close callback, and locale. */
 export type DetailsSlotProps = PropsRuntime<'details'> & PropsRenderSlots<'conversation.details.tool'>
   & PropsStore<ChatStore> & DetailsInjected & PropsLocale<'conversation'>
+
+/** Full generic host props: Tool output plus additive full-column details views. */
+export type DetailsHostSlotProps = PropsRuntime<'details'>
+  & PropsRenderSlots<'conversation.details.tool' | 'conversation.details.view'>
+  & PropsStore<ChatStore>
+  & Omit<DetailsHostInjected, 'hooks'>
+  & PropsHooks<DetailsHostInjected['hooks']>
+  & PropsLocale<'conversation'>
 
 /** Owner share common to the hero / New-Session Workspace pickers. */
 export interface EmptyWorkspaceOwnerProps {

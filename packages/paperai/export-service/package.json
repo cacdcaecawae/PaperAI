@@ -1,0 +1,59 @@
+{
+  "name": "@paperai/export-service",
+  "description": "Atomic checked DOCX exports with recoverable PaperAI milestones",
+  "version": "0.1.1-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cacdcaecawae/PaperAI.git",
+    "directory": "packages/paperai/export-service"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@paperai/commit-service": "workspace:*",
+    "@paperai/domain": "workspace:*",
+    "@paperai/mcp": "workspace:*",
+    "@paperai/template-service": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@paperai/commit-service": "workspace:*",
+    "@paperai/domain": "workspace:*",
+    "@paperai/mcp": "workspace:*",
+    "@paperai/template-service": "workspace:*"
+  }
+}

@@ -20,8 +20,16 @@ export type ApiRemoteAgentResult =
 
 /** Resume configuration supplied by the owning Host composition. */
 export interface ApiRemoteAgentOptions {
-  /** Read the per-Agent defaults when a cold identity must resume. */
-  readonly agentOptions?: () => AgentOptions
+  /**
+   * Read the per-Agent defaults when a cold identity must resume. The resolved
+   * factory route is passed because a peer Agent driver owns its own provider
+   * and model defaults; only the default DSH factory should inherit the
+   * Host-wide LLM selection.
+   */
+  readonly agentOptions?: (
+    session: { meta: SessionHeader; events: readonly SessionEvent[] },
+    factoryRoute: string | undefined,
+  ) => AgentOptions
   /**
    * Build the Host-specific Agent-scope composition completed before
    * publication. Keyed by the resumed session itself because what a Host
@@ -36,6 +44,13 @@ export interface ApiRemoteAgentOptions {
   readonly setup?: (
     session: { meta: SessionHeader; events: readonly SessionEvent[] },
   ) => AgentSetup | Promise<AgentSetup>
+  /**
+   * Resolve the exact Agent factory route recorded by a cold session's Host
+   * composition. Omission keeps the default DSH Agent Loop.
+   */
+  readonly factoryRoute?: (
+    session: { meta: SessionHeader; events: readonly SessionEvent[] },
+  ) => string | undefined | Promise<string | undefined>
 }
 
 /** Cold identity absent from the durable session store. */
@@ -153,6 +168,9 @@ export function createApiRemoteAgentResolver(
           // awaits (composing a preset, say) does not widen the collision
           // window.
           const setup = options.setup === undefined ? undefined : await options.setup(inspected)
+          const factoryRoute = options.factoryRoute === undefined
+            ? undefined
+            : await options.factoryRoute(inspected)
           const publishedSession = ctx.sessions.get(sessionId)
           const publishedAgent = ctx.agents.get(sessionId)
           if (publishedSession !== undefined
@@ -161,7 +179,10 @@ export function createApiRemoteAgentResolver(
           }
           const handle = await ctx.agents.resume({
             resumeSessionId: sessionId,
-            ...options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions() },
+            ...factoryRoute === undefined ? {} : { factoryRoute },
+            ...options.agentOptions === undefined
+              ? {}
+              : { agentOptions: options.agentOptions(inspected, factoryRoute) },
             ...setup === undefined ? {} : { setup },
           })
           return handle.agent

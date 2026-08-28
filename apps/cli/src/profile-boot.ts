@@ -12,7 +12,8 @@
  */
 
 import { writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
@@ -33,6 +34,12 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 /** Shipped agent-preset root: beside this app's own config, in both source and built layouts. */
 const SHIPPED_PRESET_ROOT = fileURLToPath(new URL('../config/agent-presets/', import.meta.url))
+const moduleRequire = createRequire(import.meta.url)
+const PAPERAI_PRESET_ROOT = join(
+  dirname(moduleRequire.resolve('@paperai/bundle-web/package.json')),
+  'config',
+  'agent-presets',
+)
 
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
@@ -161,7 +168,10 @@ function composeProfile(
       id: 'agent-presets',
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }],
+        roots: [
+          { path: SHIPPED_PRESET_ROOT, trust: 'system' },
+          ...name === 'paperai' ? [{ path: PAPERAI_PRESET_ROOT, trust: 'system' }] : [],
+        ],
       },
     })
   }

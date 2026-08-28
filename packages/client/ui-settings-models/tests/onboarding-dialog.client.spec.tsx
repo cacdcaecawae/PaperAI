@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { DeepSeekOnboardingDialog } from '../src/client/DeepSeekOnboardingDialog.tsx'
 import type { DeepSeekOnboardingDialogProps } from '../src/client/DeepSeekOnboardingDialog.tsx'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
@@ -68,6 +69,7 @@ function harness(options: {
   providersReject?: boolean
   setFailure?: string
   setReject?: string
+  onboardingEnabled?: boolean
 } = {}) {
   if (document.getElementById('root') === null) {
     const appRoot = document.createElement('div')
@@ -138,6 +140,10 @@ function harness(options: {
     useWorkspaces: unusedHook,
     controller,
     useModels: bindSnapshotSelector(controller.store),
+    usePolicy: bindSnapshotSelector(createSnapshotStore({
+      welcomeNotice: true,
+      deepSeekCredential: options.onboardingEnabled !== false,
+    })),
     api: face as never,
     schema: settingsSchema,
     t: key => en[key],
@@ -149,6 +155,15 @@ function harness(options: {
 }
 
 describe('DeepSeekOnboardingDialog', () => {
+  it('completes without loading or painting when a product disables the step', async () => {
+    const h = harness({ onboardingEnabled: false })
+    const load = vi.spyOn(h.controller, 'load')
+    render(<DeepSeekOnboardingDialog {...h.props} />)
+    await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
+    expect(load).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('renders when the shell root is absent', async () => {
     const h = harness()
     document.getElementById('root')!.remove()

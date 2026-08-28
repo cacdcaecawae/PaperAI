@@ -33,7 +33,39 @@ const MODE = webSnapshotMode()
 // call; a Think-only step would leave nothing for the footer to attach to and
 // the scenario would pass against either implementation.
 const NARRATION = 'Reading the workspace now.'
-const PROMPT = `Begin your reply with the plain sentence "${NARRATION}" as text, and in that same message call the bash tool with the command "echo alpha". After the tool result, reply with the single word DONE and stop.`
+const RECORDED_PROMPT = `Begin your reply with the plain sentence "${NARRATION}" as text, and in that same message call the bash tool with the command "echo alpha". After the tool result, reply with the single word DONE and stop.`
+
+function mapStrings(value: unknown, transform: (text: string) => string): unknown {
+  if (typeof value === 'string') return transform(value)
+  if (Array.isArray(value)) return value.map(item => mapStrings(item, transform))
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapStrings(item, transform)]))
+}
+
+function windowsShellText(value: string): string {
+  return value
+    .replaceAll('bash', 'pwsh')
+    .replaceAll('echo', 'Write-Output')
+}
+
+function windowsReplayFixture(fixture: string): string {
+  return fixture.split(/\r?\n/).map((line) => {
+    if (line.length === 0) return line
+    return JSON.stringify(mapStrings(JSON.parse(line) as unknown, windowsShellText))
+  }).join('\n')
+}
+
+function normalizeShellAria(value: string): string {
+  if (process.platform !== 'win32') return value
+  return value
+    .replaceAll('Write-Output', 'echo')
+    .replaceAll('pwsh', 'bash')
+    .replaceAll('Pwsh', 'Bash')
+}
+
+const PROMPT = MODE !== 'record' && process.platform === 'win32'
+  ? windowsShellText(RECORDED_PROMPT)
+  : RECORDED_PROMPT
 
 describe('web e2e: assistant IconActions wait for the turn to end', () => {
   let scaffold: WebScaffold | undefined
@@ -42,6 +74,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
   let tripwire: ReturnType<typeof watchConsole>
   let sessionEvents: SessionEvent[]
   let sidecarDir: string | undefined
+  let replayFixture = FIXTURE
 
   afterEach(async () => {
     // close() carries the fixture-consumption tripwire, so its failure is the
@@ -54,6 +87,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     await closing?.close().catch((error: unknown) => failures.push(error))
     if (sidecarDir !== undefined) await rm(sidecarDir, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
     sidecarDir = undefined
+    replayFixture = FIXTURE
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, 'turn-tail-actions teardown failed')
   })
@@ -61,16 +95,25 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
   /** Boot scaffold + page, materializing the sidecar before the replay row installs. */
   async function launch(buildOverride?: (sidecarHome: string) => ReplayOverrideDoc): Promise<void> {
     sessionEvents = []
+    replayFixture = FIXTURE
     let overridePath: string | undefined
-    if (buildOverride !== undefined) {
+    const needsWindowsFixture = MODE !== 'record' && process.platform === 'win32'
+    if (buildOverride !== undefined || needsWindowsFixture) {
       sidecarDir = await mkdtemp(join(tmpdir(), 'dsh-web-e2e-sidecar-'))
+      if (needsWindowsFixture) {
+        replayFixture = join(sidecarDir, 'session.jsonl')
+        await writeFile(replayFixture, windowsReplayFixture(await readFile(FIXTURE, 'utf8')))
+      }
+    }
+    if (buildOverride !== undefined) {
+      if (sidecarDir === undefined) throw new Error('replay override requires a sidecar directory')
       overridePath = join(sidecarDir, 'replay.override.json')
       await writeFile(overridePath, JSON.stringify(buildOverride(sidecarDir)))
     }
     scaffold = await launchWebScaffold(
       MODE === 'record'
         ? {}
-        : { replayFixture: FIXTURE, ...(overridePath === undefined ? {} : { replayOverride: overridePath }) },
+        : { replayFixture, ...(overridePath === undefined ? {} : { replayOverride: overridePath }) },
     )
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
@@ -100,7 +143,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
   }, 200_000)
 
   it.skipIf(MODE === 'record')('withholds the footer while the turn runs and grants it at turn/end', async () => {
-    expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT])
+    expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([RECORDED_PROMPT])
     let marker = ''
     // Patch the SECOND call: the first one delivers the narration and the tool
     // call as recorded, so the park happens with a durable mid-turn message.
@@ -108,6 +151,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
       marker = join(sidecarHome, '.hang-ready')
       return { patches: [{ at: 1, entry: { kind: 'hang', readyFile: marker } }] }
     })
+    expect(fixtureUserPrompts(await readFile(replayFixture, 'utf8'))).toEqual([PROMPT])
     onTestFailed(() => saveFailureShot(page, 'web-e2e-turn-tail-actions'))
     // The barrier is armed before the park and awaited only after the stop
     // click, so its budget must cover the whole parked phase: marker poll,
@@ -128,7 +172,9 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     await expect.poll(() => copyButtons.count(), { timeout: 10_000 }).toBe(1)
     expect(await page.getByRole('button', { name: 'Branch into a new conversation' }).count()).toBe(0)
     await copyButtons.first().focus()
-    const running = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
+    const running = normalizeShellAria(
+      await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd),
+    )
     await compareOrRefreshGolden(RUNNING_EXPECTED, running, MODE)
 
     // Closing the turn from the park is the state change under test: an
@@ -140,7 +186,9 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     await expect.poll(() => copyButtons.count(), { timeout: 10_000 }).toBe(2)
     await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
     await copyButtons.last().focus()
-    const settledAria = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
+    const settledAria = normalizeShellAria(
+      await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd),
+    )
     await compareOrRefreshGolden(SETTLED_EXPECTED, settledAria, MODE)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])

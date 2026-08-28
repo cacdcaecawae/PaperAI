@@ -56,6 +56,9 @@
     },
     {
       "path": "../../typert/protocol"
+    },
+    {
+      "path": "../../paperai/workbench-service"
     }
   ]
 }

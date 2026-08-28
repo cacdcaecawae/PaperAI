@@ -39,6 +39,33 @@ function stubAgent(ctx: Context, session: Session): Agent {
 }
 
 describe('API Remote Agent resolver races', () => {
+  it('passes the inspected session and resolved route to cold-resume defaults', async () => {
+    const ctx = await createContext()
+    const sessionId = sid('routed-agent-options')
+    const meta = { ...header(sessionId), agentPreset: 'codex' }
+    const inspected = { meta, events: [] as SessionEvent[] }
+    provideSession(ctx, meta, () => Promise.resolve(inspected))
+    const agentOptions = vi.fn(() => ({}))
+    const resume = vi.spyOn(ctx.agents, 'resume').mockImplementation(async () => {
+      const session = ctx.sessions.create(sessionId, { meta: { cwd: '/proj' } })
+      return { agent: stubAgent(ctx, session), dispose: () => Promise.resolve() }
+    })
+
+    const result = await createApiRemoteAgentResolver(ctx, {
+      factoryRoute: () => 'codex',
+      agentOptions,
+    })(sessionId)
+
+    expect(result).toMatchObject({ agent: { id: sessionId } })
+    expect(agentOptions).toHaveBeenCalledWith(inspected, 'codex')
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      resumeSessionId: sessionId,
+      factoryRoute: 'codex',
+      agentOptions: {},
+    }))
+    await ctx.fiber.dispose()
+  })
+
   it('maps an inspected session without a cwd to session-not-found', async () => {
     const ctx = await createContext()
     const sessionId = sid('missing-after-inspect')

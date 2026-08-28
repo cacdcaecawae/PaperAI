@@ -62,6 +62,8 @@ export function uniqueRepoFiles(
  * @param pattern - global regex matched independently against each line.
  * @param normalize - maps raw regex text to the reference the gate evaluates.
  * @param isViolation - returns true when the normalized reference is invalid.
+ * @param transformLine - optional source filter applied before matching while
+ * preserving the original file and line coordinates.
  * @returns every rejected reference in source order.
  */
 export function findReferenceViolations(
@@ -70,6 +72,7 @@ export function findReferenceViolations(
   pattern: RegExp,
   normalize: (raw: string) => string,
   isViolation: (ref: string) => boolean,
+  transformLine?: (line: string) => string,
 ): ReferenceViolation[] {
   const file = relative(root, absPath).split(sep).join('/')
   const out: ReferenceViolation[] = []
@@ -77,7 +80,8 @@ export function findReferenceViolations(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line === undefined) continue
-    for (const match of line.matchAll(pattern)) {
+    const matchable = transformLine?.(line) ?? line
+    for (const match of matchable.matchAll(pattern)) {
       const ref = normalize(match[0])
       if (isViolation(ref)) out.push({ file, line: i + 1, ref })
     }

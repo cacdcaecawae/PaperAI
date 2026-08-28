@@ -100,9 +100,23 @@
    a preset does, which is why the metadata exists. */
 .item {
   display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 280px;
+}
+
+.itemMark {
+  flex: none;
+  margin-top: 2px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.itemCopy {
+  display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: 280px;
+  min-width: 0;
 }
 
 .itemName {

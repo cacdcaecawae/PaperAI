@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "hit-master-thesis",
+  "name": "HIT 硕士毕设",
+  "description": "哈尔滨工业大学硕士学位论文开题、中期和论文书写模板",
+  "version": "provided-snapshot-2026-08-28",
+  "sourceLabel": "哈尔滨工业大学模板（用户提供快照，2026-08-28）",
+  "members": [
+    {
+      "id": "proposal",
+      "name": "硕士学位论文开题报告",
+      "description": "开题报告封面、内容提纲、字数、参考文献和版式要求",
+      "appliesToRoles": ["proposal"],
+      "usage": "form-template",
+      "sourceVersion": "provided-snapshot-2026-08-28",
+      "source": {
+        "file": "proposal-source.doc",
+        "originalFileName": "硕士学位论文开题报告模板.doc",
+        "sha256": "cdce8f9fe41c5b58d97cdb9fc118ca19ec271715435f097364fd07c7e859cc9a",
+        "size": 27167
+      },
+      "normalized": {
+        "file": "proposal.docx",
+        "sha256": "f601039aa2ad99b415fe3835d1b516162d8be898a0f77de392a08bf39bb42ebe",
+        "size": 23506
+      }
+    },
+    {
+      "id": "midterm",
+      "name": "硕士学位论文中期报告",
+      "description": "中期报告封面、进度与研究结果提纲以及版式要求",
+      "appliesToRoles": ["midterm"],
+      "usage": "form-template",
+      "sourceVersion": "provided-snapshot-2026-08-28",
+      "source": {
+        "file": "midterm-source.doc",
+        "originalFileName": "硕士学位论文中期报告模板.doc",
+        "sha256": "f970325a95b50de46c28eda0ce85dcf58ae3e4bbc785251fc290d56621baff52",
+        "size": 44032
+      },
+      "normalized": {
+        "file": "midterm.docx",
+        "sha256": "979a7b110d1090dd565f1d0cce85bd53d694bcde2d4434ca83f1dac44f22d079",
+        "size": 21675
+      }
+    },
+    {
+      "id": "thesis-format",
+      "name": "研究生学位论文书写范例（理工类）",
+      "description": "硕士论文页面、样式、章节结构和示例排版参考，不复制示例正文",
+      "appliesToRoles": ["manuscript"],
+      "usage": "format-reference",
+      "sourceVersion": "provided-snapshot-2026-08-28",
+      "source": {
+        "file": "final-source.doc",
+        "originalFileName": "hit-结题模板.doc",
+        "sha256": "de778801361919ce131cae64963cce19ae2060f0c05467f03ee9fb126820cf6b",
+        "size": 22952448
+      },
+      "normalized": {
+        "file": "final.docx",
+        "sha256": "ce9989a65681cdba00b053e85b0ab2af198109d7c77a247a6cb9eefa647d45da",
+        "size": 13565399
+      }
+    }
+  ]
+}

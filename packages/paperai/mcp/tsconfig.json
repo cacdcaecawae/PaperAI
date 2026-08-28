@@ -1,0 +1,39 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
+      "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../domain"
+    },
+    {
+      "path": "../project-service"
+    },
+    {
+      "path": "../document-service"
+    },
+    {
+      "path": "../template-service"
+    },
+    {
+      "path": "../commit-service"
+    }
+  ]
+}

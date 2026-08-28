@@ -55,4 +55,27 @@ describe('LayoutController', () => {
     expect(stale.toggleSidebar).not.toHaveBeenCalled()
     expect(fresh.toggleSidebar).toHaveBeenCalledTimes(1)
   })
+
+  it('publishes a runtime product profile and restores only the latest one', () => {
+    const service = new LayoutController()
+    const first = service.configure({ detailsDefault: 500, detailsMax: 700 })
+    expect(service.configuration.getSnapshot()).toMatchObject({ detailsDefault: 500, detailsMax: 700 })
+    const second = service.configure({
+      centerMin: 560,
+      detailsMin: 420,
+      detailsDefault: 600,
+      detailsMax: 960,
+      detailsVisibility: 'current-session',
+      detailsNarrowMode: 'focus',
+    })
+    first()
+    expect(service.configuration.getSnapshot()).toMatchObject({ detailsDefault: 600 })
+    second()
+    expect(service.configuration.getSnapshot()).toMatchObject({
+      centerMin: 640,
+      detailsDefault: 360,
+      detailsVisibility: 'nonblank-session',
+    })
+    second()
+  })
 })

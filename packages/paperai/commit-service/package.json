@@ -1,0 +1,51 @@
+{
+  "name": "@paperai/commit-service",
+  "description": "Recoverable FIFO document commits for PaperAI Working DOCX files",
+  "version": "0.1.1-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cacdcaecawae/PaperAI.git",
+    "directory": "packages/paperai/commit-service"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
+    "@paperai/document-engine": "workspace:*",
+    "@paperai/domain": "workspace:*",
+    "@paperai/repository": "workspace:*",
+    "@paperai/template-service": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
+    "@paperai/document-engine": "workspace:*",
+    "@paperai/domain": "workspace:*",
+    "@paperai/repository": "workspace:*"
+  }
+}

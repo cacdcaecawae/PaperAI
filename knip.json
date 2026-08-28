@@ -116,7 +116,26 @@
         "tests/**/*.ts"
       ],
       "ignoreDependencies": [
-        "@deepseek-ai/dsh-api-gateway"
+        "@deepseek-ai/dsh-api-gateway",
+        "@paperai/workbench-service"
+      ]
+    },
+    "packages/bundle/paperai-web": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-storage-sqlite",
+        "@paperai/agent-acp",
+        "@paperai/commit-service",
+        "@paperai/document-engine-officecli",
+        "@paperai/document-service",
+        "@paperai/export-service",
+        "@paperai/mcp",
+        "@paperai/project-service",
+        "@paperai/repository",
+        "@paperai/template-pack-hit",
+        "@paperai/template-service",
+        "@paperai/ui-brand",
+        "@paperai/ui-workbench",
+        "@paperai/workbench-service"
       ]
     },
     "packages/client/ui-primitives": {
@@ -637,7 +656,24 @@
         "tests/**/*.ts"
       ],
       "ignoreDependencies": [
-        "@deepseek-ai/.+"
+        "@deepseek-ai/.+",
+        "@paperai/bundle-web"
+      ]
+    },
+    "packages/paperai/agent-acp": {
+      "ignoreDependencies": [
+        "@agentclientprotocol/claude-agent-acp",
+        "@agentclientprotocol/codex-acp"
+      ]
+    },
+    "packages/paperai/document-engine": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/paperai/workbench-service": {
+      "ignoreDependencies": [
+        "zod"
       ]
     },
     "packages/subagent/subagent-dsh-sdk": {

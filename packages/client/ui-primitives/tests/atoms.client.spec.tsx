@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Button, ConnectionBanner, Input, Menu, Modal, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Button, ConnectionBanner, DetailsViewShell, Input, Menu, Modal, Pill,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import { POINTER_GRACE_MS } from '../src/pointer-grace.ts'
 
 afterEach(cleanup)
@@ -26,6 +28,33 @@ describe('Button', () => {
   it('outline variant renders a bordered cancel-style button', () => {
     render(<Button variant="outline">Cancel</Button>)
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDefined()
+  })
+})
+
+describe('DetailsViewShell', () => {
+  it('shares one accessible details header and tab contract', () => {
+    const close = vi.fn()
+    const select = vi.fn()
+    render(
+      <DetailsViewShell
+        title="Thesis"
+        subtitle="documents/thesis.docx"
+        closeLabel="Close details"
+        onClose={close}
+        tabs={[{ id: 'preview', label: 'Preview' }, { id: 'history', label: 'History' }]}
+        activeTab="preview"
+        onSelectTab={select}
+      >
+        <main>Document body</main>
+      </DetailsViewShell>,
+    )
+    expect(screen.getByRole('tablist', { name: 'Thesis' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'Preview' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'History' }).getAttribute('aria-selected')).toBe('false')
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }))
+    expect(select).toHaveBeenCalledWith('history')
+    fireEvent.click(screen.getByRole('button', { name: 'Close details' }))
+    expect(close).toHaveBeenCalledOnce()
   })
 })
 

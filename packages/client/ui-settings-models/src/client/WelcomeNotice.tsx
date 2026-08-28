@@ -6,6 +6,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WelcomeNoticeState, WelcomeNoticeStore } from './welcome-store.ts'
+import type { ResolvedModelsOnboardingConfig } from '../config.ts'
 import type { en } from './locales.ts'
 import { OnboardingModal } from './OnboardingModal.tsx'
 import css from './WelcomeNotice.module.css'
@@ -15,6 +16,8 @@ export interface WelcomeNoticeInjected {
   hooks: {
     /** Durable or process-local acknowledgement state. */
     welcome: SnapshotStore<WelcomeNoticeState>
+    /** Live product policy controlling this optional step. */
+    policy: SnapshotStore<Readonly<ResolvedModelsOnboardingConfig>>
   }
   /** Welcome acknowledgement controller. */
   controller: WelcomeNoticeStore
@@ -32,8 +35,9 @@ export type WelcomeNoticeProps =
  * @returns the welcome modal or null while the step decides not to show.
  */
 export function WelcomeNotice(props: WelcomeNoticeProps): ReactNode {
-  const { complete, controller, useWelcome, t } = props
+  const { complete, controller, usePolicy, useWelcome, t } = props
   const state = useWelcome(snapshot => snapshot)
+  const policy = usePolicy(snapshot => snapshot)
   const finished = useRef(false)
   const finish = useCallback((): void => {
     if (finished.current) return
@@ -42,14 +46,17 @@ export function WelcomeNotice(props: WelcomeNoticeProps): ReactNode {
   }, [complete])
 
   useEffect(() => {
-    if (state.status === 'idle') void controller.load()
-  }, [controller, state.status])
+    if (policy.welcomeNotice && state.status === 'idle') void controller.load()
+  }, [controller, policy.welcomeNotice, state.status])
 
   useEffect(() => {
-    if (state.acknowledged) finish()
-  }, [finish, state.acknowledged])
+    if (!policy.welcomeNotice || state.acknowledged) finish()
+  }, [finish, policy.welcomeNotice, state.acknowledged])
 
-  if (state.status === 'idle' || state.status === 'loading' || state.acknowledged) return null
+  if (!policy.welcomeNotice
+    || state.status === 'idle'
+    || state.status === 'loading'
+    || state.acknowledged) return null
 
   const acknowledge = async (): Promise<void> => {
     if (await controller.acknowledge()) finish()

@@ -24,7 +24,9 @@ import {
  */
 
 const binScript = fileURLToPath(new URL('../src/bin.ts', import.meta.url))
-const tsxLoader = fileURLToPath(import.meta.resolve('tsx'))
+// `--import` consumes an ESM specifier. Keep the file URL returned by resolve;
+// a Windows drive path would otherwise be parsed as the unsupported `f:` URL scheme.
+const tsxLoader = import.meta.resolve('tsx')
 // Repo root is four levels up from packages/examples/acp-demo/tests.
 const repoTsconfig = fileURLToPath(new URL('../../../../tsconfig.json', import.meta.url))
 
@@ -67,10 +69,19 @@ let workdir: string | undefined
 
 afterEach(async () => {
   if (spawned !== undefined) {
-    spawned.child.kill('SIGKILL')
+    const { child } = spawned
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) => {
+        child.once('exit', () => { resolve() })
+      })
+      child.kill('SIGKILL')
+      await exited
+    }
     spawned = undefined
   }
-  if (workdir !== undefined) await rm(workdir, { recursive: true, force: true })
+  if (workdir !== undefined) {
+    await rm(workdir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+  }
   workdir = undefined
 })
 
@@ -120,10 +131,16 @@ describe('dsh-acp-demo real-load-path smoke (bin + Loader, keyless)', () => {
     const { client, cwd, stderr } = await boot()
     // initialize: a broken export shape (collapsed bridge plugin, dropped inject)
     // crashes the tree on the first service read here — see postmortem 0001.
-    const init = await client.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {},
-    })
+    const init = await (async () => {
+      try {
+        return await client.initialize({
+          protocolVersion: PROTOCOL_VERSION,
+          clientCapabilities: {},
+        })
+      } catch (error) {
+        throw new Error(`ACP demo exited during initialize:\n${stderr.join('')}`, { cause: error })
+      }
+    })()
     expect(init.agentCapabilities).toEqual({
       promptCapabilities: { image: false, audio: false, embeddedContext: false },
     })

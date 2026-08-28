@@ -7,12 +7,15 @@
  * session-aware occupants render in fixed column positions; strict entries
  * gate themselves on current-session availability while session-maybe
  * entries retain identity. Pure component: everything arrives
- * through the three framework shares — zero cordis or framework imports,
+ * through the four derived props shares — zero cordis or framework imports,
  * zero self-made hooks.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type {
+  PropsRenderSlots, PropsRuntime, PropsStore, SnapshotSelectorHook,
+} from '@deepseek-ai/dsh-client-ui-slots'
+import type { ResolvedLayoutConfig } from '../config.ts'
 import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
@@ -22,10 +25,28 @@ export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
+  & AppFrameInjected
+
+/** Validated deployment options injected by the layout registration. */
+interface AppFrameInjected {
+  /** Live deployment/product configuration supplied by ctx.layout. */
+  useLayoutConfiguration: SnapshotSelectorHook<Readonly<ResolvedLayoutConfig>>
+}
 
 /** Center column grid item (session-body building block). */
-function CenterColumn(props: { children?: ReactNode }) {
-  return <div className={css.centerCol}>{props.children}</div>
+function CenterColumn(props: { children?: ReactNode; inactive: boolean }) {
+  // React 18's HTMLAttributes omits the standard inert attribute. A string
+  // spread emits inert="" without treating it as a React boolean attribute.
+  const inertAttribute: Record<string, string> = props.inactive ? { inert: '' } : {}
+  return (
+    <div
+      className={css.centerCol}
+      aria-hidden={props.inactive || undefined}
+      {...inertAttribute}
+    >
+      {props.children}
+    </div>
+  )
 }
 
 /** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
@@ -89,11 +110,15 @@ export function AppFrame({
   useSessions,
   actions,
   renderSlot,
+  useLayoutConfiguration,
 }: AppFrameProps) {
   const panels = useStore(s => s)
+  const configuration = useLayoutConfiguration(value => value)
   const detailsSession = useSessions((s) => {
     const current = s.current
-    return current !== undefined && s.byId[current]?.blank === false ? current : undefined
+    if (current === undefined) return undefined
+    if (configuration.detailsVisibility === 'current-session') return current
+    return s.byId[current]?.blank === false ? current : undefined
   })
   const frameRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(() => window.innerWidth)
@@ -139,7 +164,13 @@ export function AppFrame({
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const cols = computeColumns(viewport, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  const cols = computeColumns(
+    viewport,
+    sidebarPreference,
+    detailsSession === undefined ? 0 : panels.details,
+    configuration,
+    configuration.detailsNarrowMode,
+  )
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -158,8 +189,8 @@ export function AppFrame({
     actions.setSidebar(sidebarBase.current + dx)
   }, [actions])
   const onDetailsDrag = useCallback((dx: number) => {
-    actions.setDetails(detailsBase.current - dx)
-  }, [actions])
+    actions.setDetails(detailsBase.current - dx, configuration)
+  }, [actions, configuration])
 
   return (
     <div
@@ -168,6 +199,7 @@ export function AppFrame({
       style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-details-collapsed={cols.details === 0 || undefined}
+      data-details-focused={cols.detailsFocused || undefined}
       data-dragging={dragging || undefined}
     >
       <div className={css.sidebarCol}>
@@ -187,7 +219,7 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
+        <CenterColumn inactive={cols.detailsFocused}>{renderSlot('conversation', {})}</CenterColumn>
         <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
@@ -195,7 +227,7 @@ export function AppFrame({
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.details > 0 && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {cols.details > 0 && !cols.detailsFocused && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
     </div>
   )
 }

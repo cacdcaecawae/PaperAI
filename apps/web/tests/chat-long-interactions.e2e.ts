@@ -31,11 +31,64 @@ const TARGET_CALL_2 = 'chat-scroll-088-2'
 const CONTINUE_PROMPT = 'CHAT_INTERACTION_CONTINUE Continue from this exact branch point.'
 const CONTINUE_FIRST = 'CHAT_INTERACTION_CONTINUE_FIRST'
 const CONTINUE_DONE = 'CHAT_INTERACTION_CONTINUE_DONE'
-const FIXTURE = createChatScrollFixture({
+const NATIVE_SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
+const TOOL_DISCLOSURE_SELECTOR = process.platform === 'win32'
+  ? '[data-disclosure-row][role="button"]'
+  : '[data-sample="bash"]'
+const SOURCE_FIXTURE = createChatScrollFixture({
   markerPrefix: 'INTERACTION',
   title: 'CHAT_INTERACTION long semantic identity session',
   turns: FIXTURE_TURNS,
 })
+const FIXTURE = {
+  ...SOURCE_FIXTURE,
+  log: process.platform === 'win32'
+    ? windowsShellFixture(SOURCE_FIXTURE.log)
+    : SOURCE_FIXTURE.log,
+}
+
+function windowsShellArguments(serialized: string): string {
+  const value = JSON.parse(serialized) as unknown
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('seeded shell arguments must be a JSON object')
+  }
+  const args = value as Record<string, unknown>
+  if (typeof args.command !== 'string') {
+    throw new Error('seeded shell arguments must carry a command')
+  }
+  const match = /^printf '(.+)\\n'$/.exec(args.command)
+  if (match === null) {
+    throw new Error(`unexpected seeded bash command: ${args.command}`)
+  }
+  return JSON.stringify({
+    ...args,
+    command: `Write-Output '${match[1]!.replaceAll("'", "''")}'`,
+  })
+}
+
+function windowsShellValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(windowsShellValue)
+  if (value === null || typeof value !== 'object') return value
+  const mapped = Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, windowsShellValue(entry)]),
+  )
+  if (mapped.name !== 'bash') return mapped
+  if (typeof mapped.arguments !== 'string') {
+    throw new Error('seeded bash call must carry serialized arguments')
+  }
+  return {
+    ...mapped,
+    name: NATIVE_SHELL_TOOL,
+    arguments: windowsShellArguments(mapped.arguments),
+  }
+}
+
+function windowsShellFixture(fixture: string): string {
+  return fixture.split(/\r?\n/).map((line) => {
+    if (line.length === 0) return line
+    return JSON.stringify(windowsShellValue(JSON.parse(line) as unknown))
+  }).join('\n')
+}
 
 function continuationChunks(): StreamChunk[] {
   const response = `${CONTINUE_FIRST} The fork retained the intended prefix. ${CONTINUE_DONE}.`
@@ -228,8 +281,8 @@ describe('web e2e: long Chat interaction contract', () => {
     ))))
     expect(toolKinds).toEqual(['tool-call', 'tool-call'])
 
-    const summary1 = call1.locator('[data-sample="bash"]')
-    const summary2 = call2.locator('[data-sample="bash"]')
+    const summary1 = call1.locator(TOOL_DISCLOSURE_SELECTOR)
+    const summary2 = call2.locator(TOOL_DISCLOSURE_SELECTOR)
     expect(await summary1.getAttribute('aria-expanded')).toBe('false')
     expect(await summary2.getAttribute('aria-expanded')).toBe('false')
     await summary2.focus()

@@ -1,0 +1,4 @@
+# Claude owns its model/tool loop through ACP. PaperAI domain capabilities are
+# supplied as MCP servers by the host, so this DSH preset intentionally adds no
+# second loop or duplicate tool catalog.
+[]

@@ -14,10 +14,11 @@
 
 import { useEffect, useState } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconAgentPresetOutline16, IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: pulls the ui-conversation SlotMap merge (the hero seat).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from './brand-slot.ts'
 import type { AgentPresetSeatState } from './seat-store.ts'
 import { presetDisplayText } from './locales.ts'
 import css from './AgentPresetSeat.module.css'
@@ -60,6 +61,7 @@ function introStaggerMs(count: number): number {
 /** Full component props. */
 export type AgentPresetSeatProps =
   PropsRuntime<'conversation.hero.agentPreset'>
+  & PropsRenderSlots<'conversation.hero.agentPreset.mark'>
   & PropsLocale<'settings.agentPreset'>
   & InjectFace<AgentPresetSeatInjected>
 
@@ -68,7 +70,9 @@ export type AgentPresetSeatProps =
  * @param props - composed slot props.
  * @returns the chip, or null when the deployment composes no presets.
  */
-export function AgentPresetSeat({ load, select, introduced, useAgentPresetSeat, t }: AgentPresetSeatProps) {
+export function AgentPresetSeat({
+  load, select, introduced, useAgentPresetSeat, renderSlot, t,
+}: AgentPresetSeatProps) {
   const state = useAgentPresetSeat(snapshot => snapshot)
   const [open, setOpen] = useState(false)
 
@@ -137,8 +141,15 @@ export function AgentPresetSeat({ load, select, introduced, useAgentPresetSeat, 
           // preset does, which is why the roster carries display copy.
           label: (
             <span className={css.item}>
-              <span className={css.itemName}>{text.name}</span>
-              <span className={css.itemDesc}>{text.description ?? t('noDescription')}</span>
+              {renderSlot('conversation.hero.agentPreset.mark', {
+                presetId: option.id,
+                size: 16,
+                className: css.itemMark,
+              }, { entryKey: option.id })}
+              <span className={css.itemCopy}>
+                <span className={css.itemName}>{text.name}</span>
+                <span className={css.itemDesc}>{text.description ?? t('noDescription')}</span>
+              </span>
             </span>
           ),
         }
@@ -160,7 +171,19 @@ export function AgentPresetSeat({ load, select, introduced, useAgentPresetSeat, 
           disabled={state.busy}
           onClick={() => { setOpen(value => !value) }}
         >
-          <IconAgentPresetOutline16 className={introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon} />
+          {renderSlot('conversation.hero.agentPreset.mark', {
+            presetId: state.current,
+            size: 16,
+            className: introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon,
+          }, {
+            entryKey: state.current,
+            fallback: (
+              <IconAgentPresetOutline16
+                size={16}
+                className={introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon}
+              />
+            ),
+          })}
           {shownLabel}
           <IconChevronDownOutline14 className={css.chevron} />
         </button>

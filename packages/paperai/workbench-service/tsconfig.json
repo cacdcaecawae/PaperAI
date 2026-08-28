@@ -1,0 +1,25 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../../packages/runtime-diagnostics/invariants" },
+    { "path": "../../../packages/util/brand" },
+    { "path": "../../../packages/core/session" },
+    { "path": "../../../packages/typert/protocol" },
+    { "path": "../../../packages/workspace/workspace" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../commit-service" },
+    { "path": "../document-service" },
+    { "path": "../domain" },
+    { "path": "../export-service" },
+    { "path": "../project-service" },
+    { "path": "../repository" },
+    { "path": "../template-service" }
+  ]
+}

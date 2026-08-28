@@ -29,6 +29,13 @@ function scrollerOf(from: HTMLElement): HTMLElement {
   return (from.closest('[data-conversation-scroll]')) ?? from
 }
 
+/** Editing controls keep native caret/navigation semantics; flow rows use the
+ * conversation scrollport's deterministic paging keys instead. */
+function isEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null
+}
+
 interface PagingAnchor {
   /** Stable node/call identity, independent of boundary-spanning group keys. */
   key: string
@@ -361,6 +368,40 @@ export function ChatView({
     return () => {
       el.removeEventListener('scroll', onScroll)
     }
+  }, [])
+
+  // Chromium delegates PageUp/PageDown/Home/End inconsistently when the
+  // focused flow row is a div-button (notably on Windows). Own those reader
+  // gestures at the actual conversation scrollport so keyboard navigation and
+  // bottom-follow state use the same geometry on every desktop platform.
+  useEffect(() => {
+    const local = listRef.current
+    /* v8 ignore next -- ref-null guard: effect runs after the list node commits. */
+    if (local === null) return
+    const el = scrollerOf(local)
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.defaultPrevented || isEditingTarget(event.target)) return
+      // A focused flow row may be removed while paging long history. Browsers
+      // then retarget the next key to <body>; keep ownership for that neutral
+      // target, but never steal navigation from sidebar/settings controls.
+      if (event.target instanceof Node
+        && event.target !== document.body
+        && event.target !== document.documentElement
+        && !el.contains(event.target)) return
+      const page = Math.max(40, Math.round(el.clientHeight * 0.9))
+      let next: number | undefined
+      switch (event.key) {
+        case 'PageUp': next = el.scrollTop - page; break
+        case 'PageDown': next = el.scrollTop + page; break
+        case 'Home': next = 0; break
+        case 'End': next = el.scrollHeight; break
+        default: return
+      }
+      event.preventDefault()
+      el.scrollTop = next
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [])
 
   // The ref starts null and is assigned every render, so the placeholder

@@ -249,6 +249,34 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('alpha-s')).toBeNull()
   })
 
+  it('renders additive Workspace content only inside an expanded real Workspace', () => {
+    const renderSlot = vi.fn((name: string, owner: object) => name === 'sidebar.workspaces.content'
+      ? <div data-testid="workspace-content">{JSON.stringify(owner)}</div>
+      : null)
+    mount({
+      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha project')])),
+      renderSlot: renderSlot as never,
+    })
+    expect(screen.queryByTestId('workspace-content')).toBeNull()
+
+    fireEvent.click(screen.getByText('Alpha project'))
+    expect(screen.getByTestId('workspace-content').textContent).toBe(JSON.stringify({
+      workspaceId: 'alpha',
+      path: '/projects/alpha',
+      title: 'Alpha project',
+      active: false,
+    }))
+    expect(renderSlot).toHaveBeenCalledWith('sidebar.workspaces.content', {
+      workspaceId: wid('alpha'),
+      path: '/projects/alpha',
+      title: 'Alpha project',
+      active: false,
+    })
+
+    fireEvent.click(screen.getByText('Alpha project'))
+    expect(screen.queryByTestId('workspace-content')).toBeNull()
+  })
+
   it('shows five sessions by default and clears transient show-all when the Workspace collapses', () => {
     const items = Array.from({ length: 7 }, (_, index) => summary(`session-${index + 1}`, 7 - index))
     const b = mount({

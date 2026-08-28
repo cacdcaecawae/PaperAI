@@ -230,6 +230,14 @@
       "@deepseek-ai/dsh-client-ui-settings-plugin-inventory": ["./packages/client/ui-settings-plugin-inventory/src"],
       "@deepseek-ai/dsh-client-locale": ["./packages/client/locale/src"],
       "@deepseek-ai/dsh-client-web": ["./packages/client/web/src"],
+      // PaperAI is an in-repository product layer. Keep source launches and
+      // Cordis config validation independent from previously built lib/ files.
+      "@paperai/ui-brand": ["./packages/client/ui-paperai-brand/src"],
+      "@paperai/ui-workbench": ["./packages/client/ui-paperai-workbench/src"],
+      "@paperai/bundle-web": ["./packages/bundle/paperai-web/src"],
+      "@paperai/*/types": ["./packages/paperai/*/src/types.ts"],
+      "@paperai/*/invariant": ["./packages/paperai/*/src/invariant.ts"],
+      "@paperai/*": ["./packages/paperai/*/src"],
       // sdk/ folders are role-named without their npm-side sdk/jsonrpc prefixes,
       // so the generic wildcard cannot map these three package names.
       "@deepseek-ai/dsh-sdk-client": ["./packages/sdk/client/src"],

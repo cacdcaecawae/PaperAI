@@ -9,6 +9,12 @@
  * declared action set, delivered as the registration's bound actions.
  */
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import {
+  resolveLayoutConfig,
+  type Config,
+  type ResolvedLayoutConfig,
+} from '../config.ts'
 import type { createLayoutStore } from './stores.ts'
 
 /** The layout store's bound action set (framework-baked, draft params peeled). */
@@ -27,11 +33,27 @@ export interface ILayout {
   openDetails(): void
   /** Close the details panel. */
   closeDetails(): void
+  /**
+   * Apply a product-level layout profile without changing the generic DSH
+   * defaults. The returned disposer restores the deployment baseline unless
+   * a newer profile has replaced it.
+   * @param config - product geometry and narrow-layout behavior.
+   * @returns idempotent profile disposer.
+   */
+  configure(config: Config): () => void
 }
 
 /** Cross-plugin panel-action face (ctx.layout). */
 export class LayoutController implements ILayout {
   #panels: PanelActions | undefined
+  #configurationGeneration = 0
+  /** Effective deployment/product layout configuration observed by the root frame. */
+  readonly configuration: SnapshotStore<Readonly<ResolvedLayoutConfig>>
+
+  /** Deployment baseline and live product-profile source. */
+  constructor(private readonly baseline: Readonly<ResolvedLayoutConfig> = resolveLayoutConfig()) {
+    this.configuration = createSnapshotStore(baseline)
+  }
 
   /**
    * Adopt the root entry's bound store actions. Called from the root
@@ -51,12 +73,27 @@ export class LayoutController implements ILayout {
 
   /** Open the details panel (no-op when already open). */
   openDetails(): void {
-    this.#require().openDetails()
+    this.#require().openDetails(this.configuration.getSnapshot())
   }
 
   /** Close the details panel. */
   closeDetails(): void {
     this.#require().closeDetails()
+  }
+
+  /** Apply one runtime product profile and return its stale-safe disposer. */
+  configure(config: Config): () => void {
+    const resolved = resolveLayoutConfig({ ...this.baseline, ...config })
+    const generation = ++this.#configurationGeneration
+    this.configuration.set(resolved)
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      if (generation !== this.#configurationGeneration) return
+      this.#configurationGeneration++
+      this.configuration.set(this.baseline)
+    }
   }
 
   #require(): PanelActions {

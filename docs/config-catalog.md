@@ -436,6 +436,58 @@ export interface Config {
 
 Source: [`packages/client/hmr/src/index.ts:31`](../packages/client/hmr/src/index.ts)
 
+<a id="deepseek-aidsh-client-ui-layout"></a>
+
+## `@deepseek-ai/dsh-client-ui-layout`
+
+```ts config-catalog
+/** Deployment-controlled layout options. Omitted fields preserve DSH layout behavior. */
+export interface Config {
+  /** Center-column floor in integer CSS pixels. */
+  centerMin?: number
+  /** Details-column drag floor in integer CSS pixels. */
+  detailsMin?: number
+  /** Width used when opening a closed details column, in integer CSS pixels. */
+  detailsDefault?: number
+  /** Details-column drag ceiling in integer CSS pixels. */
+  detailsMax?: number
+  /** Session eligibility for retaining an open details column. */
+  detailsVisibility?: DetailsVisibility
+  /** Narrow-layout behavior for an open details column. */
+  detailsNarrowMode?: DetailsNarrowMode
+}
+
+/** Session states that may retain an open details column. */
+export type DetailsVisibility = 'nonblank-session' | 'current-session'
+
+/** Behavior when an open details column cannot coexist with both split-view minimums. */
+export type DetailsNarrowMode = 'close' | 'focus'
+```
+
+Source: [`packages/client/ui-layout/src/config.ts:23`](../packages/client/ui-layout/src/config.ts)
+
+<a id="deepseek-aidsh-client-ui-settings-models"></a>
+
+## `@deepseek-ai/dsh-client-ui-settings-models`
+
+```ts config-catalog
+/** Models settings plugin configuration. */
+export interface Config {
+  /** First-run dialogs; the Models settings page remains available when both are disabled. */
+  onboarding?: ModelsOnboardingConfig
+}
+
+/** Optional onboarding steps contributed by the Models settings plugin. */
+export interface ModelsOnboardingConfig {
+  /** Show the versioned DSH welcome notice. Defaults to true. */
+  welcomeNotice?: boolean
+  /** Prompt for an official DeepSeek credential when no LLM route is usable. Defaults to true. */
+  deepSeekCredential?: boolean
+}
+```
+
+Source: [`packages/client/ui-settings-models/src/config.ts:12`](../packages/client/ui-settings-models/src/config.ts)
+
 <a id="deepseek-aidsh-code-runtime-worker-thread"></a>
 
 ## `@deepseek-ai/dsh-code-runtime-worker-thread`
@@ -3218,6 +3270,178 @@ export interface Config {
 
 Source: [`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages/workflow/workflow-worker-thread/src/index.ts)
 
+<a id="paperaiagent-acp"></a>
+
+## `@paperai/agent-acp`
+
+Requires: `agents` · `sessions` · `subprocess` · `paperMcp`
+
+```ts config-catalog
+/** PaperAI ACP Agent plugin configuration. */
+export interface Config {
+  /** Local Codex ACP launch overrides. */
+  readonly codex?: AcpProviderConfig
+  /** Local Claude ACP launch overrides. */
+  readonly claude?: AcpProviderConfig
+}
+
+/** Optional launch override for one pinned local ACP adapter. */
+export interface AcpProviderConfig {
+  /** Executable override; defaults to the pinned adapter's discovered binary. */
+  readonly command?: string
+  /** Additional command-line arguments passed to the local ACP adapter. */
+  readonly args?: string[]
+  /** Provider-specific environment additions; values stay secret on wire surfaces. */
+  readonly env?: Record<string, string>
+  /** Optional provider credential injected only into the adapter process. */
+  readonly apiKey?: string
+  /** Optional provider API endpoint override consumed by the adapter. */
+  readonly baseURL?: string
+}
+```
+
+Source: [`packages/paperai/agent-acp/src/index.ts:49`](../packages/paperai/agent-acp/src/index.ts)
+
+<a id="paperaidocument-engine-officecli"></a>
+
+## `@paperai/document-engine-officecli`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** Provider configuration; every deployment-sensitive limit is explicit. */
+export interface Config {
+  /** Explicit OfficeCLI executable; omitting it uses the pinned npm package. */
+  command?: string
+  /** Positive per-command deadline. */
+  timeoutMs?: number
+  /** Positive in-memory cap for each output stream. */
+  outputMaxBytes?: number
+  /** Positive TERM-to-KILL grace delegated to the subprocess Provider. */
+  terminateGraceMs?: number
+  /** Positive independent deadline for closing a resident document after an operation. */
+  cleanupTimeoutMs?: number
+  /** PowerShell executable for Word COM conversion; false or an empty string disables legacy `.doc` import. */
+  legacyDocPowerShellCommand?: string | false
+  /** Positive deadline for one legacy `.doc` conversion. */
+  legacyDocTimeoutMs?: number
+  /** Positive in-memory cap for each legacy converter output stream. */
+  legacyDocOutputMaxBytes?: number
+  /** Positive TERM-to-KILL grace for the legacy converter process tree. */
+  legacyDocTerminateGraceMs?: number
+}
+```
+
+Source: [`packages/paperai/document-engine-officecli/src/index.ts:43`](../packages/paperai/document-engine-officecli/src/index.ts)
+
+<a id="paperaiexport-service"></a>
+
+## `@paperai/export-service`
+
+Requires: `paperCommits` · `paperMcp` · `paperTemplates`
+
+```ts config-catalog
+/** Export-service deployment limits and publication policy. */
+export interface Config {
+  /** Maximum immutable snapshot size accepted for one export. */
+  readonly maxExportBytes?: number
+  /** Whether an explicitly selected existing regular DOCX may be replaced. */
+  readonly overwriteExisting?: boolean
+}
+```
+
+Source: [`packages/paperai/export-service/src/index.ts:65`](../packages/paperai/export-service/src/index.ts)
+
+<a id="paperaimcp"></a>
+
+## `@paperai/mcp`
+
+Requires: `webServer` · `paperProjects` · `paperDocuments` · `paperTemplates` · `paperCommits`
+
+```ts config-catalog
+/** PaperAI MCP route and model-facing result bounds. */
+export interface Config {
+  /** Exact DSH WebServer path used by Streamable HTTP MCP. */
+  routePath?: string
+  /** MCP descriptor name shown to local Agents. */
+  serverName?: string
+  /** Default semantic nodes returned by one read call. */
+  defaultNodesPerRead?: number
+  /** Maximum semantic nodes returned by one read call. */
+  maxNodesPerRead?: number
+  /** Maximum ordered mutations accepted by one document commit. */
+  maxMutationsPerCommit?: number
+}
+```
+
+Source: [`packages/paperai/mcp/src/index.ts:48`](../packages/paperai/mcp/src/index.ts)
+
+<a id="paperaiproject-service"></a>
+
+## `@paperai/project-service`
+
+Requires: `workspaceRegistry` · `paperRepository`
+
+```ts config-catalog
+/** Project-service deployment settings. */
+export interface Config {
+  /** Git executable name or absolute path. */
+  gitCommand?: string
+  /** Initial branch for a repository created by PaperAI. */
+  gitInitialBranch?: string
+  /** Positive deadline for each Git command. */
+  gitTimeoutMs?: number
+  /** Positive in-memory cap for each Git output stream. */
+  gitOutputMaxBytes?: number
+  /** Positive Git process-tree termination grace. */
+  gitTerminateGraceMs?: number
+}
+```
+
+Source: [`packages/paperai/project-service/src/index.ts:40`](../packages/paperai/project-service/src/index.ts)
+
+<a id="paperaitemplate-service"></a>
+
+## `@paperai/template-service`
+
+Requires: `paperRepository` · `documentEngine` · `subprocess`
+
+```ts config-catalog
+/** Template service deployment configuration. */
+export interface Config {
+  /** Absolute root for content-addressed template source and inspection copies. */
+  readonly storageRoot: string
+  /** Maximum accepted source or normalized asset size. */
+  readonly maxUploadBytes?: number
+  /** Deadline for a legacy `.doc` to DOCX conversion. */
+  readonly converterTimeoutMs?: number
+  /** Per-stream output cap for the legacy converter. */
+  readonly converterOutputMaxBytes?: number
+  /** TERM-to-KILL grace for the legacy converter process tree. */
+  readonly converterTerminateGraceMs?: number
+  /** Windows PowerShell executable used for Word COM conversion; empty disables `.doc` upload. */
+  readonly wordComPowerShellCommand?: string
+}
+```
+
+Source: [`packages/paperai/template-service/src/index.ts:80`](../packages/paperai/template-service/src/index.ts)
+
+<a id="paperaiworkbench-service"></a>
+
+## `@paperai/workbench-service`
+
+Requires: `workspaceRegistry` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
+
+```ts config-catalog
+/** Workbench upload policy. */
+export interface Config {
+  /** Maximum decoded bytes accepted from one browser Word upload. */
+  readonly maxUploadBytes?: number
+}
+```
+
+Source: [`packages/paperai/workbench-service/src/index.ts:309`](../packages/paperai/workbench-service/src/index.ts)
+
 ## Loadable plugins with no config
 
 These load from a `cordis.yml` entry with no `config:` block; they declare no configuration API.
@@ -3241,7 +3465,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-goal` ([`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
-- `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-model-selection` ([`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-permission-presets` ([`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts))
@@ -3250,7 +3473,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-renderer` ([`packages/client/ui-renderer/src/index.ts`](../packages/client/ui-renderer/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-settings` ([`packages/client/ui-settings/src/index.ts`](../packages/client/ui-settings/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-settings-general` ([`packages/client/ui-settings-general/src/index.ts`](../packages/client/ui-settings-general/src/index.ts))
-- `@deepseek-ai/dsh-client-ui-settings-models` ([`packages/client/ui-settings-models/src/index.ts`](../packages/client/ui-settings-models/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-settings-plugin-inventory` ([`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-settings-plugins` ([`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-sidebar` ([`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts))
@@ -3292,6 +3514,12 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
+- `@paperai/commit-service` — requires `paperRepository` · `documentEngine` · `paperDocuments` · `paperTemplates` ([`packages/paperai/commit-service/src/index.ts`](../packages/paperai/commit-service/src/index.ts))
+- `@paperai/document-service` — requires `paperRepository` · `documentEngine` ([`packages/paperai/document-service/src/index.ts`](../packages/paperai/document-service/src/index.ts))
+- `@paperai/repository` — requires `storageDomain` ([`packages/paperai/repository/src/index.ts`](../packages/paperai/repository/src/index.ts))
+- `@paperai/template-pack-hit` — requires `paperTemplates` ([`packages/paperai/template-pack-hit/src/index.ts`](../packages/paperai/template-pack-hit/src/index.ts))
+- `@paperai/ui-brand` ([`packages/client/ui-paperai-brand/src/index.ts`](../packages/client/ui-paperai-brand/src/index.ts))
+- `@paperai/ui-workbench` ([`packages/client/ui-paperai-workbench/src/index.ts`](../packages/client/ui-paperai-workbench/src/index.ts))
 
 ## Seam packages (not directly loadable)
 
@@ -3313,6 +3541,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-spill` — abstract `SpillStore` ([`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts))
 - `@deepseek-ai/dsh-subprocess` — abstract `SubprocessRuntime` ([`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts))
 - `@deepseek-ai/dsh-workflow` — abstract `WorkflowEngine` ([`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts))
+- `@paperai/document-engine` — abstract `DocumentEngine` ([`packages/paperai/document-engine/src/index.ts`](../packages/paperai/document-engine/src/index.ts))
 
 ## Library packages (no plugin entry)
 
@@ -3350,3 +3579,5 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-typert-generator` ([`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts))
 - `@deepseek-ai/dsh-typert-protocol` ([`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts))
 - `@deepseek-ai/dsh-typert-registry` ([`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts))
+- `@paperai/bundle-web` ([`packages/bundle/paperai-web/src/index.ts`](../packages/bundle/paperai-web/src/index.ts))
+- `@paperai/domain` ([`packages/paperai/domain/src/index.ts`](../packages/paperai/domain/src/index.ts))

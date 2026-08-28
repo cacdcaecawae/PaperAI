@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { join } from 'node:path'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import {
@@ -49,6 +49,16 @@ describe('web e2e: settings modal and General preferences', () => {
   afterAll(async () => {
     await browser?.close()
     await scaffold?.close()
+  })
+
+  afterEach(async () => {
+    // Keep one failed settings assertion from leaving its modal mask over the
+    // shared page and turning every later scenario into a pointer-interception
+    // cascade. Nested confirmations close before the owning settings dialog.
+    for (let depth = 0; depth < 3 && await page.getByRole('dialog').count() > 0; depth += 1) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(50)
+    }
   })
 
   it('opens the settings dialog, switches sections, and closes by every path', async () => {
@@ -186,7 +196,15 @@ describe('web e2e: settings modal and General preferences', () => {
     await page.getByRole('button', { name: '设置', exact: true }).click()
     const initialDialog = page.getByRole('dialog', { name: '设置' })
     const darkCube = initialDialog.getByRole('button', { name: '深色' })
+    const persisted = page.waitForResponse((response) => {
+      if (response.request().method() !== 'POST') return false
+      if (new URL(response.url()).pathname !== '/api/settings.mutate') return false
+      const request = response.request().postDataJSON() as { payload?: { ns?: unknown } }
+      return request.payload?.ns === 'ui-theme'
+    }, { timeout: 10_000 })
     await darkCube.click()
+    const persistedBody = await (await persisted).json() as { result?: { ok?: unknown } }
+    expect(persistedBody.result?.ok).toBe(true)
     await expect.poll(() => darkCube.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true')
     await expect.poll(async () => readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8'), { timeout: 5_000 })
       .toMatch(/ui-theme:\n\s+preference: dark/)

@@ -766,13 +766,15 @@ export function fixtureUserPrompts(fixtureText: string): string[] {
  * @returns the realized fixture text.
  */
 export function realizeSeedFixture(scaffold: WebScaffold, fixtureText: string, id: string): string {
+  const jsonStringContent = (value: string): string => JSON.stringify(value).slice(1, -1)
+  const workspaceCwd = jsonStringContent(scaffold.workspaceCwd)
   const realized = fixtureText
-    .split('{{sessionId}}').join(id)
-    .split('{{cwd}}').join(scaffold.workspaceCwd)
+    .split('{{sessionId}}').join(jsonStringContent(id))
+    .split('{{cwd}}').join(workspaceCwd)
   const fixtureCwd = (JSON.parse(realized.split('\n', 1)[0]!) as { cwd?: string }).cwd
   return fixtureCwd === undefined
     ? realized
-    : realized.split(fixtureCwd).join(scaffold.workspaceCwd)
+    : realized.split(jsonStringContent(fixtureCwd)).join(workspaceCwd)
 }
 
 /**
@@ -894,10 +896,22 @@ async function persistSeedSession(
  */
 function normalizeAria(snapshot: string, workspaceCwd: string): string {
   // The session heading renders the workspace's basename, not the full
-  // path, so both spellings must collapse to the token.
-  const base = workspaceCwd.split('/').pop()!
-  return snapshot
-    .split(workspaceCwd).join('{{cwd}}')
+  // path, so both spellings must collapse to the token. Playwright's YAML
+  // serializer escapes Windows separators inside quoted names, while some
+  // UI surfaces normalize the same path to forward slashes. Replace every
+  // representation before replacing the basename so snapshots remain
+  // portable between Windows and POSIX hosts.
+  const base = workspaceCwd.split(/[\\/]/).pop()!
+  const cwdSpellings = [
+    workspaceCwd,
+    workspaceCwd.replace(/\\/g, '/'),
+    workspaceCwd.replace(/\\/g, '\\\\'),
+  ].filter((value, index, values) => value.length > 0 && values.indexOf(value) === index)
+  let normalized = snapshot
+  for (const spelling of cwdSpellings.sort((left, right) => right.length - left.length)) {
+    normalized = normalized.split(spelling).join('{{cwd}}')
+  }
+  return normalized
     .split(base).join('{{workspace}}')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '{{uuid}}')
     // The optional space in `\d+m ?\d+s` covers both minute spellings: the

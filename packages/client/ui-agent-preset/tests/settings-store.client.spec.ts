@@ -287,6 +287,26 @@ describe('the new-session chip controller', () => {
     ])
   })
 
+  it('reconciles a late current session instead of displaying the wrong default', async () => {
+    const current: { session: SeatSessionSummary | undefined } = { session: undefined }
+    const api = {
+      agentPresets: {
+        list: () => Promise.resolve({
+          rpcId: 'r',
+          result: { ok: true as const, value: { presets: ROSTER } },
+        }),
+      },
+    } as unknown as IApiClient
+    const controller = new AgentPresetSeatController(api, () => current.session)
+    await controller.load()
+    expect(controller.store.getSnapshot().current).toBe('standard')
+
+    current.session = { id: 'late', blank: true, agentPreset: 'minimal' } as SeatSessionSummary
+    controller.syncCurrentSession()
+
+    expect(controller.store.getSnapshot().current).toBe('minimal')
+  })
+
   it('shows the first preset when the roster marks none default', async () => {
     const controller = chip([{ id: 'minimal', trust: 'system', isDefault: false }], undefined)
 

@@ -61,12 +61,16 @@ export interface AgentPresetsApi {
   Promise<RpcResponse<{ presets: readonly AgentPresetEntry[]; authorable: boolean; hasDocument: boolean }>>
 
   /**
-   * Recompose one session's agent from a different preset.
+   * Switch one session's Agent to a different preset.
    *
    * Allowed only while the session is blank — no turn has run. Once a
    * conversation starts, its history was produced under that preset's tools,
    * and swapping them would leave logged tool calls the new composition cannot
-   * make; the attempt answers `agent-preset-locked`.
+   * make; the attempt answers `agent-preset-locked`. A preset on the same
+   * factory route recomposes the live scope. A preset on another route
+   * checkpoints the Session and replaces the idle Agent by resuming that
+   * identity through the target factory; replacement failure restores the
+   * recorded route and composition.
    */
   select(request: RpcRequest<{ sessionId: SessionId; agentPreset: string }>):
   Promise<RpcResponse<{ agentPreset: string }>>

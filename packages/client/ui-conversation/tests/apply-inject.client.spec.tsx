@@ -22,7 +22,7 @@ import type { ISession, SessionId } from '@deepseek-ai/dsh-client-runtime/client
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
   ChatViewInjected, ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
-  ConversationSessionInjected, DetailsInjected,
+  ConversationSessionInjected, DetailsHostInjected,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { createChatStore } from '../src/client/stores.ts'
 
@@ -347,11 +347,12 @@ describe('conversation slot inject API', () => {
 })
 
 describe('details inject API', () => {
-  it('details injects the one layout callback; selection rides the shared store instead', async () => {
+  it('details injects the active-view source and close callback; selection rides the shared store', async () => {
     const b = await bench()
     const entry = b.entryOf('details')
-    const injected = (entry.inject as unknown as () => DetailsInjected)()
-    expect(Object.keys(injected)).toEqual(['closeDetails'])
+    const injected = (entry.inject as unknown as (sessionId: SessionId) => DetailsHostInjected)(ROOT)
+    expect(Object.keys(injected)).toEqual(['closeDetails', 'hooks'])
+    expect(injected.hooks.detailsView.getSnapshot()).toBe('tool')
     injected.closeDetails()
     expect(b.layoutFake.closeDetails).toHaveBeenCalledTimes(1)
     // The shared handle: details resolves the SAME instance conversation writes.

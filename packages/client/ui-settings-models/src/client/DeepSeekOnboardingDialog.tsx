@@ -12,6 +12,7 @@ import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelsSettingsState, ModelsSettingsStore } from './store.ts'
+import type { ResolvedModelsOnboardingConfig } from '../config.ts'
 import { onboardingReadiness } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import { ProviderEditor } from './ProviderEditor.tsx'
@@ -24,6 +25,8 @@ export interface DeepSeekOnboardingInjected {
   hooks: {
     /** Shared Models-page join state, bound by the slot renderer. */
     models: SnapshotStore<ModelsSettingsState>
+    /** Live product policy controlling this optional step. */
+    policy: SnapshotStore<Readonly<ResolvedModelsOnboardingConfig>>
   }
   /** Shared Models-page join controller. */
   controller: ModelsSettingsStore
@@ -51,21 +54,25 @@ function assertNever(_value: never): never {
  * @returns the onboarding modal or null when onboarding needs no intervention.
  */
 export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): ReactNode {
-  const { complete, controller, useModels, api, schema, t } = props
+  const { complete, controller, useModels, usePolicy, api, schema, t } = props
   const state = useModels(snapshot => snapshot)
+  const policy = usePolicy(snapshot => snapshot)
   const readiness = onboardingReadiness(state)
 
   useEffect(() => {
-    if (state.status === 'idle') void controller.load()
-  }, [controller, state.status])
+    if (policy.deepSeekCredential && state.status === 'idle') void controller.load()
+  }, [controller, policy.deepSeekCredential, state.status])
 
   useEffect(() => {
     if (
-      readiness.kind === 'adapter-absent'
+      !policy.deepSeekCredential
+      || readiness.kind === 'adapter-absent'
       || readiness.kind === 'provider-ready'
       || readiness.kind === 'unavailable'
     ) complete()
-  }, [complete, readiness.kind])
+  }, [complete, policy.deepSeekCredential, readiness.kind])
+
+  if (!policy.deepSeekCredential) return null
 
   switch (readiness.kind) {
     case 'loading':

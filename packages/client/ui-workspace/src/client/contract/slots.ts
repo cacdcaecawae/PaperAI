@@ -53,11 +53,34 @@ export interface DirectoryFlowOwnerProps {
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /**
+     * Additive content rendered directly below one expanded Workspace row.
+     * The owner supplies stable Workspace identity and path facts; occupants
+     * own their resource tree, loading state, and row actions. Entries render
+     * by ascending `order` and disappear with the Workspace browser entry.
+     */
+    'sidebar.workspaces.content': {
+      kind: 'list'
+      scope: 'root'
+      owner: WorkspaceContentOwnerProps
+    }
     /** Directory-flow hole under the conversation empty-state picker (declared by the WorkspacePicker entry). */
     'conversation.hero.workspace.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
     /** Directory-flow hole under the sidebar browsing region (declared by the WorkspaceBrowser entry). */
     'sidebar.workspaces.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
   }
+}
+
+/** Stable Workspace facts supplied to additive resource-tree occupants. */
+export interface WorkspaceContentOwnerProps {
+  /** Host Workspace identity. */
+  workspaceId: WorkspaceId
+  /** Canonical Host path represented by this Workspace. */
+  path: string
+  /** Current display title. */
+  title: string
+  /** Whether this Workspace contains the selected Session. */
+  active: boolean
 }
 
 /** The two directory-flow holes; a flow package's client half registers its one component into both. */
@@ -142,7 +165,7 @@ export type WorkspaceBrowserInjected = {
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
 export type WorkspaceBrowserProps =
   PropsRuntime<'sidebar.workspaces'>
-  & PropsRenderSlots<'sidebar.workspaces.directoryFlow'>
+  & PropsRenderSlots<'sidebar.workspaces.content' | 'sidebar.workspaces.directoryFlow'>
   & PropsStore<ReturnType<typeof createWorkspaceViewStore>>
   & Omit<WorkspaceBrowserInjected, 'hooks'>
   & PropsHooks<WorkspaceBrowserInjected['hooks']>

@@ -81,6 +81,14 @@ export interface CreateAgentOptions {
   /** The live agent/session identity. */
   readonly sessionId: SessionId
   /**
+   * Optional exact factory route. Omission uses the default factory registered
+   * through {@link AgentRegistry.setFactory}; a present route must have been
+   * registered through {@link AgentRegistry.registerFactory} and never falls
+   * back to the default. Hosts use this for peer top-level drivers whose
+   * session composition is still described by an Agent preset.
+   */
+  readonly factoryRoute?: string
+  /**
    * Session creation metadata: validated absolute `cwd`, `parentSession`
    * fork lineage, the `seedLength` seed boundary, the coarse `origin`
    * classification, and the `delegationDepth` recursion budget. Mirrors the
@@ -139,6 +147,8 @@ export interface CreateAgentOptions {
 export interface ResumeAgentOptions {
   /** The persisted session id to load and use as the live agent/session identity. */
   readonly resumeSessionId: SessionId
+  /** Exact factory route used to drive the persisted session; omission uses the default factory. */
+  readonly factoryRoute?: string
   /** Per-agent options (model, …). */
   readonly agentOptions?: AgentOptions
   /** Optional creation-only cancellation signal for persistence load/setup; detached before return. */
@@ -158,20 +168,38 @@ export interface ResumeAgentOptions {
 /**
  * An owned agent plus its disposer, returned by {@link AgentRegistry.create} /
  * {@link AgentRegistry.resume}. The disposer is a CAPABILITY: among consumers,
- * only the holder can tear this agent down. The registered factory provider is
+ * only the holder can tear this agent down. The registry retains factory API
+ * handles internally only so {@link AgentRegistry.recreate} can perform an
+ * explicit persisted-session replacement. The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
  * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes
  * its session from the store, and finally unwinds its scoped world.
  *
  * `ctx.agents.get(id)` still returns a bare {@link Agent} — the handle is
- * exposed only to the consumer owner that created it; the structural provider
- * reaches the same teardown internally. Config-created agents (the loop's own
- * startup) are owned by the loop fiber and never need a handle.
+ * exposed only to the consumer owner that created it; the registry and
+ * structural provider reach the same teardown internally. Config-created
+ * agents (the loop's own startup) are owned by the loop fiber and never need a
+ * handle.
  */
 export interface AgentHandle {
   agent: Agent
   dispose(): Promise<void>
+}
+
+/**
+ * One persisted-agent replacement with an explicit recovery route.
+ * Both resume requests must address {@link current}; the registry stops the
+ * current handle before starting `replacement`, and resumes `rollback` if the
+ * replacement fails.
+ */
+export interface RecreateAgentOptions {
+  /** Exact live Agent whose registry-created handle may be replaced. */
+  readonly current: Agent
+  /** Resume request for the new driver and scoped composition. */
+  readonly replacement: ResumeAgentOptions
+  /** Resume request that restores the current driver and composition. */
+  readonly rollback: ResumeAgentOptions
 }
 
 /**
@@ -218,6 +246,15 @@ const NO_FACTORY_MESSAGE = 'no agent factory registered (load an agent-loop plug
 const NO_INITIATOR_MESSAGE = 'no initiating agent is active'
 const DISPOSED_INITIATOR_MESSAGE = 'agent initiator scope is disposed'
 
+/**
+ * Preserve the exact Cordis disposer while exposing the registry's historical
+ * fire-and-forget callback contract. Callers that own a fiber do not await this
+ * function; Cordis itself still observes and drains its returned Promise.
+ */
+function asVoidDisposer(dispose: () => unknown): () => void {
+  return dispose
+}
+
 /** All mutable lifecycle state for one exact registry entry. */
 interface AgentEntry {
   readonly id: SessionId
@@ -241,6 +278,13 @@ interface FactorySlot {
   readonly target: AgentFactory
 }
 
+/** Registry-retained ownership needed to replace one exact live factory Agent. */
+interface FactoryHandleSlot {
+  readonly agent: Agent
+  readonly handle: AgentHandle
+  readonly factoryRoute: string | undefined
+}
+
 /**
  * Agent service (`ctx.agents`): tracks live agents and carries the initiating
  * Agent through one process-local asynchronous driver chain. Agent *creation*
@@ -256,6 +300,8 @@ interface FactorySlot {
 export class AgentRegistry extends Service {
   private store = new Map<SessionId, AgentEntry>()
   private factory: FactorySlot | undefined
+  private readonly routedFactories = new Map<string, FactorySlot>()
+  private readonly factoryHandles = new Map<SessionId, FactoryHandleSlot>()
   private readonly initiators = new AsyncLocalStorage<Agent | undefined>()
   private readonly initiatorRuns = new AsyncLocalStorage<InitiatorRun>()
   private initiatorState: 'active' | 'closing' | 'disposed' = 'active'
@@ -383,12 +429,61 @@ export class AgentRegistry extends Service {
     // caller's composite effect can yield it for in-order teardown; the
     // loop's constructor effect returns it directly, identity-nesting the
     // registration under that effect.
-    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous cleanup; direct return preserves disposer identity
-    return dispose
+    return asVoidDisposer(dispose)
+  }
+
+  /**
+   * Register one named Agent factory beside the default loop factory.
+   * Routes are exact and effect-scoped: requesting an absent route fails
+   * instead of changing the session's driver by falling back to the default.
+   * @param route - stable non-empty route named by the owning Host composition.
+   * @param factory - factory that creates and resumes Agents on this route.
+   * @returns the exact Cordis effect disposer for the registration.
+   */
+  registerFactory(route: string, factory: AgentFactory): () => void {
+    const key = route.trim()
+    if (key === '') throw new TypeError('agent factory route must be a non-empty string')
+    const dispose = this.ctx.effect(() => {
+      if (this.routedFactories.has(key)) {
+        throw new Error(`agent factory route "${key}" is already registered`)
+      }
+      const target = (factory as AgentFactory & { [symbols.original]?: AgentFactory })[symbols.original] ?? factory
+      const slot = { target }
+      this.routedFactories.set(key, slot)
+      return () => {
+        if (this.routedFactories.get(key) === slot) this.routedFactories.delete(key)
+      }
+    }, `agents.registerFactory(${key})`)
+    return asVoidDisposer(dispose)
+  }
+
+  /**
+   * Test whether one exact named factory route is currently available.
+   * @param route - exact route to inspect.
+   * @returns whether a factory is registered for that route.
+   */
+  hasFactoryRoute(route: string): boolean {
+    return this.routedFactories.has(route)
+  }
+
+  /**
+   * Read the factory route that created one exact live Agent. `undefined`
+   * identifies the default factory, not an unknown route.
+   * @param agent - exact live Agent returned by this registry's factory API.
+   * @returns its named route, or `undefined` for the default factory.
+   * @throws when the Agent is stale or was registered without a factory handle.
+   */
+  factoryRouteFor(agent: Agent): string | undefined {
+    return this.requireFactoryHandle(agent).factoryRoute
   }
 
   /** Return the active creation factory. */
-  private requireFactory(): FactorySlot {
+  private requireFactory(route?: string): FactorySlot {
+    if (route !== undefined) {
+      const routed = this.routedFactories.get(route)
+      if (routed === undefined) throw new Error(`no agent factory registered for route "${route}"`)
+      return routed
+    }
     if (this.factory === undefined) throw new Error(NO_FACTORY_MESSAGE)
     return this.factory
   }
@@ -408,10 +503,11 @@ export class AgentRegistry extends Service {
     // explicitly. This preserves AgentLoop's dependency origin while binding
     // its effects to ownerCtx; plain factories receive ownerCtx as an explicit
     // capability and need no Cordis tracker magic.
-    const { target } = this.requireFactory()
+    const { target } = this.requireFactory(options.factoryRoute)
     const receiver = getTraceable(ownerCtx, target)
-    // oxlint-disable-next-line typescript/unbound-method -- Reflect.apply intentionally supplies the caller-traced receiver
-    return Reflect.apply(target.createAgent, receiver, [ownerCtx, options])
+    const createAgent = Reflect.get(target, 'createAgent')
+    const handle: AgentHandle = await Reflect.apply(createAgent, receiver, [ownerCtx, options])
+    return this.retainFactoryHandle(handle, options.factoryRoute)
   }
 
   /**
@@ -423,10 +519,70 @@ export class AgentRegistry extends Service {
    */
   async resume(options: ResumeAgentOptions): Promise<AgentHandle> {
     const ownerCtx = this.ctx
-    const { target } = this.requireFactory()
+    const { target } = this.requireFactory(options.factoryRoute)
     const receiver = getTraceable(ownerCtx, target)
-    // oxlint-disable-next-line typescript/unbound-method -- Reflect.apply intentionally supplies the caller-traced receiver
-    return Reflect.apply(target.resume, receiver, [ownerCtx, options])
+    const resume = Reflect.get(target, 'resume')
+    const handle: AgentHandle = await Reflect.apply(resume, receiver, [ownerCtx, options])
+    return this.retainFactoryHandle(handle, options.factoryRoute)
+  }
+
+  /**
+   * Replace one idle, persisted Agent with another factory driver under the
+   * same session id. Both routes are validated before teardown. Replacement
+   * failure resumes the supplied rollback composition before the original
+   * error is rethrown; failure of both attempts rejects with both causes.
+   * @param options - current Agent plus replacement and rollback resume requests.
+   * @returns the replacement handle after publication.
+   * @throws when the current Agent is stale, running, not factory-created, an
+   *   id or route is invalid, disposal fails, or replacement and recovery fail.
+   */
+  async recreate(options: RecreateAgentOptions): Promise<AgentHandle> {
+    const { current, replacement, rollback } = options
+    if (replacement.resumeSessionId !== current.id || rollback.resumeSessionId !== current.id) {
+      throw new Error(`agent "${current.id}" replacement and rollback must use the same session id`)
+    }
+    if (current.status !== 'idle') {
+      throw new Error(`agent "${current.id}" must be idle before its factory driver can be replaced`)
+    }
+    const owned = this.requireFactoryHandle(current)
+    // Missing target or recovery routes must not tear down the working Agent.
+    this.requireFactory(replacement.factoryRoute)
+    this.requireFactory(rollback.factoryRoute)
+    await owned.handle.dispose()
+    try {
+      return await this.resume(replacement)
+    } catch (replacementError: unknown) {
+      try {
+        await this.resume(rollback)
+      } catch (rollbackError: unknown) {
+        throw new AggregateError(
+          [replacementError, rollbackError],
+          `failed to replace agent "${current.id}" and restore its previous factory driver`,
+        )
+      }
+      throw replacementError
+    }
+  }
+
+  /** Retain only handles whose factories published the exact returned Agent. */
+  private retainFactoryHandle(handle: AgentHandle, factoryRoute: string | undefined): AgentHandle {
+    if (this.store.get(handle.agent.id)?.agent === handle.agent) {
+      this.factoryHandles.set(handle.agent.id, {
+        agent: handle.agent,
+        handle,
+        factoryRoute,
+      })
+    }
+    return handle
+  }
+
+  /** Resolve the retained handle for one exact live factory Agent. */
+  private requireFactoryHandle(agent: Agent): FactoryHandleSlot {
+    const slot = this.factoryHandles.get(agent.id)
+    if (this.store.get(agent.id)?.agent !== agent || slot?.agent !== agent) {
+      throw new Error(`agent "${agent.id}" has no live registry-created factory handle`)
+    }
+    return slot
   }
 
   /**
@@ -452,8 +608,7 @@ export class AgentRegistry extends Service {
       yield this.enter(agent, this.ctx.agent)
       this.announce(agent)
     }.bind(this), 'agents.register()')
-    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous cleanup; direct return preserves disposer identity
-    return dispose
+    return asVoidDisposer(dispose)
   }
 
   /**
@@ -515,6 +670,8 @@ export class AgentRegistry extends Service {
     // captured entry identity is the final boundary.
     /* v8 ignore next -- enter() rejects replacement while this single-shot detach capability is live. */
     if (this.store.get(entry.id) !== entry) return
+    const handle = this.factoryHandles.get(entry.id)
+    if (handle?.agent === entry.agent) this.factoryHandles.delete(entry.id)
     this.store.delete(entry.id)
     // An insertion rolled back before announce was never externally created,
     // so emitting disposed would invent an impossible lifecycle edge. Marking

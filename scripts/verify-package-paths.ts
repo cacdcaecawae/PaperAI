@@ -29,9 +29,16 @@ const PATTERNS = [
   'examples/**/*.ts',
 ]
 
-/** Paths excluded from the scan: built output and vendored upstream source. */
+/** Paths excluded from the scan: built output, vendored source, and a synthetic
+ * Typert workspace whose `packages/*` strings intentionally do not name this
+ * repository's package tree.
+ */
 const isExcluded = (p: string): boolean =>
-  isArchivedAgentNotePath(p) || p.includes('/lib/') || p.endsWith('.d.ts') || p.startsWith('vendor/')
+  isArchivedAgentNotePath(p)
+  || p.includes('/lib/')
+  || p.endsWith('.d.ts')
+  || p.startsWith('vendor/')
+  || p === 'packages/typert/generator/tests/remote-model.spec.ts'
 
 /**
  * Directory names of every real package, `packages/<group>/<pkg>`. A broken
@@ -57,6 +64,7 @@ const packageNames = realPackageNames()
  * period) is trimmed before the existence check.
  */
 const PKG_REF = /\bpackages\/[A-Za-z0-9._/-]+/g
+const EXTERNAL_URL = /\bhttps?:\/\/[^\s)]+/g
 
 function isDriftedPackageReference(ref: string): boolean {
   if (existsSync(resolve(root, ref))) return false
@@ -86,6 +94,9 @@ function findViolations(absPath: string): Violation[] {
     // Remove trailing separators or sentence punctuation matched greedily.
     ref => ref.replace(/[./]+$/, ''),
     isDriftedPackageReference,
+    // An external permalink may itself contain a `packages/` directory. It is
+    // not a root-relative reference into this repository.
+    line => line.replace(EXTERNAL_URL, ''),
   )
 }
 

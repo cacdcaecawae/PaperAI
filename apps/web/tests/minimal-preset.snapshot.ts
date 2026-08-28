@@ -12,6 +12,25 @@ import { assertFixtureInventory, launchWebScaffold, type WebScaffold } from './s
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/minimal-preset', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
 const PROMPT = 'Reply exactly MINIMAL_PRESET_REQUEST_OK and stop.'
+const NATIVE_SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
+
+function shellCommands(stateDir: string): { setup: string; read: string } {
+  if (process.platform === 'win32') {
+    return {
+      setup: `Set-Location -LiteralPath ${JSON.stringify(stateDir)}; $env:DSH_MINIMAL_STATE = 'PERSISTED'`,
+      read: 'Write-Output "$($env:DSH_MINIMAL_STATE):$($PWD.Path)"',
+    }
+  }
+  return {
+    setup: `cd ${JSON.stringify(stateDir)} && export DSH_MINIMAL_STATE=PERSISTED`,
+    read: 'printf \'%s:%s\n\' "$DSH_MINIMAL_STATE" "$PWD"',
+  }
+}
+
+function normalizeWorkspacePaths(value: string, workspaceCwd: string): string {
+  const normalizedCwd = workspaceCwd.replaceAll('\\', '/')
+  return value.replaceAll('\\', '/').split(normalizedCwd).join('{{cwd}}')
+}
 
 describe('minimal agent preset', () => {
   let scaffold: WebScaffold
@@ -66,18 +85,19 @@ describe('minimal agent preset', () => {
     const stateDir = join(scaffold.workspaceCwd, 'persistent-state')
     await mkdir(stateDir)
     const signal = new AbortController().signal
+    const commands = shellCommands(stateDir)
     await scaffold.ctx.tools.execute({
       signal,
-      callId: CallId('minimal-bash-state-setup'),
-      name: 'bash',
-      arguments: { command: `cd ${JSON.stringify(stateDir)} && export DSH_MINIMAL_STATE=PERSISTED` },
+      callId: CallId(`minimal-${NATIVE_SHELL_TOOL}-state-setup`),
+      name: NATIVE_SHELL_TOOL,
+      arguments: { command: commands.setup },
       agent: agentHandle.agent,
     })
-    const bash = await scaffold.ctx.tools.execute({
+    const shell = await scaffold.ctx.tools.execute({
       signal,
-      callId: CallId('minimal-bash-state-read'),
-      name: 'bash',
-      arguments: { command: 'printf \'%s:%s\n\' "$DSH_MINIMAL_STATE" "$PWD"' },
+      callId: CallId(`minimal-${NATIVE_SHELL_TOOL}-state-read`),
+      name: NATIVE_SHELL_TOOL,
+      arguments: { command: commands.read },
       agent: agentHandle.agent,
     })
     const seedPath = join(scaffold.workspaceCwd, 'preset-smoke.txt')
@@ -90,29 +110,23 @@ describe('minimal agent preset', () => {
       agent: agentHandle.agent,
     })
 
-    const text = (result: typeof bash): string => result.content
+    const text = (result: typeof shell): string => normalizeWorkspacePaths(result.content
       .filter(block => block.type === 'text')
       .map(block => block.text)
-      .join('')
-      .replaceAll(scaffold.workspaceCwd, '{{cwd}}')
-      .trimEnd()
+      .join(''), scaffold.workspaceCwd)
+      .trim()
 
+    expect(requestHeader.tools?.map(tool => tool.name)).toEqual([NATIVE_SHELL_TOOL, 'str_replace_editor'])
+    expect(text(shell)).toBe('PERSISTED:{{cwd}}/persistent-state')
     expect({
       prompt: requestHeader.system,
-      tools: requestHeader.tools?.map(tool => tool.name),
-      bash: text(bash),
       editor: text(editor),
     }).toMatchInlineSnapshot(`
       {
-        "bash": "PERSISTED:{{cwd}}/persistent-state",
         "editor": "Here's the content of {{cwd}}/preset-smoke.txt with line numbers (which has a total of 2 lines):
            1  MINIMAL_EDITOR_OK
            2",
         "prompt": "You are a helpful software engineer assistant.",
-        "tools": [
-          "bash",
-          "str_replace_editor",
-        ],
       }
     `)
     expect(requestHeader.tools?.toSorted((left, right) => left.name.localeCompare(right.name)))

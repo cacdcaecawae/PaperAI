@@ -16,6 +16,12 @@ The chip opens on the deployment default and its pick is *staged* — the screen
 
 A session that has started is refused rather than queued: the host answers `agent-preset-locked`, and the stage is dropped instead of waiting for a session that will never accept it.
 
+## Preset brand marks
+
+The new-session chip declares `conversation.hero.agentPreset.mark`, a root-scoped keyed child slot. A brand plugin registers one component with `key` equal to the exact preset id and uses `ctx.slots.inject` so its load order remains independent from this package. Each dispatch supplies `AgentPresetBrandMarkOwnerProps`: `presetId`, the requested square `size`, and an optional host `className` that the occupant applies to its outer mark element. The adjacent text already names the preset, so marks are decorative content.
+
+An unclaimed selected key renders the existing generic Agent-preset icon; unclaimed menu rows remain text-only. The slot changes presentation only: roster metadata, staged selection, blank-session application, and the host's `agent-preset-locked` rule are unchanged.
+
 ## The session-header label
 
 A third surface, beside the session title: the preset THIS session runs, as static chrome. A control there would promise a switch the host refuses outright. It reads the preset from the session's own summary and resolves the display name against the same roster the General row reads. Forwarded `agent-preset/selected` owner events fold committed blank-session switches into that shared summary in every tab; the initiating tab may already have applied the RPC echo, and the merge is idempotent.
