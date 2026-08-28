@@ -4,7 +4,7 @@ Last updated: 2026-08-28
 
 ## Current stage
 
-The functional PaperAI v1 vertical product and its release verification are complete. `main` starts from pinned DeepSeek Harness commit `b150a551`; the PaperAI profile, Host/domain layer, HIT template pack, OfficeCLI adapter, ACP drivers, authenticated MCP bridge, export service, and DSH-native workbench are implemented. Real browser workflows cover project creation, legacy Word import, preview/edit/history, template gate, draft/formal export behavior, native Codex models, constrained-width layouts, Windows-native shell interactions, settings persistence, and HMR/artifact integrity.
+The functional PaperAI v1 vertical product is released. `main` starts from a tree-identical root snapshot of pinned DeepSeek Harness commit `b150a551`; the PaperAI profile, Host/domain layer, HIT template pack, OfficeCLI adapter, ACP drivers, authenticated MCP bridge, export service, and DSH-native workbench are implemented. Real browser workflows cover project creation, legacy Word import, preview/edit/history, template gate, draft/formal export behavior, native Codex models, constrained-width layouts, Windows-native shell interactions, settings persistence, and HMR/artifact integrity.
 
 ## Confirmed architecture
 
@@ -28,7 +28,7 @@ The functional PaperAI v1 vertical product and its release verification are comp
 - Legacy branch: `legacy-standalone-local`.
 - Verified bundle: `F:\Papel-agent-legacy-20260828.bundle`.
 - Source ZIP: `F:\Papel-agent-legacy-20260828.zip`.
-- Remote `origin/main` remains untouched until the new implementation passes its gates.
+- The previous remote history remains recoverable through the legacy branch, bundle, and ZIP; the rebuilt DSH-based history is now published to `origin/main`.
 
 ## Release evidence
 
@@ -40,4 +40,4 @@ The functional PaperAI v1 vertical product and its release verification are comp
 
 ## Current next step
 
-Review and stage the release diff, create the rebuilt-history commit, fetch `origin/main`, and force-with-lease push `main` to `cacdcaecawae/PaperAI`.
+Use PaperAI v1 with real school projects, collect workflow and UI friction, and prioritize the next iteration without reopening the completed architecture reset.

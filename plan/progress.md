@@ -31,7 +31,7 @@
 - Completed a real legacy `.doc` browser workflow with Word normalization, immutable source preservation, OfficeCLI HTML preview, a human document commit, version history, HIT template confirmation/association, gate findings, draft export, and blocked formal export.
 - Added a durable commit-publication journal with old-v1 SQLite compatibility and crash recovery. Added import compensation so rejected/cancelled root commits remove only the uncommitted derived Working import while preserving the uploaded source and all committed/template documents.
 - Validated the DSH-native workbench at 1440×900 and 1366×768 in three-column mode, plus 1259×800 in document-focus mode. The Word page remains readable and the details workbench expands instead of collapsing into a narrow tool panel.
-- Promoted the bilingual PaperAI product-profile ADR to `implemented`; focused client and document lanes, package invariants, Cordis config, TypeScript project references, and real browser checks pass. Full workspace release gates and the force-with-lease GitHub push remain.
+- Promoted the bilingual PaperAI product-profile ADR to `implemented`; focused client and document lanes, package invariants, Cordis config, TypeScript project references, and real browser checks pass. The subsequent full workspace release gates and GitHub publication are recorded below.
 
 ## 2026-08-28 — Release gates complete
 
@@ -42,4 +42,10 @@
 - Full Web built lane passes 84/84 files: 285 tests passed and 13 mode-specific tests skipped.
 - Full workspace lane passes 883 files with 4 skipped: 14,344 tests passed and 61 skipped. Independent E2E passes 28 files/112 tests, with 33 files/92 tests skipped by platform or recording design.
 - Static release aggregate passes 37/37 gates, including documentation build, Markdown links, translation pairing, package paths, catalogs, module graph, Knip, licenses, and repository constraints. Contract lint, third-party notice verification, and `git diff --check` also pass.
-- Release candidate is ready for the history-reset commit and `--force-with-lease` push to `cacdcaecawae/PaperAI`.
+- Release candidate passed every gate required for the history-reset publication to `cacdcaecawae/PaperAI`.
+
+## 2026-08-28 — Release published
+
+- Rebuilt the shallow upstream boundary as a self-contained root commit whose tree is byte-identical to DeepSeek Harness `b150a551`, preserving the pinned baseline without importing unrelated upstream history.
+- Published the complete PaperAI v1 implementation to `cacdcaecawae/PaperAI` `main` with `--force-with-lease`; Git and GitHub API hashes were independently verified.
+- Kept the pre-replatform implementation recoverable in the local legacy branch, verified Git bundle, and source ZIP, plus a local pre-root-rewrite branch for the tested shallow-history commit.
