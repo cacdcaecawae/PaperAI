@@ -3276,7 +3276,7 @@ export interface Config {
 
 ## `@paperai/agent-acp`
 
-需要：`agents` · `sessions` · `subprocess` · `paperMcp`
+需要：`agents` · `sessions` · `subprocess` · `fs` · `sandboxPolicy` · `paperMcp`
 
 ```ts config-catalog
 /** PaperAI ACP Agent plugin configuration. */
@@ -3442,7 +3442,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/workbench-service/src/index.ts:309`](../packages/paperai/workbench-service/src/index.ts)
+来源：[`packages/paperai/workbench-service/src/index.ts:314`](../packages/paperai/workbench-service/src/index.ts)
 
 ## 无配置的可加载插件
 

@@ -10,7 +10,7 @@
 
 ACP 会话所有者让 descriptor lease 与 Agent 生命周期一致：
 
-```ts
+```ts ignore
 const lease = ctx.paperMcp.issueDescriptor({
   kind: 'agent',
   name: 'Codex',

@@ -10,7 +10,7 @@ The plugin provides `ctx.paperMcp` and registers one exact Streamable HTTP route
 
 The ACP session owner keeps the descriptor lease for exactly the Agent lifetime:
 
-```ts
+```ts ignore
 const lease = ctx.paperMcp.issueDescriptor({
   kind: 'agent',
   name: 'Codex',

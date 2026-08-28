@@ -513,7 +513,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:42`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:43`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 

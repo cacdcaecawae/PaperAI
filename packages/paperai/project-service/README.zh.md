@@ -31,6 +31,9 @@ exports/
 ## 服务 API
 
 ```ts
+import type { ProjectRecord } from '@paperai/domain'
+import type { ProjectGitStatus } from '@paperai/project-service'
+
 interface CreatePaperProjectInput {
   rootPath: string
   name?: string

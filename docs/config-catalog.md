@@ -3274,7 +3274,7 @@ Source: [`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages
 
 ## `@paperai/agent-acp`
 
-Requires: `agents` · `sessions` · `subprocess` · `paperMcp`
+Requires: `agents` · `sessions` · `subprocess` · `fs` · `sandboxPolicy` · `paperMcp`
 
 ```ts config-catalog
 /** PaperAI ACP Agent plugin configuration. */
@@ -3440,7 +3440,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/workbench-service/src/index.ts:309`](../packages/paperai/workbench-service/src/index.ts)
+Source: [`packages/paperai/workbench-service/src/index.ts:314`](../packages/paperai/workbench-service/src/index.ts)
 
 ## Loadable plugins with no config
 

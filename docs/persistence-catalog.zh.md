@@ -515,7 +515,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/paperai/agent-acp/src/agent.ts:42`](../packages/paperai/agent-acp/src/agent.ts)
+来源：[`packages/paperai/agent-acp/src/agent.ts:43`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 
