@@ -1239,9 +1239,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when the Workspace or document is missing, mismatched, or cannot be projected.'],
       },
       {
-        signature: '@Remote(\'readNode\') readNode(request: PaperAIReadNodeRequest): Promise<PaperAISelectedNodeBuffer>',
+        signature: '@Remote(\'readNode\') readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer>',
         description: 'Read one semantic node into a temporary plain-text edit buffer.',
-        parameters: [{ name: 'request', description: 'document projection identity and semantic node to read.' }],
+        parameters: [{ name: 'request', description: 'document projection identity and semantic node to read.' }, { name: 'signal', description: 'optional cancellation signal for the node read.' }],
         returns: 'a fresh buffer tied to the observed revision and head commit.',
         throws: ['when the document or node is missing or the observed projection is stale.'],
       },

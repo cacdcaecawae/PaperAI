@@ -12,14 +12,35 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionConfigOption,
+  SessionModeState,
   SessionUpdate,
 } from '@agentclientprotocol/sdk'
 import type { Context } from '@deepseek-ai/cordis'
+import type { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { modelStateFromConfigOptions, type AcpModelState } from './catalog.ts'
 
 const moduleRequire = createRequire(import.meta.url)
 const SESSION_STEERING_METHOD = '_session/steering'
+
+type AcpSandboxMode = NonNullable<ReturnType<typeof effectiveSandboxMode>>
+
+const NATIVE_PERMISSION_MODES = {
+  codex: {
+    'read-only': 'read-only',
+    'workspace-write': 'agent',
+    'danger-full-access': 'agent-full-access',
+  },
+  claude: {
+    'read-only': 'plan',
+    'workspace-write': 'acceptEdits',
+    'danger-full-access': 'bypassPermissions',
+  },
+} as const satisfies Record<AcpProviderDefinition['id'], Record<AcpSandboxMode, string>>
+
+function nativePermissionMode(provider: AcpProviderDefinition['id'], mode: AcpSandboxMode): string {
+  return NATIVE_PERMISSION_MODES[provider][mode]
+}
 
 type AcpSteeringResponse =
   | { readonly outcome: 'injected' }
@@ -45,6 +66,7 @@ export interface AcpProviderDefinition {
 export interface AcpRuntimeCallbacks {
   readonly update: (update: SessionUpdate) => void
   readonly modelChanged: (model: string) => void
+  readonly modeChanged: () => void
   readonly readTextFile: (path: string, signal: AbortSignal) => Promise<string>
   readonly writeTextFile: (path: string, content: string, signal: AbortSignal) => Promise<void>
   readonly permission: (
@@ -93,12 +115,31 @@ function stderrText(process: SubprocessHandle): string {
   return process.collected.stderr?.readFrom(0).text.trim() ?? ''
 }
 
+async function raceAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted()
+  const aborted = Promise.withResolvers<never>()
+  const onAbort = (): void => {
+    try {
+      signal.throwIfAborted()
+    } catch (error: unknown) {
+      aborted.reject(error)
+    }
+  }
+  signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await Promise.race([operation, aborted.promise])
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
+}
+
 /** One managed ACP process and protocol connection. */
 export class AcpRuntime {
   private process: SubprocessHandle | undefined
   private connection: ClientConnection | undefined
   private externalSessionId: string | undefined
   private modelState: AcpModelState = { models: [] }
+  private modeState: SessionModeState | undefined
   private replaying = false
   private steeringSupported = false
   private promptActive = false
@@ -130,10 +171,15 @@ export class AcpRuntime {
   /**
    * Spawn, initialize, and create or resume the provider-owned session.
    * @param previousExternalSessionId Provider session id to resume, or `undefined` to create a session.
+   * @param sandboxMode DSH sandbox preset that the provider session must enforce before startup completes.
    * @param signal Cancels process startup and ACP initialization requests.
    * @returns Initialization metadata and the model selector advertised by the active session.
    */
-  async start(previousExternalSessionId: string | undefined, signal: AbortSignal): Promise<AcpSessionStart> {
+  async start(
+    previousExternalSessionId: string | undefined,
+    sandboxMode: AcpSandboxMode,
+    signal: AbortSignal,
+  ): Promise<AcpSessionStart> {
     signal.throwIfAborted()
     const argv = resolveLaunch(this.provider)
     const process = this.process = this.ctx.subprocess.spawn({
@@ -148,7 +194,9 @@ export class AcpRuntime {
       signal,
       env: {
         ...this.provider.env,
-        ...this.provider.id === 'codex' ? { INITIAL_AGENT_MODE: 'agent' } : {},
+        ...this.provider.id === 'codex'
+          ? { INITIAL_AGENT_MODE: nativePermissionMode(this.provider.id, sandboxMode) }
+          : {},
       },
     })
     if (process.stdin === undefined || process.stdout === undefined) {
@@ -175,6 +223,13 @@ export class AcpRuntime {
           if (context.params.update.sessionUpdate === 'config_option_update') {
             this.modelState = modelStateFromConfigOptions(context.params.update.configOptions)
             this.callbacks.modelChanged(this.currentModel)
+          }
+          if (context.params.update.sessionUpdate === 'current_mode_update' && this.modeState !== undefined) {
+            this.modeState = {
+              ...this.modeState,
+              currentModeId: context.params.update.currentModeId,
+            }
+            this.callbacks.modeChanged()
           }
           this.callbacks.update(context.params.update)
         }
@@ -213,9 +268,11 @@ export class AcpRuntime {
             mcpServers,
           }, { cancellationSignal: signal })
           this.modelState = modelStateFromConfigOptions(loaded.configOptions)
+          this.modeState = loaded.modes ?? undefined
         } finally {
           this.replaying = false
         }
+        await this.selectSandboxMode(sandboxMode, signal)
         return {
           externalSessionId: previousExternalSessionId,
           resumed: true,
@@ -231,6 +288,8 @@ export class AcpRuntime {
       }, { cancellationSignal: signal })
       this.externalSessionId = created.sessionId
       this.modelState = modelStateFromConfigOptions(created.configOptions)
+      this.modeState = created.modes ?? undefined
+      await this.selectSandboxMode(sandboxMode, signal)
       return {
         externalSessionId: created.sessionId,
         resumed: false,
@@ -258,10 +317,10 @@ export class AcpRuntime {
     const sessionId = this.requireSessionId()
     this.promptActive = true
     try {
-      const response = await connection.agent.request(acp.methods.agent.session.prompt, {
+      const response = await raceAbort(connection.agent.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [...prompt],
-      }, { cancellationSignal: signal })
+      }, { cancellationSignal: signal }), signal)
       // The ACP SDK dispatches responses independently from preceding
       // notifications. Let already-read updates reach the projection before the
       // prompt completion closes it.
@@ -327,6 +386,34 @@ export class AcpRuntime {
     return this.currentModel
   }
 
+  /**
+   * Apply the DSH sandbox preset through the provider's advertised native ACP mode.
+   * @param sandboxMode Current DSH sandbox preset for this Session.
+   * @param signal Optional cancellation for startup or publication synchronization.
+   * @throws when the pinned provider does not advertise the required native mode.
+   */
+  async selectSandboxMode(sandboxMode: AcpSandboxMode, signal?: AbortSignal): Promise<void> {
+    const target = nativePermissionMode(this.provider.id, sandboxMode)
+    const state = this.modeState
+    if (state === undefined || !state.availableModes.some(mode => mode.id === target)) {
+      throw new Error(
+        `${this.provider.name} ACP did not advertise required mode "${target}" for sandbox mode "${sandboxMode}"`,
+      )
+    }
+    if (state.currentModeId === target) return
+    const params = { sessionId: this.requireSessionId(), modeId: target }
+    if (signal === undefined) {
+      await this.requireConnection().agent.request(acp.methods.agent.session.setMode, params)
+    } else {
+      await raceAbort(this.requireConnection().agent.request(
+        acp.methods.agent.session.setMode,
+        params,
+        { cancellationSignal: signal },
+      ), signal)
+    }
+    this.modeState = { ...state, currentModeId: target }
+  }
+
   /** Close the protocol and terminate the complete managed process tree. */
   async close(): Promise<void> {
     if (this.closed) return
@@ -339,6 +426,7 @@ export class AcpRuntime {
     if (process !== undefined) await process.waitForExit()
     this.connection = undefined
     this.process = undefined
+    this.modeState = undefined
     this.promptActive = false
     this.steeringSupported = false
   }

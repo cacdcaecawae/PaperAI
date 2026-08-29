@@ -180,7 +180,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         associateTemplate: templateId => controller.associateTemplate(sessionId, templateId),
         exportDocument: mode => controller.exportDocument(sessionId, mode),
         reloadExternal: () => controller.reloadExternal(sessionId),
-        dismissExternal: () => { controller.dismissExternal(sessionId) },
+        resolveExternalConflict: (resolution) => { controller.resolveExternalConflict(sessionId, resolution) },
         restore: commitId => controller.restore(sessionId, commitId),
       }),
     }, DocumentWorkbench))

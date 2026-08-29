@@ -206,6 +206,7 @@ afterEach(async () => {
 
 async function mountHarness(options: {
   readonly env?: Readonly<Record<string, string>>
+  readonly neverSetMode?: { readonly mode: string; readonly once: boolean }
   readonly mountApproval?: boolean
   readonly approvalOutcome?: ApprovalOutcome
   readonly records?: Map<string, StoredSession>
@@ -242,6 +243,14 @@ async function mountHarness(options: {
   const commonEnv = {
     FAKE_ACP_LOG: logPath,
     FAKE_ACP_SESSION_ID: 'external-paper-session',
+    ...options.neverSetMode === undefined
+      ? {}
+      : {
+        FAKE_ACP_NEVER_SET_MODE: options.neverSetMode.mode,
+        ...options.neverSetMode.once
+          ? { FAKE_ACP_NEVER_SET_MODE_ONCE_FILE: join(scratchRoot, 'stalled-set-mode-once') }
+          : {},
+      },
     ...options.writePath === undefined
       ? {}
       : { FAKE_ACP_WRITE_PATH: options.writePath(root, fallbackRoot) },
@@ -285,6 +294,24 @@ async function createAgent(
   })
 }
 
+async function createAgentWithSandboxMode(
+  harness: Harness,
+  id: string,
+  route: 'codex' | 'claude',
+  mode: 'read-only' | 'workspace-write' | 'danger-full-access',
+): Promise<AgentHandle> {
+  return await harness.ctx.agents.create({
+    sessionId: SessionId(id),
+    factoryRoute: route,
+    meta: { cwd: harness.root },
+    setup: (agentCtx) => {
+      const agent = agentCtx.agent
+      if (agent === undefined) throw new Error('ACP Agent setup is missing its Agent scope')
+      setSandboxMode(agent.session, mode)
+    },
+  })
+}
+
 async function runTurn(handle: AgentHandle, text: string): Promise<void> {
   handle.agent.followup(createUserMessage({
     content: [{ type: 'text', text }],
@@ -300,6 +327,21 @@ async function readLog(path: string): Promise<LogEntry[]> {
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
+  }
+}
+
+async function expectResolvesWithin(promise: Promise<unknown>, timeoutMs = 1_000): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([
+      promise.then(() => 'resolved' as const),
+      new Promise<'timed-out'>((resolve) => {
+        timer = setTimeout(() => { resolve('timed-out') }, timeoutMs)
+      }),
+    ])
+    expect(result).toBe('resolved')
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -406,6 +448,260 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
 })
 
 describe('ACP permission policy projection', { concurrent: false }, () => {
+  it.each([
+    { provider: 'codex' as const, mode: 'read-only' as const, nativeMode: 'read-only' },
+    { provider: 'codex' as const, mode: 'workspace-write' as const, nativeMode: 'agent' },
+    { provider: 'codex' as const, mode: 'danger-full-access' as const, nativeMode: 'agent-full-access' },
+    { provider: 'claude' as const, mode: 'read-only' as const, nativeMode: 'plan' },
+    { provider: 'claude' as const, mode: 'workspace-write' as const, nativeMode: 'acceptEdits' },
+    { provider: 'claude' as const, mode: 'danger-full-access' as const, nativeMode: 'bypassPermissions' },
+  ])('synchronizes a new $provider session in $mode to $nativeMode', async ({
+    provider,
+    mode,
+    nativeMode,
+  }) => {
+    const harness = await mountHarness()
+
+    await createAgentWithSandboxMode(harness, `native-new-${provider}-${mode}`, provider, mode)
+
+    const log = await readLog(harness.logPath)
+    const selected = log.findLast(entry => entry.event === 'set-mode')?.['modeId']
+      ?? (log.find(entry => entry.event === 'initialize')?.['environment'] as LogEntry | undefined)
+        ?.['initialAgentMode']
+    expect(selected).toBe(nativeMode)
+  }, 20_000)
+
+  it.each([
+    {
+      provider: 'codex' as const,
+      expected: ['agent-full-access', 'read-only'],
+      modes: ['danger-full-access', 'read-only'] as const,
+    },
+    {
+      provider: 'claude' as const,
+      expected: ['bypassPermissions', 'plan'],
+      modes: ['danger-full-access', 'read-only'] as const,
+    },
+  ])('serializes idle $provider permission switches before the next prompt', async ({
+    provider,
+    expected,
+    modes,
+  }) => {
+    const harness = await mountHarness()
+    const handle = await createAgent(harness, `native-switch-${provider}`, provider)
+
+    for (const mode of modes) setSandboxMode(handle.agent.session, mode)
+    await runTurn(handle, 'Run after idle permission switches')
+
+    const log = await readLog(harness.logPath)
+    const selected = log.filter(entry => entry.event === 'set-mode').map(entry => entry['modeId'])
+    expect(selected.slice(-expected.length)).toEqual(expected)
+    expect(log.findLastIndex(entry => entry.event === 'set-mode'))
+      .toBeLessThan(log.findIndex(entry => entry.event === 'prompt'))
+  }, 20_000)
+
+  it('does not prompt until an already-requested native mode switch completes', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_SET_MODE_DELAY_MS: '250' } })
+    const handle = await createAgent(harness, 'native-mode-prompt-order', 'codex')
+
+    setSandboxMode(handle.agent.session, 'read-only')
+    await runTurn(handle, 'Read under the new native mode')
+
+    const events = (await readLog(harness.logPath)).map(entry => entry.event)
+    expect(events.indexOf('set-mode-start')).toBeLessThan(events.indexOf('set-mode'))
+    expect(events.indexOf('set-mode')).toBeLessThan(events.indexOf('prompt'))
+  }, 20_000)
+
+  it('cancels an active turn when a queued permission expansion is superseded by read-only', async () => {
+    const harness = await mountHarness({
+      neverSetMode: { mode: 'agent-full-access', once: true },
+      env: {
+        FAKE_ACP_PROMPT_DELAY_MS: '1000',
+      },
+    })
+    const handle = await createAgent(harness, 'native-mode-active-tightening', 'codex')
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Active before permissions tighten' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'prompt')).toBe(true)
+    })
+
+    setSandboxMode(handle.agent.session, 'danger-full-access')
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => (
+        entry.event === 'set-mode-start' && entry['modeId'] === 'agent-full-access'
+      ))).toBe(true)
+    })
+    setSandboxMode(handle.agent.session, 'read-only')
+    await expectResolvesWithin(handle.agent.whenIdle())
+    await runTurn(handle, 'Run after permission tightening')
+
+    const log = await readLog(harness.logPath)
+    const initialized = log.filter(entry => entry.event === 'initialize')
+    expect(initialized).toHaveLength(2)
+    expect(initialized[1]?.['environment']).toMatchObject({ initialAgentMode: 'read-only' })
+    expect(log.some(entry => entry.event === 'set-mode' && entry['modeId'] === 'agent-full-access'))
+      .toBe(false)
+  }, 20_000)
+
+  it('reasserts the latest DSH mode after a stale provider mode notification', async () => {
+    const harness = await mountHarness({
+      env: {
+        FAKE_ACP_DELAY_MODE_UPDATE: 'read-only',
+        FAKE_ACP_MODE_UPDATE_DELAY_MS: '250',
+      },
+    })
+    const handle = await createAgent(harness, 'native-mode-stale-update', 'codex')
+    setSandboxMode(handle.agent.session, 'read-only')
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).filter(entry => entry.event === 'set-mode'))
+        .toHaveLength(1)
+    })
+    setSandboxMode(handle.agent.session, 'danger-full-access')
+
+    await vi.waitFor(async () => {
+      const selected = (await readLog(harness.logPath))
+        .filter(entry => entry.event === 'set-mode')
+        .map(entry => entry['modeId'])
+      expect(selected).toEqual(['read-only', 'agent-full-access', 'agent-full-access'])
+    }, { timeout: 2_000 })
+  }, 20_000)
+
+  it.each([
+    { provider: 'codex' as const, nativeMode: 'read-only' },
+    { provider: 'claude' as const, nativeMode: 'plan' },
+  ])('restores the persisted $provider permission mode before publication', async ({
+    provider,
+    nativeMode,
+  }) => {
+    const records = new Map<string, StoredSession>()
+    const sourceHarness = await mountHarness({ records })
+    const created = await createAgentWithSandboxMode(
+      sourceHarness,
+      `native-resume-${provider}`,
+      provider,
+      'read-only',
+    )
+    sourceHarness.persistence.capture(created.agent.session)
+    const resumeHarness = await mountHarness({ records })
+
+    await resumeHarness.ctx.agents.resume({
+      resumeSessionId: SessionId(`native-resume-${provider}`),
+      factoryRoute: provider,
+    })
+
+    const log = await readLog(resumeHarness.logPath)
+    const initialized = log.find(entry => entry.event === 'initialize')
+    if (provider === 'codex') {
+      expect(initialized?.['environment']).toMatchObject({ initialAgentMode: nativeMode })
+    } else {
+      expect(log.find(entry => entry.event === 'set-mode'))
+        .toMatchObject({ label: provider, modeId: nativeMode })
+    }
+  }, 20_000)
+
+  it.each([
+    { provider: 'codex' as const, nativeMode: 'read-only' },
+    { provider: 'claude' as const, nativeMode: 'plan' },
+  ])('starts a replacement $provider runtime in the current permission mode', async ({
+    provider,
+    nativeMode,
+  }) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_PROMPT_DELAY_MS: '300' } })
+    const handle = await createAgent(harness, `native-mode-restart-${provider}`, provider)
+    setSandboxMode(handle.agent.session, 'read-only')
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).findLast(entry => entry.event === 'set-mode'))
+        .toMatchObject({ modeId: nativeMode })
+    })
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Cancel this turn' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'prompt')).toBe(true)
+    })
+    handle.agent.cancel({ kind: 'user' })
+    await handle.agent.whenIdle()
+
+    await runTurn(handle, 'Run after restart')
+
+    const log = await readLog(harness.logPath)
+    const initialized = log.filter(entry => entry.event === 'initialize')
+    expect(initialized).toHaveLength(2)
+    if (provider === 'codex') {
+      expect(initialized[1]?.['environment']).toMatchObject({ initialAgentMode: nativeMode })
+    } else {
+      const secondInitializeIndex = log.findLastIndex(entry => entry.event === 'initialize')
+      expect(log.slice(secondInitializeIndex + 1).find(entry => entry.event === 'set-mode'))
+        .toMatchObject({ label: provider, modeId: nativeMode })
+    }
+  }, 20_000)
+
+  it('cancels a stalled native mode switch and replays the latest mode before the next turn', async () => {
+    const harness = await mountHarness({ neverSetMode: { mode: 'read-only', once: true } })
+    const warn = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
+    const handle = await createAgent(harness, 'native-mode-stalled-cancel', 'codex')
+
+    setSandboxMode(handle.agent.session, 'read-only')
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Wait behind the stalled mode switch' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => (
+        entry.event === 'set-mode-start' && entry['modeId'] === 'read-only'
+      ))).toBe(true)
+    })
+
+    handle.agent.cancel({ kind: 'user' })
+    await expectResolvesWithin(handle.agent.whenIdle())
+    await runTurn(handle, 'Run in the replacement runtime')
+
+    const log = await readLog(harness.logPath)
+    const initialized = log.filter(entry => entry.event === 'initialize')
+    expect(initialized).toHaveLength(2)
+    expect(initialized[1]?.['environment']).toMatchObject({ initialAgentMode: 'read-only' })
+    expect(log.findLast(entry => entry.event === 'prompt'))
+      .toMatchObject({ prompt: [{ type: 'text', text: 'Run in the replacement runtime' }] })
+    expect(warn).not.toHaveBeenCalled()
+  }, 20_000)
+
+  it('disposes while a native mode switch is stalled without waiting for the provider', async () => {
+    const harness = await mountHarness({ neverSetMode: { mode: 'read-only', once: false } })
+    const warn = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
+    const handle = await createAgent(harness, 'native-mode-stalled-dispose', 'codex')
+
+    setSandboxMode(handle.agent.session, 'read-only')
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => (
+        entry.event === 'set-mode-start' && entry['modeId'] === 'read-only'
+      ))).toBe(true)
+    })
+
+    await expectResolvesWithin(handle.dispose())
+
+    expect(warn).not.toHaveBeenCalled()
+    expect(harness.ctx.agents.get(handle.agent.id)).toBeUndefined()
+  }, 20_000)
+
+  it('rejects publication when Claude does not advertise the required native mode', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_OMIT_MODE: 'plan' } })
+
+    await expect(createAgentWithSandboxMode(
+      harness,
+      'native-mode-unavailable',
+      'claude',
+      'read-only',
+    )).rejects.toThrow(
+      'Claude ACP did not advertise required mode "plan" for sandbox mode "read-only"',
+    )
+    expect(harness.ctx.agents.get(SessionId('native-mode-unavailable'))).toBeUndefined()
+    expect(harness.ctx.sessions.get(SessionId('native-mode-unavailable'))).toBeUndefined()
+  }, 20_000)
+
   it.each([
     {
       name: 'full access chooses allow-always without consulting approval',
@@ -741,12 +1037,14 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
         anthropicApiKey: null,
         openAiBaseUrl: 'https://openai.v1',
         anthropicBaseUrl: null,
+        initialAgentMode: 'agent',
       },
       {
         openAiApiKey: 'codex-key-v2',
         anthropicApiKey: null,
         openAiBaseUrl: 'https://openai.v2',
         anthropicBaseUrl: null,
+        initialAgentMode: 'agent',
       },
     ])
     expect(claude.map(entry => entry['environment'])).toEqual([{
@@ -754,6 +1052,7 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
       anthropicApiKey: 'claude-key-v1',
       openAiBaseUrl: null,
       anthropicBaseUrl: 'https://anthropic.v1',
+      initialAgentMode: null,
     }])
   }, 30_000)
 })

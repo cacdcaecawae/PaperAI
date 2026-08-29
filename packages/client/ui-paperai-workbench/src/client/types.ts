@@ -78,6 +78,12 @@ export interface PaperAIExportReceipt {
   readonly outputPath: string
 }
 
+/** Browser-owned inputs retained while the selected node is rebased after an external edit. */
+export interface PaperAIExternalNodeConflict {
+  readonly localDraft: string
+  readonly externalText: string
+}
+
 /** Complete browser state for one Session's PaperAI details view. */
 export interface PaperAIWorkbenchState {
   phase: PaperAIWorkbenchPhase
@@ -91,6 +97,7 @@ export interface PaperAIWorkbenchState {
   templates: import('@paperai/workbench-service/types').PaperAITemplateCatalog | null
   exportReceipt: PaperAIExportReceipt | null
   externalUpdate: PaperAIDocumentChangedEvent | null
+  externalConflict: PaperAIExternalNodeConflict | null
   error: string | null
   nodeError: string | null
   actionError: string | null

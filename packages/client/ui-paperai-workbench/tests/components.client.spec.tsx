@@ -17,6 +17,7 @@ import {
   COMMIT_0, CONFIRMED_TEMPLATE_CATALOG, documentSnapshot, HIT_PACK_ID,
   HIT_PROPOSAL_MEMBER_ID, HIT_TEMPLATE_ID, NODE_PARAGRAPH, RESOURCES,
   RESOURCE_ID, SESSION_ID, TEMPLATE_CATALOG, textNodeBuffer, WORKSPACE_ID,
+  REVISION_2,
 } from './fixtures.client.ts'
 
 afterEach(cleanup)
@@ -81,7 +82,7 @@ function workbenchProps(state: PaperAIWorkbenchState) {
   const associateTemplate = vi.fn(async () => ({ ok: true as const }))
   const exportDocument = vi.fn(async () => ({ ok: true as const }))
   const reloadExternal = vi.fn(async () => ({ ok: true as const }))
-  const dismissExternal = vi.fn()
+  const resolveExternalConflict = vi.fn()
   const restore = vi.fn(async () => ({ ok: true as const }))
   const props = {
     sessionId: SESSION_ID,
@@ -101,7 +102,7 @@ function workbenchProps(state: PaperAIWorkbenchState) {
     associateTemplate,
     exportDocument,
     reloadExternal,
-    dismissExternal,
+    resolveExternalConflict,
     restore,
     t,
   } as unknown as PaperAIDocumentWorkbenchProps
@@ -109,7 +110,7 @@ function workbenchProps(state: PaperAIWorkbenchState) {
     props, store, closeDetails, selectTab, retryOpen, selectNode, updateDraft,
     discardDraft, commitSelected, validate, loadTemplates, installTemplate,
     uploadTemplate, confirmTemplate, associateTemplate, exportDocument,
-    reloadExternal, dismissExternal, restore,
+    reloadExternal, resolveExternalConflict, restore,
   }
 }
 
@@ -126,6 +127,7 @@ function workbenchState(overrides: Partial<PaperAIWorkbenchState>): PaperAIWorkb
     templates: null,
     exportReceipt: null,
     externalUpdate: null,
+    externalConflict: null,
     error: null,
     nodeError: null,
     actionError: null,
@@ -344,12 +346,79 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...b.props} />)
     expect(screen.getByText('其他会话或 Agent 已提交修改。加载时会保留本地草稿；若同一节点也被修改，将提示冲突。')).not.toBeNull()
-    const reload = screen.getByRole('button', { name: '加载新版本' })
+    const reload = screen.getByRole('button', { name: '查看并解决' })
     expect(reload.hasAttribute('disabled')).toBe(false)
     fireEvent.click(reload)
     expect(b.reloadExternal).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole('button', { name: '保留当前内容' }))
-    expect(b.dismissExternal).toHaveBeenCalledOnce()
+  })
+
+  it('shows both same-node conflict inputs and offers local, external, and merged resolutions', () => {
+    const b = workbenchProps(workbenchState({
+      phase: 'ready',
+      tab: 'edit',
+      document: documentSnapshot(REVISION_2),
+      nodePhase: 'ready',
+      selectedNode: textNodeBuffer(REVISION_2, 'External rewrite'),
+      draft: 'Unsaved local draft',
+      dirty: true,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'External rewrite',
+      },
+    }))
+    render(<DocumentWorkbench {...b.props} />)
+
+    expect(screen.getByRole('textbox', { name: '本地草稿' }))
+      .toHaveProperty('value', 'Unsaved local draft')
+    expect(screen.getByRole('textbox', { name: '外部最新文本' }))
+      .toHaveProperty('value', 'External rewrite')
+    expect(screen.getByText('请先解决当前节点的外部修改冲突。')).not.toBeNull()
+    expect(screen.queryByText('请先提交或放弃当前节点的临时修改。')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '采用本地版本' }))
+    fireEvent.click(screen.getByRole('button', { name: '采用外部版本' }))
+    fireEvent.click(screen.getByRole('button', { name: '使用合并内容' }))
+    expect(b.resolveExternalConflict.mock.calls).toEqual([['local'], ['external'], ['merged']])
+    expect(screen.getByRole('button', { name: '提交并创建版本' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('keeps navigation, history, template, gate, and export actions locked until a clean-looking conflict is resolved', () => {
+    const conflict = {
+      phase: 'ready' as const,
+      document: documentSnapshot(REVISION_2),
+      nodePhase: 'ready' as const,
+      selectedNode: textNodeBuffer(REVISION_2, 'External rewrite'),
+      draft: 'External rewrite',
+      dirty: false,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'External rewrite',
+      },
+    }
+    const edit = workbenchProps(workbenchState({ ...conflict, tab: 'edit' }))
+    const view = render(<DocumentWorkbench {...edit.props} />)
+    const otherNode = screen.getByRole('button', { name: /Research background/ })
+    expect(otherNode.hasAttribute('disabled')).toBe(true)
+    expect(otherNode.getAttribute('title')).toBe('请先解决当前节点的外部修改冲突。')
+
+    view.unmount()
+    const versions = workbenchProps(workbenchState({ ...conflict, tab: 'versions' }))
+    render(<DocumentWorkbench {...versions.props} />)
+    expect(screen.getByText('请先解决当前节点的外部修改冲突。')).not.toBeNull()
+    expect(screen.getByRole('button', { name: '恢复此版本' }).hasAttribute('disabled')).toBe(true)
+
+    cleanup()
+    const gate = workbenchProps(workbenchState({
+      ...conflict,
+      tab: 'gate',
+      templates: { ...TEMPLATE_CATALOG, contracts: [] },
+    }))
+    render(<DocumentWorkbench {...gate.props} />)
+    expect(screen.getByText('请先解决当前节点的外部修改冲突。')).not.toBeNull()
+    expect(screen.getByRole('button', { name: '运行门禁' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '安装并解析' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '上传模板' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '导出草稿' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '导出正式版' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('renders Agent/model provenance and only backed version restore actions', () => {

@@ -287,6 +287,7 @@ export class PaperAiAcpAgents extends Service {
       }
       const setupCommit = await raceAbort(options.setup?.(agent.ctx), abort.signal, id)
       setupCommit?.commit()
+      await raceAbort(agent.syncSandboxMode(abort.signal), abort.signal, id)
 
       detachSession = agent.ctx.sessions.enter(session)
       agent.ctx.sessions.announce(session)

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
 import type {
-  PaperAIImportDocumentResult, PaperAIResourceList, PaperAISelectedNodeBuffer,
+  PaperAIDocumentOpenResult, PaperAIImportDocumentResult, PaperAIResourceList, PaperAISelectedNodeBuffer,
   PaperAIWorkbenchRemote,
 } from '../src/client/types.ts'
 import {
@@ -622,7 +622,7 @@ describe('PaperAIWorkbenchController', () => {
       nodeId: NODE_PARAGRAPH,
       revision: documentSnapshot().revision,
       headCommitId: COMMIT_1,
-    })
+    }, expect.any(AbortSignal))
     expect(controller.workbenchStore(SESSION_ID).getSnapshot().selectedNode).toMatchObject({
       nodeId: NODE_PARAGRAPH, format: 'text',
     })
@@ -931,9 +931,6 @@ describe('PaperAIWorkbenchController', () => {
       externalUpdate: change,
       document: { headCommitId: COMMIT_1 },
     })
-    controller.dismissExternal(SESSION_ID)
-    expect(controller.workbenchStore(SESSION_ID).getSnapshot().externalUpdate).toBeNull()
-    controller.handleDocumentChanged(change)
 
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
     expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
@@ -947,7 +944,82 @@ describe('PaperAIWorkbenchController', () => {
     controller.dispose()
   })
 
-  it('keeps a dirty draft on the old base when the selected node changed externally', async () => {
+  it('consumes the pending external event when the authoritative reload has already advanced further', async () => {
+    const remote = successfulRemote()
+    remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_3) })
+    remote.readNode = vi.fn<PaperAIWorkbenchRemote['readNode']>(async () => ({
+      ok: true,
+      value: textNodeBuffer(REVISION_3, 'Authoritative R3 rewrite'),
+    }))
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, 'Unsaved local draft')
+    controller.handleDocumentChanged({
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_2,
+      updatedAt: '2026-08-28T12:00:00.000Z',
+    })
+
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      document: { revision: REVISION_3, headCommitId: COMMIT_3 },
+      externalUpdate: null,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'Authoritative R3 rewrite',
+      },
+    })
+    expect(remote.readNode).toHaveBeenCalledWith(expect.objectContaining({
+      revision: REVISION_3,
+      headCommitId: COMMIT_3,
+    }), expect.any(AbortSignal))
+    controller.dispose()
+  })
+
+  it('preserves a newer external event that arrives while the pending event reload is in flight', async () => {
+    const pendingOpen = deferred<RemoteResult<PaperAIDocumentOpenResult>>()
+    const remote = successfulRemote()
+    remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
+      .mockImplementationOnce(() => pendingOpen.promise)
+    remote.readNode = vi.fn<PaperAIWorkbenchRemote['readNode']>(async () => ({
+      ok: true,
+      value: textNodeBuffer(REVISION_3, 'Authoritative R3 rewrite'),
+    }))
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, 'Unsaved local draft')
+    controller.handleDocumentChanged({
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_2,
+      updatedAt: '2026-08-28T12:00:00.000Z',
+    })
+
+    const reload = controller.reloadExternal(SESSION_ID)
+    await vi.waitFor(() => { expect(remote.open).toHaveBeenCalledTimes(2) })
+    const newestChange = {
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_4,
+      updatedAt: '2026-08-28T12:02:00.000Z',
+    } as const
+    controller.handleDocumentChanged(newestChange)
+    pendingOpen.resolve({ ok: true, value: documentOpenResult(REVISION_3) })
+
+    await expect(reload).resolves.toEqual({ ok: true })
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      document: { revision: REVISION_3, headCommitId: COMMIT_3 },
+      externalUpdate: newestChange,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'Authoritative R3 rewrite',
+      },
+    })
+    controller.dispose()
+  })
+
+  it('rebases a same-node conflict onto the external head and commits the chosen local draft', async () => {
     const remote = successfulRemote()
     remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
       .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
@@ -956,6 +1028,7 @@ describe('PaperAIWorkbenchController', () => {
       ok: true,
       value: textNodeBuffer(REVISION_2, 'External rewrite'),
     }))
+    const commit = vi.spyOn(remote, 'commit')
     const controller = new PaperAIWorkbenchController(remote)
     await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
     controller.updateDraft(SESSION_ID, 'Unsaved local draft')
@@ -966,17 +1039,141 @@ describe('PaperAIWorkbenchController', () => {
     } as const
     controller.handleDocumentChanged(change)
 
-    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({
-      ok: false,
-      error: 'selected node changed externally; local draft preserved for conflict resolution',
-    })
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
     expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
       action: null,
       dirty: true,
       draft: 'Unsaved local draft',
-      externalUpdate: change,
-      document: { revision: documentSnapshot().revision, headCommitId: COMMIT_1 },
+      externalUpdate: null,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'External rewrite',
+      },
+      document: { revision: REVISION_2, headCommitId: COMMIT_2 },
+      selectedNode: {
+        baseRevision: REVISION_2,
+        baseCommitId: COMMIT_2,
+        text: 'External rewrite',
+      },
     })
+
+    controller.resolveExternalConflict(SESSION_ID, 'local')
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      externalConflict: null,
+      dirty: true,
+      draft: 'Unsaved local draft',
+    })
+    await expect(controller.commitSelected(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({
+      baseRevision: REVISION_2,
+      baseCommitId: COMMIT_2,
+      mutations: [{
+        type: 'replace-text',
+        nodeId: NODE_HEADING,
+        baseText: 'External rewrite',
+        nextText: 'Unsaved local draft',
+      }],
+    }), expect.any(AbortSignal))
+    controller.dispose()
+  })
+
+  it('adopts the external text or resolves an edited merge without losing either conflict input', async () => {
+    for (const resolution of ['external', 'merged'] as const) {
+      const remote = successfulRemote()
+      remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
+        .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
+        .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_2) })
+      remote.readNode = vi.fn<PaperAIWorkbenchRemote['readNode']>(async () => ({
+        ok: true,
+        value: textNodeBuffer(REVISION_2, 'External rewrite'),
+      }))
+      const commit = vi.spyOn(remote, 'commit')
+      const controller = new PaperAIWorkbenchController(remote)
+      await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+      controller.updateDraft(SESSION_ID, 'Unsaved local draft')
+      controller.handleDocumentChanged({
+        documentId: DOCUMENT_ID,
+        headCommitId: COMMIT_2,
+        updatedAt: '2026-08-28T12:00:00.000Z',
+      })
+      await controller.reloadExternal(SESSION_ID)
+
+      if (resolution === 'merged') controller.updateDraft(SESSION_ID, 'Merged local and external text')
+      controller.resolveExternalConflict(SESSION_ID, resolution)
+      const resolved = controller.workbenchStore(SESSION_ID).getSnapshot()
+      expect(resolved.externalConflict).toBeNull()
+      expect(resolved.draft).toBe(resolution === 'external'
+        ? 'External rewrite'
+        : 'Merged local and external text')
+      expect(resolved.dirty).toBe(resolution === 'merged')
+      if (resolution === 'merged') {
+        await expect(controller.commitSelected(SESSION_ID)).resolves.toEqual({ ok: true })
+        expect(commit).toHaveBeenCalledWith(expect.objectContaining({
+          baseRevision: REVISION_2,
+          baseCommitId: COMMIT_2,
+          mutations: [expect.objectContaining({
+            baseText: 'External rewrite',
+            nextText: 'Merged local and external text',
+          })],
+        }), expect.any(AbortSignal))
+      }
+      controller.dispose()
+    }
+  })
+
+  it('retains the edited merge when a second external head arrives and commits from the newest base', async () => {
+    const remote = successfulRemote()
+    remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_2) })
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_3) })
+    remote.readNode = vi.fn<PaperAIWorkbenchRemote['readNode']>(async request => ({
+      ok: true,
+      value: textNodeBuffer(
+        request.revision,
+        request.revision === REVISION_2 ? 'First external rewrite' : 'Second external rewrite',
+      ),
+    }))
+    const commit = vi.spyOn(remote, 'commit')
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, 'Unsaved local draft')
+    controller.handleDocumentChanged({
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_2,
+      updatedAt: '2026-08-28T12:00:00.000Z',
+    })
+    await controller.reloadExternal(SESSION_ID)
+    controller.updateDraft(SESSION_ID, 'Merge in progress')
+
+    const nextChange = {
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_3,
+      updatedAt: '2026-08-28T12:01:00.000Z',
+    } as const
+    controller.handleDocumentChanged(nextChange)
+    expect(remote.open).toHaveBeenCalledTimes(2)
+    await controller.reloadExternal(SESSION_ID)
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      document: { revision: REVISION_3, headCommitId: COMMIT_3 },
+      draft: 'Merge in progress',
+      externalConflict: {
+        localDraft: 'Merge in progress',
+        externalText: 'Second external rewrite',
+      },
+    })
+
+    controller.updateDraft(SESSION_ID, 'Final merged text')
+    controller.resolveExternalConflict(SESSION_ID, 'merged')
+    await expect(controller.commitSelected(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({
+      baseRevision: REVISION_3,
+      baseCommitId: COMMIT_3,
+      mutations: [expect.objectContaining({
+        baseText: 'Second external rewrite',
+        nextText: 'Final merged text',
+      })],
+    }), expect.any(AbortSignal))
     controller.dispose()
   })
 

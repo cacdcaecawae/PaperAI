@@ -3442,7 +3442,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/workbench-service/src/index.ts:314`](../packages/paperai/workbench-service/src/index.ts)
+来源：[`packages/paperai/workbench-service/src/index.ts:324`](../packages/paperai/workbench-service/src/index.ts)
 
 ## 无配置的可加载插件
 

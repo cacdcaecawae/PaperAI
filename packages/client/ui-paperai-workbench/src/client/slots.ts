@@ -73,8 +73,8 @@ export interface PaperAIDocumentWorkbenchInjected {
   exportDocument: (mode: PaperAIExportMode) => Promise<PaperAIActionResult>
   /** Replace the current projection with a pending durable head. */
   reloadExternal: () => Promise<PaperAIActionResult>
-  /** Keep the current local buffer and dismiss the pending-head notice. */
-  dismissExternal: () => void
+  /** Resolve a selected-node conflict against the latest external head. */
+  resolveExternalConflict: (resolution: 'local' | 'external' | 'merged') => void
   /** Restore one backed commit through a newly created version. */
   restore: (commitId: PaperAIDocumentCommitId) => Promise<PaperAIActionResult>
 }

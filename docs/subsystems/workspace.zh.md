@@ -333,10 +333,11 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 /**
  * Read one semantic node into a temporary plain-text edit buffer.
  * @param request - document projection identity and semantic node to read.
+ * @param signal - optional cancellation signal for the node read.
  * @returns a fresh buffer tied to the observed revision and head commit.
  * @throws when the document or node is missing or the observed projection is stale.
  */
-@Remote('readNode') readNode(request: PaperAIReadNodeRequest): Promise<PaperAISelectedNodeBuffer>
+@Remote('readNode') readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer>
 
 /**
  * Apply selected-node mutations and create one immediate human commit.

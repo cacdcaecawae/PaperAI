@@ -662,7 +662,6 @@
     },
     "packages/paperai/agent-acp": {
       "ignoreDependencies": [
-        "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp"
       ]
     },

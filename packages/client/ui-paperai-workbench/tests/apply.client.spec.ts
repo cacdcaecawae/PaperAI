@@ -208,7 +208,7 @@ describe('PaperAI workbench browser plugin', () => {
     expect(typeof details.associateTemplate).toBe('function')
     expect(typeof details.exportDocument).toBe('function')
     expect(typeof details.reloadExternal).toBe('function')
-    expect(typeof details.dismissExternal).toBe('function')
+    expect(typeof details.resolveExternalConflict).toBe('function')
     expect('save' in details).toBe(false)
 
     details.selectTab('preview')
@@ -233,7 +233,7 @@ describe('PaperAI workbench browser plugin', () => {
     await expect(details.reloadExternal()).resolves.toEqual({
       ok: false, error: 'no external document update',
     })
-    details.dismissExternal()
+    details.resolveExternalConflict('local')
     await expect(details.restore(COMMIT_0)).resolves.toEqual({ ok: true })
     await b.ctx.fiber.dispose()
   })
@@ -259,6 +259,7 @@ describe('PaperAI workbench browser plugin', () => {
     await vi.waitFor(() => {
       expect(details.hooks.workbench.getSnapshot()).toMatchObject({
         externalUpdate: null,
+        externalConflict: null,
         document: { revision: REVISION_2, headCommitId: COMMIT_2 },
       })
     })

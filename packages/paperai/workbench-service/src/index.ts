@@ -106,6 +106,16 @@ interface CachedGateReport {
   readonly report: PaperAITemplateGateReport
 }
 
+interface GateOperation {
+  readonly id: symbol
+  readonly sourceRevision: PaperAIDocumentRevision
+}
+
+interface GateCacheSlot {
+  readonly operation: GateOperation
+  readonly cached?: CachedGateReport
+}
+
 function pathResourceId(
   category: FilesystemResourceCategory,
   path: string,
@@ -381,7 +391,11 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     maxUploadBytes: z.number().default(DEFAULT_MAX_UPLOAD_BYTES),
   })
 
-  private readonly gateCache = new Map<DocumentId, CachedGateReport>()
+  /**
+   * One slot per document keeps the newest revision-anchored gate claim or
+   * mutation fence, plus an optional current-revision report.
+   */
+  private readonly gateCache = new Map<DocumentId, GateCacheSlot>()
   private readonly maxUploadBytes: number
 
   constructor(ctx: Context, config: Config = {}) {
@@ -624,8 +638,8 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       mutations: [{ type: 'bind-template', templateId }],
       ...(signal === undefined ? {} : { signal }),
     })
-    this.dropGate(id)
     const after = this.requireDocument(id)
+    this.fenceGateMutation(after.document, request.baseRevision)
     const project = this.requireProject(after.document.projectId)
     const opened = await this.projectOpen(project, after.document, after.nodes, request.sessionId, signal)
     return { ...opened, createdCommitId: commit.id }
@@ -657,6 +671,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       request.fileName
         ?? `${before.document.name}${request.mode === 'draft-export' ? '-草稿' : ''}.docx`,
     )
+    const gateOperation = this.beginGate(before.document)
     let exported: ExportDocumentResult
     try {
       exported = await this.ctx.paperExports.exportDocument({
@@ -684,7 +699,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         ...projectGate(error.report, contract),
         status: 'failed',
       }
-      this.rememberGate(current.document, gate)
+      this.rememberGate(current.document, gateOperation, gate)
       return {
         status: 'blocked',
         documentId: current.document.id,
@@ -699,7 +714,10 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       ? undefined
       : this.ctx.paperTemplates.getContract(after.document.templateId)
     const gate = projectGate(exported.report, contract)
-    this.rememberGate(after.document, gate)
+    // The report covers the exported immutable commit, not a newer head published while file output completed.
+    if (after.document.headCommitId === exported.commit.id) {
+      this.rememberGate(after.document, gateOperation, gate)
+    }
     const opened = await this.projectOpen(project, after.document, after.nodes, request.sessionId, signal)
     return {
       status: 'success',
@@ -732,12 +750,14 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   /**
    * Read one semantic node into a temporary plain-text edit buffer.
    * @param request - document projection identity and semantic node to read.
+   * @param signal - optional cancellation signal for the node read.
    * @returns a fresh buffer tied to the observed revision and head commit.
    * @throws when the document or node is missing or the observed projection is stale.
    */
   @Remote('readNode')
-  readNode(request: PaperAIReadNodeRequest): Promise<PaperAISelectedNodeBuffer> {
+  readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer> {
     return Promise.resolve().then(() => {
+      signal?.throwIfAborted()
       const snapshot = this.requireDocument(DocumentId(String(request.documentId)))
       this.assertProjection(snapshot.document, request.revision, request.headCommitId)
       return this.bufferFor(snapshot.document, snapshot.nodes, DocumentNodeId(String(request.nodeId)))
@@ -781,8 +801,8 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       })),
       ...(signal === undefined ? {} : { signal }),
     })
-    this.dropGate(id)
     const after = this.requireDocument(id)
+    this.fenceGateMutation(after.document, request.baseRevision)
     const project = this.requireProject(after.document.projectId)
     const opened = await this.projectOpen(
       project,
@@ -810,12 +830,13 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const id = DocumentId(String(request.documentId))
     const snapshot = this.requireDocument(id)
     this.assertProjection(snapshot.document, request.revision, request.headCommitId)
+    const gateOperation = this.beginGate(snapshot.document)
     const report = await this.ctx.paperTemplates.check({ documentId: id, mode: 'continuous' }, signal)
     const contract = snapshot.document.templateId === undefined
       ? undefined
       : this.ctx.paperTemplates.getContract(snapshot.document.templateId)
     const gate = projectGate(report, contract)
-    this.rememberGate(snapshot.document, gate)
+    this.rememberGate(snapshot.document, gateOperation, gate)
     return {
       documentId: snapshot.document.id,
       revision: revisionOf(snapshot.document),
@@ -853,8 +874,8 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       },
       ...(signal === undefined ? {} : { signal }),
     })
-    this.dropGate(id)
     const after = this.requireDocument(id)
+    this.fenceGateMutation(after.document, request.baseRevision)
     const project = this.requireProject(after.document.projectId)
     const opened = await this.projectOpen(project, after.document, after.nodes, request.sessionId, signal)
     return { ...opened, createdCommitId: commit.id }
@@ -1028,16 +1049,42 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   private gateFor(document: DocumentRecord): PaperAITemplateGateReport | undefined {
-    const cached = this.gateCache.get(document.id)
+    const cached = this.gateCache.get(document.id)?.cached
     return cached?.revision === revisionOf(document) ? cached.report : undefined
   }
 
-  private rememberGate(document: DocumentRecord, report: PaperAITemplateGateReport): void {
-    this.gateCache.set(document.id, { revision: revisionOf(document), report })
+  private beginGate(document: DocumentRecord): GateOperation {
+    const operation = { id: Symbol(), sourceRevision: revisionOf(document) }
+    const cached = this.gateCache.get(document.id)?.cached
+    this.gateCache.set(document.id, cached === undefined ? { operation } : { operation, cached })
+    return operation
   }
 
-  private dropGate(documentId: DocumentId): void {
-    this.gateCache.delete(documentId)
+  private rememberGate(
+    document: DocumentRecord,
+    operation: GateOperation,
+    report: PaperAITemplateGateReport,
+  ): void {
+    const revision = revisionOf(document)
+    const active = this.gateCache.get(document.id)?.operation
+    const ownsSlot = active?.id === operation.id
+    // A milestone invalidates every gate claim that began from its exported source revision.
+    const advancesActiveSource = operation.sourceRevision !== revision
+      && active?.sourceRevision === operation.sourceRevision
+    if (!ownsSlot && !advancesActiveSource) return
+    const current = this.ctx.paperDocuments.readDocument(document.id)
+    if (current === undefined || revisionOf(current.document) !== revision) return
+    this.gateCache.set(document.id, {
+      operation: { id: operation.id, sourceRevision: revision },
+      cached: { revision, report },
+    })
+  }
+
+  private fenceGateMutation(document: DocumentRecord, sourceRevision: PaperAIDocumentRevision): void {
+    if (this.gateCache.get(document.id)?.operation.sourceRevision !== sourceRevision) return
+    this.gateCache.set(document.id, {
+      operation: { id: Symbol(), sourceRevision: revisionOf(document) },
+    })
   }
 }
 

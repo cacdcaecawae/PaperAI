@@ -19,7 +19,7 @@ import type {
   ProjectRecord,
   TemplateContract,
 } from '@paperai/domain'
-import { PaperExportError } from '@paperai/export-service'
+import { PaperExportError, type ExportDocumentResult } from '@paperai/export-service'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import PaperAiWorkbenchService from '../src/index.ts'
 import type {
@@ -66,6 +66,70 @@ interface Harness {
   readonly check: ReturnType<typeof vi.fn>
   readonly exportDocument: ReturnType<typeof vi.fn>
   contracts: TemplateContract[]
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((fulfill) => { resolve = fulfill })
+  return { promise, resolve }
+}
+
+function openDocument(harness: Harness) {
+  return harness.service.open({
+    workspaceId: WORKSPACE_ID,
+    sessionId: SESSION_ID,
+    resourceId: `document:${DOCUMENT_ID}` as PaperAIResourceId,
+  })
+}
+
+function validateDocument(
+  harness: Harness,
+  document: {
+    readonly revision: PaperAIDocumentRevision
+    readonly headCommitId: PaperAIDocumentCommitId | null
+  },
+) {
+  return harness.service.validate({
+    sessionId: SESSION_ID,
+    documentId: DOCUMENT_ID,
+    revision: document.revision,
+    headCommitId: document.headCommitId,
+  })
+}
+
+function deferSubmitSettlement(
+  operation: Harness['submit'],
+): { readonly published: Promise<DocumentCommit>; readonly settle: (commit: DocumentCommit) => void } {
+  const implementation = operation.getMockImplementation()
+  if (implementation === undefined) throw new Error('submit operation has no mock implementation')
+  const published = deferred<DocumentCommit>()
+  const settlement = deferred<DocumentCommit>()
+  operation.mockImplementationOnce(async (request) => {
+    const commit = await implementation(request)
+    published.resolve(commit)
+    return await settlement.promise
+  })
+  return { published: published.promise, settle: settlement.resolve }
+}
+
+function deferRevertSettlement(
+  operation: Harness['revert'],
+): { readonly published: Promise<DocumentCommit>; readonly settle: (commit: DocumentCommit) => void } {
+  const implementation = operation.getMockImplementation()
+  if (implementation === undefined) throw new Error('revert operation has no mock implementation')
+  const published = deferred<DocumentCommit>()
+  const settlement = deferred<DocumentCommit>()
+  operation.mockImplementationOnce(async (request) => {
+    const commit = await implementation(request)
+    published.resolve(commit)
+    return await settlement.promise
+  })
+  return { published: published.promise, settle: settlement.resolve }
 }
 
 const contexts: Context[] = []
@@ -428,6 +492,13 @@ describe('PaperAiWorkbenchService', () => {
       revision: opened.document.revision,
       headCommitId: null,
     })).rejects.toThrow('changed; reload')
+    await expect(harness.service.readNode({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      nodeId: NODE_ID,
+      revision: committed.document.revision,
+      headCommitId: committed.document.headCommitId,
+    }, AbortSignal.abort())).rejects.toThrow('aborted')
   })
 
   it('runs a live gate and restores through a new recoverable commit', async () => {
@@ -627,6 +698,39 @@ describe('PaperAiWorkbenchService', () => {
     expect(associated.document.template?.name).toBe('HIT 开题报告')
   })
 
+  it('keeps a validation claim started after template association publication but before settlement', async () => {
+    const harness = createHarness()
+    harness.contracts = [{ ...templateContract(), status: 'confirmed' }]
+    const opened = await openDocument(harness)
+    const associationSettlement = deferSubmitSettlement(harness.submit)
+    const associating = harness.service.associateTemplate({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      templateId: 'template-1',
+    })
+    const associationCommit = await associationSettlement.published
+    const published = await openDocument(harness)
+    const delayedValidation = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayedValidation.promise)
+    const validating = validateDocument(harness, published.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+
+    associationSettlement.settle(associationCommit)
+    const associated = await associating
+    delayedValidation.resolve({
+      status: 'pass',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [],
+      checkedAt: '2026-08-28T00:03:00.000Z',
+    })
+    const currentValidation = await validating
+    expect(associated.document.revision).toBe(published.document.revision)
+    expect((await openDocument(harness)).document.gate).toEqual(currentValidation.gate)
+  })
+
   it('exports into the project tree and refreshes the milestone-backed version', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-'))
     roots.push(root)
@@ -666,6 +770,378 @@ describe('PaperAiWorkbenchService', () => {
     expect(gateCache).toBeInstanceOf(Map)
     if (!(gateCache instanceof Map)) throw new Error('workbench gate cache is not a Map')
     expect(gateCache.size).toBe(1)
+  })
+
+  it('does not let a delayed validation replace the gate for a newer exported revision', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-race-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const opened = await openDocument(harness)
+    const delayed = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayed.promise)
+    const validating = validateDocument(harness, opened.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+
+    const exported = await harness.service.exportDocument({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mode: 'draft-export',
+    })
+    expect(exported.status).toBe('success')
+    if (exported.status !== 'success') throw new Error('draft export unexpectedly blocked')
+    delayed.resolve({
+      status: 'fail',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [{
+        id: 'stale-validation', severity: 'error', code: 'required-field', message: '旧版本报告',
+      }],
+      checkedAt: '2026-08-28T00:01:00.000Z',
+    })
+    await validating
+
+    const current = await openDocument(harness)
+    expect(current.document.revision).toBe(exported.document.revision)
+    expect(current.document.gate).toEqual(exported.gate)
+    const gateCache: unknown = Reflect.get(harness.service, 'gateCache')
+    expect(gateCache).toBeInstanceOf(Map)
+    if (!(gateCache instanceof Map)) throw new Error('workbench gate cache is not a Map')
+    expect(gateCache.size).toBe(1)
+  })
+
+  it('lets an export advancing the revision supersede a later validation from its source revision', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-source-race-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const opened = await openDocument(harness)
+    const delayedExport = deferred<ExportDocumentResult>()
+    const delayedValidation = deferred<GateReport>()
+    harness.exportDocument.mockReturnValueOnce(delayedExport.promise)
+    harness.check.mockReturnValueOnce(delayedValidation.promise)
+    const exporting = harness.service.exportDocument({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mode: 'draft-export',
+    })
+    await vi.waitFor(() => { expect(harness.exportDocument).toHaveBeenCalledOnce() })
+    const validating = validateDocument(harness, opened.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+    const exportCommit = await harness.submit({ mutations: [{ type: 'milestone' }] })
+    const report: GateReport = {
+      status: 'pass',
+      mode: 'draft-export',
+      documentId: DOCUMENT_ID,
+      findings: [],
+      checkedAt: '2026-08-28T00:02:00.000Z',
+    }
+    delayedExport.resolve({
+      outputPath: join(root, 'exports', 'drafts', '开题报告-草稿.docx'),
+      report,
+      gate: report,
+      commit: exportCommit,
+    })
+    const exported = await exporting
+    expect(exported.status).toBe('success')
+    if (exported.status !== 'success') throw new Error('draft export unexpectedly blocked')
+    expect(exported.document.gate).toEqual(exported.gate)
+
+    delayedValidation.resolve({
+      status: 'fail',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [{ id: 'source-validation', severity: 'error', code: 'old-check', message: '源版本报告' }],
+      checkedAt: '2026-08-28T00:01:00.000Z',
+    })
+    await validating
+    expect((await openDocument(harness)).document.gate).toEqual(exported.gate)
+  })
+
+  it('lets validation from the exported revision fence the completing export', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-target-race-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const opened = await openDocument(harness)
+    const delayedExport = deferred<ExportDocumentResult>()
+    const delayedValidation = deferred<GateReport>()
+    harness.exportDocument.mockReturnValueOnce(delayedExport.promise)
+    const exporting = harness.service.exportDocument({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mode: 'draft-export',
+    })
+    await vi.waitFor(() => { expect(harness.exportDocument).toHaveBeenCalledOnce() })
+    const exportCommit = await harness.submit({ mutations: [{ type: 'milestone' }] })
+    const exportedRevision = await openDocument(harness)
+    harness.check.mockReturnValueOnce(delayedValidation.promise)
+    const validating = validateDocument(harness, exportedRevision.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+    const exportReport: GateReport = {
+      status: 'pass',
+      mode: 'draft-export',
+      documentId: DOCUMENT_ID,
+      findings: [],
+      checkedAt: '2026-08-28T00:02:00.000Z',
+    }
+    delayedExport.resolve({
+      outputPath: join(root, 'exports', 'drafts', '开题报告-草稿.docx'),
+      report: exportReport,
+      gate: exportReport,
+      commit: exportCommit,
+    })
+    const exported = await exporting
+    expect(exported.status).toBe('success')
+    if (exported.status !== 'success') throw new Error('draft export unexpectedly blocked')
+    expect(exported.document.gate).toEqual({ status: 'not-run', findings: [] })
+
+    delayedValidation.resolve({
+      status: 'fail',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [{ id: 'target-validation', severity: 'warning', code: 'new-check', message: '导出版本报告' }],
+      checkedAt: '2026-08-28T00:03:00.000Z',
+    })
+    const currentValidation = await validating
+    expect((await openDocument(harness)).document.gate).toEqual(currentValidation.gate)
+  })
+
+  it('does not attach a completed export report to a later external revision', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-external-export-race-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const opened = await openDocument(harness)
+    const delayed = deferred<ExportDocumentResult>()
+    harness.exportDocument.mockReturnValueOnce(delayed.promise)
+    const exporting = harness.service.exportDocument({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mode: 'draft-export',
+    })
+    await vi.waitFor(() => { expect(harness.exportDocument).toHaveBeenCalledOnce() })
+    const exportCommit = await harness.submit({ mutations: [{ type: 'milestone' }] })
+    const newerCommit = await harness.submit({
+      baseCommitId: exportCommit.id,
+      mutations: [{ type: 'replace-text', nodeId: NODE_ID, nextText: '外部新版本' }],
+    })
+    const report: GateReport = {
+      status: 'pass',
+      mode: 'draft-export',
+      documentId: DOCUMENT_ID,
+      findings: [],
+      checkedAt: '2026-08-28T00:02:00.000Z',
+    }
+    delayed.resolve({
+      outputPath: join(root, 'exports', 'drafts', '开题报告-草稿.docx'),
+      report,
+      gate: report,
+      commit: exportCommit,
+    })
+
+    const exported = await exporting
+    expect(exported.status).toBe('success')
+    if (exported.status !== 'success') throw new Error('draft export unexpectedly blocked')
+    expect(exported.document.headCommitId).toBe(newerCommit.id)
+    expect(exported.gate).toMatchObject({ status: 'passed', checkedAt: report.checkedAt })
+    expect(exported.document.gate).toEqual({ status: 'not-run', findings: [] })
+  })
+
+  it('does not let an earlier validation replace a later blocked-export gate for the same revision', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-blocked-race-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const opened = await openDocument(harness)
+    const delayed = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayed.promise)
+    const validating = validateDocument(harness, opened.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+    const blockedReport: GateReport = {
+      status: 'fail',
+      mode: 'delivery-export',
+      documentId: DOCUMENT_ID,
+      findings: [{
+        id: 'delivery-block', severity: 'error', code: 'required-field', message: '交付门禁失败',
+      }],
+      checkedAt: '2026-08-28T00:04:00.000Z',
+    }
+    harness.exportDocument.mockRejectedValueOnce(new PaperExportError(
+      'DELIVERY_BLOCKED',
+      'delivery blocked',
+      blockedReport,
+    ))
+
+    const blocked = await harness.service.exportDocument({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mode: 'delivery-export',
+    })
+    expect(blocked.status).toBe('blocked')
+    delayed.resolve({
+      status: 'fail',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [{
+        id: 'stale-validation', severity: 'warning', code: 'old-check', message: '较早的连续检查',
+      }],
+      checkedAt: '2026-08-28T00:01:00.000Z',
+    })
+    await validating
+
+    const current = await openDocument(harness)
+    expect(current.document.revision).toBe(opened.document.revision)
+    expect(current.document.gate).toEqual(blocked.gate)
+  })
+
+  it('keeps the current gate when a pre-commit validation settles last', async () => {
+    const harness = createHarness()
+    const opened = await openDocument(harness)
+    const delayed = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayed.promise)
+    const staleValidation = validateDocument(harness, opened.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+    const committed = await harness.service.commit({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mutations: [{
+        type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '新版本',
+      }],
+    })
+    const currentValidation = await validateDocument(harness, committed.document)
+    delayed.resolve({
+      status: 'fail',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [{ id: 'stale-validation', severity: 'error', code: 'old-check', message: '旧版本报告' }],
+      checkedAt: '2026-08-28T00:00:30.000Z',
+    })
+    await staleValidation
+
+    const current = await openDocument(harness)
+    expect(current.document.revision).toBe(committed.document.revision)
+    expect(current.document.gate).toEqual(currentValidation.gate)
+  })
+
+  it('keeps a validation claim started after commit publication but before commit settlement', async () => {
+    const harness = createHarness()
+    const opened = await openDocument(harness)
+    const commitSettlement = deferSubmitSettlement(harness.submit)
+    const committing = harness.service.commit({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mutations: [{
+        type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '已发布版本',
+      }],
+    })
+    const commit = await commitSettlement.published
+    const published = await openDocument(harness)
+    const delayedValidation = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayedValidation.promise)
+    const validating = validateDocument(harness, published.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+
+    commitSettlement.settle(commit)
+    const committed = await committing
+    delayedValidation.resolve({
+      status: 'pass',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [],
+      checkedAt: '2026-08-28T00:03:00.000Z',
+    })
+    const currentValidation = await validating
+    expect(committed.document.revision).toBe(published.document.revision)
+    expect((await openDocument(harness)).document.gate).toEqual(currentValidation.gate)
+  })
+
+  it('keeps the current gate when a pre-restore validation settles last', async () => {
+    const harness = createHarness()
+    const opened = await openDocument(harness)
+    const committed = await harness.service.commit({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mutations: [{
+        type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '待恢复版本',
+      }],
+    })
+    const delayed = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayed.promise)
+    const staleValidation = validateDocument(harness, committed.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+    const restored = await harness.service.restore({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: committed.document.revision,
+      baseCommitId: committed.document.headCommitId,
+      targetCommitId: 'historical' as PaperAIDocumentCommitId,
+    })
+    const currentValidation = await validateDocument(harness, restored.document)
+    delayed.resolve({
+      status: 'fail',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [{ id: 'stale-validation', severity: 'error', code: 'old-check', message: '恢复前报告' }],
+      checkedAt: '2026-08-28T00:00:30.000Z',
+    })
+    await staleValidation
+
+    const current = await openDocument(harness)
+    expect(current.document.revision).toBe(restored.document.revision)
+    expect(current.document.gate).toEqual(currentValidation.gate)
+  })
+
+  it('keeps a validation claim started after restore publication but before restore settlement', async () => {
+    const harness = createHarness()
+    const opened = await openDocument(harness)
+    const committed = await harness.service.commit({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: opened.document.headCommitId,
+      mutations: [{
+        type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '待恢复版本',
+      }],
+    })
+    const restoreSettlement = deferRevertSettlement(harness.revert)
+    const restoring = harness.service.restore({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: committed.document.revision,
+      baseCommitId: committed.document.headCommitId,
+      targetCommitId: 'historical' as PaperAIDocumentCommitId,
+    })
+    const restoreCommit = await restoreSettlement.published
+    const published = await openDocument(harness)
+    const delayedValidation = deferred<GateReport>()
+    harness.check.mockReturnValueOnce(delayedValidation.promise)
+    const validating = validateDocument(harness, published.document)
+    expect(harness.check).toHaveBeenCalledOnce()
+
+    restoreSettlement.settle(restoreCommit)
+    const restored = await restoring
+    delayedValidation.resolve({
+      status: 'pass',
+      mode: 'continuous',
+      documentId: DOCUMENT_ID,
+      findings: [],
+      checkedAt: '2026-08-28T00:03:00.000Z',
+    })
+    const currentValidation = await validating
+    expect(restored.document.revision).toBe(published.document.revision)
+    expect((await openDocument(harness)).document.gate).toEqual(currentValidation.gate)
   })
 
   it('returns a projectable blocked delivery without creating an export commit', async () => {

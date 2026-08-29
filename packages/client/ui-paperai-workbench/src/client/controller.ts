@@ -31,6 +31,7 @@ const WORKBENCH_INITIAL: PaperAIWorkbenchState = Object.freeze({
   templates: null,
   exportReceipt: null,
   externalUpdate: null,
+  externalConflict: null,
   error: null,
   nodeError: null,
   actionError: null,
@@ -84,6 +85,21 @@ function bufferMatchesDocument(
     && buffer.baseRevision === document.revision
     && buffer.baseCommitId === document.headCommitId
     && document.nodes.some(node => node.nodeId === buffer.nodeId && node.editable)
+}
+
+/** Whether document navigation must retain the selected-node editing state. */
+function hasUnresolvedEdit(state: PaperAIWorkbenchState): boolean {
+  return state.dirty || state.externalConflict !== null
+}
+
+/** Whether two durable-head notices represent the same event instance. */
+function sameDocumentChange(
+  left: PaperAIDocumentChangedEvent | null,
+  right: PaperAIDocumentChangedEvent,
+): boolean {
+  return left?.documentId === right.documentId
+    && left.headCommitId === right.headCommitId
+    && left.updatedAt === right.updatedAt
 }
 
 /** Per-browser PaperAI controller; all React surfaces subscribe to its stable stores. */
@@ -199,7 +215,7 @@ export class PaperAIWorkbenchController {
     if (current.action !== null) {
       return { ok: false, error: 'workbench is busy' }
     }
-    if (current.dirty) {
+    if (hasUnresolvedEdit(current)) {
       const error = 'commit or discard the selected node draft before importing another document'
       workbench.store.update((state) => { state.actionError = error })
       return { ok: false, error }
@@ -291,9 +307,9 @@ export class PaperAIWorkbenchController {
     this.assertLive()
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
-    if (state.action !== null || state.dirty) {
+    if (state.action !== null || hasUnresolvedEdit(state)) {
       entry.store.update((draft) => {
-        draft.actionError = state.dirty
+        draft.actionError = hasUnresolvedEdit(state)
           ? 'commit or discard the selected node draft before opening another document'
           : 'wait for the current document action before opening another document'
       })
@@ -364,7 +380,7 @@ export class PaperAIWorkbenchController {
       return { ok: false, error: 'no open document' }
     }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.dirty && state.selectedNode?.nodeId !== nodeId) {
+    if (hasUnresolvedEdit(state) && state.selectedNode?.nodeId !== nodeId) {
       return { ok: false, error: 'discard unsaved node changes before selecting another node' }
     }
     if (state.nodePhase === 'ready' && state.selectedNode?.nodeId === nodeId) return OK
@@ -387,7 +403,7 @@ export class PaperAIWorkbenchController {
       nodeId,
       revision: document.revision,
       headCommitId: document.headCommitId,
-    }))
+    }, request.signal))
     if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
     if (!result.ok) return this.failNode(entry.store, remoteError(result.error))
     if (result.value.nodeId !== nodeId || !bufferMatchesDocument(result.value, document)) {
@@ -428,7 +444,7 @@ export class PaperAIWorkbenchController {
   discardDraft(sessionId: SessionId): void {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
-      if (state.selectedNode === null || state.action !== null) return
+      if (state.selectedNode === null || state.action !== null || state.externalConflict !== null) return
       state.draft = bufferValue(state.selectedNode)
       state.dirty = false
       state.actionError = null
@@ -450,6 +466,9 @@ export class PaperAIWorkbenchController {
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
     if (state.nodePhase !== 'ready' || state.selectedNode === null) {
       return { ok: false, error: 'no selected node buffer' }
+    }
+    if (state.externalConflict !== null) {
+      return { ok: false, error: 'resolve the external node conflict before committing' }
     }
     if (!state.dirty) return { ok: false, error: 'selected node has no changes' }
     if (!bufferMatchesDocument(state.selectedNode, state.document)) {
@@ -706,7 +725,7 @@ export class PaperAIWorkbenchController {
     this.assertLive()
     const currentEntry = this.workbenchEntry(sessionId)
     const state = currentEntry.store.getSnapshot()
-    if (state.dirty) {
+    if (hasUnresolvedEdit(state)) {
       return this.failAction(
         currentEntry.store,
         'commit or discard the selected node draft before restoring a version',
@@ -742,14 +761,14 @@ export class PaperAIWorkbenchController {
       if (state.document?.documentId !== change.documentId
         || state.document.headCommitId === change.headCommitId) continue
       entry.store.update((draft) => { draft.externalUpdate = change })
-      if (state.action === null && !state.dirty && state.nodePhase !== 'loading') {
+      if (state.action === null && !hasUnresolvedEdit(state) && state.nodePhase !== 'loading') {
         void this.reloadExternal(sessionId)
       }
     }
   }
 
   /**
-   * Load a pending durable head, rebasing an unchanged selected node without losing its local draft.
+   * Load a pending durable head and rebase any selected-node draft without discarding conflict inputs.
    * @param sessionId - Session whose pending external head should replace the local projection.
    * @returns the settled local action result after the refreshed document is published.
    */
@@ -763,7 +782,8 @@ export class PaperAIWorkbenchController {
     }
     if (state.externalUpdate === null) return { ok: false, error: 'no external document update' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    const localDraft = state.dirty && state.selectedNode !== null
+    const pendingExternalUpdate = state.externalUpdate
+    const localDraft = hasUnresolvedEdit(state) && state.selectedNode !== null
       ? { buffer: state.selectedNode, value: state.draft }
       : null
     const request = this.begin(entry)
@@ -785,6 +805,7 @@ export class PaperAIWorkbenchController {
       return this.failAction(entry.store, 'paperaiWorkbench returned an invalid external document projection')
     }
     let rebasedBuffer: PaperAISelectedNodeBuffer | null = null
+    let conflict: PaperAIWorkbenchState['externalConflict'] = null
     if (localDraft !== null) {
       const document = result.value.document
       if (!document.nodes.some(node => node.nodeId === localDraft.buffer.nodeId && node.editable)) {
@@ -804,29 +825,47 @@ export class PaperAIWorkbenchController {
         return this.failAction(entry.store, 'paperaiWorkbench returned a mismatched rebased node buffer')
       }
       if (bufferValue(rebased.value) !== bufferValue(localDraft.buffer)) {
-        return this.failAction(entry.store, 'selected node changed externally; local draft preserved for conflict resolution')
+        conflict = {
+          localDraft: localDraft.value,
+          externalText: bufferValue(rebased.value),
+        }
       }
       rebasedBuffer = rebased.value
     }
-    this.publishOpenResult(entry.store, result.value)
+    this.publishOpenResult(entry.store, result.value, pendingExternalUpdate)
     if (localDraft !== null && rebasedBuffer !== null) {
       entry.store.update((draft) => {
         draft.nodePhase = 'ready'
         draft.selectedNode = rebasedBuffer
         draft.draft = localDraft.value
         draft.dirty = localDraft.value !== bufferValue(rebasedBuffer)
+        draft.externalConflict = conflict
       })
     }
     return OK
   }
 
   /**
-   * Keep the current local buffer and dismiss one external-update notice.
-   * @param sessionId - Session whose external-update notice should be cleared.
+   * Resolve a selected-node conflict on the latest external document head.
+   * @param sessionId - Session owning the rebased selected-node buffer.
+   * @param resolution - preserved local text, latest external text, or the currently edited merged text.
    */
-  dismissExternal(sessionId: SessionId): void {
+  resolveExternalConflict(
+    sessionId: SessionId,
+    resolution: 'local' | 'external' | 'merged',
+  ): void {
     this.assertLive()
-    this.workbenchEntry(sessionId).store.update((state) => { state.externalUpdate = null })
+    this.workbenchEntry(sessionId).store.update((state) => {
+      if (state.externalConflict === null
+        || state.selectedNode === null
+        || state.action !== null
+        || state.externalUpdate !== null) return
+      if (resolution === 'local') state.draft = state.externalConflict.localDraft
+      if (resolution === 'external') state.draft = state.externalConflict.externalText
+      state.dirty = state.draft !== bufferValue(state.selectedNode)
+      state.externalConflict = null
+      state.actionError = null
+    })
   }
 
   /** Retry every previously loaded projection after a connection generation reset. */
@@ -915,7 +954,7 @@ export class PaperAIWorkbenchController {
       return { ok: false, result: { ok: false, error: 'no open document' } }
     }
     if (state.action !== null) return { ok: false, result: { ok: false, error: 'workbench is busy' } }
-    if (state.dirty) {
+    if (hasUnresolvedEdit(state)) {
       return {
         ok: false,
         result: { ok: false, error: 'commit or discard the selected node draft before this action' },
@@ -948,7 +987,11 @@ export class PaperAIWorkbenchController {
     return { ok: false, error }
   }
 
-  private publishOpenResult(store: PaperAIWorkbenchStore, result: PaperAIDocumentOpenResult): void {
+  private publishOpenResult(
+    store: PaperAIWorkbenchStore,
+    result: PaperAIDocumentOpenResult,
+    consumedExternalUpdate?: PaperAIDocumentChangedEvent,
+  ): void {
     const previous = store.getSnapshot()
     const tab = previous.tab
     const sameWorkspace = previous.document?.workspaceId === result.document.workspaceId
@@ -964,9 +1007,14 @@ export class PaperAIWorkbenchController {
       action: null,
       templates: sameWorkspace ? previous.templates : null,
       exportReceipt: sameDocument ? previous.exportReceipt : null,
-      externalUpdate: previous.externalUpdate?.headCommitId === result.document.headCommitId
-        ? null
-        : previous.externalUpdate,
+      externalUpdate: consumedExternalUpdate === undefined
+        ? previous.externalUpdate?.headCommitId === result.document.headCommitId
+          ? null
+          : previous.externalUpdate
+        : sameDocumentChange(previous.externalUpdate, consumedExternalUpdate)
+          ? null
+          : previous.externalUpdate,
+      externalConflict: null,
       error: null,
       nodeError: null,
       actionError: null,

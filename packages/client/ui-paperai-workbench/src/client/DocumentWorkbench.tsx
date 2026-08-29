@@ -65,6 +65,11 @@ function actorLabel(version: PaperAIDocumentVersion): string {
   return agent.length === 0 ? version.actor.name : agent.join(' / ')
 }
 
+/** Whether document actions must wait for the selected-node edit to settle. */
+function hasUnresolvedEdit(state: PaperAIWorkbenchState): boolean {
+  return state.dirty || state.externalConflict !== null
+}
+
 /** Sandboxed OfficeCLI-derived document preview. */
 function PreviewView({ document, t }: {
   document: PaperAIDocumentSnapshot
@@ -89,11 +94,14 @@ function PreviewView({ document, t }: {
 }
 
 /** Temporary editor for the selected semantic node. */
-function SelectedNodeEditor({ state, updateDraft, discardDraft, commitSelected, t }: {
+function SelectedNodeEditor({
+  state, updateDraft, discardDraft, commitSelected, resolveExternalConflict, t,
+}: {
   state: PaperAIWorkbenchState
   updateDraft: PaperAIDocumentWorkbenchProps['updateDraft']
   discardDraft: PaperAIDocumentWorkbenchProps['discardDraft']
   commitSelected: PaperAIDocumentWorkbenchProps['commitSelected']
+  resolveExternalConflict: PaperAIDocumentWorkbenchProps['resolveExternalConflict']
   t: PaperAIDocumentWorkbenchProps['t']
 }): ReactNode {
   if (state.nodePhase === 'loading') {
@@ -105,9 +113,57 @@ function SelectedNodeEditor({ state, updateDraft, discardDraft, commitSelected, 
   const buffer = state.selectedNode
   if (buffer === null) return <p className={css.nodeMessage}>{t('edit.select')}</p>
   const disabled = state.action !== null
+  const conflict = state.externalConflict
   const base = buffer.baseCommitId ?? buffer.baseRevision
   return (
-    <div className={css.nodeEditor}>
+    <div className={css.nodeEditor} data-paperai-node-editor>
+      {conflict !== null && (
+        <section className={css.conflictResolution} aria-labelledby="paperai-conflict-heading">
+          <div className={css.conflictHeading}>
+            <strong id="paperai-conflict-heading">{t('conflict.title')}</strong>
+            <span>{t('conflict.description')}</span>
+          </div>
+          <div className={css.conflictComparison}>
+            <label>
+              <span>{t('conflict.local')}</span>
+              <textarea aria-label={t('conflict.local')} value={conflict.localDraft} readOnly />
+            </label>
+            <label>
+              <span>{t('conflict.external')}</span>
+              <textarea aria-label={t('conflict.external')} value={conflict.externalText} readOnly />
+            </label>
+          </div>
+          <div className={css.conflictActions}>
+            <span>{t('conflict.mergeHint')}</span>
+            <div>
+              <Button
+                variant="toolbar"
+                size="sm"
+                disabled={disabled || state.externalUpdate !== null}
+                onClick={() => { resolveExternalConflict('local') }}
+              >
+                {t('conflict.useLocal')}
+              </Button>
+              <Button
+                variant="toolbar"
+                size="sm"
+                disabled={disabled || state.externalUpdate !== null}
+                onClick={() => { resolveExternalConflict('external') }}
+              >
+                {t('conflict.useExternal')}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={disabled || state.externalUpdate !== null}
+                onClick={() => { resolveExternalConflict('merged') }}
+              >
+                {t('conflict.useMerged')}
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
       <div className={css.nodeEditorHeader}>
         <div>
           <h2>{buffer.label}</h2>
@@ -117,7 +173,7 @@ function SelectedNodeEditor({ state, updateDraft, discardDraft, commitSelected, 
           <Button
             variant="toolbar"
             size="sm"
-            disabled={!state.dirty || disabled}
+            disabled={!state.dirty || disabled || conflict !== null}
             onClick={() => { discardDraft() }}
           >
             {t('edit.discard')}
@@ -125,7 +181,7 @@ function SelectedNodeEditor({ state, updateDraft, discardDraft, commitSelected, 
           <Button
             variant="outline"
             size="sm"
-            disabled={!state.dirty || disabled}
+            disabled={!state.dirty || disabled || conflict !== null}
             onClick={() => { void commitSelected() }}
           >
             {state.action === 'committing' ? t('edit.committing') : t('edit.commit')}
@@ -145,16 +201,21 @@ function SelectedNodeEditor({ state, updateDraft, discardDraft, commitSelected, 
 }
 
 /** Selected semantic-node buffer editor; the complete document remains preview-only. */
-function EditView({ document, state, selectNode, updateDraft, discardDraft, commitSelected, t }: {
+function EditView({
+  document, state, selectNode, updateDraft, discardDraft, commitSelected,
+  resolveExternalConflict, t,
+}: {
   document: PaperAIDocumentSnapshot
   state: PaperAIWorkbenchState
   selectNode: PaperAIDocumentWorkbenchProps['selectNode']
   updateDraft: PaperAIDocumentWorkbenchProps['updateDraft']
   discardDraft: PaperAIDocumentWorkbenchProps['discardDraft']
   commitSelected: PaperAIDocumentWorkbenchProps['commitSelected']
+  resolveExternalConflict: PaperAIDocumentWorkbenchProps['resolveExternalConflict']
   t: PaperAIDocumentWorkbenchProps['t']
 }): ReactNode {
   const editableCount = document.nodes.filter(node => node.editable).length
+  const unresolved = hasUnresolvedEdit(state)
   return (
     <section className={css.editView} aria-labelledby="paperai-edit-heading">
       <aside className={css.nodeOutline} aria-label={t('edit.nodes')}>
@@ -166,7 +227,7 @@ function EditView({ document, state, selectNode, updateDraft, discardDraft, comm
           <div className={css.nodeList}>
             {document.nodes.map((node) => {
               const selected = state.selectedNode?.nodeId === node.nodeId
-              const locked = state.dirty && !selected
+              const locked = unresolved && !selected
               const style = {
                 '--paperai-node-indent': `${10 + Math.max(0, Math.min(8, node.depth)) * 14}px`,
               } as CSSProperties
@@ -184,7 +245,9 @@ function EditView({ document, state, selectNode, updateDraft, discardDraft, comm
                   style={style}
                   aria-current={selected ? 'true' : undefined}
                   disabled={state.action !== null || locked}
-                  title={locked ? t('edit.unsavedLock') : node.label}
+                  title={locked
+                    ? t(state.externalConflict === null ? 'edit.unsavedLock' : 'edit.conflictLock')
+                    : node.label}
                   onClick={() => { void selectNode(node.nodeId) }}
                 >
                   {contents}
@@ -202,13 +265,18 @@ function EditView({ document, state, selectNode, updateDraft, discardDraft, comm
             })}
           </div>
         )}
-        {state.dirty && <p className={css.unsavedHint}>{t('edit.unsavedLock')}</p>}
+        {unresolved && (
+          <p className={css.unsavedHint}>
+            {t(state.externalConflict === null ? 'edit.unsavedLock' : 'edit.conflictLock')}
+          </p>
+        )}
       </aside>
       <SelectedNodeEditor
         state={state}
         updateDraft={updateDraft}
         discardDraft={discardDraft}
         commitSelected={commitSelected}
+        resolveExternalConflict={resolveExternalConflict}
         t={t}
       />
     </section>
@@ -222,13 +290,18 @@ function VersionsView({ document, state, restore, t }: {
   restore: PaperAIDocumentWorkbenchProps['restore']
   t: PaperAIDocumentWorkbenchProps['t']
 }): ReactNode {
+  const unresolved = hasUnresolvedEdit(state)
   return (
     <section className={css.scrollView} aria-labelledby="paperai-versions-heading">
       <div className={css.sectionHeading}>
         <h2 id="paperai-versions-heading">{t('versions.title')}</h2>
         <span>{document.versions.length}</span>
       </div>
-      {state.dirty && <p className={css.inlineNotice}>{t('versions.dirtyLock')}</p>}
+      {unresolved && (
+        <p className={css.inlineNotice}>
+          {t(state.externalConflict === null ? 'versions.dirtyLock' : 'edit.conflictLock')}
+        </p>
+      )}
       {document.versions.length === 0 ? <p className={css.empty}>{t('versions.empty')}</p> : (
         <ol className={css.versionList}>
           {document.versions.map(version => (
@@ -243,7 +316,7 @@ function VersionsView({ document, state, restore, t }: {
                   <Button
                     variant="toolbar"
                     size="sm"
-                    disabled={state.action !== null || state.nodePhase === 'loading' || state.dirty}
+                    disabled={state.action !== null || state.nodePhase === 'loading' || unresolved}
                     onClick={() => { void restore(version.commitId) }}
                   >
                     {state.action === 'restoring' ? t('versions.restoring') : t('versions.restore')}
@@ -310,7 +383,8 @@ function TemplateCatalogView({
   const [reviewed, setReviewed] = useState<ReadonlySet<string>>(() => new Set())
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const catalog = state.templates
-  const busy = state.action !== null || readingUpload || state.nodePhase === 'loading' || state.dirty
+  const busy = state.action !== null || readingUpload || state.nodePhase === 'loading'
+    || hasUnresolvedEdit(state)
 
   const uploadWord = async (file: File): Promise<void> => {
     setReadingUpload(true)
@@ -575,7 +649,8 @@ function ExportView({ document, state, exportDocument, t }: {
   exportDocument: PaperAIDocumentWorkbenchProps['exportDocument']
   t: PaperAIDocumentWorkbenchProps['t']
 }): ReactNode {
-  const busy = state.action !== null || state.nodePhase === 'loading' || state.dirty
+  const unresolved = hasUnresolvedEdit(state)
+  const busy = state.action !== null || state.nodePhase === 'loading' || unresolved
   const deliveryUnavailable = document.template === null
   const deliveryBlocked = document.gate.status === 'failed'
   return (
@@ -610,9 +685,13 @@ function ExportView({ document, state, exportDocument, t }: {
           </Tooltip>
         </div>
       </div>
-      {state.dirty && <p className={css.inlineNotice}>{t('export.dirtyLock')}</p>}
-      {!state.dirty && deliveryUnavailable && <p className={css.inlineNotice}>{t('export.noTemplate')}</p>}
-      {!state.dirty && !deliveryUnavailable && deliveryBlocked && (
+      {unresolved && (
+        <p className={css.inlineNotice}>
+          {t(state.externalConflict === null ? 'export.dirtyLock' : 'edit.conflictLock')}
+        </p>
+      )}
+      {!unresolved && deliveryUnavailable && <p className={css.inlineNotice}>{t('export.noTemplate')}</p>}
+      {!unresolved && !deliveryUnavailable && deliveryBlocked && (
         <p className={css.inlineNotice} role="alert">{t('export.gateBlocked')}</p>
       )}
       {state.exportReceipt !== null && (
@@ -638,6 +717,7 @@ function GateView({
   | 'confirmTemplate' | 'associateTemplate' | 'exportDocument' | 't'
 > & { document: PaperAIDocumentSnapshot; state: PaperAIWorkbenchState }): ReactNode {
   const report = document.gate
+  const unresolved = hasUnresolvedEdit(state)
   return (
     <div className={css.scrollView}>
       <section className={css.gateOverview} aria-labelledby="paperai-gate-heading">
@@ -650,7 +730,7 @@ function GateView({
             <Button
               variant="outline"
               size="sm"
-              disabled={state.action !== null || state.nodePhase === 'loading' || state.dirty}
+              disabled={state.action !== null || state.nodePhase === 'loading' || unresolved}
               onClick={() => { void validate() }}
             >
               {state.action === 'validating' ? t('gate.validating') : t('gate.validate')}
@@ -704,7 +784,7 @@ function ReadyView(props: Pick<
   PaperAIDocumentWorkbenchProps,
   | 'selectNode' | 'updateDraft' | 'discardDraft' | 'commitSelected' | 'validate' | 'restore'
   | 'loadTemplates' | 'installTemplate' | 'uploadTemplate' | 'confirmTemplate'
-  | 'associateTemplate' | 'exportDocument' | 't'
+  | 'associateTemplate' | 'exportDocument' | 'resolveExternalConflict' | 't'
 > & { state: PaperAIWorkbenchState }): ReactNode {
   const document = props.state.document
   if (document === null) return null
@@ -718,6 +798,7 @@ function ReadyView(props: Pick<
         updateDraft={props.updateDraft}
         discardDraft={props.discardDraft}
         commitSelected={props.commitSelected}
+        resolveExternalConflict={props.resolveExternalConflict}
         t={props.t}
       />
     )
@@ -744,7 +825,7 @@ export function DocumentWorkbench({
   closeDetails, useWorkbench, selectTab, retryOpen, selectNode, updateDraft,
   discardDraft, commitSelected, validate, loadTemplates, installTemplate,
   uploadTemplate, confirmTemplate, associateTemplate, exportDocument,
-  reloadExternal, dismissExternal, restore, t,
+  reloadExternal, resolveExternalConflict, restore, t,
 }: PaperAIDocumentWorkbenchProps): ReactNode {
   const state = useWorkbench(value => value)
   const document = state.document
@@ -764,17 +845,9 @@ export function DocumentWorkbench({
         <div className={css.externalUpdate} role="status">
           <div>
             <strong>{t('external.title')}</strong>
-            <span>{t(state.dirty ? 'external.dirtyDescription' : 'external.description')}</span>
+            <span>{t(hasUnresolvedEdit(state) ? 'external.dirtyDescription' : 'external.description')}</span>
           </div>
           <div className={css.externalActions}>
-            <Button
-              variant="toolbar"
-              size="sm"
-              disabled={state.action !== null}
-              onClick={() => { dismissExternal() }}
-            >
-              {t('external.keep')}
-            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -819,6 +892,7 @@ export function DocumentWorkbench({
             confirmTemplate={confirmTemplate}
             associateTemplate={associateTemplate}
             exportDocument={exportDocument}
+            resolveExternalConflict={resolveExternalConflict}
             restore={restore}
             t={t}
           />

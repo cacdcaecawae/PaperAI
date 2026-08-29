@@ -9,6 +9,9 @@ import {
 const logPath = process.env.FAKE_ACP_LOG
 const label = process.env.FAKE_ACP_LABEL ?? 'fake'
 let currentModel = process.env.FAKE_ACP_MODEL ?? 'fake-alpha'
+let currentMode = label === 'codex'
+  ? process.env.INITIAL_AGENT_MODE ?? 'agent'
+  : 'default'
 
 function log(event, data = {}) {
   if (logPath === undefined) return
@@ -33,6 +36,18 @@ function modelOptions() {
   }]
 }
 
+function modes() {
+  const omitted = process.env.FAKE_ACP_OMIT_MODE
+  const ids = (label === 'codex'
+    ? ['read-only', 'agent', 'agent-full-access']
+    : ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'])
+    .filter(id => id !== omitted)
+  return {
+    currentModeId: currentMode,
+    availableModes: ids.map(id => ({ id, name: id })),
+  }
+}
+
 function makeAgent(connection) {
   return {
     initialize(params) {
@@ -43,6 +58,7 @@ function makeAgent(connection) {
           anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? null,
           openAiBaseUrl: process.env.OPENAI_BASE_URL ?? null,
           anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL ?? null,
+          initialAgentMode: process.env.INITIAL_AGENT_MODE ?? null,
         },
       })
       return {
@@ -67,6 +83,7 @@ function makeAgent(connection) {
       }
       return {
         sessionId: process.env.FAKE_ACP_SESSION_ID ?? 'fake-external-session',
+        modes: modes(),
         configOptions: modelOptions(),
       }
     },
@@ -80,7 +97,33 @@ function makeAgent(connection) {
           content: { type: 'text', text: 'replayed provider history' },
         },
       })
-      return { configOptions: modelOptions() }
+      return { modes: modes(), configOptions: modelOptions() }
+    },
+
+    async setSessionMode(params) {
+      log('set-mode-start', { sessionId: params.sessionId, modeId: params.modeId })
+      const neverMode = process.env.FAKE_ACP_NEVER_SET_MODE
+      const neverOnceFile = process.env.FAKE_ACP_NEVER_SET_MODE_ONCE_FILE
+      if (params.modeId === neverMode && (neverOnceFile === undefined || !existsSync(neverOnceFile))) {
+        if (neverOnceFile !== undefined) writeFileSync(neverOnceFile, 'stalled once', 'utf8')
+        await new Promise(() => {})
+      }
+      const delayMs = Number(process.env.FAKE_ACP_SET_MODE_DELAY_MS ?? 0)
+      if (Number.isFinite(delayMs) && delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+      }
+      currentMode = params.modeId
+      log('set-mode', { sessionId: params.sessionId, modeId: params.modeId })
+      if (process.env.FAKE_ACP_DELAY_MODE_UPDATE === params.modeId) {
+        const updateDelayMs = Number(process.env.FAKE_ACP_MODE_UPDATE_DELAY_MS ?? 0)
+        setTimeout(() => {
+          void connection.sessionUpdate({
+            sessionId: params.sessionId,
+            update: { sessionUpdate: 'current_mode_update', currentModeId: params.modeId },
+          })
+        }, Number.isFinite(updateDelayMs) ? updateDelayMs : 0)
+      }
+      return {}
     },
 
     setSessionConfigOption(params) {

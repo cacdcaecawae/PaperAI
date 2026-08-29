@@ -1,0 +1,15 @@
+- region "当前节点也有外部修改":
+  - strong: 当前节点也有外部修改
+  - text: 本地草稿已保留，编辑基准已更新到外部最新版本。请比较两份文本后选择处理方式。 本地草稿
+  - textbox "本地草稿": 浏览器中的本地草稿
+  - text: 外部最新文本
+  - textbox "外部最新文本": Initial browser paragraph — 外部会话写入的最新文本
+  - text: 可在下方编辑区合并两份内容，再使用合并内容。
+  - button "采用本地版本"
+  - button "采用外部版本"
+  - button "使用合并内容"
+- heading "Initial browser paragraph — 外部会话写入的最新文本" [level=2]
+- text: 基于 {{uuid}}
+- button "放弃修改" [disabled]
+- button "提交并创建版本" [disabled]
+- textbox "编辑节点：Initial browser paragraph — 外部会话写入的最新文本": 浏览器中的本地草稿
