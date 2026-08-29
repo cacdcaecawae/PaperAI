@@ -1,3 +1,4 @@
+const { existsSync, readFileSync, writeFileSync } = require('node:fs')
 const readline = require('node:readline')
 
 const model = {
@@ -8,6 +9,15 @@ const model = {
   defaultReasoningEffort: 'medium',
   supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Medium' }],
   inputModalities: ['text'],
+}
+
+function nextThreadId() {
+  const statePath = process.env.FAKE_CODEX_THREAD_STATE
+  if (statePath === undefined) return 'real-codex-adapter-session'
+  const previous = existsSync(statePath) ? Number(readFileSync(statePath, 'utf8')) : 0
+  const next = previous + 1
+  writeFileSync(statePath, String(next), 'utf8')
+  return `real-codex-adapter-session-${next}`
 }
 
 function response(method) {
@@ -22,7 +32,7 @@ function response(method) {
       return { data: [] }
     case 'thread/start':
       return {
-        thread: { id: 'real-codex-adapter-session' },
+        thread: { id: nextThreadId() },
         model: model.id,
         reasoningEffort: 'medium',
         modelProvider: 'openai',
@@ -41,5 +51,12 @@ const lines = readline.createInterface({ input: process.stdin })
 lines.on('line', (line) => {
   const request = JSON.parse(line)
   if (request.id === undefined) return
+  if (request.method === 'thread/resume' && process.env.FAKE_CODEX_REJECT_RESUME === '1') {
+    process.stdout.write(`${JSON.stringify({
+      id: request.id,
+      error: { code: -32603, message: 'Internal error' },
+    })}\n`)
+    return
+  }
   process.stdout.write(`${JSON.stringify({ id: request.id, result: response(request.method) })}\n`)
 })

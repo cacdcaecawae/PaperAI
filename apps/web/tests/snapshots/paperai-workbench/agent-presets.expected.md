@@ -1,0 +1,10 @@
+- menu:
+  - menuitem "标准模式 功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。":
+    - text: 标准模式 功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。
+    - img
+  - menuitem "Codex Codex 通过本地 Codex ACP 运行时直接处理论文、代码与项目文件。":
+    - img "Codex"
+    - text: Codex 通过本地 Codex ACP 运行时直接处理论文、代码与项目文件。
+  - menuitem "Claude Claude 通过本地 Claude ACP 运行时直接处理论文、代码与项目文件。":
+    - img "Claude"
+    - text: Claude 通过本地 Claude ACP 运行时直接处理论文、代码与项目文件。

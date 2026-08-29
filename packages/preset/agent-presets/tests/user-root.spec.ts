@@ -128,4 +128,18 @@ describe('the harness-home preset root', () => {
     expect(existsSync(join(explicit, 'copied', COMPOSITION_FILE))).toBe(true)
     expect(existsSync(join(home, USER_ROOT_SEGMENT, 'copied'))).toBe(false)
   })
+
+  it('refuses an id filter on a user-writable root', async () => {
+    await expect(roster({
+      roots: [{ path: SYSTEM_ROOT, trust: 'user', ids: ['standard'] }],
+    } as unknown as Partial<Config>)).rejects.toThrow(/ids may restrict only a system preset root/)
+  })
+
+  it('rejects an uncontainable id in a system-root filter', () => {
+    expect(() => AgentPresets.Config({
+      default: 'standard',
+      roots: [{ path: SYSTEM_ROOT, trust: 'system', ids: ['../escape'] }],
+      includeUserRoot: false,
+    } as unknown as Config)).toThrow()
+  })
 })

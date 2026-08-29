@@ -187,22 +187,28 @@ export interface Config {
 }
 
 /** One directory scanned for preset subdirectories. */
-export interface PresetRoot {
+export type PresetRoot = SystemPresetRoot | UserPresetRoot
+
+/** One deployment-owned directory scanned for preset subdirectories. */
+export interface SystemPresetRoot {
   /** Directory holding one subdirectory per preset; a leading `~` expands. */
   path: string
-  /** Trust recorded on every preset discovered under this root. */
-  trust: PresetTrust
+  /** Deployment-owned roots publish presets with system trust. */
+  trust: 'system'
+  /** Preset ids this root exposes; absent scans every valid preset directory. */
+  ids?: string[]
 }
 
-/**
- * Where a preset's composition came from. A `system` preset ships with the
- * deployment; a `user` preset was authored locally, by a person or by an
- * agent, and therefore carries the same trust as shell access.
- */
-export type PresetTrust = 'system' | 'user'
+/** One user-writable directory scanned for locally authored presets. */
+export interface UserPresetRoot {
+  /** Directory holding one subdirectory per preset; a leading `~` expands. */
+  path: string
+  /** User roots remain unfiltered so newly authored ids are discoverable. */
+  trust: 'user'
+}
 ```
 
-来源：[`packages/preset/agent-presets/src/preset.ts:52`](../packages/preset/agent-presets/src/preset.ts)
+来源：[`packages/preset/agent-presets/src/preset.ts:65`](../packages/preset/agent-presets/src/preset.ts)
 
 <a id="deepseek-aidsh-agent-spine-demo"></a>
 

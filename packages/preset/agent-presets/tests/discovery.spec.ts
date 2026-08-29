@@ -110,6 +110,12 @@ describe('preset discovery', () => {
     expect(found.every(preset => preset.trust === 'user')).toBe(true)
   })
 
+  it('limits a system root to the configured preset ids', async () => {
+    const found = await scanRoot({ ...SYSTEM, ids: ['standard'] })
+
+    expect(found.map(preset => preset.id)).toEqual(['standard'])
+  })
+
   it('lets the earlier root win a duplicate id', async () => {
     const found = await discoverPresets([SYSTEM, USER])
 

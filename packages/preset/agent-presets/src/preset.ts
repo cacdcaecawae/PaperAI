@@ -40,13 +40,26 @@ export interface AgentPreset {
   readonly broken?: string
 }
 
-/** One directory scanned for preset subdirectories. */
-export interface PresetRoot {
+/** One deployment-owned directory scanned for preset subdirectories. */
+export interface SystemPresetRoot {
   /** Directory holding one subdirectory per preset; a leading `~` expands. */
   path: string
-  /** Trust recorded on every preset discovered under this root. */
-  trust: PresetTrust
+  /** Deployment-owned roots publish presets with system trust. */
+  trust: 'system'
+  /** Preset ids this root exposes; absent scans every valid preset directory. */
+  ids?: string[]
 }
+
+/** One user-writable directory scanned for locally authored presets. */
+export interface UserPresetRoot {
+  /** Directory holding one subdirectory per preset; a leading `~` expands. */
+  path: string
+  /** User roots remain unfiltered so newly authored ids are discoverable. */
+  trust: 'user'
+}
+
+/** One directory scanned for preset subdirectories. */
+export type PresetRoot = SystemPresetRoot | UserPresetRoot
 
 /** Plugin config: which preset is the default, and where presets live. */
 export interface Config {

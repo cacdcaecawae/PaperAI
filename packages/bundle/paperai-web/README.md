@@ -10,6 +10,8 @@ The PaperAI workbench configures the existing `ui-layout` service with a 420–9
 
 Permissions remain owned by `@deepseek-ai/dsh-base`. When neither the user's stored permission default nor a deployment or profile override selects another preset, a fresh PaperAI session starts with `workspace-write` and `ask`: it can edit the selected Workspace, while operations requiring broader authority request approval. Full access remains available through the standard DSH permission selector, including its explicit risk acknowledgement, and through deliberate deployment configuration.
 
+The fresh PaperAI roster contains three system presets: the existing full `standard` DSH Agent, Codex, and Claude. The launcher selects `standard` from the shared DSH preset root and adds the two PaperAI ACP compositions; it does not copy or fork the DSH composition. Other DSH profiles retain the complete shipped roster, and locally authored presets remain available from the normal user root.
+
 Run the source profile with `pnpm paperai`. A profile-local `cordis.patch.yml` and the DSH home patch still apply above this bundle, so normal DSH configuration and plugin management remain available.
 
 ## Model Experience

@@ -1523,6 +1523,43 @@ describe('command launcher chrome and control seats', () => {
     expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('announces a rejected Access change and restores the projected value', async () => {
+    const command = vi.fn(() => Promise.resolve(false))
+    const permissions = {
+      options: [
+        { value: 'read-only', name: 'read-only' },
+        { value: 'workspace-write', name: 'workspace-write' },
+      ],
+      currentValue: 'workspace-write',
+    }
+    const { view } = bench({ permissions, command })
+    fireEvent.click(view.getByLabelText(/^访问模式/))
+    fireEvent.click(view.getByRole('menuitem', { name: 'Read Only' }))
+
+    await vi.waitFor(() => {
+      expect(view.getByRole('alert').textContent).toContain('无法切换访问模式，请重试。')
+    })
+    expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).textContent).toBe('Workspace Write')
+  })
+
+  it('announces a failed Access command transport and restores the projected value', async () => {
+    const permissions = {
+      options: [
+        { value: 'read-only', name: 'read-only' },
+        { value: 'workspace-write', name: 'workspace-write' },
+      ],
+      currentValue: 'workspace-write',
+    }
+    const { view } = bench({ permissions, command: () => Promise.reject(new Error('wire failed')) })
+    fireEvent.click(view.getByLabelText(/^访问模式/))
+    fireEvent.click(view.getByRole('menuitem', { name: 'Read Only' }))
+
+    await vi.waitFor(() => {
+      expect(view.getByRole('alert').textContent).toContain('无法切换访问模式，请重试。')
+    })
+    expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).textContent).toBe('Workspace Write')
+  })
+
   it('requires explicit risk acknowledgement before submitting Full access', async () => {
     const command = vi.fn(() => Promise.resolve(true))
     const permissions = {

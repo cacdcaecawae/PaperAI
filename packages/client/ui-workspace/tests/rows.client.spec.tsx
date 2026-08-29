@@ -111,7 +111,7 @@ describe('workspace browser rows', () => {
     expect(screen.getByText(label)).toBeTruthy()
   })
 
-  it('renders an active Workspace and keeps its create action separate from toggling', () => {
+  it('renders a keyboard-navigable active Workspace and keeps its create action separate', () => {
     const onToggle = vi.fn()
     const onCreate = vi.fn()
     const group: GroupNode = {
@@ -120,12 +120,17 @@ describe('workspace browser rows', () => {
     }
     render(<ProjectRowItem group={group} onToggle={onToggle} onCreate={onCreate} t={t} />)
 
-    expect(screen.getByRole('treeitem').getAttribute('aria-expanded')).toBe('true')
+    const row = screen.getByRole('treeitem')
+    expect(row.hasAttribute('aria-expanded')).toBe(false)
+    expect(row.getAttribute('tabindex')).toBe('0')
     fireEvent.click(screen.getByRole('button', { name: '在“Project”中新建会话' }))
     expect(onCreate).toHaveBeenCalledOnce()
     expect(onToggle).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('Project'))
     expect(onToggle).toHaveBeenCalledOnce()
+    fireEvent.keyDown(row, { key: 'Enter' })
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(onToggle).toHaveBeenCalledTimes(3)
   })
 
   it('renders and opens a selected running Session row', () => {

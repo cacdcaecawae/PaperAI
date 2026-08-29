@@ -20,9 +20,16 @@ const PAPERAI_OVERLAY = fileURLToPath(new URL(
   '../../../packages/bundle/paperai-web/cordis.patch.yml',
   import.meta.url,
 ))
+const SHIPPED_PRESETS = fileURLToPath(new URL('../../cli/config/agent-presets', import.meta.url))
+const PAPERAI_PRESETS = fileURLToPath(new URL(
+  '../../../packages/bundle/paperai-web/config/agent-presets',
+  import.meta.url,
+))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/paperai-workbench', import.meta.url))
+const AGENT_PRESETS_EXPECTED = join(SNAPSHOT_DIR, 'agent-presets.expected.md')
 const DEFAULT_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-default.expected.md')
 const READ_ONLY_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-read-only.expected.md')
+const PERMISSION_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'permission-failure.expected.md')
 const CONFLICT_EXPECTED = join(SNAPSHOT_DIR, 'external-conflict.expected.md')
 const MODE = webSnapshotMode()
 
@@ -65,7 +72,16 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   beforeAll(async () => {
     originalPermissionMode = process.env.DSH_PERMISSION_MODE
     Reflect.deleteProperty(process.env, 'DSH_PERMISSION_MODE')
-    scaffold = await launchWebScaffold({ extraOverlayPath: PAPERAI_OVERLAY })
+    scaffold = await launchWebScaffold({
+      extraOverlayPath: PAPERAI_OVERLAY,
+      agentPresets: {
+        default: 'standard',
+        roots: [
+          { path: SHIPPED_PRESETS, trust: 'system', ids: ['standard'] },
+          { path: PAPERAI_PRESETS, trust: 'system' },
+        ],
+      },
+    })
     const projectRoot = join(scaffold.workspaceCwd, 'paper-project')
     await mkdir(projectRoot, { recursive: true })
     const workspace = await scaffold.ctx.workspaceRegistry.create(projectRoot, 'Paper project')
@@ -116,6 +132,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     tripwire = watchConsole(page)
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    await page.getByRole('treeitem', { name: /Paper project/ }).click()
     const open = page.getByRole('button', { name: '打开 Browser conflict proposal.docx' })
     await open.waitFor({ timeout: 15_000 })
     await open.click()
@@ -142,6 +159,18 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     ])
   })
 
+  it('offers exactly the PaperAI product Agent presets', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-agent-presets'))
+    const trigger = page.getByRole('button', { name: '标准模式' }).first()
+    await trigger.waitFor({ timeout: 10_000 })
+    await trigger.click()
+    const menu = page.getByRole('menu')
+    await menu.waitFor({ timeout: 10_000 })
+    expect(await menu.getByRole('menuitem').allTextContents()).toHaveLength(3)
+    await compareOrRefreshGolden(AGENT_PRESETS_EXPECTED, await menu.ariaSnapshot(), MODE)
+    await page.keyboard.press('Escape')
+  }, 60_000)
+
   it('snapshots the default permission and a real picker switch', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-permissions'))
     const access = page.locator('button[aria-label^="访问模式"]').first()
@@ -161,6 +190,38 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('menuitem', { name: 'Workspace Write' }).click()
     await expect.poll(() => access.getAttribute('aria-label'), { timeout: 10_000 })
       .toBe('访问模式，当前：Workspace Write')
+  }, 60_000)
+
+  it('announces a rejected permission switch without exposing an internal error', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-permission-failure'))
+    await page.route('**/api/commands/execute', async (route) => {
+      const request = route.request().postDataJSON() as {
+        rpcId: string
+        payload: { args: { line: string } }
+      }
+      expect(request.payload).toMatchObject({ args: { line: '/permission read-only' } })
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          type: 'server-response',
+          rpcId: request.rpcId,
+          result: {
+            ok: false,
+            error: { code: 'internal', message: 'provider internal failure', details: {} },
+          },
+        }),
+      })
+    }, { times: 1 })
+    const access = page.locator('button[aria-label^="访问模式"]').first()
+    await access.click()
+    await page.getByRole('menuitem', { name: 'Read Only' }).click()
+    const alert = page.getByRole('alert')
+    await alert.waitFor({ timeout: 10_000 })
+    expect(await alert.textContent()).toContain('无法切换访问模式，请重试。')
+    expect(await alert.textContent()).not.toContain('provider internal failure')
+    expect(await access.getAttribute('aria-label')).toBe('访问模式，当前：Workspace Write')
+    await compareOrRefreshGolden(PERMISSION_FAILURE_EXPECTED, await alert.ariaSnapshot(), MODE)
   }, 60_000)
 
   it('compares and merges a same-node external change from the latest revision', async () => {
@@ -215,8 +276,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
+      'agent-presets.expected.md',
       'external-conflict.expected.md',
       'permission-default.expected.md',
+      'permission-failure.expected.md',
       'permission-read-only.expected.md',
     ])
   })

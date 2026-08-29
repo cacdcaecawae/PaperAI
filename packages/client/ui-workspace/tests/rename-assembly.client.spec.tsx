@@ -47,6 +47,28 @@ function SidebarFrame({ renderSlot }: FrameProps) {
 }
 
 describe('session rename through the assembled browser', () => {
+  it('keeps an unoccupied Workspace content slot visually empty', async () => {
+    const runtime = await createRuntime()
+    await runtime.workspaces.update((draft) => {
+      draft.items = [{
+        workspaceId: 'w1' as WorkspaceId, title: 'alpha', path: '/w/alpha',
+        sessionIds: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      }] as never
+    })
+    await runtime.root.declare(
+      { 'sidebar.workspaces': { kind: 'single', scope: 'root' } } as never,
+      SidebarFrame as never,
+    )
+    await runtime.mount({ inject: [...inject], apply })
+    const view = runtime.renderRoot()
+
+    expect(await view.findByRole('tree', { name: '工作区' })).toBeTruthy()
+    fireEvent.click(await view.findByText('alpha'))
+    expect(view.queryByRole('heading', { name: '项目内容' })).toBeNull()
+    expect(view.getByRole('heading', { name: '会话', level: 3 })).toBeTruthy()
+    await runtime.dispose()
+  })
+
   it('renames via the row menu: binding.session.rename fires, the dialog closes, the row re-labels from the list', async () => {
     const runtime = await createRuntime()
     const rename = vi.fn<ISession['rename']>(async title => ({
@@ -70,7 +92,8 @@ describe('session rename through the assembled browser', () => {
     await runtime.mount({ inject: [...inject], apply })
     const view = runtime.renderRoot()
 
-    // The current session's group auto-expands; open the row's action menu.
+    // Enter the Workspace detail, then open the Session row's action menu.
+    fireEvent.click(await view.findByText('alpha'))
     const row = (await view.findByText('旧标题')).closest('[role="treeitem"]')!
     fireEvent.click(within(row as HTMLElement).getByLabelText('会话“旧标题”的操作'))
     fireEvent.click(view.getByRole('menuitem', { name: '重命名', hidden: true }))
@@ -118,6 +141,7 @@ describe('session rename through the assembled browser', () => {
     const view = runtime.renderRoot()
     await runtime.flush()
 
+    fireEvent.click(await view.findByText('alpha'))
     const row = (await view.findByText('旧标题')).closest('[role="treeitem"]')!
     fireEvent.click(within(row as HTMLElement).getByLabelText('会话“旧标题”的操作'))
     fireEvent.click(view.getByRole('menuitem', { name: '重命名', hidden: true }))

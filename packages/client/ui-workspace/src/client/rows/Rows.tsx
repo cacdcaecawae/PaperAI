@@ -5,7 +5,7 @@
  * except workspace Rename/Delete and session Rename/Fork/Archive; the session
  * and workspace hover cards are suppressed while a menu is open.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   HoverCard, IconArchiveOutline20, IconBranchOutline16, IconEditOutline16,
@@ -97,19 +97,19 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
 }
 
 /**
- * Project (workspace) header row: folder + title;
- * hover reveals the chevron and create button, and dwelling on a real
- * Workspace shows its hover card (the ungrouped bucket has none).
+ * Project row: a real Workspace enters its detail view, while Ungrouped
+ * retains disclosure behavior. Hover reveals the chevron and create button,
+ * and dwelling on a real Workspace shows its hover card.
  * `containsCurrent` arrives on the node (derivation fact, no renderer scan).
  * @param props.group - derived group node.
- * @param props.onToggle - expand/collapse the group.
+ * @param props.onToggle - navigate to a real Workspace or toggle Ungrouped.
  * @param props.onCreate - start a frontend Session inside this Workspace.
  * @param props.drag - optional workspace-row drag wiring.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, t }: {
+export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, focusOnMount = false, home, t }: {
   group: GroupNode
   onToggle: () => void
   onCreate: () => void
@@ -117,6 +117,8 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   actions?: { rename: () => void; delete: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
+  /** Restore focus when a second-level Workspace view returns to this row. */
+  focusOnMount?: boolean | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
   home?: string | undefined
   t: RowTranslate
@@ -124,18 +126,31 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
-  const active = group.expanded && group.containsCurrent
+  const navigates = group.workspaceId !== undefined
+  const active = group.containsCurrent
+  const ownRowRef = useRef<HTMLDivElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    if (focusOnMount) ownRowRef.current?.focus({ preventScroll: true })
+  }, [focusOnMount])
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
   ]
   const ownRow = (
     <div
+      ref={ownRowRef}
       className={clsx(css.projectRow, menuOpen && css.menuOpen)}
       role="treeitem"
-      aria-expanded={row.expanded}
+      aria-label={label}
+      aria-expanded={navigates ? undefined : row.expanded}
+      tabIndex={0}
       onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        onToggle()
+      }}
       draggable={drag !== undefined}
       onDragStart={drag === undefined
         ? undefined
@@ -147,10 +162,10 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
       onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {row.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
+        {!navigates && row.expanded ? <IconFolderOpen16 /> : <IconFolderClose16 />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
-        <IconTriangleRightFill14 className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
+        <IconTriangleRightFill14 className={clsx(css.arrow, !navigates && row.expanded && css.arrowOpen)} />
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>

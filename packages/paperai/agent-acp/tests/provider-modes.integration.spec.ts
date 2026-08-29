@@ -52,6 +52,57 @@ describe('pinned provider ACP permission modes', { concurrent: false }, () => {
     }
   }, 20_000)
 
+  it('replaces an unrestorable blank Codex session through the real codex-acp adapter', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-real-codex-resume-'))
+    await copyFile(fakeCodexAppServerPath, join(root, 'app-server'))
+    const ctx = new Context()
+    cleanup.push({ ctx, root })
+    await ctx.plugin(LocalSubprocessRuntime)
+    const provider: AcpProviderDefinition = {
+      id: 'codex',
+      name: 'Codex',
+      packageName: '@agentclientprotocol/codex-acp',
+      binName: 'codex-acp',
+      env: {
+        CODEX_PATH: process.execPath,
+        FAKE_CODEX_REJECT_RESUME: '1',
+        FAKE_CODEX_THREAD_STATE: join(root, 'thread-state'),
+      },
+    }
+    const callbacks = {
+      update: () => {},
+      modelChanged: () => {},
+      modeChanged: () => {},
+      readTextFile: () => Promise.reject(new Error('unexpected read')),
+      writeTextFile: () => Promise.reject(new Error('unexpected write')),
+      permission: () => ({ outcome: { outcome: 'cancelled' as const } }),
+    }
+    const firstRuntime = new AcpRuntime(ctx, provider, root, callbacks)
+    const first = await firstRuntime.start(undefined, 'workspace-write', new AbortController().signal)
+    await firstRuntime.close()
+    const resumedRuntime = new AcpRuntime(ctx, provider, root, callbacks)
+
+    try {
+      const replacement = await resumedRuntime.start(
+        first.externalSessionId,
+        'workspace-write',
+        new AbortController().signal,
+        true,
+      )
+      expect(replacement).toMatchObject({
+        externalSessionId: 'real-codex-adapter-session-2',
+        resumed: false,
+      })
+      expect(replacement.models).toMatchObject({
+        currentModel: 'fake-codex',
+        models: [{ id: 'fake-codex', name: 'Fake Codex' }],
+      })
+      await expect(resumedRuntime.selectSandboxMode('read-only')).resolves.toBeUndefined()
+    } finally {
+      await resumedRuntime.close()
+    }
+  }, 20_000)
+
   it('switches every Claude mapping through the real claude-agent-acp adapter', async () => {
     const updates: unknown[] = []
     const client = {

@@ -4,9 +4,11 @@
 
 共享 Workspace 浏览器与选择器插件。`WorkspaceBrowser` 填充侧边栏的 `sidebar.workspaces` slot，`WorkspacePicker` 则填充页面局部 Session Intent 主视觉区的 `conversation.hero.workspace` slot；两个界面使用同一套 Workspace 菜单和添加流程。
 
-`WorkspaceBrowser` 还会在每个已展开的真实 Workspace 正下方声明可叠加的 `sidebar.workspaces.content` 列表 slot。owner 提供 Workspace id、规范路径、当前标题以及它是否包含已选 Session；条目自行负责资源加载、行与操作，并按升序渲染。Ungrouped 区域、已折叠 Workspace 以及扁平或搜索展示都不会出现该 slot，因此扩展无法制造第二套顶层浏览器，也不会扰动现有 Session 树。
+`WorkspaceBrowser` 会在每个真实 Workspace 的二级详情视图中声明可叠加的 `sidebar.workspaces.content` 列表 slot。owner 提供 Workspace id、规范路径、当前标题以及它是否包含已选 Session；条目自行负责资源加载、区段与操作，并按升序渲染。Workspace 列表、Ungrouped、扁平展示与搜索展示都不会出现该 slot，因此扩展无法制造另一套顶层浏览器，也不会扰动 Session 列表。
 
-该浏览器通过全局运行时钩子将 Session 行渲染为分组或扁平形式，并负责 Workspace 添加／重命名／重排序以及 Session 重排序。每个 Workspace 会记住自身是关闭还是显示 Session；打开后默认显示五条 Session，其余条目通过临时的**展开其余**控件显示，而关闭并重新打开整个 Workspace 后会恢复为五条。从 Workspace 行创建 Session 时会先打开该分组，使 Session 状态到达后新行保持可见。Workspace 列表基线就绪后，浏览器持久化的展开状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 和单列表记账。视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 和跨 Workspace 的单列表则从最近更新时间顺序初始化。**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续 user prompt 或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表因没有单一 Workspace 记账，其顺序始终只保存在浏览器本地。单列表没有父级层次，因此不显示空的左侧状态槽；Session 存在可见状态时仍保留该槽。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
+分组展示是一份 Workspace 列表。用户通过指针、Enter 或 Space 激活真实 Workspace 行后会进入二级详情视图；紧凑的返回控件用于回到列表，并把焦点恢复到对应 Workspace 行。详情页头沿用共用详情语法，把返回控件与可省略的标题、规范路径副标题组合在一起。可叠加条目自行提供紧凑的项目内容区段标题；`ui-workspace` 在同一个滚动区域中提供相匹配的 Session 标题与局部新建 Session 操作。内容 slot 无占用方时不会渲染空区段。详情默认显示五条 Session，其余条目通过临时的**展开其余**控件显示；离开并重新进入详情后恢复为五条。Ungrouped 没有 Workspace 详情，因此继续作为披露行。从 Workspace 行创建 Session 时，浏览器会先进入详情，使新行拥有稳定的显示位置。
+
+该浏览器通过全局运行时钩子将 Session 行渲染为分组或扁平形式，并负责 Workspace 添加、重命名、重排序以及 Session 重排序。Workspace 列表基线就绪后，浏览器持久化的查看状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 和单列表记账。视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 和跨 Workspace 的单列表则从最近更新时间顺序初始化。**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续用户提示词或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表因没有单一 Workspace 记账，其顺序始终只保存在浏览器本地。单列表没有父级层次，因此不显示空的左侧状态槽；Session 存在可见状态时仍保留该槽。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
 
 折叠搜索是视图和添加操作旁的一枚区头按钮。在轨道中，添加和搜索会渲染为沿外壳共用横向进入路径移动的 36px 控件。激活搜索后，输入框会扩展并占据区头；点击外部只会收起经清除首尾空白后为空的查询——但轨道搜索手势仍在进行期间（直至列滑动结束、焦点落入输入框）除外，这样触发展开的那次点击不会收起它刚打开的搜索——而清除控件总会重置并收起搜索。非空白查询会以单一扁平结果列表替代任一浏览模式：不区分大小写的标题和 Workspace 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。英文搜索输入框及其防御性请求路径会移除 NUL，将查询限制在传输 schema 规定的 500 个 UTF-16 代码单元内且不会拆分代理项对，并保留现有的防抖与取消行为。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，同时给出警告。列表最多显示 20 条结果，并会在查询过宽时提示用户缩小范围；打开所选 Session 时既不会清除查询，也不会跳转至特定事件。
 
@@ -34,5 +36,5 @@ Session 行渲染运行时的实时 `pendingInteraction` 分类：审批显示**
 
 - **没有模糊内容搜索或事件深链接**：内容后端采用字面 token／短语匹配，选择结果会打开 Session，而不是匹配的事件。
 - **没有 Session 删除与取消归档控件**：会话可以归档，但已归档会话没有查看或取消归档入口；删除 Workspace 注册记录不会删除 Session。
-- **待处理的用户交互不会聚合到折叠的分组上**：折叠分组内正在等待的行不会点亮分组头指示，只有展开该分组后才可见。
+- **待处理的用户交互不会聚合到 Workspace 列表上**：Workspace 中正在等待的行不会点亮其列表行，只有打开该 Workspace 或切换到扁平／搜索展示后才可见。
 - **原生文件夹选择依赖本地 Host 载体**：在 `-native` 组合下，进程内部署或远程浏览器部署无法打开本地操作系统对话框；模态框会显示平台故障，并允许重试。可远程的选取是 `-browse` 组合的应用内流程。

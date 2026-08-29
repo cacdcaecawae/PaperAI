@@ -41,6 +41,7 @@
     "tests/plugin-config.e2e.ts",
     "tests/settings-chrome.e2e.ts",
     "tests/paperai-permissions.e2e.ts",
+    "tests/paperai-workspace-navigation.e2e.ts",
     "tests/models-settings.e2e.ts",
     "tests/default-model.e2e.ts",
     "tests/declared-reasoning.e2e.ts",

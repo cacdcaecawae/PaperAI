@@ -90,6 +90,9 @@ function makeAgent(connection) {
 
     async loadSession(params) {
       log('load-session', { sessionId: params.sessionId, cwd: params.cwd })
+      if (process.env.FAKE_ACP_FAIL_LOAD === '1') {
+        throw new Error('scripted ACP load-session failure')
+      }
       await connection.sessionUpdate({
         sessionId: params.sessionId,
         update: {

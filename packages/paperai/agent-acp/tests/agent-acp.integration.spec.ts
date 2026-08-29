@@ -438,6 +438,76 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       .toMatchObject({ sessionId: 'external-paper-session', label: 'codex' })
   }, 20_000)
 
+  it('replaces a failed provider load only when the persisted DSH session is blank', async () => {
+    const records = new Map<string, StoredSession>()
+    const sourceHarness = await mountHarness({
+      records,
+      env: { FAKE_ACP_SESSION_ID: 'external-paper-session-old' },
+    })
+    const created = await createAgent(sourceHarness, 'blank-load-recovery')
+    sourceHarness.persistence.capture(created.agent.session)
+    await created.dispose()
+    const resumeHarness = await mountHarness({
+      records,
+      env: {
+        FAKE_ACP_FAIL_LOAD: '1',
+        FAKE_ACP_SESSION_ID: 'external-paper-session-new',
+      },
+    })
+
+    const resumed = await resumeHarness.ctx.agents.resume({
+      resumeSessionId: SessionId('blank-load-recovery'),
+      factoryRoute: 'codex',
+    })
+
+    const links = resumed.agent.session.events.flatMap(event => (
+      event.type === 'paperai/acp/session' ? [event.data] : []
+    ))
+    expect(links).toEqual([
+      { provider: 'codex', externalSessionId: 'external-paper-session-old', resumed: false },
+      { provider: 'codex', externalSessionId: 'external-paper-session-new', resumed: false },
+    ])
+    await expect(resumed.agent.modelController?.listModels()).resolves.toEqual([
+      {
+        id: 'fake-alpha',
+        name: 'Fake Alpha',
+        description: 'Stable fake model',
+        group: 'Fake models',
+      },
+      {
+        id: 'fake-beta',
+        name: 'Fake Beta',
+        description: 'Alternate fake model',
+        group: 'Fake models',
+      },
+    ])
+    setSandboxMode(resumed.agent.session, 'read-only')
+    await vi.waitFor(async () => {
+      expect((await readLog(resumeHarness.logPath)).findLast(entry => entry.event === 'set-mode'))
+        .toMatchObject({ sessionId: 'external-paper-session-new', modeId: 'read-only' })
+    })
+    expect((await readLog(resumeHarness.logPath)).map(entry => entry.event))
+      .toEqual(expect.arrayContaining(['load-session', 'new-session']))
+  }, 20_000)
+
+  it('fails closed when provider load fails for a DSH session with turn history', async () => {
+    const records = new Map<string, StoredSession>()
+    const sourceHarness = await mountHarness({ records })
+    const created = await createAgent(sourceHarness, 'nonblank-load-failure')
+    created.agent.session.append('turn/start', { turn: 1 })
+    created.agent.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    sourceHarness.persistence.capture(created.agent.session)
+    await created.dispose()
+    const resumeHarness = await mountHarness({ records, env: { FAKE_ACP_FAIL_LOAD: '1' } })
+
+    await expect(resumeHarness.ctx.agents.resume({
+      resumeSessionId: SessionId('nonblank-load-failure'),
+      factoryRoute: 'codex',
+    })).rejects.toThrow('Codex ACP failed to start: Internal error')
+    expect((await readLog(resumeHarness.logPath)).map(entry => entry.event))
+      .not.toContain('new-session')
+  }, 20_000)
+
   it('tears down the Agent and Session through the public handle without hanging', async () => {
     await runLifecycleProbe('dispose')
   }, 10_000)

@@ -1,4 +1,4 @@
-/** Flat DSH-native PaperAI tree rendered below one expanded Workspace. */
+/** Flat DSH-native PaperAI resource sections rendered in one Workspace detail. */
 
 import {
   useEffect, useRef, useState, type CSSProperties, type ReactNode,
@@ -155,6 +155,10 @@ export function WorkspaceContent({
 
   return (
     <div className={css.tree} aria-busy={state.phase === 'loading'}>
+      <div className={css.sectionTitle}>
+        <span className={css.sectionTitleIcon} aria-hidden="true"><IconFolderClose16 /></span>
+        <h3>{t('tree.title')}</h3>
+      </div>
       <div className={css.importBar}>
         <Menu
           compact
@@ -220,7 +224,10 @@ export function WorkspaceContent({
         </div>
       )}
       {state.phase === 'ready' && state.resources.length === 0 && (
-        <p className={css.projectEmpty}>{t('tree.empty')}</p>
+        <div className={css.projectEmpty} role="status">
+          <span className={css.projectEmptyIcon} aria-hidden="true"><IconFolderClose16 /></span>
+          <span>{t('tree.empty')}</span>
+        </div>
       )}
       {CATEGORIES.filter(category => state.resources.some(row => row.category === category)).map((category) => {
         const rows = state.resources.filter(row => row.category === category)

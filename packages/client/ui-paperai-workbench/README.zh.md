@@ -12,7 +12,7 @@ Working DOCX 始终是唯一权威正文。右栏复用 DSH 的详情 host 结�
 
 `PaperAIWorkbenchController` 不依赖 React，并接收已经挂载的生成命名空间。它为每个 Workspace 维护一个稳定资源 store，为每个 Session 维护一个工作台 store，其中包含选中节点阶段、不可变 Host buffer、当前 draft、外部冲突输入、dirty 标记和操作状态。它会中止被取代且可取消的读取、拒绝过期节点响应与来自其他文档修订的 buffer、把 Remote 拒绝折叠到显示状态、在文档更新后保留当前标签页、在 `connection/reset` 后刷新已观察投影，并在插件销毁后拒绝回调。slot 注册通过 `slots.inject()` 跟随声明生命周期，包括声明方卸载与重新加载。
 
-插件不决定详情栏宽度。根节点填满 `ui-layout` 分配的列；普通宽度下编辑页左右排列语义目录和选中节点编辑器，列变窄后通过容器查询改为上下排列，版本元数据也通过同一查询适配。项目树沿用现有 Workspace 缩进；折叠、扁平、搜索和 Ungrouped 路径是否渲染由 `ui-workspace` 决定，因此这里不会自行出现。
+插件不决定详情栏宽度。根节点填满 `ui-layout` 分配的列；普通宽度下编辑页左右排列语义目录和选中节点编辑器，列变窄后通过容器查询改为上下排列，版本元数据也通过同一查询适配。项目资源区段沿用 Workspace 详情的紧凑行式节奏与共用 hover、焦点过渡；项目为空时会引导用户选择“导入 Word”，而不会制造虚构分类。Workspace 列表、扁平展示、搜索展示和 Ungrouped 路径是否渲染由 `ui-workspace` 决定，因此这里不会自行出现。
 
 ## 模型体验
 

@@ -69,12 +69,14 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(list!.get('scrollbar-gutter')).toBe('stable')
   })
 
-  it('keeps 2px between rows and 4px between workspace groups', () => {
+  it('keeps compact list rhythm and gives the Workspace detail the full row width', () => {
     expect(declarations('.flatList > * + *')?.get('margin-top')).toBe('2px')
     expect(declarations(".searchTree > [role='treeitem'] + [role='treeitem']")?.get('margin-top')).toBe('2px')
     expect(declarations('.groupSection > * + *')?.get('margin-top')).toBe('2px')
     expect(declarations('.groupSection + .groupSection')?.get('margin-top')).toBe('4px')
-    expect(declarations('.workspaceContent')?.get('margin-left')).toBe('22px')
+    expect(declarations('.workspaceContent')?.get('min-width')).toBe('0')
+    expect(declarations('.workspaceContent')?.get('margin-left')).toBeUndefined()
+    expect(declarations('.detailSectionHeading')?.get('min-height')).toBe('34px')
   })
 
   it('draws drag targets as a leading chevron joined to the insertion line', () => {

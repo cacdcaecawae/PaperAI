@@ -2,9 +2,10 @@
 
 /** Simplified Chinese dictionary and key source of truth. */
 export const zh = {
+  'tree.title': '项目内容',
   'tree.loading': '正在读取项目内容…',
   'tree.error': '暂时无法读取项目内容。',
-  'tree.empty': '暂无内容',
+  'tree.empty': '暂无项目内容。选择“导入 Word”即可添加。',
   'tree.retry': '重试',
   'import.word': '导入 Word',
   'import.importing': '正在导入…',
@@ -134,9 +135,10 @@ export type PaperAIWorkbenchKey = keyof typeof zh
 
 /** English dictionary checked against the Chinese key set. */
 export const en = {
+  'tree.title': 'Project content',
   'tree.loading': 'Reading project content…',
   'tree.error': 'Project content is temporarily unavailable.',
-  'tree.empty': 'No content',
+  'tree.empty': 'No project content yet. Choose Import Word to add one.',
   'tree.retry': 'Retry',
   'import.word': 'Import Word',
   'import.importing': 'Importing…',

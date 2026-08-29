@@ -1856,8 +1856,8 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     key: 'sidebar.workspaces.content',
     kind: 'list',
     scope: 'root',
-    summary: 'Additive content rendered directly below one expanded Workspace row.',
-    doc: 'Additive content rendered directly below one expanded Workspace row.\nThe owner supplies stable Workspace identity and path facts; occupants\nown their resource tree, loading state, and row actions. Entries render\nby ascending `order` and disappear with the Workspace browser entry.',
+    summary: 'Additive content rendered in one real Workspace\'s second-level view.',
+    doc: 'Additive content rendered in one real Workspace\'s second-level view.\nThe owner supplies stable Workspace identity and path facts; occupants\nown their resource sections, loading state, and row actions. Entries\nrender by ascending `order` and disappear with the Workspace browser.',
     registerOptions: [
       {
         name: 'id',
@@ -1879,7 +1879,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Stable Workspace facts supplied to additive resource-tree occupants. */\nexport interface WorkspaceContentOwnerProps {\n  /** Host Workspace identity. */\n  workspaceId: WorkspaceId\n  /** Canonical Host path represented by this Workspace. */\n  path: string\n  /** Current display title. */\n  title: string\n  /** Whether this Workspace contains the selected Session. */\n  active: boolean\n}',
+      '/** Stable Workspace facts supplied to additive detail-section occupants. */\nexport interface WorkspaceContentOwnerProps {\n  /** Host Workspace identity. */\n  workspaceId: WorkspaceId\n  /** Canonical Host path represented by this Workspace. */\n  path: string\n  /** Current display title. */\n  title: string\n  /** Whether this Workspace contains the selected Session. */\n  active: boolean\n}',
     ],
     ownerPropsReferences: [
       'Workspace',

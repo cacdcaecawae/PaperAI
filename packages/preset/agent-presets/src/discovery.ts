@@ -148,6 +148,7 @@ export async function scanRoot(root: PresetRoot): Promise<AgentPreset[]> {
   const found: AgentPreset[] = []
   for (const child of children) {
     if (!child.isDirectory() || !PRESET_ID.test(child.name)) continue
+    if (root.trust === 'system' && root.ids !== undefined && !root.ids.includes(child.name)) continue
     const directory = join(dir, child.name)
     const path = join(directory, COMPOSITION_FILE)
     const broken = await isFile(path)

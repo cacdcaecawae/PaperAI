@@ -33,7 +33,14 @@ import { discoverPresets, USER_PRESET_DIR } from './discovery.ts'
 import { copyComposition, deleteComposition, readComposition } from './authoring.ts'
 import { mountPreset, serviceForAgent, standingMountFor } from './mount.ts'
 import { PresetExistsError } from './authoring.ts'
-import { PresetMountError, UnknownPresetError, type AgentPreset, type Config, type PresetRoot } from './preset.ts'
+import {
+  PRESET_ID,
+  PresetMountError,
+  UnknownPresetError,
+  type AgentPreset,
+  type Config,
+  type PresetRoot,
+} from './preset.ts'
 import type {} from './types.ts'
 
 /** Settings namespace carrying the user's chosen default preset. */
@@ -64,7 +71,14 @@ export {
 } from './authoring.ts'
 export { resolveSessionPreset, type PresetBearingSession } from './session.ts'
 export { PresetMountError, UnknownPresetError } from './preset.ts'
-export type { AgentPreset, Config, PresetRoot, PresetTrust } from './preset.ts'
+export type {
+  AgentPreset,
+  Config,
+  PresetRoot,
+  PresetTrust,
+  SystemPresetRoot,
+  UserPresetRoot,
+} from './preset.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -88,6 +102,7 @@ export class AgentPresets extends Service {
     roots: z.array(z.object({
       path: z.string().required(),
       trust: z.union(['system', 'user'] as const).default('user'),
+      ids: z.array(z.string().pattern(PRESET_ID)).default(undefined as unknown as string[]),
     })).default([]),
     includeUserRoot: z.boolean().default(true),
   }) as z<Config>
@@ -130,6 +145,12 @@ export class AgentPresets extends Service {
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentPresets')
     this.selfCtx = ctx
+    const filteredUserRoot = config.roots.find(
+      root => root.trust === 'user' && 'ids' in root && root.ids !== undefined,
+    )
+    if (filteredUserRoot !== undefined) {
+      throw new Error('agent-presets: ids may restrict only a system preset root; user roots must expose newly authored ids')
+    }
     this.resolvedRoots = config.includeUserRoot
       ? [...config.roots, { path: dshHomePath(USER_PRESET_DIR), trust: 'user' }]
       : [...config.roots]

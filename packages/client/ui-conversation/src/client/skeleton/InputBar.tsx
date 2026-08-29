@@ -578,7 +578,14 @@ export function InputBar({
   // or while the command face is absent with the session).
   const accessSelect: ReactNode = command === undefined
     ? null
-    : <PermissionSelect key={sessionId} value={permissions} locked={locked} command={command} t={t} />
+    : <PermissionSelect
+      key={sessionId}
+      value={permissions}
+      locked={locked}
+      command={command}
+      onChangeFailed={() => { showToast(t('access.changeFailed')) }}
+      t={t}
+    />
 
   // Mirror-layer decorations: a visible backdrop with transparent textarea
   // text. Claim tokens and references retain the draft's own glyph metrics,

@@ -8,6 +8,8 @@ PaperAI 的 Codex 与 Claude 同级顶层 Agent 驱动。插件保留 DSH 原生
 
 DSH Session 的沙箱 preset 也会选择提供方已声明的原生 ACP 权限模式。Codex 把 `read-only`、`workspace-write` 和 `danger-full-access` 分别映射为 `read-only`、`agent` 和 `agent-full-access`；Claude 分别映射为 `plan`、`acceptEdits` 和 `bypassPermissions`。Claude 的 `acceptEdits` 控制提供方原生文件编辑姿态；DSH 仍会在每次 ACP 客户端文件回调处执行 `workspace-write` 限制。Codex 进程启动时还会通过 `INITIAL_AGENT_MODE` 接收同一目标。新建和加载的会话会在发布前校准提供方声明的当前模式。空闲时的沙箱变更会依次通过 ACP `session/set_mode` 同步，下一次 prompt 会等待最终选择生效。提供方活动回合中切换到更严格的模式会撤销该进程代际并取消当前回合；替代进程会以 Session 当前模式启动。模式请求会组合 Agent 生命周期、进程代际和调用方取消信号，因此取消操作撤销代际后，无响应的提供方请求无法继续卡住关闭流程或替代 prompt。如果固定版本的适配器没有声明所需原生模式，启动或同步会明确失败；本包不会虚构提供方模式标识，也不会静默选择权限更弱的模式。
 
+ACP 适配器可能在提供方形成持久对话历史之前返回会话 id。如果 DSH Session 既不包含 `user/message` 也不包含 `turn/start`，则运行时会在冷启动的 `session/load` 失败后新建提供方会话，并记录新的关联。只要任一事件已经存在，加载失败就会继续明确终止恢复：PaperAI 不会用空白提供方会话替代无法恢复的对话历史。
+
 ACP 客户端文件回调使用已挂载的 DSH 文件系统，而不是直接调用 Node 文件系统。读取继续遵循 DSH 的读取策略；每次写入都会在最终文件操作处重新解析当前 Session 的沙箱模式和不可变 Workspace 根目录。`read-only` 拒绝写入，`workspace-write` 将写入限制在 Workspace 与平台临时目录内，完全访问则移除该限制。ACP 的 `session/request_permission` 响应不会隐式放宽后续文件回调，因为 ACP 不会把该批准与之后的 `fs/write_text_file` 请求绑定。
 
 每个 ACP 会话还独占一份经过身份验证的 PaperAI MCP 描述符。描述符会在 ACP `session/new` 或 `session/load` 时传入，随 Provider 模型切换同步提交来源，并在 Agent handle 释放时撤销。因此 Codex 与 Claude 会和人工工作台共用文档提交、模板门禁、历史、回退与导出服务；MCP 服务缺失会明确导致启动失败，不会静默退化成只改文件系统。

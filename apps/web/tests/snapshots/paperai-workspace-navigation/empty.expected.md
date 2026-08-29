@@ -1,0 +1,20 @@
+- button "返回工作区列表":
+  - img
+- heading "Empty project" [level=2]
+- text: {{cwd}}/empty-project
+- region "工作区详情":
+  - heading "项目内容" [level=3]
+  - button "文档类型":
+    - text: 论文正文
+    - img
+  - button "Choose File"
+  - button "导入 Word":
+    - img
+    - text: 导入 Word
+  - status: 暂无项目内容。选择“导入 Word”即可添加。
+  - heading "会话" [level=3]
+  - button "在“Empty project”中新建会话":
+    - img
+    - text: 新会话
+  - tree "工作区会话":
+    - treeitem "新会话" [selected]

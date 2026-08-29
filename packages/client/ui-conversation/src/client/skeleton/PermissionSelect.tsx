@@ -65,11 +65,13 @@ export interface PermissionSelectProps {
   value: PermissionSelectValue | undefined
   locked: boolean
   command: (line: string) => Promise<boolean>
+  /** Announce a rejected or failed permission command through the composer's shared error surface. */
+  onChangeFailed: () => void
   /** The owning bar's locale seat, passed down as a plain prop. */
   t: ComposerBarProps['t']
 }
 
-export function PermissionSelect({ value, locked, command, t }: PermissionSelectProps) {
+export function PermissionSelect({ value, locked, command, onChangeFailed, t }: PermissionSelectProps) {
   const [pick, setPick] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [confirmation, setConfirmation] = useState<string | null>(null)
@@ -97,9 +99,16 @@ export function PermissionSelect({ value, locked, command, t }: PermissionSelect
 
   const submit = (id: string): void => {
     setPick(id)
-    void command(`/permission ${id}`)
-      .catch(() => false)
-      .then(() => { setPick(null) })
+    void command(`/permission ${id}`).then(
+      (accepted) => {
+        if (!accepted) onChangeFailed()
+        setPick(null)
+      },
+      () => {
+        onChangeFailed()
+        setPick(null)
+      },
+    )
   }
 
   const choose = (id: string): void => {

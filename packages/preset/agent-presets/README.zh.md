@@ -86,7 +86,7 @@ description: 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agen
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `default` | 必填 | 调用方未指定时挂载的 preset id |
-| `roots` | `[]` | 按优先级排列的扫描目录；每项提供 `path`（开头的 `~` 会展开）与 `trust`（默认为 `user`） |
+| `roots` | `[]` | 按优先级排列的扫描目录；每项提供 `path`（开头的 `~` 会展开）与 `trust`（默认为 `user`）；`system` 根目录可以设置 `ids`，只公开这些 preset 目录 |
 | `includeUserRoot` | `true` | 在全部已配置根目录之后，追加 `<dshHome>/.agent-presets` 作为 `user` 根目录 |
 
 根目录不存在时视为不提供任何 preset，而非失败：用户根目录在写出第一个本地 preset 之前并不存在，而指定了没有任何根目录提供的默认值，在解析时本就会明确报错。
@@ -96,6 +96,8 @@ description: 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agen
 `<dshHome>/.agent-presets` 是个人自有 preset 的所在，正如 `<dshHome>/skills` 是其自有 skill 的所在（[`dsh-skill-filesystem`](../../skill/skill-filesystem/README.zh.md)），因此 roster 自行推导它，而不等某个部署记得配置——一个什么都没配的启动器同样能发现并创作 preset。它追加在全部已配置根目录**之后**，从而保持靠前的根目录赢得重复 id：随附的 `standard` 仍然遮蔽一个占用该名字的家目录目录，而 `copy()` 会拒绝该 id，不会落下一个无人解析得到的 preset。
 
 根目录在服务构造时解析一次。若根目录集合在一次 `list()` 与依据其答案执行的 `copy()` 之间发生变化，写入的将是调用方从未见过的目录。
+
+只有 `system` 根目录接受 `ids`。`user` 根目录始终不过滤，因为复制操作可以创建任意有效 id，且下一次发现读取必须能看到它；为 `user` 根目录配置 `ids` 会在服务构造时失败。每个配置的 id 必须遵守与 preset 目录名相同的 `[a-z0-9][a-z0-9-]*` 路径限定规则。过滤器只选择同一个部署自有根目录内的既有条目，不复制其组装。
 
 `includeUserRoot: false` 使 roster 只覆盖 `roots`。把 preset 限制在自有目录内的部署需要它，任何钉住确切 roster 的测试同样需要——否则将由这台机器真实的 `<dshHome>` 决定 roster 的内容。
 

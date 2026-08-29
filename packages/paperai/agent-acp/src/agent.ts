@@ -370,7 +370,12 @@ export class AcpAgent implements Agent {
     this.lifecycleSignal = signal
     const previousExternalSessionId = this.previousExternalSessionId()
     const runtime = this.createRuntime(signal)
-    const started = await runtime.start(previousExternalSessionId, this.currentSandboxMode(), signal)
+    const started = await runtime.start(
+      previousExternalSessionId,
+      this.currentSandboxMode(),
+      signal,
+      this.providerSessionIsReplaceable(),
+    )
     this.applyRuntimeStart(started)
     if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
       this.pendingSessionLink = {
@@ -700,6 +705,7 @@ export class AcpAgent implements Agent {
         previousExternalSessionId,
         this.currentSandboxMode(),
         AbortSignal.any([lifecycleSignal, signal]),
+        this.providerSessionIsReplaceable(),
       )
       this.applyRuntimeStart(started)
       if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
@@ -727,6 +733,12 @@ export class AcpAgent implements Agent {
       }
     }
     return undefined
+  }
+
+  private providerSessionIsReplaceable(): boolean {
+    return !this.session.events.some(event => (
+      event.type === 'turn/start' || event.type === 'user/message'
+    ))
   }
 
   private applyRuntimeStart(started: Awaited<ReturnType<AcpRuntime['start']>>): void {

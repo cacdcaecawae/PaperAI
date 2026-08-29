@@ -1,0 +1,7 @@
+- tree "工作区":
+  - treeitem "Empty project":
+    - img
+    - text: Empty project
+  - treeitem "Paper project":
+    - img
+    - text: Paper project

@@ -10,6 +10,8 @@ PaperAI 工作台通过既有 `ui-layout` 服务配置 420–960 px 的详情栏
 
 权限继续由 `@deepseek-ai/dsh-base` 负责。当用户保存的权限默认值以及部署或 profile 配置都没有选择其他 preset 时，新的 PaperAI 会话以 `workspace-write` 和 `ask` 启动：Agent 可以修改所选 Workspace，超出该权限的操作需要请求批准。用户仍可通过标准 DSH 权限选择器主动开启完全访问，并完成既有风险确认；部署方也可以通过明确配置覆盖默认值。
 
+全新的 PaperAI roster 包含 3 个系统 preset：既有的完整 `standard` DSH Agent、Codex 和 Claude。启动器从共享 DSH preset 根目录选择 `standard`，再加入两个 PaperAI ACP 组装；它不会复制或分叉 DSH 组装。其他 DSH profile 保留完整的随附 roster，本地创作的 preset 也继续从标准用户根目录提供。
+
 使用 `pnpm paperai` 运行源码 profile。profile 自有的 `cordis.patch.yml` 与 DSH home patch 仍然应用在本组合包之上，因此标准 DSH 配置和插件管理继续可用。
 
 ## 模型体验

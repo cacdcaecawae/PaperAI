@@ -173,12 +173,16 @@ export class AcpRuntime {
    * @param previousExternalSessionId Provider session id to resume, or `undefined` to create a session.
    * @param sandboxMode DSH sandbox preset that the provider session must enforce before startup completes.
    * @param signal Cancels process startup and ACP initialization requests.
+   * @param replaceFailedLoad Whether a rejected load may create a replacement provider session.
+   * Callers may enable it only when no provider conversation history exists.
    * @returns Initialization metadata and the model selector advertised by the active session.
+   * @throws When initialization, a non-replaceable load, session creation, or native-mode synchronization fails.
    */
   async start(
     previousExternalSessionId: string | undefined,
     sandboxMode: AcpSandboxMode,
     signal: AbortSignal,
+    replaceFailedLoad = false,
   ): Promise<AcpSessionStart> {
     signal.throwIfAborted()
     const argv = resolveLaunch(this.provider)
@@ -269,15 +273,23 @@ export class AcpRuntime {
           }, { cancellationSignal: signal })
           this.modelState = modelStateFromConfigOptions(loaded.configOptions)
           this.modeState = loaded.modes ?? undefined
+        } catch (error: unknown) {
+          signal.throwIfAborted()
+          if (!replaceFailedLoad) throw error
+          this.externalSessionId = undefined
+          this.modelState = { models: [] }
+          this.modeState = undefined
         } finally {
           this.replaying = false
         }
-        await this.selectSandboxMode(sandboxMode, signal)
-        return {
-          externalSessionId: previousExternalSessionId,
-          resumed: true,
-          initialized,
-          models: this.modelState,
+        if (this.externalSessionId !== undefined) {
+          await this.selectSandboxMode(sandboxMode, signal)
+          return {
+            externalSessionId: previousExternalSessionId,
+            resumed: true,
+            initialized,
+            models: this.modelState,
+          }
         }
       }
 

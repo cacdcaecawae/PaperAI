@@ -95,6 +95,11 @@ function rerender(b: ReturnType<typeof mount>, overrides: Partial<WorkspaceBrows
   b.view.rerender(<WorkspaceBrowser {...b.props} />)
 }
 
+/** Session rows inside the currently open second-level Workspace view. */
+function detailSessionRows(): HTMLElement[] {
+  return Array.from(screen.getByRole('tree', { name: '工作区会话' }).querySelectorAll<HTMLElement>('[role="treeitem"]'))
+}
+
 describe('WorkspaceBrowser', () => {
   it('workspace hover card shows a POSIX home descendant as ~', () => {
     vi.useFakeTimers()
@@ -234,52 +239,110 @@ describe('WorkspaceBrowser', () => {
     ])
   })
 
-  it('expands a group on click and opens a session row', () => {
+  it('enters a Workspace detail with resources and sessions, then returns to the list', () => {
     const open = vi.fn()
-    mount({
-      useSessions: hook(sessionState([summary('alpha-s', 1)])),
-      useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])])),
-      open,
-    })
-    fireEvent.click(screen.getByText('alpha'))
-    fireEvent.click(screen.getByText('alpha-s'))
-    expect(open).toHaveBeenCalledWith(sid('alpha-s'))
-    // Collapse hides the row again.
-    fireEvent.click(screen.getByText('alpha'))
-    expect(screen.queryByText('alpha-s')).toBeNull()
-  })
-
-  it('renders additive Workspace content only inside an expanded real Workspace', () => {
     const renderSlot = vi.fn((name: string, owner: object) => name === 'sidebar.workspaces.content'
       ? <div data-testid="workspace-content">{JSON.stringify(owner)}</div>
       : null)
     mount({
-      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha project')])),
+      useSessions: hook(sessionState([summary('alpha-s', 1)])),
+      useWorkspaces: hook(workspaceState([
+        workspace('alpha', ['alpha-s'], 'Alpha project'),
+        workspace('beta', [], 'Beta project'),
+      ])),
+      open,
       renderSlot: renderSlot as never,
     })
-    expect(screen.queryByTestId('workspace-content')).toBeNull()
 
-    fireEvent.click(screen.getByText('Alpha project'))
+    expect(screen.getByRole('tree', { name: '工作区' })).toBeTruthy()
+    const alpha = screen.getByRole('treeitem', { name: /Alpha project/ })
+    alpha.focus()
+    fireEvent.keyDown(alpha, { key: 'Enter' })
+
+    expect(screen.getByRole('button', { name: '返回工作区列表' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Alpha project', level: 2 })).toBeTruthy()
+    expect(screen.queryByText('Beta project')).toBeNull()
     expect(screen.getByTestId('workspace-content').textContent).toBe(JSON.stringify({
       workspaceId: 'alpha',
       path: '/projects/alpha',
       title: 'Alpha project',
       active: false,
     }))
+    expect(screen.getByRole('heading', { name: '会话', level: 3 })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '在“Alpha project”中新建会话' })).toBeTruthy()
+    fireEvent.click(screen.getByText('alpha-s'))
+    expect(open).toHaveBeenCalledWith(sid('alpha-s'))
+
+    fireEvent.click(screen.getByRole('button', { name: '返回工作区列表' }))
+    expect(screen.getByText('Alpha project')).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('treeitem', { name: 'Alpha project' }))
+    expect(screen.getByText('Beta project')).toBeTruthy()
+    expect(screen.queryByText('alpha-s')).toBeNull()
     expect(renderSlot).toHaveBeenCalledWith('sidebar.workspaces.content', {
       workspaceId: wid('alpha'),
       path: '/projects/alpha',
       title: 'Alpha project',
       active: false,
     })
-
-    fireEvent.click(screen.getByText('Alpha project'))
     expect(screen.queryByTestId('workspace-content')).toBeNull()
   })
 
-  it('shows five sessions by default and clears transient show-all when the Workspace collapses', () => {
-    const items = Array.from({ length: 7 }, (_, index) => summary(`session-${index + 1}`, 7 - index))
+  it('does not add a project-content section around an empty list slot', () => {
+    mount({
+      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha project')])),
+      renderSlot: ((name: string) => name === 'sidebar.workspaces.content' ? <></> : null) as never,
+    })
+    fireEvent.click(screen.getByText('Alpha project'))
+    expect(screen.queryByRole('heading', { name: '项目内容' })).toBeNull()
+  })
+
+  it('updates an open detail and exits it when grouping or Workspace ownership changes', async () => {
+    const renderSlot = vi.fn((name: string, owner: { title?: string; path?: string }) => (
+      name === 'sidebar.workspaces.content'
+        ? <div data-testid="workspace-content">{owner.title}:{owner.path}</div>
+        : null
+    ))
     const b = mount({
+      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha project')])),
+      renderSlot: renderSlot as never,
+    })
+    fireEvent.click(screen.getByText('Alpha project'))
+
+    const renamed = { ...workspace('alpha', [], 'Renamed project'), path: '/projects/renamed' }
+    rerender(b, { useWorkspaces: hook(workspaceState([renamed])) })
+    expect(screen.getByRole('heading', { name: 'Renamed project', level: 2 })).toBeTruthy()
+    expect(screen.getByTitle('/projects/renamed')).toBeTruthy()
+    expect(screen.getByTestId('workspace-content').textContent).toBe('Renamed project:/projects/renamed')
+
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
+    expect(screen.queryByRole('button', { name: '返回工作区列表' })).toBeNull()
+    expect(screen.queryByTestId('workspace-content')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '按工作区' }))
+    fireEvent.click(screen.getByText('Renamed project'))
+    rerender(b, { useWorkspaces: hook(workspaceState([])) })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '返回工作区列表' })).toBeNull()
+      expect(screen.queryByTestId('workspace-content')).toBeNull()
+      expect(screen.getByRole('tree', { name: '工作区' })).toBeTruthy()
+    })
+  })
+
+  it('shows a compact empty Session state inside a Workspace detail', () => {
+    mount({
+      useSessions: hook(sessionState([])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha project')])),
+    })
+    fireEvent.click(screen.getByText('Alpha project'))
+    expect(screen.getByRole('status').textContent).toBe('暂无会话。选择“新会话”即可开始。')
+    expect(screen.getByRole('button', { name: '在“Alpha project”中新建会话' })).toBeTruthy()
+  })
+
+  it('shows five sessions by default and clears transient show-all after returning to the list', () => {
+    const items = Array.from({ length: 7 }, (_, index) => summary(`session-${index + 1}`, 7 - index))
+    mount({
       useSessions: hook(sessionState(items)),
       useWorkspaces: hook(workspaceState([workspace('alpha', items.map(item => item.id))])),
     })
@@ -293,10 +356,8 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('session-7')).toBeTruthy()
     expect(screen.getByRole('button', { name: '收起' })).toBeTruthy()
 
+    fireEvent.click(screen.getByRole('button', { name: '返回工作区列表' }))
     fireEvent.click(screen.getByText('alpha'))
-    expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: false })
-    fireEvent.click(screen.getByText('alpha'))
-    expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: true })
     expect(screen.queryByText('session-6')).toBeNull()
     expect(screen.getByRole('button', { name: '展开其余 2 个会话' })).toBeTruthy()
   })
@@ -311,12 +372,12 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '最近更新' }))
     await waitFor(() => {
-      const rows = screen.getAllByRole('treeitem').slice(1)
+      const rows = detailSessionRows()
       expect(rows[0]?.textContent).toContain('one')
       expect(rows[1]?.textContent).toContain('two')
     })
 
-    const [one, two] = screen.getAllByRole('treeitem').slice(1) as [HTMLElement, HTMLElement]
+    const [one, two] = detailSessionRows() as [HTMLElement, HTMLElement]
     two.getBoundingClientRect = () => ({
       top: 150, bottom: 184, left: 0, right: 200, width: 200, height: 34, x: 0, y: 150, toJSON: () => ({}),
     })
@@ -326,7 +387,7 @@ describe('WorkspaceBrowser', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '手动排序' }))
-    expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
+    expect(detailSessionRows()[0]?.textContent).toContain('two')
 
     // User activity updates the timestamp baseline in Manual mode without
     // changing the shared visual order.
@@ -336,14 +397,14 @@ describe('WorkspaceBrowser', () => {
       expect(b.store.getSnapshot().sessionUpdatedAtByAccount.alpha).toEqual({ one: 4, two: 2 })
     })
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['two', 'one'])
-    expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
+    expect(detailSessionRows()[0]?.textContent).toContain('two')
 
     // Entering Last updated performs one complete recency sort.
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '最近更新' }))
     await waitFor(() => {
       expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['one', 'two'])
-      expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('one')
+      expect(detailSessionRows()[0]?.textContent).toContain('one')
     })
 
     // A later user activity timestamp promotes that Session once while the
@@ -352,7 +413,7 @@ describe('WorkspaceBrowser', () => {
     rerender(b, { useSessions: hook(promoted) })
     await waitFor(() => {
       expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['two', 'one'])
-      expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
+      expect(detailSessionRows()[0]?.textContent).toContain('two')
     })
 
     b.view.unmount()
@@ -361,7 +422,8 @@ describe('WorkspaceBrowser', () => {
       useWorkspaces: hook(workspaceState([workspace('alpha', ['two', 'one'])])),
     })
     expect(restored.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['two', 'one'])
-    expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
+    fireEvent.click(screen.getByText('alpha'))
+    expect(detailSessionRows()[0]?.textContent).toContain('two')
   })
 
   it('archives a session from the row menu and hides archived rows in both modes', async () => {
@@ -420,19 +482,16 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('child-s').closest('[role="treeitem"]')?.getAttribute('draggable')).toBe('true')
   })
 
-  it('expands the target group before starting a session from its ＋', () => {
+  it('enters the target Workspace before starting a session from its ＋', () => {
     const startSession = vi.fn()
-    const b = mount({
+    mount({
       useSessions: hook(sessionState([summary('alpha-s', 1)])),
       useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])])),
       startSession,
     })
-    startSession.mockImplementation(() => {
-      expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: true })
-    })
     expect(screen.queryByText('alpha-s')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '在“alpha”中新建会话' }))
-    expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: true })
+    expect(screen.getByRole('button', { name: '返回工作区列表' })).toBeTruthy()
     expect(screen.getByText('alpha-s')).toBeTruthy()
     expect(startSession).toHaveBeenCalledWith(wid('alpha'))
   })
@@ -451,18 +510,18 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).not.toHaveBeenCalled()
   })
 
-  it('keeps an already-expanded group when the selection moves within it', () => {
+  it('keeps an opened Workspace detail when the selected session moves within it', () => {
     const first = sessionState([summary('a', 2), summary('b', 1)], { current: sid('a') })
     const b = mount({
       useSessions: hook(first),
       useWorkspaces: hook(workspaceState([workspace('alpha', ['a', 'b'])])),
     })
+    fireEvent.click(screen.getByText('alpha'))
     expect(screen.getByText('a')).toBeTruthy()
-    // Selection hop inside the same group: the effect re-runs and leaves the
-    // expansion list unchanged (no duplicate key, group still open).
+    // Selection hops do not navigate away from the Workspace the user opened.
     rerender(b, { useSessions: hook({ ...first, current: sid('b') }) })
     expect(screen.getByText('b')).toBeTruthy()
-    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '返回工作区列表' }))
     expect(screen.queryByText('b')).toBeNull()
   })
 
@@ -479,12 +538,16 @@ describe('WorkspaceBrowser', () => {
         workspace('alpha', ['alpha-blank']), workspace('beta', ['beta-blank']),
       ])),
     })
-    expect(screen.getByText('新会话')).toBeTruthy()
+    fireEvent.click(screen.getByText('alpha'))
+    expect(detailSessionRows()[0]?.textContent).toContain('新会话')
     expect(screen.queryByText('alpha-blank')).toBeNull()
     expect(screen.queryByText('beta-blank')).toBeNull()
 
     rerender(b, { useSessions: hook({ ...sessions, current: staleBlank.id }) })
-    expect(screen.getAllByText('新会话')).toHaveLength(1)
+    expect(detailSessionRows()).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: '返回工作区列表' }))
+    fireEvent.click(screen.getByText('beta'))
+    expect(detailSessionRows()[0]?.textContent).toContain('新会话')
     b.store.actions.setGroupBy('flat')
     rerender(b, {})
     expect(screen.getAllByText('新会话')).toHaveLength(1)
@@ -540,7 +603,8 @@ describe('WorkspaceBrowser', () => {
     await waitFor(() => {
       expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['blank', 'old', 'mid'])
     })
-    const blank = screen.getByText('新会话').closest('[role="treeitem"]') as HTMLElement
+    fireEvent.click(screen.getByText('alpha'))
+    const blank = detailSessionRows().find(row => row.textContent?.includes('新会话')) as HTMLElement
     const mid = screen.getByText('mid').closest('[role="treeitem"]') as HTMLElement
     mid.getBoundingClientRect = () => ({
       top: 150, bottom: 184, left: 0, right: 200, width: 200, height: 34, x: 0, y: 150, toJSON: () => ({}),
@@ -588,7 +652,7 @@ describe('WorkspaceBrowser', () => {
       expect(screen.getByText('无匹配会话')).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: '清除搜索' }))
       expect(input.value).toBe('')
-      expect(screen.getByRole('tree', { name: '会话' })).toBeTruthy()
+      expect(screen.getByRole('tree', { name: '工作区' })).toBeTruthy()
       // Clicking the field row focuses the input (wide mode).
       fireEvent.click(input.parentElement as HTMLElement)
       expect(document.activeElement).toBe(input)
@@ -862,7 +926,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('alpha')).toBeTruthy()
   })
 
-  it('uses the full expanded Workspace section when resolving a Workspace drop half', () => {
+  it('keeps Workspace reordering on the compact list view', () => {
     const insertWorkspaceBefore = vi.fn(async () => {})
     const sessions = sessionState(Array.from({ length: 5 }, (_, index) => summary(`beta-${index}`, index)))
     mount({
@@ -874,19 +938,16 @@ describe('WorkspaceBrowser', () => {
       ])),
       insertWorkspaceBefore,
     })
-    fireEvent.click(screen.getByText('beta'))
     const source = screen.getByText('tail').closest('[role="treeitem"]') as HTMLElement
     let targetSection = screen.getByText('beta').closest('[role="treeitem"]')?.parentElement as HTMLElement
     while (targetSection.parentElement?.getAttribute('role') !== 'tree') {
       targetSection = targetSection.parentElement as HTMLElement
     }
     targetSection.getBoundingClientRect = () => ({
-      top: 100, bottom: 300, left: 0, right: 200, width: 200, height: 200, x: 0, y: 100, toJSON: () => ({}),
+      top: 100, bottom: 134, left: 0, right: 200, width: 200, height: 34, x: 0, y: 100, toJSON: () => ({}),
     })
     fireEvent.dragStart(source, { dataTransfer: dragData() })
-    // y=190 is below the header row but still in the top half of the whole
-    // expanded section, so the target is before beta rather than after it.
-    fireDrag(targetSection, 'drop', 190)
+    fireDrag(targetSection, 'drop', 105)
     expect(insertWorkspaceBefore).toHaveBeenCalledWith(wid('tail'), wid('beta'))
   })
 
@@ -949,7 +1010,7 @@ describe('WorkspaceBrowser', () => {
       insertSessionBefore,
     })
     fireEvent.click(screen.getByText('alpha'))
-    const rows = screen.getAllByRole('treeitem').slice(1) // drop the group header
+    const rows = detailSessionRows()
     const [one, , three] = rows as [HTMLElement, HTMLElement, HTMLElement]
     three.getBoundingClientRect = () => ({
       top: 200, bottom: 234, left: 0, right: 200, width: 200, height: 34, x: 0, y: 200, toJSON: () => ({}),
@@ -1055,7 +1116,7 @@ describe('WorkspaceBrowser', () => {
       insertSessionBefore,
     })
     fireEvent.click(screen.getByText('alpha'))
-    const [one, two] = screen.getAllByRole('treeitem').slice(1) as [HTMLElement, HTMLElement]
+    const [one, two] = detailSessionRows() as [HTMLElement, HTMLElement]
     two.getBoundingClientRect = () => ({
       top: 150, bottom: 184, left: 0, right: 200, width: 200, height: 34, x: 0, y: 150, toJSON: () => ({}),
     })
@@ -1081,7 +1142,7 @@ describe('WorkspaceBrowser', () => {
       insertSessionBefore,
     })
     fireEvent.click(screen.getByText('alpha'))
-    const [one, two] = screen.getAllByRole('treeitem').slice(1) as [HTMLElement, HTMLElement]
+    const [one, two] = detailSessionRows() as [HTMLElement, HTMLElement]
     two.getBoundingClientRect = () => ({
       top: 150, bottom: 184, left: 0, right: 200, width: 200, height: 34, x: 0, y: 150, toJSON: () => ({}),
     })
@@ -1106,7 +1167,7 @@ describe('WorkspaceBrowser', () => {
         insertSessionBefore,
       })
       fireEvent.click(screen.getByText('alpha'))
-      const [one, two] = screen.getAllByRole('treeitem').slice(1) as [HTMLElement, HTMLElement]
+      const [one, two] = detailSessionRows() as [HTMLElement, HTMLElement]
       two.getBoundingClientRect = () => ({
         top: 150, bottom: 184, left: 0, right: 200, width: 200, height: 34, x: 0, y: 150, toJSON: () => ({}),
       })

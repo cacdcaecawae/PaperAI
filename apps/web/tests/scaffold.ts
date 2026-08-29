@@ -281,7 +281,7 @@ export interface LaunchOptions {
    */
   agentPresets?: {
     /** Roots to discover, in precedence order; the shipped directory is `system`. */
-    roots: { path: string; trust: 'system' | 'user' }[]
+    roots: { path: string; trust: 'system' | 'user'; ids?: string[] }[]
     /** The preset a session that names none is composed from. */
     default: string
   }

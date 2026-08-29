@@ -170,7 +170,8 @@ describe('WorkspaceContent', () => {
       phase: 'ready', resources: [], selected: null, error: null,
     })
     render(<WorkspaceContent {...empty.props} />)
-    expect(screen.getByText('暂无内容')).not.toBeNull()
+    expect(screen.getByRole('heading', { name: '项目内容', level: 3 })).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('暂无项目内容。选择“导入 Word”即可添加。')
     expect(screen.queryByRole('region')).toBeNull()
   })
 

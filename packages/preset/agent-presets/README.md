@@ -86,7 +86,7 @@ Every read failure degrades to no metadata — absent, malformed, wrongly typed,
 | Field | Default | Meaning |
 |---|---|---|
 | `default` | required | Preset id mounted when a caller names none |
-| `roots` | `[]` | Scanned directories in precedence order; each supplies `path` (a leading `~` expands) and `trust` (defaults to `user`) |
+| `roots` | `[]` | Scanned directories in precedence order; each supplies `path` (a leading `~` expands) and `trust` (defaults to `user`); a `system` root may set `ids` to expose only those preset directories |
 | `includeUserRoot` | `true` | Append `<dshHome>/.agent-presets` as a `user` root, after every configured root |
 
 An absent root supplies no presets rather than failing: the user root does not exist until the first locally authored preset, and naming a default no root supplies already fails loud at resolution.
@@ -96,6 +96,8 @@ An absent root supplies no presets rather than failing: the user root does not e
 `<dshHome>/.agent-presets` is where a person's own presets live, the way `<dshHome>/skills` is where their own skills live ([`dsh-skill-filesystem`](../../skill/skill-filesystem/README.md)), so the roster derives it rather than waiting for a deployment to remember it — a launcher that configures nothing still finds and authors presets. It is appended AFTER every configured root, which keeps an earlier root winning a duplicate id: a shipped `standard` still shadows a home directory that claimed the name, and `copy()` refuses that id rather than landing a preset nothing would resolve.
 
 The roots are resolved once, when the service is constructed. A root set that changed between a `list()` and the `copy()` acting on its answer would author into a directory the caller never saw.
+
+Only a `system` root accepts `ids`. A `user` root is always unfiltered because a copy can create any valid id and must become visible on the next discovery read; configuring `ids` on one fails at service construction. Each configured id must satisfy the same `[a-z0-9][a-z0-9-]*` containment rule as a preset directory. The filter selects entries already present in one deployment-owned root and does not copy their compositions.
 
 `includeUserRoot: false` mounts a roster over `roots` alone. A deployment that confines presets to its own directories needs it, and so does any test pinning an exact roster — otherwise the machine's real `<dshHome>` decides what the roster contains.
 

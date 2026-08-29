@@ -54,10 +54,10 @@ export interface DirectoryFlowOwnerProps {
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /**
-     * Additive content rendered directly below one expanded Workspace row.
+     * Additive content rendered in one real Workspace's second-level view.
      * The owner supplies stable Workspace identity and path facts; occupants
-     * own their resource tree, loading state, and row actions. Entries render
-     * by ascending `order` and disappear with the Workspace browser entry.
+     * own their resource sections, loading state, and row actions. Entries
+     * render by ascending `order` and disappear with the Workspace browser.
      */
     'sidebar.workspaces.content': {
       kind: 'list'
@@ -71,7 +71,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Stable Workspace facts supplied to additive resource-tree occupants. */
+/** Stable Workspace facts supplied to additive detail-section occupants. */
 export interface WorkspaceContentOwnerProps {
   /** Host Workspace identity. */
   workspaceId: WorkspaceId

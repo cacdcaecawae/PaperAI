@@ -31,6 +31,9 @@ import {
   type Profile,
 } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
+import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
 
 /** Shipped agent-preset root: beside this app's own config, in both source and built layouts. */
 const SHIPPED_PRESET_ROOT = fileURLToPath(new URL('../config/agent-presets/', import.meta.url))
@@ -41,9 +44,26 @@ const PAPERAI_PRESET_ROOT = join(
   'agent-presets',
 )
 
-import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
-import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+/**
+ * Preset roots supplied by this app for one profile.
+ *
+ * PaperAI curates the shared system root to the full `standard` DSH Agent and
+ * adds its two product-owned ACP presets. Other profiles retain the complete
+ * shipped DSH root. The roster still appends its normal user-authoring root.
+ * @param name - the profile name.
+ * @returns roots in discovery precedence order.
+ */
+export function profilePresetRoots(name: string): Array<{
+  path: string
+  trust: 'system'
+  ids?: string[]
+}> {
+  if (name !== 'paperai') return [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }]
+  return [
+    { path: SHIPPED_PRESET_ROOT, trust: 'system', ids: ['standard'] },
+    { path: PAPERAI_PRESET_ROOT, trust: 'system' },
+  ]
+}
 
 const NAME = 'dsh'
 
@@ -168,10 +188,7 @@ function composeProfile(
       id: 'agent-presets',
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [
-          { path: SHIPPED_PRESET_ROOT, trust: 'system' },
-          ...name === 'paperai' ? [{ path: PAPERAI_PRESET_ROOT, trust: 'system' }] : [],
-        ],
+        roots: profilePresetRoots(name),
       },
     })
   }

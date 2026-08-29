@@ -20,11 +20,13 @@ fork 中的上游包继续使用 `@deepseek-ai/dsh-*`，新增的产品自有包
 
 PaperAI 配置提供三个并列的顶级 Agent preset：
 
-- **DSH** 使用内置 DSH agent harness 和 `dsh-agent-loop`，提供方由既有 Models Settings 配置。
+- **DSH** 使用既有的完整 `standard` 系统 preset，其中包含内置 DSH agent harness 和 `dsh-agent-loop`；提供方由既有 Models Settings 配置。
 - **Codex** 使用已安装的本地 Codex ACP 适配器，把 ACP 生命周期、配置选项、权限、流式内容、计划、工具、取消和错误映射到 DSH 会话。
 - **Claude** 使用已安装的本地 Claude ACP 适配器，并复用同一个顶级 ACP Agent 实现。
 
 它们是创建会话时的 Agent 选择，不是 DSH subagent。Codex 和 Claude 从 ACP `session/new.configOptions` 获取真实模型选择，并通过 `session/set_config_option` 应用变更；UI 不虚构模型 id。既有 DSH 凭据和模型 Settings 继续负责内置 DSH 提供方，包括 API key、Base URL、协议和模型列表。
+
+PaperAI 启动器把共享系统 preset 根目录限制为 `standard`，随后加入产品自有的 Codex 与 Claude 根目录。因此，全新的 harness home 只会呈现这 3 个系统选项，且无需复制 DSH 组装。其他 profile 保留完整的随附 DSH 根目录；preset 服务继续追加用户创作根目录，以提供本地创建的选项。
 
 PaperAI MCP 工具是所有 Agent 可见的文档能力面。Host 命令与 MCP handler 调用相同的领域服务；每次执行文档命令时，都从当前 DSH 会话解析 actor/model 来源信息。
 
@@ -35,7 +37,7 @@ DSH 客户端继续作为页面壳。PaperAI 只扩展四个窄上游 seam，并
 | 属主 | 窄扩展 | PaperAI contribution |
 |---|---|---|
 | `ui-layout` | 可配置的中栏/详情栏几何和详情栏可见性 | 更宽的文档工作台，同时保留原有让位和拖拽行为 |
-| `ui-workspace` | 每个工作区分组内的 list slot | 文档、模板、图片、实验和文档状态 |
+| `ui-workspace` | 每个真实 Workspace 二级详情中的 list slot | 文档、模板、图片、实验和文档状态 |
 | `ui-conversation` | 与既有工具详情并列的通用详情视图宿主 | 预览、编辑、历史和模板门禁视图 |
 | `ui-agent-preset` | keyed 品牌呈现 slot | DSH、Codex、Claude 官方标记，不再硬编码通用图标 |
 
@@ -76,10 +78,12 @@ PaperAI 领域服务独立于 DSH 平台，并通过 Cordis Service Definition �
 
 **把 Markdown 或可编辑 HTML 持久化为第二份权威文档。** 通过另一种全文模型往返 Word 版式会产生同步和保真冲突。单一 Working DOCX 配合生成预览和章节缓冲区，可以维持一个真源。
 
+**把 `standard` 复制进 PaperAI 组合包。** 副本会逐渐偏离其声称提供的 DSH Agent，也会要求每项上游 preset 修正重复应用两次。按 id 从共享系统根目录选择 `standard`，可以让原生 Agent 继续只有一份组装真源，同时允许 PaperAI 收敛自己的 roster。
+
 ## 测试
 
 - PaperAI 配置可从源码和构建产物启动，并完整保留原生 DSH 会话、权限、Settings、凭据、模型和响应式 UI 行为。
-- DSH、本地 Codex、本地 Claude 以并列顶级 Agent 显示，各自具有标记和真实提供方/模型选择，并均能运行会话。
+- 全新的 PaperAI harness home 只列出既有 `standard` DSH Agent、本地 Codex 与本地 Claude，三者以并列顶级 Agent 显示，各自具有标记和真实提供方/模型选择，并均能运行会话。其他 profile 保留完整的随附 DSH roster。
 - 用户可以选择目录、初始化或恢复 PaperAI 项目、导入 DOC/DOCX、查看 OfficeCLI HTML 预览、编辑选中章节并创建可恢复文档提交。
 - 文档工作台提供预览、编辑、历史和模板门禁，且不再受原先 300–520 px 工具详情栏宽度限制。
 - HIT 模板内置可用，自定义模板可以上传和确认，源文件保持不变，派生文档遵守角色兼容性。
