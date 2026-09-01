@@ -208,7 +208,7 @@ describe('OfficeCliDocumentEngine', () => {
     expect(calls[0]?.argv[1]).toMatch(/officecli/u)
   })
 
-  it('normalizes legacy documents through the structural engine extension', async () => {
+  it('projects the host legacy-conversion capability through the structural engine extension', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-officecli-method-'))
     const source = join(root, 'source.doc')
     const target = join(root, 'target.docx')
@@ -218,9 +218,18 @@ describe('OfficeCliDocumentEngine', () => {
         if (spec.argv.some(argument => argument.endsWith('convert-legacy-doc.ps1'))) writeFileSync(target, 'docx')
         return {}
       })
-      await expect(engine.normalizeLegacyDocument(source, target)).resolves.toEqual({ status: 'normalized' })
+      const result = await engine.normalizeLegacyDocument(source, target)
       await expect(readFile(source, 'utf8')).resolves.toBe('source')
-      expect(calls.at(-1)?.argv).toContain(target)
+      if (process.platform === 'win32') {
+        expect(result).toEqual({ status: 'normalized' })
+        expect(calls.at(-1)?.argv).toContain(target)
+      } else {
+        expect(result).toEqual({
+          status: 'degraded',
+          detail: `Legacy .doc conversion requires Windows and Microsoft Word; current platform is ${process.platform}`,
+        })
+        expect(calls).toHaveLength(0)
+      }
     } finally {
       await rm(root, { recursive: true, force: true })
     }

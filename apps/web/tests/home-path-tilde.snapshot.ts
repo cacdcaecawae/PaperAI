@@ -16,11 +16,8 @@ describe('assembled POSIX home-path display', () => {
   it('shows the home-descendant Workspace path as ~ and copies the full path', async () => {
     mountAssembledApp()
 
-    const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
-    const group = (await within(tree).findAllByText('project'))
-      .map(el => el.closest<HTMLElement>('[role="treeitem"]'))
-      .find(el => el?.getAttribute('aria-expanded') !== null)
-    if (group == null) throw new Error('home-descendant Workspace group missing')
+    const tree = await screen.findByRole('tree', { name: 'Workspaces' }, { timeout: 10_000 })
+    const group = await within(tree).findByRole('treeitem', { name: 'project' })
 
     fireEvent.pointerEnter(group.parentElement as HTMLElement)
     const hoverPath = await waitFor(() => {

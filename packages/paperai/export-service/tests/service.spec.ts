@@ -1,4 +1,4 @@
-import { link, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { link, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -43,7 +43,7 @@ describe('PaperExportService', () => {
       documentId: harness.document.id,
       mode: 'draft-export',
     }, undefined)
-    expect(result.outputPath).toBe(outputPath)
+    expect(result.outputPath).toBe(await realpath(outputPath))
     expect(result.report).toMatchObject({ mode: 'draft-export', status: 'pass' })
     expect(result.report.findings).toHaveLength(1)
     expect(result.gate).toEqual(result.report)

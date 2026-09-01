@@ -9,16 +9,13 @@
 // when the image is the whole `/plan` task.
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { expect, it } from 'vitest'
-import { installAssembledBootEnv, mountAssembledApp } from './assembled-boot.ts'
+import { installAssembledBootEnv, mountAssembledApp, startAssembledFixtureSession } from './assembled-boot.ts'
 
 installAssembledBootEnv()
 
 /** Open a fresh fixture session and return its composer textarea. */
 async function freshComposer(): Promise<HTMLTextAreaElement> {
-  const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
-  const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
-  if (start === null) throw new Error('fixture Workspace new-session action missing')
-  fireEvent.click(start)
+  await startAssembledFixtureSession()
   return await screen.findByPlaceholderText('Describe what you want to build', {}, { timeout: 10_000 }) as HTMLTextAreaElement
 }
 

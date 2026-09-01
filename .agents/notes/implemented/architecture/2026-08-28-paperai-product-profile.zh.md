@@ -49,7 +49,7 @@ Working DOCX 是权威可编辑正文。导入的源文件和模板保持不可�
 
 PaperAI 领域服务独立于 DSH 平台，并通过 Cordis Service Definition 和可替换 Service Provider 暴露：
 
-- 项目与 repository 服务持有 PaperAI 元数据，同时把项目投影到 DSH 工作区；
+- 项目与 repository 服务持有 PaperAI 元数据，同时把项目投影到 DSH 工作区；项目根目录以规范化真实路径为标识，并在 Windows 上折叠大小写，避免符号链接、junction 和路径拼写别名形成竞争标识；尚不存在的持久化根目录在可解析前保留词法标识；
 - OfficeCLI 文档引擎 Provider 按 Working DOCX 串行化修改；
 - 文档、模板、HIT 模板包、门禁、提交和导出服务分别持有自身业务规则；
 - 同一份命令约定同时被浏览器 remote 和 PaperAI MCP 传输层消费；
@@ -88,6 +88,7 @@ PaperAI 领域服务独立于 DSH 平台，并通过 Cordis Service Definition �
 - 文档工作台提供预览、编辑、历史和模板门禁，且不再受原先 300–520 px 工具详情栏宽度限制。
 - HIT 模板内置可用，自定义模板可以上传和确认，源文件保持不变，派生文档遵守角色兼容性。
 - 人工与 Agent 修改共用一个串行提交路径，并具备正确来源、冲突检测、段落历史和回退。
+- 项目修复与查找把符号链接、junction、大小写和短路径别名视为同一根目录，并拒绝有歧义的持久化重复记录。
 - 不完整时仍可导出草稿；交付导出执行模板门禁并阻止有效 hard error。
 - PaperAI MCP 与浏览器操作调用同一份领域命令约定。
 - 每个产品可见插件都有 Loader/组合测试，领域行为有服务测试，浏览器冒烟测试在桌面和受限宽度下覆盖从项目到导出的主流程。

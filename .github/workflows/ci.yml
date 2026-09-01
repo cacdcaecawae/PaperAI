@@ -12,8 +12,7 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 # Cancel a superseded pull-request run on a new push so a fresh head does not
-# queue a second full 9-job run behind a stale one (paid enterprise runners
-# would otherwise stack with no auto-cancellation).
+# queue a second complete run behind a stale one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,9 +23,9 @@ jobs:
   # build-backed consumer tail. The consumer job owns the only Linux build so
   # all three jobs enter runner allocation independently.
   #
-  # RUNNER OWNERSHIP: only the upstream DSH repository owns the larger and
-  # self-hosted pools. Synchronized downstream repositories use GitHub-hosted
-  # runners, so their checks cannot wait forever for labels they do not own.
+  # RUNNER OWNERSHIP: only the upstream DSH repository runs this matrix and
+  # owns its larger and self-hosted pools. Product jobs later in this workflow
+  # use standard GitHub-hosted runners.
   #
   # FAILOVER (Linux): each upstream Linux enterprise job resolves its pool through the
   # DSH_CI_FAILOVER_LINUX repository variable. Unset (normal), the expressions
@@ -41,14 +40,12 @@ jobs:
   # switch is the separate DSH_CI_FAILOVER_WINDOWS variable on the windows-native
   # job below.
   node-24:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: >-
-      ${{ github.repository != 'deepseek-harness/deepseek-harness'
-          && 'ubuntu-24.04'
-          || (vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
-              && github.event.pull_request.user.login != 'dependabot[bot]'
-              && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
-              || 'dsh-ubuntu-24-04-16core') }}
+      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
+          || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / static
     env:
       DSH_GATE_CONCURRENCY: '8'
@@ -95,14 +92,12 @@ jobs:
         run: pnpm run check:ci:static
 
   node-24-coverage:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: >-
-      ${{ github.repository != 'deepseek-harness/deepseek-harness'
-          && 'ubuntu-24.04'
-          || (vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
-              && github.event.pull_request.user.login != 'dependabot[bot]'
-              && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
-              || 'dsh-ubuntu-24-04-16core') }}
+      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
+          || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / coverage
     env:
       # Partitioning replaces the instrumented share; this budget gives the
@@ -159,14 +154,12 @@ jobs:
         run: pnpm run check:ci:coverage
 
   node-24-consumers:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: >-
-      ${{ github.repository != 'deepseek-harness/deepseek-harness'
-          && 'ubuntu-24.04'
-          || (vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
-              && github.event.pull_request.user.login != 'dependabot[bot]'
-              && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
-              || 'dsh-ubuntu-24-04-16core') }}
+      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
+          || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / snapshots and artifacts
     env:
       DSH_GATE_CONCURRENCY: '8'
@@ -175,7 +168,7 @@ jobs:
       DSH_PUBLINT_CONCURRENCY: '8'
       DSH_WEB_SNAPSHOT_WORKERS: '6'
       # Failover halves snapshot concurrency for the shared 64-core VM.
-      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ github.repository != 'deepseek-harness/deepseek-harness' && '4' || (vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '32') }}
+      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '32' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -247,7 +240,7 @@ jobs:
 
 
   node-compat:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     # Each compatibility contract receives an independent standard hosted job.
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
@@ -287,7 +280,7 @@ jobs:
         run: pnpm run check:node-compat
 
   python-sdk:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: ubuntu-latest
     name: python 3.10 / keyless SDK
     steps:
@@ -309,14 +302,14 @@ jobs:
   # The reusable builder owns the executable, snapshot, wheel, clean-install,
   # GLIBC, and manylinux checks; release validation retains all native targets.
   python-runtime:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     name: python runtime / release-shaped Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
     with:
       targets: node24-linux-x64
       ci: true
 
-  # The required pull-request Windows signal: the two blocking win32 surfaces
+  # The upstream pull-request Windows signal: the two blocking win32 surfaces
   # (workspace build, production site) execute with real, checksum-verified
   # Windows Node under Wine on standard hosted Linux. The independent
   # windows-native job below keeps the complete native-kernel inventory —
@@ -327,7 +320,7 @@ jobs:
   # Current topology and fidelity limits live in
   # .agents/notes/implemented/process/2026-08-08-native-windows-pull-request-ci.md
   windows:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: ubuntu-latest
     name: windows node 24 / wine blocking
     timeout-minutes: 15
@@ -406,26 +399,23 @@ jobs:
         if: always()
         run: wineserver -k 2>/dev/null || true
 
-  # Every pull request also gets a real Windows-kernel signal. This job keeps
+  # Every upstream pull request also gets a real Windows-kernel signal. This job keeps
   # its own unmasked conclusion but is deliberately absent from
   # all-checks-passed.needs, so it never delays or changes that required
   # verdict. Under normal operation it runs on the hosted larger runner; under
   # Windows failover (DSH_CI_FAILOVER_WINDOWS=selfhosted) it retargets onto the
   # in-house self-hosted Windows pool. Dependabot PRs are excluded from the
   # self-hosted pool and stay queued for the hosted runner — see the failover
-  # runbook. Downstream repositories use windows-2025 because they do not
-  # own either DSH Windows pool. This Windows switch is independent of the Linux
+  # runbook. This Windows switch is independent of the Linux
   # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
   # and the all-checks-passed verdict above.
   windows-native:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: >-
-      ${{ github.repository != 'deepseek-harness/deepseek-harness'
-          && 'windows-2025'
-          || (vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
-              && github.event.pull_request.user.login != 'dependabot[bot]'
-              && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
-              || 'dsh-windows-2025-16core') }}
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'dsh-windows-2025-16core' }}
     name: windows node 24 / native complete
     timeout-minutes: 120
     env:
@@ -467,17 +457,148 @@ jobs:
         shell: pwsh
         run: pnpm run check:ci:windows-complete
 
-  # Single stable required check for branch protection: require "all checks
-  # passed" instead of enumerating matrix legs whose names change as lanes and
-  # node versions evolve. Every blocking job in THIS workflow must be listed in
-  # `needs`. The required Wine job is listed as `windows`; `windows-native` is
-  # deliberately absent so its independent result never delays or changes this
-  # verdict. (`needs` cannot reach across workflow files; the master-only jobs in
-  # ci-master.yml are intentionally not part of this PR verdict.)
-  # `if: always()` is load-bearing: without it a failed dependency
-  # would SKIP this job, and GitHub counts a skipped required check as passing
-  # — so this job always runs and fails on any non-success result, including
-  # 'cancelled' and 'skipped'.
+  # Synchronized product repositories validate their owned profile and the
+  # shared seams it changes without replaying DSH's release matrix. The
+  # upstream jobs above remain the authority for the complete harness.
+  paperai-code:
+    if: github.event_name == 'pull_request' && github.repository != 'deepseek-harness/deepseek-harness'
+    runs-on: ubuntu-24.04
+    name: paperai node 24 / code
+    env:
+      DSH_GATE_CONCURRENCY: '3'
+      DSH_OXLINT_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run static, type, lint, and documentation gates
+        env:
+          DSH_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          pnpm run check:ci:static
+          pnpm run build:lib:host
+          pnpm run typecheck:contracts-ready
+          pnpm run lint:contracts-ready
+
+      - name: Run focused PaperAI tests and changed-source coverage
+        run: >-
+          pnpm run test:paperai:ci --
+          --coverage.enabled
+          --coverage.changed=${{ github.event.pull_request.base.sha }}
+          --coverage.thresholds.perFile=true
+          --coverage.thresholds.statements=85
+          --coverage.thresholds.branches=65
+          --coverage.thresholds.functions=85
+          --coverage.thresholds.lines=85
+          --coverage.reporter=text
+          --maxWorkers=2
+          --testTimeout=30000
+
+  paperai-ui:
+    if: github.event_name == 'pull_request' && github.repository != 'deepseek-harness/deepseek-harness'
+    runs-on: ubuntu-24.04
+    name: paperai node 24 / assembled UI
+    env:
+      DSH_EXAMPLE_MODE: lib
+      DSH_SNAPSHOT: replay
+      DSH_SNAPSHOT_MAX_CONCURRENCY: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium
+
+      - name: Build and validate published artifacts
+        run: |
+          pnpm run build
+          pnpm run publint
+          pnpm run verify-node-next-types
+          pnpm run verify-built-package-invariants
+
+      - name: Replay affected protocol snapshots
+        run: |
+          pnpm run test:snapshot -- examples/acp-agent/tests/acp.snapshot.ts -t "snapshot: (pwsh-tool-turn|persistent-pwsh-tool-turn) matches" --maxWorkers=1 --testTimeout=30000
+          pnpm run test:snapshot -- scripts/translation-prompt.snapshot.ts --maxWorkers=1 --testTimeout=30000
+
+      - name: Replay PaperAI and affected assembled browser snapshots
+        run: >-
+          pnpm run test:web:built --
+          apps/web/tests/paperai-permissions.e2e.ts
+          apps/web/tests/paperai-workspace-navigation.e2e.ts
+          apps/web/tests/built-boot.snapshot.ts
+          apps/web/tests/command-image-envelope.snapshot.ts
+          apps/web/tests/home-path-tilde.snapshot.ts
+          apps/web/tests/image-display.snapshot.ts
+          apps/web/tests/max-tokens-notice.snapshot.ts
+          apps/web/tests/search-card.snapshot.ts
+          apps/web/tests/todo-row.snapshot.ts
+          --maxWorkers=1
+          --testTimeout=120000
+
+  paperai-windows:
+    if: github.event_name == 'pull_request' && github.repository != 'deepseek-harness/deepseek-harness'
+    runs-on: windows-2025
+    name: paperai windows / focused
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused Windows integration tests
+        shell: pwsh
+        run: pnpm run test:paperai:windows -- --maxWorkers=2 --testTimeout=30000
+
+  # Single stable required check for branch protection. Upstream validates its
+  # release matrix; synchronized downstream repositories validate the three
+  # PaperAI-owned jobs. `if: always()` is load-bearing because a failed
+  # dependency would otherwise skip this verdict.
   all-checks-passed:
     name: all checks passed
     # This bookkeeping-only verdict must not depend on custom-pool
@@ -492,13 +613,40 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
-    needs: [node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
+    needs:
+      - node-24
+      - node-24-coverage
+      - node-24-consumers
+      - node-compat
+      - python-sdk
+      - python-runtime
+      - windows
+      - paperai-code
+      - paperai-ui
+      - paperai-windows
     if: always() && github.event_name == 'pull_request'
     steps:
-      - name: Fail if any needed job did not succeed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+      - name: Fail if an upstream required job did not succeed
+        if: >-
+          github.repository == 'deepseek-harness/deepseek-harness'
+          && (needs.node-24.result != 'success'
+          || needs.node-24-coverage.result != 'success'
+          || needs.node-24-consumers.result != 'success'
+          || needs.node-compat.result != 'success'
+          || needs.python-sdk.result != 'success'
+          || needs.python-runtime.result != 'success'
+          || needs.windows.result != 'success')
         run: |
-          echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
+          echo "::error::Upstream required job results: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+      - name: Fail if a PaperAI required job did not succeed
+        if: >-
+          github.repository != 'deepseek-harness/deepseek-harness'
+          && (needs.paperai-code.result != 'success'
+          || needs.paperai-ui.result != 'success'
+          || needs.paperai-windows.result != 'success')
+        run: |
+          echo "::error::PaperAI required job results: ${{ join(needs.*.result, ', ') }}"
           exit 1
       - name: All checks passed
         run: echo "All needed jobs succeeded (${{ join(needs.*.result, ', ') }})"

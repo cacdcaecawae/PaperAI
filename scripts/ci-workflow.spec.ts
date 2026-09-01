@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
@@ -36,117 +36,145 @@ describe('CI workflow', () => {
     }
   })
 
-  it('keeps a required Wine Windows job, a non-blocking native Windows job with failover, and a master-only standby', () => {
+  it('separates the upstream release matrix from the downstream PaperAI gates', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const masterWorkflow = loadWorkflow('.github/workflows/ci-master.yml')
-    if (!isRecord(workflow.jobs)
-      || !isRecord(workflow.jobs.windows)
-      || !isRecord(workflow.jobs['windows-native'])
-      || !isRecord(workflow.jobs['node-24'])
-      || !isRecord(workflow.jobs['node-24-coverage'])
-      || !isRecord(workflow.jobs['node-24-consumers'])
-      || !isRecord(workflow.jobs['all-checks-passed'])
-      || !isRecord(masterWorkflow.jobs)
-      || !isRecord(masterWorkflow.jobs['wine-apt-cache'])
-      || !isRecord(masterWorkflow.jobs['serial-windows'])) {
-      throw new TypeError('CI workflow must define windows, windows-native, node-24, node-24-coverage, node-24-consumers, and all-checks-passed; ci-master must define wine-apt-cache and serial-windows')
+    if (!isRecord(workflow.jobs) || !isRecord(masterWorkflow.jobs)) {
+      throw new TypeError('CI workflows must define jobs')
     }
 
-    const windows = workflow.jobs.windows
-    const windowsNative = workflow.jobs['windows-native']
-    const wineAptCache = masterWorkflow.jobs['wine-apt-cache']
-    const serialWindows = masterWorkflow.jobs['serial-windows']
-    const node24 = workflow.jobs['node-24']
-    const node24Coverage = workflow.jobs['node-24-coverage']
-    const node24Consumers = workflow.jobs['node-24-consumers']
+    const upstreamJobs = [
+      'node-24',
+      'node-24-coverage',
+      'node-24-consumers',
+      'node-compat',
+      'python-sdk',
+      'python-runtime',
+      'windows',
+      'windows-native',
+    ]
+    for (const name of upstreamJobs) {
+      const job = workflow.jobs[name]
+      if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
+      expect(job.if).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
+    }
+
+    for (const name of ['paperai-code', 'paperai-ui', 'paperai-windows']) {
+      const job = workflow.jobs[name]
+      if (!isRecord(job) || !Array.isArray(job.steps)) {
+        throw new TypeError(`${name} must define steps`)
+      }
+      expect(job.if).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
+    }
+
+    const code = workflow.jobs['paperai-code']
+    const ui = workflow.jobs['paperai-ui']
+    const paperaiWindows = workflow.jobs['paperai-windows']
     const aggregate = workflow.jobs['all-checks-passed']
-    if (!Array.isArray(windows.steps) || !Array.isArray(aggregate.needs)) {
-      throw new TypeError('Windows job must define steps and the aggregate must define needs')
+    const windowsNative = workflow.jobs['windows-native']
+    if (!isRecord(code)
+      || !isRecord(ui)
+      || !isRecord(paperaiWindows)
+      || !isRecord(aggregate)
+      || !isRecord(windowsNative)
+      || !Array.isArray(code.steps)
+      || !Array.isArray(ui.steps)
+      || !Array.isArray(paperaiWindows.steps)
+      || !Array.isArray(aggregate.steps)
+      || !Array.isArray(aggregate.needs)) {
+      throw new TypeError('PaperAI, aggregate, and native Windows jobs must be complete')
     }
-    const commandSteps = windows.steps.filter((step): step is Record<string, unknown> & { run: string } => (
-      isRecord(step) && typeof step.run === 'string'
-    ))
 
-    // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
-    expect(windows['runs-on']).toBe('ubuntu-latest')
-    expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe("github.event_name == 'pull_request'")
-    expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
+    expect(code['runs-on']).toBe('ubuntu-24.04')
+    expect(ui['runs-on']).toBe('ubuntu-24.04')
+    expect(paperaiWindows['runs-on']).toBe('windows-2025')
+    const codeCommands = commandText(code.steps)
+    expect(codeCommands).toContain('pnpm run check:ci:static')
+    expect(codeCommands).toContain('pnpm run typecheck:contracts-ready')
+    expect(codeCommands).toContain('pnpm run lint:contracts-ready')
+    expect(codeCommands).toContain('pnpm run test:paperai:ci')
+    expect(codeCommands).toContain('--coverage.changed=')
+    expect(codeCommands).toContain('--coverage.thresholds.perFile=true')
+    expect(codeCommands).toContain('--coverage.thresholds.statements=85')
+    expect(codeCommands).toContain('--coverage.thresholds.branches=65')
+    expect(codeCommands).toContain('--coverage.thresholds.functions=85')
+    expect(codeCommands).toContain('--coverage.thresholds.lines=85')
+    expect(codeCommands).toContain('--coverage.reporter=text')
 
-    // windows-native: non-blocking native job with failover, runs windows-complete.
-    // Its pool is resolved by the Windows-specific switch.
+    const manifest: unknown = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+    if (!isRecord(manifest) || !isRecord(manifest.scripts)) {
+      throw new TypeError('package.json must define scripts')
+    }
+    const paperaiCodeScript = manifest.scripts['test:paperai:ci']
+    const paperaiWindowsScript = manifest.scripts['test:paperai:windows']
+    if (typeof paperaiCodeScript !== 'string' || typeof paperaiWindowsScript !== 'string') {
+      throw new TypeError('PaperAI CI scripts must be strings')
+    }
+    for (const selection of [
+      'packages/client/ui-paperai-workbench/tests',
+      'packages/interaction/permission-presets/tests',
+      'packages/paperai',
+    ]) {
+      expect(paperaiCodeScript).toContain(selection)
+    }
+    for (const selection of [
+      'packages/paperai/agent-acp/tests',
+      'packages/paperai/project-service/tests/project-service.spec.ts',
+    ]) {
+      expect(paperaiWindowsScript).toContain(selection)
+    }
+    for (const criticalTest of [
+      'packages/paperai/agent-acp/tests/provider-modes.integration.spec.ts',
+      'packages/paperai/workbench-service/tests/workbench.spec.ts',
+      'packages/client/ui-paperai-workbench/tests/controller.client.spec.ts',
+      'packages/client/ui-paperai-workbench/tests/components.client.spec.tsx',
+      'packages/paperai/project-service/tests/project-service.spec.ts',
+    ]) {
+      expect(existsSync(resolve(root, criticalTest)), criticalTest).toBe(true)
+    }
+
+    const uiCommands = commandText(ui.steps)
+    expect(uiCommands).toContain('pnpm run build')
+    expect(uiCommands).toContain('pnpm run test:snapshot')
+    expect(uiCommands).toContain('apps/web/tests/paperai-permissions.e2e.ts')
+    expect(uiCommands).toContain('apps/web/tests/paperai-workspace-navigation.e2e.ts')
+    expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
+
+    const windowsCommands = commandText(paperaiWindows.steps)
+    expect(windowsCommands).toContain('pnpm run test:paperai:windows')
+    expect(windowsCommands).not.toContain('check:ci:windows-complete')
     expect(typeof windowsNative['runs-on']).toBe('string')
     expect(windowsNative['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')
-    expect(windowsNative['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
-    expect(windowsNative['runs-on']).toContain('self-hosted')
-    expect(windowsNative['runs-on']).toContain('dsh-win-ci')
     expect(windowsNative['runs-on']).toContain('dsh-windows-2025-16core')
-    expect(windowsNative['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
-    expect(windowsNative['runs-on']).toContain('windows-2025')
-    expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
-    expect(windowsNative.env).toMatchObject({
-      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
-    })
-    const nativeSteps = windowsNative.steps as unknown[]
-    const nativeCommandSteps = nativeSteps.filter((step): step is Record<string, unknown> & { run: string } => (
-      isRecord(step) && typeof step.run === 'string'
-    ))
-    expect(nativeCommandSteps.map(step => step.run)).toContain('pnpm run check:ci:windows-complete')
+    expect(commandText(windowsNative.steps as unknown[])).toContain('pnpm run check:ci:windows-complete')
 
-    // wine-apt-cache: master-only, seeds the Wine apt cache, lives in ci-master.
+    expect(aggregate.needs).toEqual(expect.arrayContaining([
+      'paperai-code',
+      'paperai-ui',
+      'paperai-windows',
+      'windows',
+    ]))
+    expect(aggregate.needs).not.toContain('windows-native')
+    const aggregateConditions = aggregate.steps
+      .filter(isRecord)
+      .map(step => typeof step.if === 'string' ? step.if : '')
+      .join('\n')
+    expect(aggregateConditions).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
+    expect(aggregateConditions).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
+    expect(aggregateConditions).toContain("needs.paperai-code.result != 'success'")
+    expect(aggregateConditions).toContain("needs.paperai-ui.result != 'success'")
+    expect(aggregateConditions).toContain("needs.paperai-windows.result != 'success'")
+    expect(aggregateConditions).toContain("needs.windows.result != 'success'")
+
+    const wineAptCache = masterWorkflow.jobs['wine-apt-cache']
+    const serialWindows = masterWorkflow.jobs['serial-windows']
+    if (!isRecord(wineAptCache) || !isRecord(serialWindows)) {
+      throw new TypeError('ci-master must define Wine cache and Windows standby jobs')
+    }
     expect(wineAptCache.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
-
-    // serial-windows: master-only standby, self-hosted, non-blocking, lives in ci-master.
     expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
-    expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
-
-    // Aggregate: Wine `windows` required, native `windows-native` excluded.
-    expect(aggregate.needs).toContain('windows')
-    expect(aggregate.needs).not.toContain('windows-native')
-    expect(aggregate.needs).not.toContain('serial-windows')
-
-    // Linux failover is a separate switch: the three required Linux workers
-    // and the verdict job resolve their pool through DSH_CI_FAILOVER_LINUX,
-    // never the Windows switch.
-    for (const [jobName, job] of [['node-24', node24], ['node-24-coverage', node24Coverage], ['node-24-consumers', node24Consumers]] as const) {
-      expect(typeof job['runs-on']).toBe('string')
-      expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
-      expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
-      expect(job['runs-on']).toContain('vm-backup')
-      expect(job['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
-      expect(job['runs-on']).toContain('ubuntu-24.04')
-    }
-    expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
-    expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
-    expect(aggregate['runs-on']).toContain('vm-backup')
-    expect(aggregate['runs-on']).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
-
-    const hostedRunner = "runner.environment == 'github-hosted'"
-    const selfHostedRunner = "runner.environment == 'self-hosted'"
-    for (const job of [node24, node24Coverage, node24Consumers]) {
-      if (!Array.isArray(job.steps)) throw new TypeError('primary Linux jobs must define steps')
-      const cacheRestores = job.steps.filter(step => (
-        isRecord(step) && step.uses === 'actions/cache/restore@v4'
-      ))
-      expect(cacheRestores.length).toBeGreaterThan(0)
-      expect(cacheRestores.every(step => isRecord(step) && step.if === hostedRunner)).toBe(true)
-    }
-    if (!Array.isArray(node24Consumers.steps) || !isRecord(node24Consumers.env)) {
-      throw new TypeError('consumer job must define steps and environment')
-    }
-    const hostedPlaywright: unknown = node24Consumers.steps.find((step: unknown) => (
-      isRecord(step) && step.name === 'Install Playwright Chromium and hosted dependencies'
-    ))
-    const selfHostedPlaywright: unknown = node24Consumers.steps.find((step: unknown) => (
-      isRecord(step) && step.name === 'Install Playwright Chromium on the failover VM'
-    ))
-    expect(hostedPlaywright).toMatchObject({ if: hostedRunner })
-    expect(selfHostedPlaywright).toMatchObject({ if: selfHostedRunner })
-    expect(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
-    expect(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("'4'")
   })
 
   it('exempts push from cancellation in ci-master, so one master merge does not cancel the running drill', () => {
@@ -169,7 +197,7 @@ describe('CI workflow', () => {
     expect(workflow.concurrency['cancel-in-progress']).toBe("${{ github.event_name != 'push' }}")
 
     // The PR-only ci.yml still cancels a superseded run on a new push, so a
-    // fresh head does not stack a second full 9-job run behind a stale one.
+    // fresh head does not stack another complete run behind a stale one.
     // Unlike ci-master it has no push carve-out: every PR event supersedes.
     expect(prWorkflow.concurrency).toMatchObject({
       'cancel-in-progress': true,
@@ -236,7 +264,7 @@ describe('CI workflow', () => {
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/instance.ts')
   })
 
-  it('requires one release-shaped Python runtime target on every pull request', () => {
+  it('keeps the release-shaped Python runtime target in the upstream matrix', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const pythonRuntime = workflowJob(workflow, 'python-runtime')
     const aggregate = workflowJob(workflow, 'all-checks-passed')
@@ -245,7 +273,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: "github.event_name == 'pull_request'",
+      if: "github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'",
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {
@@ -611,6 +639,15 @@ function workflowJob(workflow: Record<string, unknown>, job: string): Record<str
     throw new TypeError(`workflow must define the ${job} job`)
   }
   return workflow.jobs[job]
+}
+
+function commandText(steps: unknown[]): string {
+  return steps
+    .filter((step): step is Record<string, unknown> & { run: string } => (
+      isRecord(step) && typeof step.run === 'string'
+    ))
+    .map(step => step.run)
+    .join('\n')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

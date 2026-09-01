@@ -235,6 +235,7 @@
       "@paperai/ui-brand": ["./packages/client/ui-paperai-brand/src"],
       "@paperai/ui-workbench": ["./packages/client/ui-paperai-workbench/src"],
       "@paperai/bundle-web": ["./packages/bundle/paperai-web/src"],
+      "@paperai/mcp/server": ["./packages/paperai/mcp/src/server.ts"],
       "@paperai/*/types": ["./packages/paperai/*/src/types.ts"],
       "@paperai/*/invariant": ["./packages/paperai/*/src/invariant.ts"],
       "@paperai/*": ["./packages/paperai/*/src"],

@@ -6,6 +6,7 @@ import {
   CLAUDE_AGENT_SDK_PACKAGE,
   claudeDistributionFromManifest,
   collectPythonDependencies,
+  declaredRuntimeVersion,
   isOwnerAuthorizedRuntime,
   isPermissive,
   type Manifest,
@@ -77,6 +78,32 @@ describe('tierExternalDeps', () => {
 
     expect(tierExternalDeps(manifests, names).get('shared')).toBe(true)
     expect(tierExternalDeps(manifests, names).has('@deepseek-ai/dsh-cli')).toBe(false)
+  })
+})
+
+describe('declaredRuntimeVersion', () => {
+  it('selects the shipping declaration instead of a tooling or development version', () => {
+    const manifests = new Map<string, Manifest>([
+      ['package.json', { devDependencies: { [CLAUDE_AGENT_SDK_PACKAGE]: '0.3.232' } }],
+      ['packages/subagent/provider/package.json', {
+        dependencies: { [CLAUDE_AGENT_SDK_PACKAGE]: '0.3.220' },
+      }],
+      ['packages/client/example/package.json', {
+        devDependencies: { [CLAUDE_AGENT_SDK_PACKAGE]: '0.3.232' },
+      }],
+    ])
+
+    expect(declaredRuntimeVersion(manifests, CLAUDE_AGENT_SDK_PACKAGE)).toBe('0.3.220')
+  })
+
+  it('fails when shipping manifests declare no version or disagree', () => {
+    expect(() => declaredRuntimeVersion(new Map(), CLAUDE_AGENT_SDK_PACKAGE)).toThrow(
+      'expected one shipping runtime version',
+    )
+    expect(() => declaredRuntimeVersion(new Map<string, Manifest>([
+      ['packages/a/package.json', { dependencies: { [CLAUDE_AGENT_SDK_PACKAGE]: '0.3.220' } }],
+      ['packages/b/package.json', { optionalDependencies: { [CLAUDE_AGENT_SDK_PACKAGE]: '0.3.232' } }],
+    ]), CLAUDE_AGENT_SDK_PACKAGE)).toThrow('0.3.220')
   })
 })
 

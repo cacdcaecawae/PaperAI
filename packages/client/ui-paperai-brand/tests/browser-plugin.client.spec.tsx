@@ -18,6 +18,7 @@ const HOLES = [
   'sidebar.brand.name',
   'conversation.hero.brand.mark',
 ] as const
+const AGENT_PRESET_MARK = 'conversation.hero.agentPreset.mark' as const
 
 async function bench(declare = true) {
   const ctx = new Context()
@@ -25,7 +26,10 @@ async function bench(declare = true) {
   const slots = ctx.get('slots') as SlotRegistry
   const declareHoles = () => slots.register({
     name: 'root',
-    children: Object.fromEntries(HOLES.map(name => [name, { kind: 'single', scope: 'root' }])),
+    children: {
+      ...Object.fromEntries(HOLES.map(name => [name, { kind: 'single', scope: 'root' }])),
+      [AGENT_PRESET_MARK]: { kind: 'keyed', scope: 'root' },
+    },
   } as never, () => null)
   const disposeHoles = declare ? declareHoles() : undefined
   return { ctx, slots, declareHoles, disposeHoles }
@@ -41,15 +45,19 @@ describe('PaperAI browser-brand plugin', () => {
     const fiber = before.ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(1)
+    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(2)
 
     before.disposeHoles?.()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(0)
+    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(0)
     before.declareHoles()
     await Promise.resolve()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(1)
+    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(2)
 
     await fiber.dispose()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(0)
+    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(0)
 
     const after = await bench(false)
     await after.ctx.plugin({ inject: [...inject], apply }).await()
@@ -57,6 +65,7 @@ describe('PaperAI browser-brand plugin', () => {
     after.declareHoles()
     await Promise.resolve()
     for (const hole of HOLES) expect(after.slots.entries(hole)).toHaveLength(1)
+    expect(after.slots.entries(AGENT_PRESET_MARK)).toHaveLength(2)
   })
 
   it('renders the Chinese product wordmark and host-sized document mark', () => {

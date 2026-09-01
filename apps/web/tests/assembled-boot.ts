@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { act, cleanup } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { bootInjections, orderByModuleGraph } from '@deepseek-ai/dsh-client-modules'
 import type { ClientModuleLoaderTarget, WebBootEntry } from '@deepseek-ai/dsh-client-modules/client'
@@ -216,6 +216,26 @@ export function mountAssembledApp(search = '?fixture'): void {
     void entry.run()
     unmount = () => entry.dispose()
   })
+}
+
+/** Enter one Workspace through the grouped sidebar used by the assembled Web composition. */
+export async function openAssembledWorkspace(name: string): Promise<void> {
+  const tree = await screen.findByRole('tree', { name: 'Workspaces' }, { timeout: 10_000 })
+  fireEvent.click(await within(tree).findByRole('treeitem', { name }))
+  await screen.findByRole('region', { name: 'Workspace details' }, { timeout: 10_000 })
+}
+
+/** Open the resident fixture history Session from its Workspace detail. */
+export async function openAssembledFixtureHistory(): Promise<void> {
+  await openAssembledWorkspace('fixture')
+  const sessions = await screen.findByRole('tree', { name: 'Workspace sessions' }, { timeout: 10_000 })
+  fireEvent.click(await within(sessions).findByText('Fixture 历史会话'))
+}
+
+/** Start a blank Session from the fixture Workspace detail. */
+export async function startAssembledFixtureSession(): Promise<void> {
+  await openAssembledWorkspace('fixture')
+  fireEvent.click(await screen.findByRole('button', { name: 'New session in fixture' }))
 }
 
 /**
