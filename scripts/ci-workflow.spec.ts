@@ -117,9 +117,11 @@ describe('CI workflow', () => {
     ]) {
       expect(paperaiCodeScript).toContain(selection)
     }
+    expect(paperaiCodeScript).not.toContain('packages/shell/tool-pwsh-persistent/tests')
     for (const selection of [
       'packages/paperai/agent-acp/tests',
       'packages/paperai/project-service/tests/project-service.spec.ts',
+      'packages/shell/tool-pwsh-persistent/tests/loader-composition.spec.ts',
     ]) {
       expect(paperaiWindowsScript).toContain(selection)
     }
@@ -135,13 +137,20 @@ describe('CI workflow', () => {
 
     const uiCommands = commandText(ui.steps)
     expect(uiCommands).toContain('pnpm run build')
-    expect(uiCommands).toContain('pnpm run test:snapshot')
+    expect(uiCommands).toContain('pnpm exec vitest run --config vitest.snapshot.config.ts')
+    expect(uiCommands).toContain('pnpm exec vitest run --config vitest.web.config.ts')
+    expect(uiCommands).not.toContain('pnpm run test:snapshot --')
+    expect(uiCommands).not.toContain('pnpm run test:web:built --')
+    expect(uiCommands).toContain('snapshot: pwsh-tool-turn matches')
+    expect(uiCommands).not.toContain('persistent-pwsh-tool-turn')
+    expect(uiCommands).toContain('scripts/translation-prompt.snapshot.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-permissions.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-workspace-navigation.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
 
     const windowsCommands = commandText(paperaiWindows.steps)
     expect(windowsCommands).toContain('pnpm run test:paperai:windows')
+    expect(windowsCommands).toContain('snapshot: persistent-pwsh-tool-turn matches')
     expect(windowsCommands).not.toContain('check:ci:windows-complete')
     expect(typeof windowsNative['runs-on']).toBe('string')
     expect(windowsNative['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')

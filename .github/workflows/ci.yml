@@ -545,12 +545,12 @@ jobs:
 
       - name: Replay affected protocol snapshots
         run: |
-          pnpm run test:snapshot -- examples/acp-agent/tests/acp.snapshot.ts -t "snapshot: (pwsh-tool-turn|persistent-pwsh-tool-turn) matches" --maxWorkers=1 --testTimeout=30000
-          pnpm run test:snapshot -- scripts/translation-prompt.snapshot.ts --maxWorkers=1 --testTimeout=30000
+          pnpm exec vitest run --config vitest.snapshot.config.ts examples/acp-agent/tests/acp.snapshot.ts -t "snapshot: pwsh-tool-turn matches" --maxWorkers=1 --testTimeout=30000
+          pnpm exec vitest run --config vitest.snapshot.config.ts scripts/translation-prompt.snapshot.ts --maxWorkers=1 --testTimeout=30000
 
       - name: Replay PaperAI and affected assembled browser snapshots
         run: >-
-          pnpm run test:web:built --
+          pnpm exec vitest run --config vitest.web.config.ts
           apps/web/tests/paperai-permissions.e2e.ts
           apps/web/tests/paperai-workspace-navigation.e2e.ts
           apps/web/tests/built-boot.snapshot.ts
@@ -594,6 +594,18 @@ jobs:
       - name: Run focused Windows integration tests
         shell: pwsh
         run: pnpm run test:paperai:windows -- --maxWorkers=2 --testTimeout=30000
+
+      - name: Replay persistent PowerShell ACP snapshot
+        shell: pwsh
+        env:
+          DSH_SNAPSHOT: replay
+          DSH_SNAPSHOT_MAX_CONCURRENCY: '1'
+        run: >-
+          pnpm exec vitest run --config vitest.snapshot.config.ts
+          examples/acp-agent/tests/acp.snapshot.ts
+          -t "snapshot: persistent-pwsh-tool-turn matches"
+          --maxWorkers=1
+          --testTimeout=30000
 
   # Single stable required check for branch protection. Upstream validates its
   # release matrix; synchronized downstream repositories validate the three

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-01-paperai-downstream-automation-ownership.md
-2026-09-01-paperai-downstream-automation-ownership.md: 473dd824222acaaddd9d015cb66f65352ed64d76
-2026-09-01-paperai-downstream-automation-ownership.zh.md: 7410fc32a40506f47696638e9adea0771dc4968e
+2026-09-01-paperai-downstream-automation-ownership.md: 780981072679abf72a89ad3b5c5ee6d7cfc05c79
+2026-09-01-paperai-downstream-automation-ownership.zh.md: 0efa4bcc8d60036a7f0deef419773f9e87e906e7

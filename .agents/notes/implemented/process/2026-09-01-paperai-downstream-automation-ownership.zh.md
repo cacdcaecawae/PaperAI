@@ -10,7 +10,7 @@ PaperAI 在产品包所在仓库中保留了同步自 DeepSeek Harness 的工作
 
 ## 决策
 
-Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与故障转移 runner、逐文件 100% 覆盖率、Node 兼容矩阵、Python SDK 与 runtime 检查、Wine lane、完整原生 Windows 清单和全量快照清单。同步后的下游仓库只在标准托管 runner 上运行三个产品门禁：Linux 代码门禁负责静态检查、类型、lint、文档、聚焦产品测试，以及改动源码的逐文件覆盖率（语句、函数与行 85%，分支 65%）；Linux 组装 UI 门禁执行一次完整构建、发布产物检查、受影响的协议快照和 PaperAI 无密钥浏览器快照；聚焦的原生 Windows 门禁验证 ACP、OfficeCLI、导出、项目路径标识和持久 PowerShell 集成。所有产品可见的 PaperAI 浏览器快照仍是每个 pull request 的必需检查。
+Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与故障转移 runner、逐文件 100% 覆盖率、Node 兼容矩阵、Python SDK 与 runtime 检查、Wine lane、完整原生 Windows 清单和全量快照清单。同步后的下游仓库只在标准托管 runner 上运行三个产品门禁：Linux 代码门禁负责静态检查、类型、lint、文档、聚焦产品测试，以及改动源码的逐文件覆盖率（语句、函数与行 85%，分支 65%）；Linux 组装 UI 门禁执行一次完整构建、发布产物检查、受影响的协议快照和 PaperAI 无密钥浏览器快照；聚焦的原生 Windows 门禁验证 ACP、OfficeCLI、导出、项目路径标识和持久 PowerShell 集成。快照 job 直接调用 Vitest 并显式指定配置与文件路径，命令转发不会把聚焦选择扩大成全量清单。持久 PowerShell 仅在原生 Windows 门禁验证，因为其终端行为与平台相关。所有产品可见的 PaperAI 浏览器快照仍是每个 pull request 的必需检查。
 
 稳定的 `all checks passed` 结论只评估当前仓库拥有的 job 集合。PaperAI 在工作流源码中保留上游 job，使同步仍可审查，但会跳过这些 job，而不是重复执行另一产品的发布矩阵。拥有上游专属外部状态的自动化同样按仓库身份选择：DSH issue 自动化以及 DSH 或 vendored-framework npm 发布 job 只在 `deepseek-harness/deepseek-harness` 运行。跳过一个由上游拥有的 job 不算 PaperAI 产品失败。
 
