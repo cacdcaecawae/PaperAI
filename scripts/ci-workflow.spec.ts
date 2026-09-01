@@ -236,12 +236,20 @@ describe('CI workflow', () => {
 })
 
 describe('DeepSeek e2e workflow', () => {
-  it('prepares bubblewrap from the pinned payload without a package transaction', () => {
+  it('keeps downstream runs opt-in and prepares bubblewrap without a package transaction', () => {
     const workflow = loadWorkflow('.github/workflows/e2e.yml')
     const e2e = workflowJob(workflow, 'e2e')
     if (!Array.isArray(e2e.steps)) throw new TypeError('DeepSeek e2e workflow must define steps')
 
+    expect(e2e.if).toBe(
+      "(github.repository == 'deepseek-harness/deepseek-harness' || vars.DSH_REAL_API_E2E_ENABLED == 'true') && (github.event_name != 'pull_request' || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]'))",
+    )
     const steps = e2e.steps.filter(isRecord)
+    const preflight = steps.find(step => step.name === 'Preflight (require DEEPSEEK_API_KEY)')
+    const liveTests = steps.find(step => step.name === 'E2E tests (real DeepSeek API)')
+    const externalKey = { DEEPSEEK_API_KEY: '${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}' }
+    expect(preflight).toMatchObject({ env: externalKey })
+    expect(liveTests).toMatchObject({ env: externalKey })
     expect(steps.find(step => step.name === 'Prepare bubblewrap (unrestrict userns)')).toMatchObject({
       run: 'bash scripts/prepare-ci-bubblewrap.sh',
     })
@@ -424,19 +432,21 @@ describe('Python release workflows', () => {
 })
 
 describe('Issue lifecycle workflow', () => {
-  it('runs the lifecycle job on every PR/review event but gates token and board steps', () => {
+  it('limits upstream issue automation to its owning repository', () => {
     const lifecycle = loadWorkflow('.github/workflows/issue-lifecycle.yml')
     const policy = loadWorkflow('.github/workflows/issue-policy.yml')
     const lifecycleJob = workflowJob(lifecycle, 'lifecycle')
+    const policyJob = workflowJob(policy, 'policy')
     if (!Array.isArray(lifecycleJob.steps)) throw new TypeError('Issue lifecycle job must define steps')
 
-    // The job has no job-level `if`, so it is listed on every pull_request /
-    // pull_request_review event and reports success instead of a gray skip. The
-    // write-capable steps are gated at step level so approved/commented reviews
-    // never mint a Project/Issue App token nor touch the board.
+    // Both workflows target the upstream repository and organization Project.
+    // Synced downstream copies must not request the upstream App token or query
+    // the upstream repository with a downstream GITHUB_TOKEN.
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
-    expect(lifecycleJob.if).toBeUndefined()
+    const upstreamRepository = "${{ github.repository == 'deepseek-harness/deepseek-harness' }}"
+    expect(lifecycleJob.if).toBe(upstreamRepository)
+    expect(policyJob.if).toBe(upstreamRepository)
     // Keep the subscription-type gates: issue-lifecycle does not re-subscribe
     // ready_for_review (issue-policy owns that) and only reacts to submitted
     // review events.

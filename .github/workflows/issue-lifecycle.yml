@@ -36,11 +36,16 @@ concurrency:
 jobs:
   lifecycle:
     name: Issue lifecycle
-    # Runs on every pull_request_review event so the check reports success rather
-    # than a gray "skipped" segment. The token-creating and board-mutating steps
-    # are gated at step level (a skipped step does not gray the job): only a
-    # changes_requested review drives the Project board; approved/commented
-    # reviews never mint a write-capable App token.
+    # This workflow owns the upstream organization Project and requires its
+    # GitHub App. Product repositories keep the file for source synchronization
+    # but do not have authority over that Project.
+    if: ${{ github.repository == 'deepseek-harness/deepseek-harness' }}
+    # In the owning repository, runs on every pull_request_review event so the
+    # check reports success rather than a gray "skipped" segment. The
+    # token-creating and board-mutating steps are gated at step level (a skipped
+    # step does not gray the job): only a changes_requested review drives the
+    # Project board; approved/commented reviews never mint a write-capable App
+    # token.
     runs-on: ubuntu-latest
     steps:
       - name: Check out trusted policy
