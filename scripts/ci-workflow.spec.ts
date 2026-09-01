@@ -81,6 +81,8 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('self-hosted')
     expect(windowsNative['runs-on']).toContain('dsh-win-ci')
     expect(windowsNative['runs-on']).toContain('dsh-windows-2025-16core')
+    expect(windowsNative['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
+    expect(windowsNative['runs-on']).toContain('windows-2025')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
     expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
     expect(windowsNative.env).toMatchObject({
@@ -114,10 +116,37 @@ describe('CI workflow', () => {
       expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
       expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(job['runs-on']).toContain('vm-backup')
+      expect(job['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
+      expect(job['runs-on']).toContain('ubuntu-24.04')
     }
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')
+    expect(aggregate['runs-on']).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
+
+    const hostedRunner = "runner.environment == 'github-hosted'"
+    const selfHostedRunner = "runner.environment == 'self-hosted'"
+    for (const job of [node24, node24Coverage, node24Consumers]) {
+      if (!Array.isArray(job.steps)) throw new TypeError('primary Linux jobs must define steps')
+      const cacheRestores = job.steps.filter(step => (
+        isRecord(step) && step.uses === 'actions/cache/restore@v4'
+      ))
+      expect(cacheRestores.length).toBeGreaterThan(0)
+      expect(cacheRestores.every(step => isRecord(step) && step.if === hostedRunner)).toBe(true)
+    }
+    if (!Array.isArray(node24Consumers.steps) || !isRecord(node24Consumers.env)) {
+      throw new TypeError('consumer job must define steps and environment')
+    }
+    const hostedPlaywright: unknown = node24Consumers.steps.find((step: unknown) => (
+      isRecord(step) && step.name === 'Install Playwright Chromium and hosted dependencies'
+    ))
+    const selfHostedPlaywright: unknown = node24Consumers.steps.find((step: unknown) => (
+      isRecord(step) && step.name === 'Install Playwright Chromium on the failover VM'
+    ))
+    expect(hostedPlaywright).toMatchObject({ if: hostedRunner })
+    expect(selfHostedPlaywright).toMatchObject({ if: selfHostedRunner })
+    expect(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("github.repository != 'deepseek-harness/deepseek-harness'")
+    expect(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("'4'")
   })
 
   it('exempts push from cancellation in ci-master, so one master merge does not cancel the running drill', () => {

@@ -14,7 +14,7 @@ Status: implemented
 
 [ci.yml](../../../../.github/workflows/ci.yml) 中必需的 `windows` 作业仍是在 `ubuntu-latest` 上运行的 `windows node 24 / wine blocking`。它保留经过校验和验证的 Windows Node、Wine apt 与 pnpm 缓存、仅限工作区快照的 hoisted 安装，以及运行工作区构建与生产网站的[共享 Wine 门禁脚本](../../../../scripts/wine-windows-gates.sh)。Node 分发文件传输采用有界重试；nodejs.org 的大文件传输停滞时，由支持范围请求的传输镜像续传相同字节，但版本和 SHA-256 权威仍属于 nodejs.org，归档通过该校验前绝不会投入使用。稳定的 `windows` 作业 ID 仍是 `all checks passed` 的依赖项。[已归档的 Wine 实验](../../archived/process/2026-07-27-wine-windows-gates-experiment.md)保留其实测取舍，而本文负责当前双通道拓扑。
 
-每个拉取请求还会在组织自有的 `dsh-windows-2025-16core` 运行器上启动一个常规且独立的 `windows-native` 作业，名称为 `windows node 24 / native complete`。该作业为工作区符号链接启用开发人员模式，通过 `pnpm/action-setup` 的 standalone 模式提供仓库固定版本的 `@pnpm/exe`，在不传输 store 归档的情况下执行不可变安装，并在原生 PowerShell 下运行 `pnpm run check:ci:windows-complete`。因此 package script 会通过 `npm_execpath` 暴露 `pnpm.exe`，让完整清单在 Windows 上覆盖无 shell 的包管理器再进入。门禁卡住时，120 分钟超时会为其设定上限，同时不把实测性能目标当作正确性截止时间。
+每个拉取请求还会启动一个常规且独立的 `windows-native` 作业，名称为 `windows node 24 / native complete`。在 `deepseek-harness/deepseek-harness` 中，它使用组织自有的 `dsh-windows-2025-16core` 运行器；同步下游仓库则按[下游自动化所有权决策](2026-09-01-paperai-downstream-automation-ownership.zh.md)使用 `windows-2025`。该作业为工作区符号链接启用开发人员模式，通过 `pnpm/action-setup` 的 standalone 模式提供仓库固定版本的 `@pnpm/exe`，在不传输 store 归档的情况下执行不可变安装，并在原生 PowerShell 下运行 `pnpm run check:ci:windows-complete`。因此 package script 会通过 `npm_execpath` 暴露 `pnpm.exe`，让完整清单在 Windows 上覆盖无 shell 的包管理器再进入。门禁卡住时，120 分钟超时会为其设定上限，同时不把实测性能目标当作正确性截止时间。
 
 原生作业被刻意排除在 `all-checks-passed.needs` 之外，且不使用 `continue-on-error`：聚合流程既不等待它，也不会因它改变结论；该作业则保留自身未被掩盖的结果。工作区构建、生产网站和逐文件 100% 覆盖率检查失败会使原生作业失败。静态检查、文档、包、构建产物、lint 与快照清单在同一作业内作为观测性门禁运行；其失败保持可见，但不会改变原生聚合结果，因为这些检查的阻断性判定由 Linux 负责。
 
@@ -44,7 +44,7 @@ Shiki 会禁用 TextMate 正则的延迟编译，并在用户内容进入保持�
 
 **排除看似不受支持的文件或削弱 Windows fixture。** 不予采纳，因为受影响的 LSP、watcher、持久化、客户端与进程行为均受支持。仅适用于另一平台的分支采用窄范围标注；可移植结果继续计入分母，并通过符合真实宿主行为的 fixture 验证。
 
-**保留 GitHub 标准的 `windows-2025` 运行器。** 该可移植双核镜像能可靠完成这份完整清单，但其 32 分钟的串行结果使自动原生信号的实用性远低于所选的 16 核运行器。
+**为上游 DSH 保留 GitHub 标准的 `windows-2025` 运行器。** 该可移植镜像能可靠完成这份完整清单，但其 32 分钟的串行结果使上游自动原生信号的实用性远低于所选的 16 核运行器。下游仓库不拥有企业池，因此接受这项延迟。
 
 **使用 32 核或更大的运行器。** 32 核对比仅比 16 核将聚合门禁时间缩短 1.47 秒，且仍因 Node 的 CJS lexer 失败；先前高并发的 32 核和 64 核试验也以同类故障失败。因此，增加容量只会提高资源分配成本，却不能带来稳定的端到端收益。
 
@@ -54,4 +54,4 @@ Wine 保留必需聚合流程现有的关键路径和作业身份。`all checks 
 
 尽管如此，每个拉取请求都会获得真实 NT 内核、NTFS、PowerShell、Windows 进程、原生插件和受支持源码覆盖率信号。原生作业会重复设置流程与两项阻断构建，在标准镜像上明显更慢；但它也会暴露兼容性通道掩盖的路径、watcher、生命周期与 fixture 缺陷。
 
-维护者必须保留两种有意设计的执行拓扑：Wine 快照使用 Linux 安装加 hoisted 布局来触达 win32 二进制文件，而原生作业在组织自有的 16 核 Windows 运行器上使用不可变工作区。任一作业独有的失败都必须依据该边界分类，不得削弱或静默跳过。
+维护者必须保留两种有意设计的执行拓扑：Wine 快照使用 Linux 安装加 hoisted 布局来触达 win32 二进制文件，而原生作业在上游 16 核或下游标准 Windows 运行器上使用不可变工作区。任一作业独有的失败都必须依据该边界分类，不得削弱或静默跳过。
