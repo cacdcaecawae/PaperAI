@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -166,7 +166,7 @@ describe('PaperProjectService', () => {
       name: prior.name,
       createdAt: prior.createdAt,
       workspaceId: 'workspace-1',
-      rootPath: root,
+      rootPath: await realpath(root),
     })
     expect(result.project.updatedAt).not.toBe(prior.updatedAt)
     expect(harness.putProject).toHaveBeenCalledTimes(1)
