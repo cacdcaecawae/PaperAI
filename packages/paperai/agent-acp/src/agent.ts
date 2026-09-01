@@ -312,6 +312,10 @@ export class AcpAgent implements Agent {
   private runtimeGeneration: AbortController | undefined
   private runtimeNeedsRestart = false
   private modeSync: Promise<void> = Promise.resolve()
+  private modelOperationTail: Promise<void> = Promise.resolve()
+  private modelOperationsPending = 0
+  private modelOperationWakeRequested = false
+  private closing = false
   private observedSandboxMode: SandboxMode
   // Permission maintenance spans running -> idle -> maintenance. Keep its
   // deferred wake outside Phase so no idle microtask can start the old mode.
@@ -540,7 +544,11 @@ export class AcpAgent implements Agent {
 
   /** Close the provider process and the Agent-owned scope. */
   async close(): Promise<void> {
+    this.closing = true
+    const pendingModelOperations = this.modelOperationTail
     this.cancel({ kind: 'disposed' })
+    await this.whenIdle()
+    await pendingModelOperations
     await this.whenIdle()
     this.runtimeGeneration?.abort(new Error(`agent "${this.id}" lifecycle closed`))
     const pendingModeSync = this.modeSync
@@ -550,8 +558,13 @@ export class AcpAgent implements Agent {
   }
 
   private wake(): void {
+    if (this.closing) return
     if (this.permissionTransition !== undefined) {
       this.permissionTransition.wakeRequested = true
+      return
+    }
+    if (this.modelOperationsPending > 0) {
+      this.modelOperationWakeRequested = true
       return
     }
     if (this.phase.kind !== 'idle') {
@@ -574,7 +587,13 @@ export class AcpAgent implements Agent {
     try {
       while (this.inbox.hasPending
         && this.phase.kind === 'running'
-        && !this.phase.abort.signal.aborted) await this.turn()
+        && !this.phase.abort.signal.aborted) {
+        if (this.modelOperationsPending > 0) {
+          this.modelOperationWakeRequested = true
+          return
+        }
+        await this.turn()
+      }
     } catch {
       // Turn-level failures are logged and emitted at their exact boundary.
     } finally {
@@ -622,7 +641,9 @@ export class AcpAgent implements Agent {
       )
       let response: PromptResponse | undefined
       try {
-        response = await runtime.prompt(await this.promptBlocks(claimed, signal))
+        const prompt = await this.promptBlocks(claimed, signal)
+        signal.throwIfAborted()
+        response = await runtime.prompt(prompt)
       } finally {
         const interrupted = signal.aborted || response?.stopReason === 'cancelled'
         if (response !== undefined) projection.finish(response, interrupted)
@@ -751,15 +772,34 @@ export class AcpAgent implements Agent {
     }
   }
 
-  private async withModelRuntime<T>(operation: (runtime: AcpRuntime) => Promise<T> | T): Promise<T> {
-    if (!this.needsRuntimeRestart()) return await operation(this.requireRuntime())
-    await this.whenIdle()
-    if (!this.needsRuntimeRestart()) return await operation(this.requireRuntime())
-    return await this.runMaintenance(async (signal) => {
-      const runtime = await this.runtimeForSandboxMode(this.currentSandboxMode(), signal)
-      await this.syncSandboxMode(signal)
-      return await operation(runtime)
+  private withModelRuntime<T>(operation: (runtime: AcpRuntime) => Promise<T> | T): Promise<T> {
+    if (this.closing) {
+      return Promise.reject(new Error(`${this.provider.name} ACP Agent lifecycle is closed`))
+    }
+    this.modelOperationsPending += 1
+    const result = this.modelOperationTail.then(async () => {
+      if (!this.needsRuntimeRestart()) return await operation(this.requireRuntime())
+      await this.whenIdle()
+      if (!this.needsRuntimeRestart()) return await operation(this.requireRuntime())
+      return await this.runMaintenance(async (signal) => {
+        const runtime = await this.runtimeForSandboxMode(this.currentSandboxMode(), signal)
+        await this.syncSandboxMode(signal)
+        return await operation(runtime)
+      })
     })
+    this.modelOperationTail = result.then(
+      () => { this.finishModelOperation() },
+      () => { this.finishModelOperation() },
+    )
+    return result
+  }
+
+  private finishModelOperation(): void {
+    this.modelOperationsPending -= 1
+    if (this.modelOperationsPending !== 0) return
+    const wakeRequested = this.modelOperationWakeRequested
+    this.modelOperationWakeRequested = false
+    if (wakeRequested && this.inbox.hasPending) this.wake()
   }
 
   private needsRuntimeRestart(): boolean {

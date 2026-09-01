@@ -135,7 +135,7 @@ function makeAgent(connection) {
       return {}
     },
 
-    setSessionConfigOption(params) {
+    async setSessionConfigOption(params) {
       log('set-config-option', {
         sessionId: params.sessionId,
         configId: params.configId,
@@ -144,6 +144,9 @@ function makeAgent(connection) {
       const rejectionFile = process.env.FAKE_ACP_REJECT_SET_CONFIG_FILE
       if (rejectionFile !== undefined && existsSync(rejectionFile)) {
         throw new Error(`scripted ACP set-config rejection for ${String(params.value)}`)
+      }
+      if (process.env.FAKE_ACP_NEVER_SET_CONFIG === String(params.value)) {
+        await new Promise(() => {})
       }
       currentModel = String(params.value)
       return { configOptions: modelOptions() }
@@ -159,7 +162,17 @@ function makeAgent(connection) {
       if (Number.isFinite(delayMs) && delayMs > 0) {
         await new Promise(resolve => setTimeout(resolve, delayMs))
       }
-      if (process.env.FAKE_ACP_CANCEL_FINAL_TOOL === '1') {
+      const promptReleaseFile = process.env.FAKE_ACP_PROMPT_RELEASE_FILE
+      while (promptReleaseFile !== undefined && !existsSync(promptReleaseFile)) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      const cancelFinalToolOnceFile = process.env.FAKE_ACP_CANCEL_FINAL_TOOL_ONCE_FILE
+      const cancelWithFinalTool = process.env.FAKE_ACP_CANCEL_FINAL_TOOL === '1'
+        && (cancelFinalToolOnceFile === undefined || !existsSync(cancelFinalToolOnceFile))
+      if (cancelWithFinalTool) {
+        if (cancelFinalToolOnceFile !== undefined) {
+          writeFileSync(cancelFinalToolOnceFile, 'cancelled once', 'utf8')
+        }
         await connection.sessionUpdate({
           sessionId: params.sessionId,
           update: {

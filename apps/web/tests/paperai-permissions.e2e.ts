@@ -36,6 +36,7 @@ const DEFAULT_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-default.expec
 const READ_ONLY_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-read-only.expected.md')
 const PERMISSION_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'permission-failure.expected.md')
 const MODEL_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'model-failure.expected.md')
+const CANCEL_BEFORE_PROMPT_EXPECTED = join(SNAPSHOT_DIR, 'cancel-before-prompt.expected.md')
 const CANCEL_FINAL_TOOL_EXPECTED = join(SNAPSHOT_DIR, 'cancel-final-tool.expected.md')
 const CONFLICT_EXPECTED = join(SNAPSHOT_DIR, 'external-conflict.expected.md')
 const MODE = webSnapshotMode()
@@ -297,6 +298,57 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(CANCEL_FINAL_TOOL_EXPECTED, snapshot, MODE)
   }, 60_000)
 
+  it('does not start provider work when cancellation wins before prompt dispatch', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-cancel-before-prompt'))
+    const text = '这条消息在发送给提供方之前取消。'
+    const composer = page.locator('textarea:enabled').last()
+    await composer.fill(text)
+    const send = page.getByRole('button', { name: '发送消息', exact: true })
+    await expect.poll(() => send.isEnabled(), { timeout: 10_000 }).toBe(true)
+    const logStart = (await readAcpLog(acpLogPath)).length
+    const eventStart = sessionEvents.length
+    let armed = true
+    let cancelTurn: (() => void) | undefined
+    scaffold.ctx.on('session/event', (session, event) => {
+      if (!armed || event.type !== 'request/context') return
+      const agent = scaffold.ctx.agents.get(session.id)
+      if (agent === undefined || agent.options.provider !== 'codex') return
+      armed = false
+      cancelTurn = () => { agent.cancel({ kind: 'user' }) }
+      queueMicrotask(() => { cancelTurn?.() })
+    })
+    const settled = scaffold.whenTurnSettled(60_000)
+    await send.click()
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe('')
+    await expect.poll(async () => {
+      const attempted = (await readAcpLog(acpLogPath)).slice(logStart)
+      return attempted.some(entry => entry.event === 'prompt')
+        || sessionEvents.slice(eventStart).some(event => event.type === 'turn/end')
+    }, { timeout: 15_000 }).toBe(true)
+    expect(armed).toBe(false)
+    expect(cancelTurn).toBeTypeOf('function')
+    const prematurePrompt = (await readAcpLog(acpLogPath))
+      .slice(logStart)
+      .some(entry => entry.event === 'prompt')
+    if (prematurePrompt) {
+      await expect.poll(async () => {
+        const attempted = (await readAcpLog(acpLogPath)).slice(logStart)
+        return attempted.some(entry => entry.event === 'cancel-tool-start')
+          || sessionEvents.slice(eventStart).some(event => event.type === 'turn/end')
+      }, { timeout: 15_000 }).toBe(true)
+      cancelTurn?.()
+    }
+    await settled
+
+    const attempted = (await readAcpLog(acpLogPath)).slice(logStart)
+    expect(attempted).not.toContainEqual(expect.objectContaining({ event: 'prompt' }))
+    await expect.poll(() => composer.isEnabled(), { timeout: 10_000 }).toBe(true)
+    const userRowSelector = `div[data-time-hover-root]:has-text("${text}")`
+    await page.locator(userRowSelector).first().waitFor({ timeout: 10_000 })
+    const snapshot = await captureStableAria(page, userRowSelector, scaffold.workspaceCwd)
+    await compareOrRefreshGolden(CANCEL_BEFORE_PROMPT_EXPECTED, snapshot, MODE)
+  }, 60_000)
+
   it('localizes a rejected provider model switch without exposing its diagnostic', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-model-failure'))
     const model = page.locator('button[aria-label^="选择模型"]').first()
@@ -409,6 +461,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
+      'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
       'external-conflict.expected.md',
       'model-failure.expected.md',

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-01-paperai-acp-cancellation-settlement.md
-2026-09-01-paperai-acp-cancellation-settlement.md: 5eeafa6a299693fb5b096d1e9d4b0b91de7958da
-2026-09-01-paperai-acp-cancellation-settlement.zh.md: fe80c1347e752974981197a17dcba614f9395d4e
+2026-09-01-paperai-acp-cancellation-settlement.md: d11133aaece1015552b0ce5abead85f2ac82251f
+2026-09-01-paperai-acp-cancellation-settlement.zh.md: 265ef5e087e8923ac3cb470a47085db51ec606db
