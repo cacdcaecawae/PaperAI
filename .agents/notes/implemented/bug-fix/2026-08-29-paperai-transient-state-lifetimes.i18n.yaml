@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-29-paperai-transient-state-lifetimes.md
-2026-08-29-paperai-transient-state-lifetimes.md: 3245e24978d337cf8356e41b0e513ec7693e35cb
-2026-08-29-paperai-transient-state-lifetimes.zh.md: 9b31736ab26cea916f185dd163d19d6290723f4a
+2026-08-29-paperai-transient-state-lifetimes.md: 1269ae18ac12d1e956cf2374064246e98f258518
+2026-08-29-paperai-transient-state-lifetimes.zh.md: e76e3d9f6fdd790c630e519360ba2a377ea00ff5

@@ -13,6 +13,8 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
+import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
+import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { SANDBOX_MODES, effectiveSandboxMode, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
@@ -21,6 +23,7 @@ import { SANDBOX_MODES, effectiveSandboxMode, setSandboxMode } from '@deepseek-a
 import type {} from '@deepseek-ai/dsh-shell'
 import type { ApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import { APPROVAL_POLICIES, effectiveApprovalPolicy, setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
+import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 // Type-only: resolves ctx.sessionProjections / ctx.commands for the optional children.
 import type {} from '@deepseek-ai/dsh-session-projection'
@@ -36,6 +39,32 @@ export type * from './types.ts'
 declare module '@deepseek-ai/cordis' {
   interface Context {
     permissionPresets: PermissionPresetService
+  }
+
+  interface Events {
+    /**
+     * Await provider-specific permission work before the selected preset and
+     * its knobs become durable. A listener calls `next()` only after its
+     * external permission state accepts the target values.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that Agent's switch.
+     * @param payload.agent - Exact Agent whose permission select initiated the switch.
+     * @param payload.preset - Selected preset name.
+     * @param payload.sandbox - Sandbox mode the preset will commit.
+     * @param payload.approval - Approval policy the preset will commit.
+     * @param payload.signal - Cancellation signal owned by the command request.
+     * @mode waterfall
+     */
+    'permission/preset-apply'(
+      this: Scoped<Agent>,
+      payload: {
+        agent: Agent
+        preset: string
+        sandbox: SandboxMode
+        approval: ApprovalPolicy
+        signal: AbortSignal
+      },
+      next: () => Promise<CommandResult>,
+    ): Promise<CommandResult>
   }
 }
 
@@ -275,10 +304,11 @@ export class PermissionPresetService extends Service {
         name: 'permission',
         description: 'Switch the permission preset (sandbox mode + approval policy)',
         input: { hint: '<preset>' },
+        exposeThrownError: false,
         // No settlement text labels its value with this command's own name: a
         // surface that renders `name · text` (the web command row) would
         // otherwise read `permission · Permission preset: workspace-write.`
-        handler: ({ agent, rawInput }) => {
+        handler: async ({ agent, rawInput, signal }) => {
           const name = rawInput.trim()
           if (name === '') {
             return { kind: 'success', text: `current preset ${this.current(agent.session.events)} (available: ${this.names.join(', ')})` }
@@ -286,8 +316,17 @@ export class PermissionPresetService extends Service {
           if (!this.names.includes(name)) {
             return { kind: 'error', text: `unknown preset "${name}" (available: ${this.names.join(', ')})` }
           }
-          this.apply(agent.session, name, (policy) =>{  this.ctx.approval.setPolicy(agent, policy) })
-          return { kind: 'success', text: `preset ${name}` }
+          const spec = this.resolve(name)
+          return await agentEvents(this.ctx, agent).waterfall('permission/preset-apply', {
+            preset: name,
+            sandbox: spec.sandbox,
+            approval: spec.approval,
+            signal,
+          }, () => {
+            signal.throwIfAborted()
+            this.apply(agent.session, name, (policy) =>{  this.ctx.approval.setPolicy(agent, policy) })
+            return Promise.resolve({ kind: 'success', text: `preset ${name}` })
+          })
         },
       })
     })

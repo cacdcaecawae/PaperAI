@@ -508,14 +508,15 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Separated by space rather than a rule: at sidebar width a divider stacked
+   near the panel's other headings reads as boxed segments. */
 .detailSectionHeading {
   display: flex;
   min-height: 34px;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 12px;
   padding: 4px 4px 2px 0;
-  border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
 .detailSectionHeading .detailSectionTitle {

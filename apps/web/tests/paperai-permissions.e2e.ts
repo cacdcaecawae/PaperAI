@@ -1,14 +1,15 @@
 // PaperAI browser snapshots: the shipped product composition exposes its safe
 // permission default and preserves both sides of a same-node external conflict.
 import { Buffer } from 'node:buffer'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@paperai/workbench-service'
 import {
   assertFixtureInventory, compareOrRefreshGolden, captureStableAria,
@@ -25,13 +26,34 @@ const PAPERAI_PRESETS = fileURLToPath(new URL(
   '../../../packages/bundle/paperai-web/config/agent-presets',
   import.meta.url,
 ))
+const FAKE_ACP_AGENT = fileURLToPath(new URL(
+  '../../../packages/paperai/agent-acp/tests/fixtures/fake-acp-agent.mjs',
+  import.meta.url,
+))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/paperai-workbench', import.meta.url))
 const AGENT_PRESETS_EXPECTED = join(SNAPSHOT_DIR, 'agent-presets.expected.md')
 const DEFAULT_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-default.expected.md')
 const READ_ONLY_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-read-only.expected.md')
 const PERMISSION_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'permission-failure.expected.md')
+const MODEL_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'model-failure.expected.md')
+const CANCEL_FINAL_TOOL_EXPECTED = join(SNAPSHOT_DIR, 'cancel-final-tool.expected.md')
 const CONFLICT_EXPECTED = join(SNAPSHOT_DIR, 'external-conflict.expected.md')
 const MODE = webSnapshotMode()
+
+interface AcpLogEntry {
+  readonly event: string
+  readonly modeId?: string
+}
+
+async function readAcpLog(path: string): Promise<AcpLogEntry[]> {
+  try {
+    const content = await readFile(path, 'utf8')
+    return content.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as AcpLogEntry)
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
 
 /** Small valid OOXML document sent through the real browser import path. */
 function fixtureDocxBase64(): string {
@@ -68,20 +90,44 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   let workspaceId: Parameters<WebScaffold['ctx']['paperaiWorkbench']['list']>[0]['workspaceId']
   let resourceId: Awaited<ReturnType<WebScaffold['ctx']['paperaiWorkbench']['list']>>['resources'][number]['id']
   let originalPermissionMode: string | undefined
+  let acpFixtureRoot: string | undefined
+  let acpLogPath: string
+  let rejectModePath: string
+  let rejectModelPath: string
+  const sessionEvents: SessionEvent[] = []
 
   beforeAll(async () => {
     originalPermissionMode = process.env.DSH_PERMISSION_MODE
     Reflect.deleteProperty(process.env, 'DSH_PERMISSION_MODE')
+    acpFixtureRoot = await mkdtemp(join(tmpdir(), 'dsh-paperai-acp-browser-'))
+    acpLogPath = join(acpFixtureRoot, 'events.jsonl')
+    rejectModePath = join(acpFixtureRoot, 'reject-set-mode')
+    rejectModelPath = join(acpFixtureRoot, 'reject-set-config')
     scaffold = await launchWebScaffold({
       extraOverlayPath: PAPERAI_OVERLAY,
       agentPresets: {
-        default: 'standard',
+        default: 'codex',
         roots: [
           { path: SHIPPED_PRESETS, trust: 'system', ids: ['standard'] },
           { path: PAPERAI_PRESETS, trust: 'system' },
         ],
       },
+      paperAiAcp: {
+        codex: {
+          command: process.execPath,
+          args: [FAKE_ACP_AGENT],
+          env: {
+            FAKE_ACP_LABEL: 'codex',
+            FAKE_ACP_LOG: acpLogPath,
+            FAKE_ACP_REJECT_SET_MODE: 'read-only',
+            FAKE_ACP_REJECT_SET_MODE_FILE: rejectModePath,
+            FAKE_ACP_REJECT_SET_CONFIG_FILE: rejectModelPath,
+            FAKE_ACP_CANCEL_FINAL_TOOL: '1',
+          },
+        },
+      },
     })
+    scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     const projectRoot = join(scaffold.workspaceCwd, 'paper-project')
     await mkdir(projectRoot, { recursive: true })
     const workspace = await scaffold.ctx.workspaceRegistry.create(projectRoot, 'Paper project')
@@ -133,6 +179,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await page.getByRole('treeitem', { name: /Paper project/ }).click()
+    await page.getByRole('treeitem', { name: '新会话', exact: true }).click()
     const open = page.getByRole('button', { name: '打开 Browser conflict proposal.docx' })
     await open.waitFor({ timeout: 15_000 })
     await open.click()
@@ -142,6 +189,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   afterAll(async () => {
     await browser?.close()
     await scaffold?.close()
+    if (acpFixtureRoot !== undefined) await rm(acpFixtureRoot, { recursive: true, force: true })
     if (originalPermissionMode === undefined) {
       Reflect.deleteProperty(process.env, 'DSH_PERMISSION_MODE')
     } else {
@@ -161,7 +209,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('offers exactly the PaperAI product Agent presets', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-agent-presets'))
-    const trigger = page.getByRole('button', { name: '标准模式' }).first()
+    const trigger = page.getByRole('button', { name: 'Codex' }).first()
     await trigger.waitFor({ timeout: 10_000 })
     await trigger.click()
     const menu = page.getByRole('menu')
@@ -190,38 +238,84 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('menuitem', { name: 'Workspace Write' }).click()
     await expect.poll(() => access.getAttribute('aria-label'), { timeout: 10_000 })
       .toBe('访问模式，当前：Workspace Write')
+    await expect.poll(() => access.isEnabled(), { timeout: 10_000 }).toBe(true)
   }, 60_000)
 
   it('announces a rejected permission switch without exposing an internal error', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-permission-failure'))
-    await page.route('**/api/commands/execute', async (route) => {
-      const request = route.request().postDataJSON() as {
-        rpcId: string
-        payload: { args: { line: string } }
-      }
-      expect(request.payload).toMatchObject({ args: { line: '/permission read-only' } })
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          type: 'server-response',
-          rpcId: request.rpcId,
-          result: {
-            ok: false,
-            error: { code: 'internal', message: 'provider internal failure', details: {} },
-          },
-        }),
-      })
-    }, { times: 1 })
     const access = page.locator('button[aria-label^="访问模式"]').first()
-    await access.click()
-    await page.getByRole('menuitem', { name: 'Read Only' }).click()
-    const alert = page.getByRole('alert')
-    await alert.waitFor({ timeout: 10_000 })
-    expect(await alert.textContent()).toContain('无法切换访问模式，请重试。')
-    expect(await alert.textContent()).not.toContain('provider internal failure')
-    expect(await access.getAttribute('aria-label')).toBe('访问模式，当前：Workspace Write')
-    await compareOrRefreshGolden(PERMISSION_FAILURE_EXPECTED, await alert.ariaSnapshot(), MODE)
+    const logBefore = (await readAcpLog(acpLogPath)).length
+    try {
+      await writeFile(rejectModePath, 'reject read-only', 'utf8')
+      await access.click()
+      await page.getByRole('menuitem', { name: 'Read Only' }).click()
+      const alert = page.getByRole('alert')
+      await alert.waitFor({ timeout: 10_000 })
+      expect(await alert.textContent()).toContain('无法切换访问模式，请重试。')
+      expect(await alert.textContent()).not.toContain('provider internal failure')
+      expect(await access.getAttribute('aria-label')).toBe('访问模式，当前：Workspace Write')
+      await compareOrRefreshGolden(PERMISSION_FAILURE_EXPECTED, await alert.ariaSnapshot(), MODE)
+      const attempted = (await readAcpLog(acpLogPath)).slice(logBefore)
+      expect(attempted).toContainEqual(expect.objectContaining({ event: 'set-mode-start', modeId: 'read-only' }))
+      expect(attempted).not.toContainEqual(expect.objectContaining({ event: 'set-mode', modeId: 'read-only' }))
+      expect(await page.locator('body').innerText()).not.toContain('scripted ACP set-mode rejection')
+      expect(await page.locator('body').innerText()).not.toContain('Internal error')
+    } finally {
+      await rm(rejectModePath, { force: true })
+    }
+    await expect.poll(() => access.isEnabled(), { timeout: 10_000 }).toBe(true)
+  }, 60_000)
+
+  it('keeps the provider final tool result visible when a running turn is cancelled', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-cancel-final-tool'))
+    const composer = page.locator('textarea:enabled').last()
+    await expect.poll(() => composer.inputValue(), { timeout: 10_000 }).toBe('')
+    await composer.fill('请编辑论文引言，然后等待我停止。')
+    const send = page.getByRole('button', { name: '发送消息', exact: true })
+    await expect.poll(() => send.isEnabled(), { timeout: 10_000 }).toBe(true)
+    const eventStart = sessionEvents.length
+    const settled = scaffold.whenTurnSettled(60_000)
+    await send.click()
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe('')
+    await expect.poll(async () => (
+      (await readAcpLog(acpLogPath)).some(entry => entry.event === 'cancel-tool-start')
+    ), { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => {
+      const turnEvents = sessionEvents.slice(eventStart).map(event => event.type)
+      return turnEvents.includes('user/message') && turnEvents.includes('turn/start')
+    }, { timeout: 15_000 }).toBe(true)
+    await page.getByRole('button', { name: '停止生成' }).click()
+    await settled
+    await expect.poll(async () => (
+      (await readAcpLog(acpLogPath)).some(entry => entry.event === 'cancel-tool-finished')
+    ), { timeout: 10_000 }).toBe(true)
+    const finalTool = page.locator('[data-tool="paperai.edit"]')
+    await finalTool.waitFor({ timeout: 15_000 })
+    await finalTool.locator('[data-disclosure-row]').click()
+    await finalTool.getByText('changedParagraphs', { exact: false }).waitFor({ timeout: 10_000 })
+    const snapshot = await captureStableAria(page, '[data-tool="paperai.edit"]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(CANCEL_FINAL_TOOL_EXPECTED, snapshot, MODE)
+  }, 60_000)
+
+  it('localizes a rejected provider model switch without exposing its diagnostic', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-model-failure'))
+    const model = page.locator('button[aria-label^="选择模型"]').first()
+    await model.waitFor({ timeout: 10_000 })
+    try {
+      await writeFile(rejectModelPath, 'reject model switch', 'utf8')
+      await model.click()
+      await page.getByRole('menuitem', { name: /^模型/ }).click()
+      await page.getByRole('menuitemradio', { name: /Fake Beta/ }).click()
+      const alert = page.getByRole('alert').filter({ hasText: '未能切换模型，请重试。' })
+      await alert.waitFor({ timeout: 10_000 })
+      expect(await model.getAttribute('aria-label')).toContain('Fake Alpha')
+      await compareOrRefreshGolden(MODEL_FAILURE_EXPECTED, await alert.ariaSnapshot(), MODE)
+      expect(await page.locator('body').innerText()).not.toContain('scripted ACP set-config rejection')
+      expect(await page.locator('body').innerText()).not.toContain('Internal error')
+    } finally {
+      await rm(rejectModelPath, { force: true })
+      await page.keyboard.press('Escape')
+    }
   }, 60_000)
 
   it('compares and merges a same-node external change from the latest revision', async () => {
@@ -253,14 +347,52 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await review.waitFor({ timeout: 10_000 })
     await review.click()
     await page.getByRole('textbox', { name: '外部最新文本' }).waitFor({ timeout: 30_000 })
+    const conflictHeading = page.getByText('当前节点也有外部修改', { exact: true })
+    await expect.poll(() => conflictHeading.evaluate(element => document.activeElement === element)).toBe(true)
     expect(await page.getByRole('textbox', { name: '本地草稿' }).inputValue()).toBe('浏览器中的本地草稿')
     expect(await page.getByRole('textbox', { name: '外部最新文本' }).inputValue())
       .toBe('Initial browser paragraph — 外部会话写入的最新文本')
+
+    await editor.fill('浏览器合并中的草稿')
+    const latest = await scaffold.ctx.paperaiWorkbench.open({
+      workspaceId,
+      sessionId: externalSessionId,
+      resourceId,
+    })
+    const other = latest.document.nodes.find(node => node.editable && node.nodeId !== selected.nodeId)
+    if (other === undefined) throw new Error('PaperAI browser fixture has no second editable node')
+    const otherBuffer = await scaffold.ctx.paperaiWorkbench.readNode({
+      sessionId: externalSessionId,
+      documentId: latest.document.documentId,
+      nodeId: other.nodeId,
+      revision: latest.document.revision,
+      headCommitId: latest.document.headCommitId,
+    })
+    await scaffold.ctx.paperaiWorkbench.commit({
+      sessionId: externalSessionId,
+      documentId: latest.document.documentId,
+      baseRevision: latest.document.revision,
+      baseCommitId: latest.document.headCommitId,
+      mutations: [{
+        type: 'replace-text',
+        nodeId: other.nodeId,
+        baseText: otherBuffer.text,
+        nextText: `${otherBuffer.text} — unrelated external update`,
+      }],
+    })
+    await review.waitFor({ timeout: 10_000 })
+    await review.click()
+    await expect.poll(() => editor.isEnabled(), { timeout: 30_000 }).toBe(true)
+    expect(await page.getByRole('textbox', { name: '本地草稿' }).inputValue()).toBe('浏览器中的本地草稿')
+    expect(await page.getByRole('textbox', { name: '外部最新文本' }).inputValue())
+      .toBe('Initial browser paragraph — 外部会话写入的最新文本')
+    expect(await editor.inputValue()).toBe('浏览器合并中的草稿')
     const snapshot = await captureStableAria(page, '[data-paperai-node-editor]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(CONFLICT_EXPECTED, snapshot, MODE)
 
     await editor.fill('浏览器合并后的最终文本')
     await page.getByRole('button', { name: '使用合并内容' }).click()
+    await expect.poll(() => editor.evaluate(element => document.activeElement === element)).toBe(true)
     const commit = page.getByRole('button', { name: '提交并创建版本' })
     await commit.click()
     await page.getByRole('heading', { name: '浏览器合并后的最终文本' }).waitFor({ timeout: 30_000 })
@@ -277,7 +409,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
+      'cancel-final-tool.expected.md',
       'external-conflict.expected.md',
+      'model-failure.expected.md',
       'permission-default.expected.md',
       'permission-failure.expected.md',
       'permission-read-only.expected.md',

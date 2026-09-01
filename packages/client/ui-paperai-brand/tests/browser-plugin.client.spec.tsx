@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, inject } from '../src/client/index.ts'
-import { PaperAIBrandMark, PaperAIBrandName } from '../src/client/PaperAIBrand.tsx'
+import {
+  ClaudeAgentMark,
+  CodexAgentMark,
+  PaperAIBrandMark,
+  PaperAIBrandName,
+} from '../src/client/PaperAIBrand.tsx'
 
 afterEach(cleanup)
 
@@ -69,5 +74,18 @@ describe('PaperAI browser-brand plugin', () => {
     expect(svg?.getAttribute('class')?.split(' ')).toContain('hero-mark')
     mark.rerender(<PaperAIBrandMark size={24} />)
     expect(mark.container.querySelector('svg')?.getAttribute('width')).toBe('24')
+  })
+
+  it('keeps provider marks decorative beside their preset names', () => {
+    const marks = render(<>
+      <CodexAgentMark presetId="codex" size={18} />
+      <ClaudeAgentMark presetId="claude" size={18} />
+    </>)
+    for (const svg of marks.container.querySelectorAll('svg')) {
+      expect(svg.getAttribute('aria-hidden')).toBe('true')
+      expect(svg.getAttribute('focusable')).toBe('false')
+      expect(svg.getAttribute('role')).toBeNull()
+      expect(svg.getAttribute('aria-label')).toBeNull()
+    }
   })
 })

@@ -29,8 +29,8 @@ export interface ModelDirectoryState {
   failures: readonly ModelCatalogFailure[]
   /** Lifecycle of the in-flight operation. */
   status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
-  /** Whole-request or selection failure text; null when none. */
-  error: string | null
+  /** User-facing operation that failed; protocol diagnostics stay off the UI state. */
+  error: 'load' | 'select' | null
 }
 
 /** One session's shared directory controller; disposed with the session scope. */
@@ -70,7 +70,7 @@ export class ModelDirectory {
       return result.value
     }
     if (!result.ok) {
-      this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
+      this.store.update((s) => { s.status = 'error'; s.error = 'load' })
       throw new Error(`session.models failed: ${result.error.code}: ${result.error.message}`)
     }
     const { current, routable, groups, failures } = result.value
@@ -108,7 +108,7 @@ export class ModelDirectory {
       return
     }
     if (!result.ok) {
-      this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
+      this.store.update((s) => { s.status = 'error'; s.error = 'select' })
       throw new Error(`session.selectModel failed: ${result.error.code}: ${result.error.message}`)
     }
     // The Host validated the route before accepting it, so a selection that

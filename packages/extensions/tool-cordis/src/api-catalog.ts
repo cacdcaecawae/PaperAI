@@ -3189,6 +3189,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'change', description: 'JSON-safe document id, committed head id, and update time.' }],
   },
   {
+    name: 'permission/preset-apply',
+    mode: 'waterfall',
+    signature: '\'permission/preset-apply\'( this: Scoped<Agent>, payload: { agent: Agent preset: string sandbox: SandboxMode approval: ApprovalPolicy signal: AbortSignal }, next: () => Promise<CommandResult>, ): Promise<CommandResult>',
+    summary: 'Await provider-specific permission work before the selected preset and its knobs become durable.',
+    description: 'Await provider-specific permission work before the selected preset and its knobs become durable. A listener calls `next()` only after its external permission state accepts the target values. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that Agent\'s switch.',
+    parameters: [{ name: 'payload', description: '.signal - Cancellation signal owned by the command request.' }],
+  },
+  {
     name: 'session-telemetry/record',
     mode: 'waterfall',
     signature: '\'session-telemetry/record\'(record: SessionTelemetryRecord, next: () => SessionTelemetryRecord): SessionTelemetryRecord',
@@ -3674,7 +3682,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CommandDefinition',
-    declaration: 'export interface CommandDefinition {\n    readonly name: string;\n    readonly description: string;\n    readonly input?: CommandInputDescriptor;\n    readonly recordInput?: boolean;\n    readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>;\n}',
+    declaration: 'export interface CommandDefinition {\n    readonly name: string;\n    readonly description: string;\n    readonly input?: CommandInputDescriptor;\n    readonly recordInput?: boolean;\n    readonly exposeThrownError?: boolean;\n    readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>;\n}',
   },
   {
     name: 'CommandDescriptor',

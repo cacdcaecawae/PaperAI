@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-30-paperai-blank-acp-session-recovery.md
-2026-08-30-paperai-blank-acp-session-recovery.md: 142c348f9a1dba61bdcebf80dc70689855a22861
-2026-08-30-paperai-blank-acp-session-recovery.zh.md: 11ac63ed78b54377e4cd9b5d588775f0e27bc9c7
+2026-08-30-paperai-blank-acp-session-recovery.md: 88c6317ec1341e126611f6e200167c2b7ebe22f0
+2026-08-30-paperai-blank-acp-session-recovery.zh.md: 32ff0d156b27216214d72168045657d03b49f3ac

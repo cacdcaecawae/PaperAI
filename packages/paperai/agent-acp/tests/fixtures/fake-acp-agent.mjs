@@ -12,6 +12,7 @@ let currentModel = process.env.FAKE_ACP_MODEL ?? 'fake-alpha'
 let currentMode = label === 'codex'
   ? process.env.INITIAL_AGENT_MODE ?? 'agent'
   : 'default'
+let releaseCancelledPrompt
 
 function log(event, data = {}) {
   if (logPath === undefined) return
@@ -105,6 +106,11 @@ function makeAgent(connection) {
 
     async setSessionMode(params) {
       log('set-mode-start', { sessionId: params.sessionId, modeId: params.modeId })
+      const rejectionFile = process.env.FAKE_ACP_REJECT_SET_MODE_FILE
+      if (process.env.FAKE_ACP_REJECT_SET_MODE === params.modeId
+        && (rejectionFile === undefined || existsSync(rejectionFile))) {
+        throw new Error(`scripted ACP set-mode rejection for ${params.modeId}`)
+      }
       const neverMode = process.env.FAKE_ACP_NEVER_SET_MODE
       const neverOnceFile = process.env.FAKE_ACP_NEVER_SET_MODE_ONCE_FILE
       if (params.modeId === neverMode && (neverOnceFile === undefined || !existsSync(neverOnceFile))) {
@@ -135,6 +141,10 @@ function makeAgent(connection) {
         configId: params.configId,
         value: params.value,
       })
+      const rejectionFile = process.env.FAKE_ACP_REJECT_SET_CONFIG_FILE
+      if (rejectionFile !== undefined && existsSync(rejectionFile)) {
+        throw new Error(`scripted ACP set-config rejection for ${String(params.value)}`)
+      }
       currentModel = String(params.value)
       return { configOptions: modelOptions() }
     },
@@ -148,6 +158,40 @@ function makeAgent(connection) {
       const delayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS ?? 0)
       if (Number.isFinite(delayMs) && delayMs > 0) {
         await new Promise(resolve => setTimeout(resolve, delayMs))
+      }
+      if (process.env.FAKE_ACP_CANCEL_FINAL_TOOL === '1') {
+        await connection.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Editing before cancellation.' },
+          },
+        })
+        await connection.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'cancel-edit',
+            title: 'Edit before cancellation',
+            name: 'paperai.edit',
+            kind: 'edit',
+            status: 'in_progress',
+            rawInput: { section: 'introduction' },
+          },
+        })
+        log('cancel-tool-start')
+        await new Promise(resolve => { releaseCancelledPrompt = resolve })
+        await connection.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'cancel-edit',
+            status: 'completed',
+            rawOutput: { changedParagraphs: 1 },
+          },
+        })
+        log('cancel-tool-finished')
+        return { stopReason: 'cancelled' }
       }
       if (process.env.FAKE_ACP_REQUEST_PERMISSION === '1') {
         const response = await connection.requestPermission({
@@ -289,6 +333,8 @@ function makeAgent(connection) {
 
     cancel(params) {
       log('cancel', { sessionId: params.sessionId })
+      releaseCancelledPrompt?.()
+      releaseCancelledPrompt = undefined
     },
 
     extMethod(method, params) {

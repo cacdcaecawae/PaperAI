@@ -1177,6 +1177,58 @@ describe('PaperAIWorkbenchController', () => {
     controller.dispose()
   })
 
+  it('retains an unresolved conflict when a newer head changes only another node', async () => {
+    const remote = successfulRemote()
+    remote.open = vi.fn<PaperAIWorkbenchRemote['open']>()
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult() })
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_2) })
+      .mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_3) })
+    remote.readNode = vi.fn<PaperAIWorkbenchRemote['readNode']>(async request => ({
+      ok: true,
+      value: textNodeBuffer(request.revision, 'External rewrite'),
+    }))
+    const commit = vi.spyOn(remote, 'commit')
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, 'Unsaved local draft')
+    controller.handleDocumentChanged({
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_2,
+      updatedAt: '2026-08-28T12:00:00.000Z',
+    })
+    await controller.reloadExternal(SESSION_ID)
+    controller.updateDraft(SESSION_ID, 'Merge in progress')
+
+    controller.handleDocumentChanged({
+      documentId: DOCUMENT_ID,
+      headCommitId: COMMIT_3,
+      updatedAt: '2026-08-28T12:01:00.000Z',
+    })
+    await controller.reloadExternal(SESSION_ID)
+
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      document: { revision: REVISION_3, headCommitId: COMMIT_3 },
+      selectedNode: {
+        baseRevision: REVISION_3,
+        baseCommitId: COMMIT_3,
+        text: 'External rewrite',
+      },
+      draft: 'Merge in progress',
+      dirty: true,
+      externalUpdate: null,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'External rewrite',
+      },
+    })
+    await expect(controller.commitSelected(SESSION_ID)).resolves.toEqual({
+      ok: false,
+      error: 'resolve the external node conflict before committing',
+    })
+    expect(commit).not.toHaveBeenCalled()
+    controller.dispose()
+  })
+
   it('rejects a commit projection that switches document identity', async () => {
     const remote = successfulRemote()
     remote.commit = vi.fn<PaperAIWorkbenchRemote['commit']>(async () => {

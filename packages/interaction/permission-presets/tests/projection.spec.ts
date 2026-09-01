@@ -87,6 +87,92 @@ describe('permissions projection unit', () => {
 })
 
 describe('/permission command', () => {
+  it('commits preset knobs only after awaited provider-specific permission work delegates', async () => {
+    const { ctx, session } = await harness()
+    const { agent } = await agentFor(ctx, session)
+    const observed: string[] = []
+    ctx.on('permission/preset-apply', async ({ sandbox }, next) => {
+      observed.push(`before:${sandbox}:${ctx.permissionPresets.current(session.events)}`)
+      const result = await next()
+      observed.push(`after:${ctx.permissionPresets.current(session.events)}`)
+      return result
+    })
+
+    await expect(ctx.commands.execute(
+      agent,
+      '/permission danger-full-access',
+      [],
+      new AbortController().signal,
+    )).resolves.toMatchObject({ result: { kind: 'success' } })
+    expect(observed).toEqual([
+      'before:danger-full-access:workspace-write',
+      'after:danger-full-access',
+    ])
+  })
+
+  it('leaves every permission knob unchanged when provider-specific permission work rejects', async () => {
+    const { ctx, session } = await harness()
+    const { agent } = await agentFor(ctx, session)
+    const before = session.events.filter(event => (
+      event.type === 'permission/preset'
+      || event.type === 'sandbox/mode'
+      || event.type === 'approval/policy'
+    ))
+    ctx.on('permission/preset-apply', () => Promise.reject(new Error('provider rejected mode')))
+
+    await expect(ctx.commands.execute(
+      agent,
+      '/permission danger-full-access',
+      [],
+      new AbortController().signal,
+    )).rejects.toThrow('provider rejected mode')
+    expect(session.events.filter(event => (
+      event.type === 'permission/preset'
+      || event.type === 'sandbox/mode'
+      || event.type === 'approval/policy'
+    ))).toEqual(before)
+  })
+
+  it('does not commit permission knobs when the command is aborted before delegation commits', async () => {
+    const { ctx, session } = await harness()
+    const { agent } = await agentFor(ctx, session)
+    const controller = new AbortController()
+    const entered = Promise.withResolvers<boolean>()
+    const release = Promise.withResolvers<boolean>()
+    const finished = Promise.withResolvers<boolean>()
+    const before = session.events.filter(event => (
+      event.type === 'permission/preset'
+      || event.type === 'sandbox/mode'
+      || event.type === 'approval/policy'
+    ))
+    ctx.on('permission/preset-apply', async (_request, next) => {
+      entered.resolve(true)
+      await release.promise
+      try {
+        return await next()
+      } finally {
+        finished.resolve(true)
+      }
+    })
+
+    const pending = ctx.commands.execute(
+      agent,
+      '/permission danger-full-access',
+      [],
+      controller.signal,
+    )
+    await entered.promise
+    controller.abort(new Error('permission command aborted before commit'))
+    release.resolve(true)
+    await expect(pending).rejects.toThrow('permission command aborted before commit')
+    await finished.promise
+    expect(session.events.filter(event => (
+      event.type === 'permission/preset'
+      || event.type === 'sandbox/mode'
+      || event.type === 'approval/policy'
+    ))).toEqual(before)
+  })
+
   it('switches through permission.set and logs the lifecycle pair', async () => {
     const { ctx, session } = await harness()
     const { agent, inject } = await agentFor(ctx, session)

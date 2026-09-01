@@ -9,6 +9,7 @@
 .sectionTitle {
   display: flex;
   min-width: 0;
+  min-height: 34px;
   align-items: center;
   gap: 6px;
   padding: 5px 8px 3px;
@@ -35,48 +36,64 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Role and import read as one "import as this role" unit: adjacent and
+   left-grouped, both weightless, so neither outranks the document rows the
+   panel exists to show. */
 .importBar {
   display: flex;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 4px 4px 6px 8px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  gap: 2px;
+  padding: 0 4px 4px;
 }
 
-.roleSelect {
-  display: flex;
-  width: 100%;
+.roleSelect,
+.importAction {
+  display: inline-flex;
   min-width: 0;
-  flex: 1;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
   border: 0;
   border-radius: 8px;
-  padding: 5px 8px;
+  padding: 4px 6px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
   font: inherit;
   font-size: 12px;
   line-height: 18px;
 }
 
-.roleSelect:hover,
-.roleSelect:focus-visible {
+.roleSelect > span,
+.importAction > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roleSelect:hover:not(:disabled),
+.importAction:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 
+.roleSelect:disabled,
+.importAction:disabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+}
+
 .roleSelect,
+.importAction,
 .resourceAction {
   transition:
     background 120ms var(--ds-ease-in-out),
     color 120ms var(--ds-ease-in-out);
 }
 
-.roleSelect:focus-visible {
+.roleSelect:focus-visible,
+.importAction:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
 }
@@ -124,14 +141,16 @@
   align-items: center;
 }
 
+/* A category label must not read at the same rank as the rows beneath it:
+   it steps down on size, weight, and color together. */
 .groupHeading {
   gap: 6px;
-  min-height: 32px;
-  padding: 4px 8px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 14px;
+  min-height: 26px;
+  padding: 4px 8px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
   font-weight: 500;
-  line-height: 20px;
+  line-height: 18px;
 }
 
 .groupIcon,
@@ -150,22 +169,16 @@
   font-weight: 400;
 }
 
+/* Wrapping copy makes centre alignment float the glyph against the middle of
+   the block; align to the first line instead. Matches the sessions empty row. */
 .projectEmpty {
   display: flex;
-  min-height: 36px;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
-  padding: 10px 8px;
+  padding: 4px 8px 8px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 18px;
-}
-
-.projectEmptyIcon {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  color: var(--dsw-alias-label-tertiary);
 }
 
 .resourceRow {

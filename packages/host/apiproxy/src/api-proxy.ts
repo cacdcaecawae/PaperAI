@@ -1807,14 +1807,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   /**
-   * Whether an adapter currently serves this provider, and therefore whether
-   * a session selecting it can start a turn. Catalog membership cannot answer
-   * it: an adapter may serve a model its own catalog stopped advertising, so
-   * a provider missing from the groups is not the same as one nothing serves.
-   * A composition with no llm registry at all cannot judge and says yes —
-   * the dispatch it would have refused fails on its own terms.
+   * Whether the Agent driver or an LLM adapter currently serves this provider,
+   * and therefore whether a session selecting it can start a turn. Catalog
+   * membership cannot answer it: either owner may serve a model its own
+   * catalog stopped advertising, so a provider missing from the groups is not
+   * the same as one nothing serves. A composition with no llm registry at all
+   * cannot judge the adapter route and says yes — the dispatch it would have
+   * refused fails on its own terms.
    */
-  function routeServed(provider: string): boolean {
+  function routeServed(agent: Agent, provider: string): boolean {
+    if (agent.modelController?.provider.id === provider) return true
     const llm = ctx.get('llm')
     return llm === undefined || llm.listProviders().some(entry => entry.id === provider)
   }
@@ -1835,7 +1837,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     if ('error' in found) return { refused: err(request, found.error) }
     const agent = found.agent
     const selection = selectionFor(agent).current
-    if (!routeServed(selection.provider)) {
+    if (!routeServed(agent, selection.provider)) {
       return {
         refused: err(request, {
           code: 'model-unavailable',
@@ -2265,7 +2267,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         const current = selectionFor(found.agent).current
         const { groups, failures } = await buildModelCatalog(ctx)
-        const routable = routeServed(current.provider)
+        const routable = routeServed(found.agent, current.provider)
         return ok(request, { current: { ...current }, routable, groups, failures })
       },
 

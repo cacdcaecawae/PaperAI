@@ -7,8 +7,10 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentHandle } from '@deepseek-ai/dsh-agent'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import PermissionPresetService from '@deepseek-ai/dsh-permission-presets'
 import SandboxPolicyService, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, {
   SessionId,
@@ -21,6 +23,7 @@ import SessionPersistence, {
   type SessionInspection,
   type SessionPersistenceSnapshot,
 } from '@deepseek-ai/dsh-session-persistence'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import {
   SettingsProvider,
   type SettingsNamespace,
@@ -208,6 +211,7 @@ async function mountHarness(options: {
   readonly env?: Readonly<Record<string, string>>
   readonly neverSetMode?: { readonly mode: string; readonly once: boolean }
   readonly mountApproval?: boolean
+  readonly mountPermissionPresets?: boolean
   readonly approvalOutcome?: ApprovalOutcome
   readonly records?: Map<string, StoredSession>
   readonly settingsDocument?: Record<string, unknown>
@@ -225,6 +229,16 @@ async function mountHarness(options: {
   await ctx.plugin(LocalSubprocessRuntime)
   await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fallbackRoot })
   await ctx.plugin(SandboxedFileSystem, { cwd: fallbackRoot })
+  if (options.mountPermissionPresets === true) {
+    await ctx.plugin(CommandRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    ctx.provide('shell', {
+      sandboxMode: 'workspace-write',
+      resolve() { throw new Error('ACP permission tests do not execute shell commands') },
+      run() { throw new Error('ACP permission tests do not execute shell commands') },
+      start() { throw new Error('ACP permission tests do not execute shell commands') },
+    })
+  }
   await ctx.plugin(TestPaperMcp)
   const records = options.records ?? new Map<string, StoredSession>()
   await ctx.plugin(TestPersistence, records)
@@ -235,6 +249,16 @@ async function mountHarness(options: {
     ctx.on('approval/request', () => {
       approvalRequests += 1
       return Promise.resolve(options.approvalOutcome ?? 'allowed-once')
+    })
+  }
+  if (options.mountPermissionPresets === true) {
+    await ctx.plugin(PermissionPresetService, {
+      presets: {
+        'read-only': { sandbox: 'read-only', approval: 'ask' },
+        'workspace-write': { sandbox: 'workspace-write', approval: 'ask' },
+        'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' },
+      },
+      defaultPreset: 'workspace-write',
     })
   }
   if (options.settingsDocument !== undefined) {
@@ -518,6 +542,155 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
 })
 
 describe('ACP permission policy projection', { concurrent: false }, () => {
+  it('does not commit a rejected native mode and settles cancellation after the replacement starts', async () => {
+    const harness = await mountHarness({
+      mountPermissionPresets: true,
+      env: {
+        FAKE_ACP_REJECT_SET_MODE: 'read-only',
+        FAKE_ACP_CANCEL_FINAL_TOOL: '1',
+      },
+    })
+    const handle = await createAgent(harness, 'native-mode-command-rejection', 'codex')
+    const before = handle.agent.session.events.filter(event => (
+      event.type === 'permission/preset'
+      || event.type === 'sandbox/mode'
+      || event.type === 'approval/policy'
+    ))
+
+    await expect(harness.ctx.commands.execute(
+      handle.agent,
+      '/permission read-only',
+      [],
+      new AbortController().signal,
+    )).rejects.toThrow('Internal error')
+
+    const after = handle.agent.session.events.filter(event => (
+      event.type === 'permission/preset'
+      || event.type === 'sandbox/mode'
+      || event.type === 'approval/policy'
+    ))
+    expect(after).toEqual(before)
+    expect(harness.ctx.sessionProjections.snapshot(handle.agent.session).values.permissions)
+      .toMatchObject({ currentValue: 'workspace-write' })
+    const log = await readLog(harness.logPath)
+    expect(log.filter(entry => (
+      entry.event === 'set-mode-start' && entry['modeId'] === 'read-only'
+    ))).toHaveLength(1)
+    expect(log.filter(entry => (
+      entry.event === 'set-mode' && entry['modeId'] === 'read-only'
+    ))).toHaveLength(0)
+
+    expect((await handle.agent.modelController?.listModels())?.map(model => model.id))
+      .toEqual(['fake-alpha', 'fake-beta'])
+    await expect(handle.agent.modelController?.selectModel('fake-beta')).resolves.toBe('fake-beta')
+    expect(handle.agent.modelController?.currentModel).toBe('fake-beta')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')).toHaveLength(2)
+
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Cancel after replacing the rejected runtime' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'cancel-tool-start'))
+        .toBe(true)
+    })
+    handle.agent.cancel({ kind: 'user' })
+    await handle.agent.whenIdle()
+
+    const settledLog = await readLog(harness.logPath)
+    expect(settledLog.some(entry => entry.event === 'cancel-tool-finished')).toBe(true)
+    expect(settledLog.filter(entry => entry.event === 'initialize')).toHaveLength(2)
+    expect(handle.agent.session.events.findLast(event => event.type === 'request/header')?.data.header)
+      .toMatchObject({ config: { provider: 'codex', model: 'fake-beta' } })
+    expect(handle.agent.session.events.some(event => (
+      event.type === 'tool/result' && event.data.message.source.callId === 'cancel-edit'
+    ))).toBe(true)
+  }, 20_000)
+
+  it('settles an active turn and starts the target native mode before committing the preset', async () => {
+    const harness = await mountHarness({
+      mountPermissionPresets: true,
+      env: { FAKE_ACP_CANCEL_FINAL_TOOL: '1' },
+    })
+    const handle = await createAgent(harness, 'native-mode-active-command', 'codex')
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Active while permissions change' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'cancel-tool-start'))
+        .toBe(true)
+    })
+
+    await expect(harness.ctx.commands.execute(
+      handle.agent,
+      '/permission read-only',
+      [],
+      new AbortController().signal,
+    )).resolves.toMatchObject({ result: { kind: 'success', text: 'preset read-only' } })
+
+    const events = handle.agent.session.events
+    expect(events.findIndex(event => event.type === 'turn/end')).toBeLessThan(
+      events.findLastIndex(event => event.type === 'sandbox/mode'),
+    )
+    expect(events.some(event => (
+      event.type === 'tool/result' && event.data.message.source.callId === 'cancel-edit'
+    ))).toBe(true)
+    expect(harness.ctx.sessionProjections.snapshot(handle.agent.session).values.permissions)
+      .toMatchObject({ currentValue: 'read-only' })
+    const initialized = (await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')
+    expect(initialized).toHaveLength(2)
+    expect(initialized[1]?.['environment']).toMatchObject({ initialAgentMode: 'read-only' })
+  }, 20_000)
+
+  it('holds a queued follow-up until an active-turn permission transition commits', async () => {
+    const harness = await mountHarness({
+      mountPermissionPresets: true,
+      env: { FAKE_ACP_CANCEL_FINAL_TOOL: '1' },
+    })
+    const handle = await createAgent(harness, 'native-mode-queued-command', 'codex')
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Active before permissions change' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).filter(entry => entry.event === 'cancel-tool-start'))
+        .toHaveLength(1)
+    })
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Queued under the new permissions' }],
+      source: { kind: 'user' },
+    }))
+
+    await expect(harness.ctx.commands.execute(
+      handle.agent,
+      '/permission read-only',
+      [],
+      new AbortController().signal,
+    )).resolves.toMatchObject({ result: { kind: 'success', text: 'preset read-only' } })
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).filter(entry => entry.event === 'prompt'))
+        .toHaveLength(2)
+    })
+
+    const events = handle.agent.session.events
+    const committedMode = events.findLastIndex(event => event.type === 'sandbox/mode')
+    const queuedTurn = events.findIndex(event => event.type === 'turn/start' && event.data.turn === 2)
+    expect(committedMode).toBeLessThan(queuedTurn)
+    const log = await readLog(harness.logPath)
+    const secondInitialize = log.findLastIndex(entry => entry.event === 'initialize')
+    const secondPrompt = log.findLastIndex(entry => entry.event === 'prompt')
+    expect(secondInitialize).toBeLessThan(secondPrompt)
+    expect(log[secondInitialize]?.['environment']).toMatchObject({ initialAgentMode: 'read-only' })
+    expect(log[secondPrompt]?.['prompt']).toEqual([{
+      type: 'text',
+      text: 'Queued under the new permissions',
+    }])
+
+    handle.agent.cancel({ kind: 'user' })
+    await handle.agent.whenIdle()
+  }, 20_000)
+
   it.each([
     { provider: 'codex' as const, mode: 'read-only' as const, nativeMode: 'read-only' },
     { provider: 'codex' as const, mode: 'workspace-write' as const, nativeMode: 'agent' },
@@ -1036,6 +1209,44 @@ describe('ACP update transcript projection', { concurrent: false }, () => {
     expect(handle.agent.status).toBe('idle')
     expect((await readLog(harness.logPath)).find(entry => entry.event === 'prompt')?.['prompt'])
       .toEqual([{ type: 'text', text: 'Revise the introduction' }])
+  }, 20_000)
+
+  it('keeps the turn projection open for final tool updates after cancellation', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_CANCEL_FINAL_TOOL: '1' } })
+    const handle = await createAgent(harness, 'cancel-final-tool-update')
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Start an edit that will be cancelled' }],
+      source: { kind: 'user' },
+    }))
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'cancel-tool-start'))
+        .toBe(true)
+    })
+
+    handle.agent.cancel({ kind: 'user' })
+    await handle.agent.whenIdle()
+    await vi.waitFor(async () => {
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'cancel-tool-finished'))
+        .toBe(true)
+    })
+
+    const events = handle.agent.session.events
+    const callIndex = events.findIndex(event => (
+      event.type === 'tool/call' && event.data.callId === 'cancel-edit'
+    ))
+    const resultIndex = events.findIndex(event => (
+      event.type === 'tool/result' && event.data.message.source.callId === 'cancel-edit'
+    ))
+    const stepEndIndex = events.findIndex(event => event.type === 'step/end')
+    const turnEndIndex = events.findIndex(event => event.type === 'turn/end')
+    expect(callIndex).toBeGreaterThanOrEqual(0)
+    expect(resultIndex).toBeGreaterThan(callIndex)
+    expect(stepEndIndex).toBeGreaterThan(resultIndex)
+    expect(turnEndIndex).toBeGreaterThan(stepEndIndex)
+    expect(events.find(event => event.type === 'assistant/message')?.data)
+      .toMatchObject({ interrupted: true })
+    expect(events.findLast(event => event.type === 'turn/end')?.data.reason)
+      .toEqual({ kind: 'aborted', reason: { kind: 'user' } })
   }, 20_000)
 })
 

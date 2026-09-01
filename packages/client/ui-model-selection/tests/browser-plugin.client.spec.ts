@@ -58,15 +58,33 @@ async function bench() {
   const ctx = new Context()
   let current: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   const calls = { models: 0, select: 0 }
+  let modelsFailure = false
+  let selectFailure = false
   ctx.provide('connection', { api: { sessions: {
     models: () => {
       calls.models += 1
+      if (modelsFailure) {
+        return Promise.resolve({
+          result: {
+            ok: false as const,
+            error: { code: 'internal' as const, message: 'resume failed: Internal error', details: {} },
+          },
+        })
+      }
       return Promise.resolve({
         result: { ok: true as const, value: { current, routable, groups: GROUPS, failures: [] } },
       })
     },
     selectModel: (payload: { provider: string; model: string; reasoningEffort?: string }) => {
       calls.select += 1
+      if (selectFailure) {
+        return Promise.resolve({
+          result: {
+            ok: false as const,
+            error: { code: 'internal' as const, message: 'provider model switch stack', details: {} },
+          },
+        })
+      }
       current = {
         provider: payload.provider,
         model: payload.model,
@@ -135,6 +153,8 @@ async function bench() {
     setHostCurrent: (selection: ModelSelection) => { current = selection },
     address: (id: SessionId) => { addressed.add(id) },
     setRoutable: (next: boolean) => { routable = next },
+    setModelsFailure: (next: boolean) => { modelsFailure = next },
+    setSelectFailure: (next: boolean) => { selectFailure = next },
     blockOf: (key: string) => blocks.get(sid(key)),
   }
 }
@@ -197,6 +217,22 @@ describe('ui-model-selection dual entry', () => {
       model: 'deepseek-v4-pro',
       reasoningEffort: 'high',
     })
+  })
+
+  it('localizes popup load and selection failures without exposing RPC diagnostics', async () => {
+    const b = await bench()
+    b.mint('s1')
+    b.setModelsFailure(true)
+    await expect(b.contribution().ui.options(
+      projection('s1'),
+      new AbortController().signal,
+    )).rejects.toThrow('暂时无法加载模型列表，请重试。')
+
+    b.setModelsFailure(false)
+    const options = await b.contribution().ui.options(projection('s1'), new AbortController().signal)
+    b.setSelectFailure(true)
+    await expect(b.contribution().ui.onSelect(options[0]!, projection('s1')))
+      .rejects.toThrow('未能切换模型，请重试。')
   })
 
   it('both entries share one directory instance per session, isolated across sessions', async () => {

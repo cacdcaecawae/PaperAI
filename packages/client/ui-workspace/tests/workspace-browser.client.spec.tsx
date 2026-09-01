@@ -259,7 +259,8 @@ describe('WorkspaceBrowser', () => {
     alpha.focus()
     fireEvent.keyDown(alpha, { key: 'Enter' })
 
-    expect(screen.getByRole('button', { name: '返回工作区列表' })).toBeTruthy()
+    const back = screen.getByRole('button', { name: '返回工作区列表' })
+    expect(document.activeElement).toBe(back)
     expect(screen.getByRole('heading', { name: 'Alpha project', level: 2 })).toBeTruthy()
     expect(screen.queryByText('Beta project')).toBeNull()
     expect(screen.getByTestId('workspace-content').textContent).toBe(JSON.stringify({
@@ -273,7 +274,7 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByText('alpha-s'))
     expect(open).toHaveBeenCalledWith(sid('alpha-s'))
 
-    fireEvent.click(screen.getByRole('button', { name: '返回工作区列表' }))
+    fireEvent.click(back)
     expect(screen.getByText('Alpha project')).toBeTruthy()
     expect(document.activeElement).toBe(screen.getByRole('treeitem', { name: 'Alpha project' }))
     expect(screen.getByText('Beta project')).toBeTruthy()

@@ -805,7 +805,7 @@ export class PaperAIWorkbenchController {
       return this.failAction(entry.store, 'paperaiWorkbench returned an invalid external document projection')
     }
     let rebasedBuffer: PaperAISelectedNodeBuffer | null = null
-    let conflict: PaperAIWorkbenchState['externalConflict'] = null
+    let conflict = state.externalConflict
     if (localDraft !== null) {
       const document = result.value.document
       if (!document.nodes.some(node => node.nodeId === localDraft.buffer.nodeId && node.editable)) {

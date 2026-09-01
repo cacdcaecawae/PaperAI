@@ -293,6 +293,7 @@ describe('CommandRuntime', () => {
     [{ ...command('empty-description'), description: ' ' }, /description/],
     [{ ...command('empty-hint'), input: { hint: '' } }, /input hint/],
     [{ ...command('bad-handler'), handler: undefined }, /handler/],
+    [{ ...command('bad-error-visibility'), exposeThrownError: 'sometimes' }, /exposeThrownError/],
   ] as const)('rejects invalid definition %#', async (definition, expected) => {
     const ctx = await mount()
     expect(() => ctx.commands.register(definition as unknown as CommandDefinition)).toThrow(expected)
@@ -397,6 +398,28 @@ describe('CommandRuntime', () => {
       { type: 'command/run', data: { name: 'boom' } },
       { type: 'command/done', data: { kind: 'error', text: 'handler exploded' } },
     ])
+  })
+
+  it('keeps a sensitive thrown message out of the command record while preserving the throw', async () => {
+    const ctx = await mount()
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    const { agent } = await mintAgentScope(ctx, 'a')
+    ctx.commands.register({
+      name: 'private-failure',
+      description: 'Private failure',
+      exposeThrownError: false,
+      handler: () => { throw new Error('provider transport diagnostic') },
+    })
+    await expect(ctx.commands.execute(agent, '/private-failure', [], new AbortController().signal))
+      .rejects.toThrow('provider transport diagnostic')
+    expect(lifecycleOf(agent)).toMatchObject([
+      { type: 'command/run', data: { name: 'private-failure' } },
+      { type: 'command/done', data: { kind: 'error' } },
+    ])
+    const done = lifecycleOf(agent).at(-1)
+    expect(done?.type).toBe('command/done')
+    expect((done?.data as { text?: unknown } | undefined)?.text).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith('command "private-failure" failed: provider transport diagnostic')
   })
 
   it('logs command/done kind error when the signal aborts a hanging handler', async () => {
