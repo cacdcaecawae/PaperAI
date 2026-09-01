@@ -469,12 +469,15 @@ describe('Issue lifecycle workflow', () => {
 })
 
 describe('npm release workflows', () => {
-  it('keeps publication dispatch-only and pack in the PR workflow', () => {
-    // pack stays in the PR/master release workflows so a PR proves the set packs.
+  it('keeps publication dispatch-only and scopes inherited pack jobs to upstream', () => {
+    const upstreamRepository = "${{ github.repository == 'deepseek-harness/deepseek-harness' }}"
+    // The synchronized pack workflows remain present, but only their owning
+    // repository has the matching release families and registry authority.
     for (const file of ['release.yml', 'release-vendor.yml']) {
       const workflow = loadWorkflow(`.github/workflows/${file}`)
       if (!isRecord(workflow.jobs)) throw new TypeError(`${file} must define jobs`)
       expect(Object.keys(workflow.jobs).sort()).toEqual(['pack'])
+      expect(workflowJob(workflow, 'pack').if).toBe(upstreamRepository)
     }
 
     // publication is workflow_dispatch-only (never a PR check) and keeps the
@@ -487,6 +490,18 @@ describe('npm release workflows', () => {
       if (!isRecord(publish)) throw new TypeError(`${file} must define a publish job`)
       expect(publish.environment).toBe('npm-publish')
       expect(publish.concurrency).toMatchObject({ group: 'Release-publish' })
+    }
+  })
+})
+
+describe('Dependabot version updates', () => {
+  it('leaves routine baselines to DSH synchronization', () => {
+    const config = loadWorkflow('.github/dependabot.yml')
+    if (!Array.isArray(config.updates)) throw new TypeError('dependabot.yml must define updates')
+    expect(config.updates).toHaveLength(3)
+    for (const update of config.updates) {
+      if (!isRecord(update)) throw new TypeError('each Dependabot update must be an object')
+      expect(update['open-pull-requests-limit']).toBe(0)
     }
   })
 })

@@ -2,10 +2,11 @@
 # vendor/, each on its own version line. This sequence releases independently of
 # dsh and of the native packages.
 #
-# Pack runs without credentials on every pull request and master push.
-# Publication is a manual workflow_dispatch of release-vendor-publish.yml from a
-# vendor-* tag; a vendor release can carry several versions, so each package has
-# its own tag.
+# Pack runs without credentials on every upstream pull request and master push.
+# A downstream product keeps this synchronized workflow but does not publish the
+# upstream vendored-framework family. Publication is a manual workflow_dispatch
+# of release-vendor-publish.yml from a vendor-* tag; a vendor release can carry
+# several versions, so each package has its own tag.
 name: Release (vendor)
 
 on:
@@ -29,6 +30,7 @@ env:
 jobs:
   pack:
     name: Pack npm tarballs
+    if: ${{ github.repository == 'deepseek-harness/deepseek-harness' }}
     runs-on: ubuntu-24.04
     steps:
       # Complete history: the release scripts read tags.
