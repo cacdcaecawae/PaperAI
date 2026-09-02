@@ -65,6 +65,8 @@ interface PresetOption {
 
 `set(session, name)` resolves the preset (unknown names throw), appends a log-only `permission/preset` event unless `name` is already the effective preset, then writes each knob through its own setter — `setSandboxMode` from [dsh-sandbox-policy](../../packages/sandbox/sandbox-policy) and `setApprovalPolicy` from [dsh-user-approval](../../packages/interaction/user-approval) — only when that knob's effective value changes. The selection event precedes the knob events in the same turn, and re-selecting the effective preset appends nothing at all.
 
+The optional `/permission` command resolves the target bundle, then dispatches the Agent-scoped `permission/preset-apply` waterfall before calling the same write path. A listener performs provider-specific permission work and calls `next()` only after the target is accepted; throwing or rejecting fails the command before any preset, sandbox, or approval event is appended. The command signal is part of the payload. Direct `set()` calls do not cross this waterfall: initialization and other programmatic callers own their synchronization, while committed knob events remain available to reconciliation observers.
+
 `permission/preset` is durable, log-only user intent: it stays out of the model transcript (the knob events own the model-visible consequences through their consumers), and it exists so `current()` can preserve WHICH preset the user chose when two presets share a bundle; `effectivePermissionPreset(events)` folds the last one, and replay needs no catch-up state. The complete event declaration is in the [persistence log event catalog](../persistence-catalog.md); the method signatures are in the generated [service catalog](#ctxpermissionpresets--permissionpresetservice).
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
@@ -126,6 +128,36 @@ set(session: Session, name: string): void
 ```
 
 Types: [Session](session.md) · [SessionEvent](session.md)
+
+Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)
+
+<a id="permission-events"></a>
+
+### `permission/*` events
+
+<a id="permissionpreset-apply--waterfall"></a>
+
+#### `permission/preset-apply` — waterfall
+
+Await provider-specific permission work before the selected preset and its knobs become durable. A listener calls `next()` only after its external permission state accepts the target values. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that Agent's switch.
+
+```ts cordis-catalog
+/**
+ * Await provider-specific permission work before the selected preset and
+ * its knobs become durable. A listener calls `next()` only after its
+ * external permission state accepts the target values.
+ * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that Agent's switch.
+ * @param payload.agent - Exact Agent whose permission select initiated the switch.
+ * @param payload.preset - Selected preset name.
+ * @param payload.sandbox - Sandbox mode the preset will commit.
+ * @param payload.approval - Approval policy the preset will commit.
+ * @param payload.signal - Cancellation signal owned by the command request.
+ * @mode waterfall
+ */
+'permission/preset-apply'( this: Scoped<Agent>, payload: { agent: Agent preset: string sandbox: SandboxMode approval: ApprovalPolicy signal: AbortSignal }, next: () => Promise<CommandResult>, ): Promise<CommandResult>
+```
+
+Types: [Agent](core.md) · [ApprovalPolicy](approval.md) · [CommandResult](commands.md) · [SandboxMode](sandbox.md) · [Scoped](scope.md)
 
 Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -515,7 +515,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/paperai/agent-acp/src/agent.ts:43`](../packages/paperai/agent-acp/src/agent.ts)
+来源：[`packages/paperai/agent-acp/src/agent.ts:44`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 
@@ -533,7 +533,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'permission/preset': { preset: string }
 ```
 
-来源：[`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
+来源：[`packages/interaction/permission-presets/src/index.ts:79`](../packages/interaction/permission-presets/src/index.ts)
 
 ### `plan/*`
 

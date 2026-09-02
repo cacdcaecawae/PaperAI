@@ -513,7 +513,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:43`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:44`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 
@@ -531,7 +531,7 @@ Source: [`packages/paperai/agent-acp/src/agent.ts:43`](../packages/paperai/agent
 'permission/preset': { preset: string }
 ```
 
-Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
+Source: [`packages/interaction/permission-presets/src/index.ts:79`](../packages/interaction/permission-presets/src/index.ts)
 
 ### `plan/*`
 

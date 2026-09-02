@@ -285,6 +285,11 @@ export interface LaunchOptions {
     /** The preset a session that names none is composed from. */
     default: string
   }
+  /** Override the PaperAI ACP launcher row after the PaperAI overlay inserts it. */
+  paperAiAcp?: {
+    codex?: { command?: string; args?: string[]; env?: Record<string, string> }
+    claude?: { command?: string; args?: string[]; env?: Record<string, string> }
+  }
   /**
    * Mount the shipped telemetry row in FULL mode against this exporter URL
    * instead of disabling it. Used to pin a real backend disclosure in
@@ -494,6 +499,9 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       // Never the derived harness-home root: a developer's own presets must not
       // be able to change a golden, whatever roots a scenario asks for.
       : [{ id: 'agent-presets', config: { ...options.agentPresets, includeUserRoot: false } }],
+    ...options.paperAiAcp === undefined
+      ? []
+      : [{ id: 'paperai-agent-acp', config: options.paperAiAcp }],
     ...options.toolsMode === undefined ? [] : [{ id: 'tools', config: { mode: options.toolsMode } }],
     // The shipped Web bundle already owns both runners and the Cordis UI. This
     // scenario adds only the model-facing tools that exercise those services.

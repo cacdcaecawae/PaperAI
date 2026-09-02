@@ -49,7 +49,7 @@ The Working DOCX is the authoritative editable body. Imported source files and t
 
 PaperAI domain services are independent from the DSH platform and are exposed through Cordis Service Definitions with replaceable Service Providers:
 
-- project and repository services own PaperAI metadata while projecting projects into DSH workspaces;
+- project and repository services own PaperAI metadata while projecting projects into DSH workspaces; project roots use canonical real paths, with Windows case folding, so symlink, junction, and spelling aliases cannot create competing identities; missing persisted roots retain a lexical identity until they become resolvable;
 - the OfficeCLI document-engine Provider serializes mutations per Working DOCX;
 - document, template, HIT template-pack, gate, commit, and export services own their respective business rules;
 - one command contract is consumed by browser remotes and the PaperAI MCP transport;
@@ -88,6 +88,7 @@ The implementation proceeds as runnable vertical slices: product profile and bra
 - The document workbench exposes Preview, Edit, History, and Template Gate without shrinking to the former 300–520 px Tool-details width.
 - HIT templates are bundled, custom templates can be uploaded and confirmed, source files remain unchanged, and derived documents obey role compatibility.
 - Human and Agent changes use one serialized commit path with correct provenance, conflict detection, paragraph history, and rollback.
+- Project repair and lookup treat symlink, junction, case, and short-path aliases as one root and reject ambiguous persisted duplicates.
 - Draft export works while incomplete; delivery export runs the template gate and blocks active hard errors.
 - PaperAI MCP and browser operations call the same domain command contract.
 - Loader/composition tests cover every product-visible plugin, service tests cover domain behavior, and browser smoke tests cover the main project-to-export workflow at desktop and constrained widths.

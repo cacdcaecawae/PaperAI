@@ -11,7 +11,7 @@
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'command.description': '选择本会话使用的模型',
-  'option.loadError': '目录加载失败：{message}',
+  'option.loadError': '暂时无法加载该提供方的模型。',
   'trigger.fallback': '选择模型',
   'trigger.selectAria': '选择模型',
   'trigger.aria': '选择模型，当前 {model}',
@@ -21,9 +21,10 @@ export const zh = {
   'menu.effort': '推理等级',
   'effort.providerDefault': 'Default',
   'status.loading': '正在刷新模型列表…',
-  'error.action': '模型操作失败：{message}',
+  'error.load': '暂时无法加载模型列表，请重试。',
+  'error.select': '未能切换模型，请重试。',
   'action.reload': '重新加载',
-  'warning.groupLoad': '{name} 加载失败：{message}',
+  'warning.groupLoad': '暂时无法加载 {name} 的模型。',
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
@@ -35,7 +36,7 @@ export type ModelKey = keyof typeof zh
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
   'command.description': 'Select the model for this conversation',
-  'option.loadError': 'Catalog failed to load: {message}',
+  'option.loadError': 'Models for this provider are temporarily unavailable.',
   'trigger.fallback': 'Select model',
   'trigger.selectAria': 'Select model',
   'trigger.aria': 'Select model, current {model}',
@@ -45,9 +46,10 @@ export const en = {
   'menu.effort': 'Effort',
   'effort.providerDefault': 'Default',
   'status.loading': 'Refreshing model list…',
-  'error.action': 'Model operation failed: {message}',
+  'error.load': 'The model list could not be loaded. Try again.',
+  'error.select': 'The model could not be changed. Try again.',
   'action.reload': 'Reload',
-  'warning.groupLoad': '{name} failed to load: {message}',
+  'warning.groupLoad': 'Models for {name} are temporarily unavailable.',
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',

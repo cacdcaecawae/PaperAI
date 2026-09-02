@@ -146,7 +146,7 @@ describe('ModelSelect reasoning effort', () => {
     }]
     const directory = createSnapshotStore<ModelDirectoryState>(state({ groups }))
     const select = vi.fn(async () => {
-      directory.set(state({ groups, status: 'error', error: 'model-unavailable: session already contains images' }))
+      directory.set(state({ groups, status: 'error', error: 'select' }))
       return false
     })
     render(<ModelSelect
@@ -162,9 +162,33 @@ describe('ModelSelect reasoning effort', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
     fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
     const toast = await screen.findByRole('alert')
-    expect(toast.textContent).toContain('模型操作失败：model-unavailable: session already contains images')
+    expect(toast.textContent).toContain('未能切换模型，请重试。')
+    expect(toast.textContent).not.toContain('model-unavailable')
     // The selection failure does not render the in-menu load strip (no Retry).
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+  })
+
+  it('keeps whole-request and provider diagnostics out of load failure surfaces', () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({
+      status: 'error',
+      error: 'load',
+      failures: [{ id: 'codex', name: 'Codex', message: 'resume failed: Internal error' }],
+    }))
+    render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+    expect(screen.getByRole('alert').textContent).toContain('暂时无法加载模型列表，请重试。')
+    expect(screen.getByRole('status').textContent).toContain('暂时无法加载 Codex 的模型。')
+    expect(document.body.textContent).not.toContain('resume failed')
+    expect(document.body.textContent).not.toContain('Internal error')
   })
 
   it('renders no Agent-bound control for an addressed subagent session', () => {

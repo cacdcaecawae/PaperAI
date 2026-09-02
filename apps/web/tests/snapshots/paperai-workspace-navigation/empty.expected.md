@@ -4,14 +4,13 @@
 - text: {{cwd}}/empty-project
 - region "工作区详情":
   - heading "项目内容" [level=3]
-  - button "文档类型":
+  - button "文档类型，当前：论文正文":
     - text: 论文正文
     - img
-  - button "Choose File"
   - button "导入 Word":
     - img
     - text: 导入 Word
-  - status: 暂无项目内容。选择“导入 Word”即可添加。
+  - status: 暂无项目内容
   - heading "会话" [level=3]
   - button "在“Empty project”中新建会话":
     - img

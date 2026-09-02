@@ -11,9 +11,11 @@
 // its own copy still renders.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { hasClass, installAssembledBootEnv, mountAssembledApp, REFRESHING_GOLDEN } from './assembled-boot.ts'
+import {
+  hasClass, installAssembledBootEnv, mountAssembledApp, openAssembledFixtureHistory, REFRESHING_GOLDEN,
+} from './assembled-boot.ts'
 
 const EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/max-tokens-notice/history-turn.expected.txt')
 
@@ -33,9 +35,7 @@ function noticeShape(row: Element): string {
 describe('assembled max-tokens turn-end notice', () => {
   it('renders the localized truncation notice after the cut-off answer instead of ending silently', async () => {
     mountAssembledApp()
-
-    const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
-    fireEvent.click(await within(tree).findByText('Fixture 历史会话'))
+    await openAssembledFixtureHistory()
     // The truncated answer itself stays in the flow: the notice supplements the
     // partial output, it never replaces it.
     await screen.findByText(/条目 3：这一条写到一半被/, undefined, { timeout: 10_000 })

@@ -3,39 +3,40 @@
   flex: none;
 }
 
-.page,
-.fold,
+.page {
+  fill: currentcolor;
+}
+
+/* The dog-ear sits in the cut corner at reduced opacity, so the folded flap
+   reads as the same sheet rather than a notch punched out of it. */
+.fold {
+  fill: currentcolor;
+  opacity: 0.38;
+}
+
 .rule,
 .accentRule {
   fill: none;
-  stroke: currentcolor;
+  stroke-width: 1.5;
   stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.page,
-.fold {
-  stroke-width: 1.55;
-}
-
-.rule,
-.accentRule {
-  stroke-width: 1.35;
 }
 
 .rule {
-  opacity: 0.62;
+  stroke: var(--dsw-alias-bg-base);
 }
 
 .accentRule {
   stroke: var(--dsw-alias-state-business-primary);
 }
 
+/* Name and descriptor are separated by space alone: size and colour already
+   rank them, so a rule between two words is redundant chrome. */
 .wordmark {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
-  align-items: center;
+  align-items: baseline;
+  gap: 7px;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
@@ -49,19 +50,11 @@
   letter-spacing: -0.02em;
 }
 
-.divider {
-  width: 1px;
-  height: 10px;
-  margin: 0 7px;
-  flex: none;
-  background: var(--dsw-alias-border-l3);
-}
-
 .descriptor {
   overflow: hidden;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
-  line-height: 14px;
+  line-height: 16px;
   text-overflow: ellipsis;
 }

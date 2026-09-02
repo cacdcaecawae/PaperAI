@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -142,12 +142,16 @@ describe('PaperProjectService', () => {
   })
 
   it('repairs a recreated workspace association while preserving project identity and name', async () => {
-    const root = await temporaryRoot('repair')
+    const parent = await temporaryRoot('repair')
+    const root = join(parent, 'canonical')
+    const alias = join(parent, 'alias')
+    await mkdir(root)
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
     const prior: ProjectRecord = {
       id: ProjectId('project-stable'),
       workspaceId: 'workspace-gone',
       name: '已有名称',
-      rootPath: root,
+      rootPath: alias,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     }
@@ -162,23 +166,27 @@ describe('PaperProjectService', () => {
       name: prior.name,
       createdAt: prior.createdAt,
       workspaceId: 'workspace-1',
-      rootPath: root,
+      rootPath: await realpath(root),
     })
     expect(result.project.updatedAt).not.toBe(prior.updatedAt)
     expect(harness.putProject).toHaveBeenCalledTimes(1)
   })
 
   it('fails loud on ambiguous records, blank intent, and invalid deployment limits', async () => {
-    const root = await temporaryRoot('invalid')
-    const record = (id: string): ProjectRecord => ({
+    const parent = await temporaryRoot('invalid')
+    const root = join(parent, 'canonical')
+    const alias = join(parent, 'alias')
+    await mkdir(root)
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    const record = (id: string, rootPath: string): ProjectRecord => ({
       id: ProjectId(id),
       workspaceId: `workspace-${id}`,
       name: id,
-      rootPath: root,
+      rootPath,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     })
-    const duplicates = await projectHarness({ projects: [record('one'), record('two')] })
+    const duplicates = await projectHarness({ projects: [record('one', root), record('two', alias)] })
     const { service } = await duplicates.load()
     await expect(service.create({ rootPath: root })).rejects.toThrow('multiple PaperAI project records')
     await expect(service.findByPath('   ')).rejects.toThrow('must not be blank')

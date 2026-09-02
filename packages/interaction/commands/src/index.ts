@@ -64,6 +64,12 @@ export interface CommandDefinition {
    * that payload in the session log.
    */
   readonly recordInput?: boolean
+  /**
+   * Whether a thrown handler's message may be stored in the user-visible
+   * `command/done` record. Defaults to true. Set false when exceptions carry
+   * provider or host diagnostics that belong only in logs.
+   */
+  readonly exposeThrownError?: boolean
   /** Execute against the receiving agent without sending the command to the model. */
   readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>
 }
@@ -180,6 +186,9 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
   if (typeof definition.handler !== 'function') {
     throw new TypeError(`command "${definition.name}" handler must be a function`)
   }
+  if (definition.exposeThrownError !== undefined && typeof definition.exposeThrownError !== 'boolean') {
+    throw new TypeError(`command "${definition.name}" exposeThrownError must be a boolean`)
+  }
   const rawInput: unknown = definition.input
   let input: CommandInputDescriptor | undefined
   if (rawInput !== undefined) {
@@ -203,6 +212,7 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
     description: definition.description,
     ...input === undefined ? {} : { input },
     ...definition.recordInput === undefined ? {} : { recordInput: definition.recordInput },
+    ...definition.exposeThrownError === undefined ? {} : { exposeThrownError: definition.exposeThrownError },
     handler: definition.handler,
   })
   const descriptor = Object.freeze({
@@ -370,7 +380,7 @@ export class CommandRuntime extends TypertRemoteService {
         if (error instanceof AttachmentError) {
           return settle({ kind: 'error', text: error.message })
         }
-        this.settleThrown(agent.session, parsed.name, commandId, error)
+        this.settleThrown(agent.session, command.definition, commandId, error)
         throw error
       }
       // Cancellation must be honored BEFORE the handler runs: admission may
@@ -379,7 +389,7 @@ export class CommandRuntime extends TypertRemoteService {
       // image objects stay unreferenced and are deferred-GC territory.)
       const cancelledDuringAdmission = cancellationOf(signal)
       if (cancelledDuringAdmission !== undefined) {
-        this.settleThrown(agent.session, parsed.name, commandId, cancelledDuringAdmission)
+        this.settleThrown(agent.session, command.definition, commandId, cancelledDuringAdmission)
         throw cancelledDuringAdmission
       }
     }
@@ -389,21 +399,25 @@ export class CommandRuntime extends TypertRemoteService {
       const output = command.definition.handler(invocation)
       result = normalizeResult(parsed.name, await withAbort(Promise.resolve(output), signal))
     } catch (error: unknown) {
-      this.settleThrown(agent.session, parsed.name, commandId, error)
+      this.settleThrown(agent.session, command.definition, commandId, error)
       throw error
     }
     return settle(result)
   }
 
   /** Contained `command/done` error append for a thrown handler or admission failure. */
-  private settleThrown(session: Session, command: string, commandId: CommandId, error: unknown): void {
+  private settleThrown(session: Session, command: CommandDefinition, commandId: CommandId, error: unknown): void {
+    const rendered = error instanceof Error ? error.message : renderThrown(error)
+    if (command.exposeThrownError === false) {
+      this.ctx.logger.warn(`command "${command.name}" failed: ${rendered}`)
+    }
     try {
       this.appendLifecycle(session, 'command/done', {
         commandId, kind: 'error',
-        text: error instanceof Error ? error.message : renderThrown(error),
+        ...command.exposeThrownError === false ? {} : { text: rendered },
       })
     } catch (appendError: unknown) {
-      this.ctx.logger.warn(`command "${command}": command/done append failed: ${renderThrown(appendError)}`)
+      this.ctx.logger.warn(`command "${command.name}": command/done append failed: ${renderThrown(appendError)}`)
     }
   }
 

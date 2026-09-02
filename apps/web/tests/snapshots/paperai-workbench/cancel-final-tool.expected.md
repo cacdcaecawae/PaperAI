@@ -1,0 +1,5 @@
+- button "Tool call paperai.edit · introduction" [expanded]:
+  - img
+  - text: Tool call paperai.edit · introduction
+- text: "IN { \"section\": \"introduction\" } OUT {\"changedParagraphs\":1}"
+- button "Inspect"

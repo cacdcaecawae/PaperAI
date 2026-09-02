@@ -16,9 +16,11 @@ Treating every load failure as replaceable would be unsafe. A DSH Session with a
 
 A load failure for any DSH Session with user or turn history remains fatal. Cancellation also remains fatal instead of entering the replacement path. This rule depends on DSH-owned durable events rather than provider error text, because ACP adapters may normalize a missing or non-durable provider thread to a generic internal error.
 
+The Web prompt admission gate treats an Agent-owned model controller as the authoritative route for its provider. The shared LLM adapter registry is consulted only for Agents without such a controller. Codex and Claude ACP Agents therefore do not need a duplicate DSH LLM adapter registration merely to submit their first prompt.
+
 ## Verification
 
-A real `codex-acp` adapter test starts a blank thread, makes its fake Codex App Server reject the subsequent resume, and verifies that PaperAI creates a second thread with the required native permission mode. Agent lifecycle tests verify the new link for a blank persisted DSH Session and verify that the same load failure never reaches `session/new` after a `turn/start` event exists.
+A real `codex-acp` adapter test starts a blank thread, makes its fake Codex App Server reject the subsequent resume, and verifies that PaperAI creates a second thread with the required native permission mode. Agent lifecycle tests verify the new link for a blank persisted DSH Session and verify that the same load failure never reaches `session/new` after a `turn/start` event exists. A gateway test admits a prompt through an Agent-owned Codex model controller when no Codex route exists in the LLM adapter registry, and the PaperAI browser snapshot sends and cancels a prompt through that assembled path.
 
 ## Alternatives considered
 
@@ -30,4 +32,4 @@ A real `codex-acp` adapter test starts a blank thread, makes its fake Codex App 
 
 ## Consequences
 
-Blank Codex Sessions survive a Host or ACP process restart and remain usable for permission changes, model discovery, and their first prompt. Sessions with conversation history fail closed when provider state cannot be restored, preserving the requirement that PaperAI never presents a fresh provider context as a continuation of existing work.
+Blank Codex Sessions survive a Host or ACP process restart and remain usable for permission changes, model discovery, and their first prompt. Agent-owned providers remain prompt-routable without duplicate LLM adapter registrations. Sessions with conversation history fail closed when provider state cannot be restored, preserving the requirement that PaperAI never presents a fresh provider context as a continuation of existing work.

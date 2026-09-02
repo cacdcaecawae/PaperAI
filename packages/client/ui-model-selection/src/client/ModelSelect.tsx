@@ -171,10 +171,9 @@ export function ModelSelect(
       if (rootRef.current !== null) close(true)
       return
     }
-    const message = directory.getSnapshot().error
-    if (message !== null) {
+    if (directory.getSnapshot().error === 'select') {
       toastSeq.current += 1
-      setToast({ seq: toastSeq.current, text: t('error.action', { message }) })
+      setToast({ seq: toastSeq.current, text: t('error.select') })
     }
   }
 
@@ -271,18 +270,22 @@ export function ModelSelect(
               {state.status === 'loading' && (
                 <div className={css.status}>{t('status.loading')}</div>
               )}
-              {state.error !== null && lastActionRef.current === 'load' && (
-                <div className={css.error}>
-                  <span>{t('error.action', { message: state.error })}</span>
+              {state.error === 'load' && lastActionRef.current === 'load' && (
+                <div className={css.error} role="alert">
+                  <span>{t('error.load')}</span>
                   <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
                 </div>
               )}
-              {state.failures.map(failure => (
-                <div className={css.warning} key={failure.id}>
-                  <span>{t('warning.groupLoad', { name: failure.name, message: failure.message })}</span>
-                  <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
+              {state.failures.length > 0 && (
+                <div role="status">
+                  {state.failures.map(failure => (
+                    <div className={css.warning} key={failure.id}>
+                      <span>{t('warning.groupLoad', { name: failure.name })}</span>
+                      <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
               <div className={clsx(css.groups, 'scrollable')}>
                 {state.groups.map((group) => {
                   const headingId = `${id}-${group.id}`
@@ -327,9 +330,9 @@ export function ModelSelect(
 
           {pane === 'effort' && (
             <>
-              {state.error !== null && lastActionRef.current === 'load' && (
-                <div className={css.error}>
-                  <span>{t('error.action', { message: state.error })}</span>
+              {state.error === 'load' && lastActionRef.current === 'load' && (
+                <div className={css.error} role="alert">
+                  <span>{t('error.load')}</span>
                   <button type="button" className={css.retry} onClick={reload}>{t('action.reload')}</button>
                 </div>
               )}

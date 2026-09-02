@@ -1,6 +1,6 @@
 /** PaperAI read-only preview, semantic-node edit, version, and template-gate details view. */
 
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   Button, DetailsViewShell, DisclosureRow, IconCheckOutline14, IconChecklistOutline14,
@@ -104,11 +104,26 @@ function SelectedNodeEditor({
   resolveExternalConflict: PaperAIDocumentWorkbenchProps['resolveExternalConflict']
   t: PaperAIDocumentWorkbenchProps['t']
 }): ReactNode {
+  const conflictHeading = useRef<HTMLElement>(null)
+  const editor = useRef<HTMLTextAreaElement>(null)
+  const hadConflict = useRef(state.externalConflict !== null)
+  const conflictFocusKey = state.externalConflict === null || state.selectedNode === null
+    ? null
+    : `${state.selectedNode.baseRevision}:${state.selectedNode.baseCommitId ?? ''}`
+  useEffect(() => {
+    if (conflictFocusKey === null) return
+    conflictHeading.current?.focus({ preventScroll: true })
+  }, [conflictFocusKey])
+  useEffect(() => {
+    const resolved = hadConflict.current && state.externalConflict === null
+    hadConflict.current = state.externalConflict !== null
+    if (resolved) editor.current?.focus({ preventScroll: true })
+  }, [state.externalConflict])
   if (state.nodePhase === 'loading') {
     return <p className={css.nodeMessage} aria-live="polite">{t('edit.loading')}</p>
   }
   if (state.nodePhase === 'error') {
-    return <p className={css.nodeError} role="alert">{t('edit.nodeError', { message: state.nodeError ?? '' })}</p>
+    return <p className={css.nodeError} role="alert">{t('edit.nodeError')}</p>
   }
   const buffer = state.selectedNode
   if (buffer === null) return <p className={css.nodeMessage}>{t('edit.select')}</p>
@@ -120,7 +135,7 @@ function SelectedNodeEditor({
       {conflict !== null && (
         <section className={css.conflictResolution} aria-labelledby="paperai-conflict-heading">
           <div className={css.conflictHeading}>
-            <strong id="paperai-conflict-heading">{t('conflict.title')}</strong>
+            <strong ref={conflictHeading} id="paperai-conflict-heading" tabIndex={-1}>{t('conflict.title')}</strong>
             <span>{t('conflict.description')}</span>
           </div>
           <div className={css.conflictComparison}>
@@ -189,6 +204,7 @@ function SelectedNodeEditor({
         </div>
       </div>
       <textarea
+        ref={editor}
         className={css.textEditor}
         aria-label={t('edit.textLabel', { name: buffer.label })}
         value={state.draft}
@@ -396,7 +412,7 @@ function TemplateCatalogView({
         name: wordStem(file.name),
         usage,
       })
-      if (!result.ok) setUploadError(result.error)
+      if (!result.ok) setUploadError(t('template.uploadFailed'))
     } catch {
       setUploadError(t('import.invalid'))
     } finally {
@@ -598,7 +614,8 @@ function TemplateCatalogView({
             <button
               type="button"
               className={css.nativeSelect}
-              aria-label={t('template.usage')}
+              aria-label={t('template.usageAria', { usage: t(USAGE_KEYS[usage]) })}
+              aria-haspopup="menu"
               aria-expanded={usageMenuOpen}
               disabled={busy}
               onClick={() => { setUsageMenuOpen(open => !open) }}
@@ -617,6 +634,7 @@ function TemplateCatalogView({
           ref={uploadInput}
           className={css.visuallyHidden}
           type="file"
+          aria-hidden="true"
           accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           tabIndex={-1}
           onChange={(event) => {
@@ -860,14 +878,14 @@ export function DocumentWorkbench({
         </div>
       )}
       {state.actionError !== null && (
-        <p className={css.actionError} role="alert">{t('workbench.actionError', { message: state.actionError })}</p>
+        <p className={css.actionError} role="alert">{t('workbench.actionError')}</p>
       )}
       <main className={css.body}>
         {state.phase === 'idle' && <p className={css.centerMessage}>{t('workbench.idle')}</p>}
         {state.phase === 'loading' && <p className={css.centerMessage} aria-live="polite">{t('workbench.loading')}</p>}
         {state.phase === 'error' && (
           <div className={css.failure} role="alert">
-            <span>{state.error ?? t('workbench.error')}</span>
+            <span>{t('workbench.error')}</span>
             <Button
               variant="outline"
               size="sm"

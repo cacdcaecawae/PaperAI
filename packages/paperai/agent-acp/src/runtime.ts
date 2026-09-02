@@ -175,6 +175,7 @@ export class AcpRuntime {
    * @param signal Cancels process startup and ACP initialization requests.
    * @param replaceFailedLoad Whether a rejected load may create a replacement provider session.
    * Callers may enable it only when no provider conversation history exists.
+   * @param lifetimeSignal Closes the provider process when this runtime generation is retired.
    * @returns Initialization metadata and the model selector advertised by the active session.
    * @throws When initialization, a non-replaceable load, session creation, or native-mode synchronization fails.
    */
@@ -183,6 +184,7 @@ export class AcpRuntime {
     sandboxMode: AcpSandboxMode,
     signal: AbortSignal,
     replaceFailedLoad = false,
+    lifetimeSignal: AbortSignal = signal,
   ): Promise<AcpSessionStart> {
     signal.throwIfAborted()
     const argv = resolveLaunch(this.provider)
@@ -195,7 +197,7 @@ export class AcpRuntime {
         stderr: { maxBytes: 64 * 1024 },
       },
       graceMs: 2_000,
-      signal,
+      signal: lifetimeSignal,
       env: {
         ...this.provider.env,
         ...this.provider.id === 'codex'
@@ -321,18 +323,17 @@ export class AcpRuntime {
   /**
    * Send one prompt while projecting notifications through the registered callback.
    * @param prompt Content blocks to send to the active provider session.
-   * @param signal Cancels the ACP prompt request.
    * @returns The provider response after already-read session updates reach the callback.
    */
-  async prompt(prompt: readonly ContentBlock[], signal: AbortSignal): Promise<PromptResponse> {
+  async prompt(prompt: readonly ContentBlock[]): Promise<PromptResponse> {
     const connection = this.requireConnection()
     const sessionId = this.requireSessionId()
     this.promptActive = true
     try {
-      const response = await raceAbort(connection.agent.request(acp.methods.agent.session.prompt, {
+      const response = await connection.agent.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [...prompt],
-      }, { cancellationSignal: signal }), signal)
+      })
       // The ACP SDK dispatches responses independently from preceding
       // notifications. Let already-read updates reach the projection before the
       // prompt completion closes it.

@@ -65,6 +65,8 @@ interface PresetOption {
 
 `set(session, name)` 解析预设（未知名称抛出异常），在 `name` 尚不是生效预设时追加一条仅记日志的 `permission/preset` 事件，然后通过各旋钮自己的 setter（[dsh-sandbox-policy](../../packages/sandbox/sandbox-policy) 的 `setSandboxMode` 与 [dsh-user-approval](../../packages/interaction/user-approval) 的 `setApprovalPolicy`）写入，且仅当该 knob的生效值发生变化时才写。同一轮次内，选择事件先于旋钮事件出现；重新选择当前生效的预设则什么都不追加。
 
+可选的 `/permission` 命令会先解析目标组合，再分派 Agent 作用域的 `permission/preset-apply` waterfall，然后才调用同一写入路径。监听器执行提供方特定的权限操作，并且只在目标被接受后调用 `next()`；抛出异常或返回拒绝会在追加任何 preset、沙箱或审批事件之前使命令失败。命令信号包含在 payload 中。直接调用 `set()` 不会经过该 waterfall：初始化和其他程序化调用方自行负责同步，而已提交的 knob 事件仍可由校准观察器处理。
+
 `permission/preset` 是持久、仅记日志的用户意图：它不进入模型 transcript（文本记录），模型可见的后果由 knob 事件经各自消费方承担；它存在是为了在两个预设共享同一个旋钮组合时，让 `current()` 仍能保住用户选择的究竟是哪一个预设；`effectivePermissionPreset(events)` 折叠最后一条，回放不需要任何追赶状态。完整事件声明见[持久化日志事件目录](../persistence-catalog.zh.md)；方法签名见生成的[服务目录](#ctxpermissionpresets--permissionpresetservice)。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
@@ -126,6 +128,36 @@ set(session: Session, name: string): void
 ```
 
 Types: [Session](session.zh.md) · [SessionEvent](session.zh.md)
+
+Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)
+
+<a id="permission-events"></a>
+
+### `permission/*` events
+
+<a id="permissionpreset-apply--waterfall"></a>
+
+#### `permission/preset-apply` — waterfall
+
+Await provider-specific permission work before the selected preset and its knobs become durable. A listener calls `next()` only after its external permission state accepts the target values. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that Agent's switch.
+
+```ts cordis-catalog
+/**
+ * Await provider-specific permission work before the selected preset and
+ * its knobs become durable. A listener calls `next()` only after its
+ * external permission state accepts the target values.
+ * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that Agent's switch.
+ * @param payload.agent - Exact Agent whose permission select initiated the switch.
+ * @param payload.preset - Selected preset name.
+ * @param payload.sandbox - Sandbox mode the preset will commit.
+ * @param payload.approval - Approval policy the preset will commit.
+ * @param payload.signal - Cancellation signal owned by the command request.
+ * @mode waterfall
+ */
+'permission/preset-apply'( this: Scoped<Agent>, payload: { agent: Agent preset: string sandbox: SandboxMode approval: ApprovalPolicy signal: AbortSignal }, next: () => Promise<CommandResult>, ): Promise<CommandResult>
+```
+
+Types: [Agent](core.zh.md) · [ApprovalPolicy](approval.zh.md) · [CommandResult](commands.zh.md) · [SandboxMode](sandbox.zh.md) · [Scoped](scope.zh.md)
 
 Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)
 <!-- END GENERATED cordis-surface -->

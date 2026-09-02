@@ -12,4 +12,4 @@
 - text: 基于 {{uuid}}
 - button "放弃修改" [disabled]
 - button "提交并创建版本" [disabled]
-- textbox "编辑节点：Initial browser paragraph — 外部会话写入的最新文本": 浏览器中的本地草稿
+- textbox "编辑节点：Initial browser paragraph — 外部会话写入的最新文本": 浏览器合并中的草稿

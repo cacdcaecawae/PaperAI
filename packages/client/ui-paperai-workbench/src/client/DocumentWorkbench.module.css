@@ -37,8 +37,8 @@
 
 .externalUpdate span {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .externalActions {
@@ -247,7 +247,7 @@
 .nodeKind {
   flex: none;
   color: var(--dsw-alias-label-dimmed);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .outlineEmpty,
@@ -290,8 +290,8 @@
 
 .nodeEditorHeader span {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .nodeActions {
@@ -330,8 +330,8 @@
 .conflictHeading > span,
 .conflictActions > span {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .conflictComparison {
@@ -356,8 +356,8 @@
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .conflictActions {
@@ -548,11 +548,6 @@
   line-height: 18px;
 }
 
-.templateMain small {
-  font-size: 11px;
-  line-height: 17px;
-}
-
 .templateRows {
   border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
@@ -648,8 +643,8 @@
 .requirementList span,
 .requirementList small {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .contractActions {
@@ -665,8 +660,8 @@
   align-items: center;
   gap: 5px;
   color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
   cursor: pointer;
 }
 
@@ -807,8 +802,8 @@
   display: block;
   margin-top: 3px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .visuallyHidden {

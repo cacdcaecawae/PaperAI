@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { DocumentWorkbench } from '../src/client/DocumentWorkbench.tsx'
@@ -77,7 +77,8 @@ function workbenchProps(state: PaperAIWorkbenchState) {
   const validate = vi.fn(async () => ({ ok: true as const }))
   const loadTemplates = vi.fn(async () => ({ ok: true as const }))
   const installTemplate = vi.fn(async () => ({ ok: true as const }))
-  const uploadTemplate = vi.fn(async () => ({ ok: true as const }))
+  const uploadTemplate = vi.fn<PaperAIDocumentWorkbenchProps['uploadTemplate']>()
+    .mockResolvedValue({ ok: true })
   const confirmTemplate = vi.fn(async () => ({ ok: true as const }))
   const associateTemplate = vi.fn(async () => ({ ok: true as const }))
   const exportDocument = vi.fn(async () => ({ ok: true as const }))
@@ -159,6 +160,8 @@ describe('WorkspaceContent', () => {
       phase: 'error', resources: [], selected: null, error: 'Host offline',
     })
     const view = render(<WorkspaceContent {...failed.props} />)
+    expect(screen.getByRole('alert').textContent).toContain('暂时无法读取项目内容。')
+    expect(screen.getByRole('alert').textContent).not.toContain('Host offline')
     expect(screen.getByRole('button', { name: '导入 Word' })).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(failed.refreshResources).toHaveBeenCalledWith(WORKSPACE_ID)
@@ -171,7 +174,7 @@ describe('WorkspaceContent', () => {
     })
     render(<WorkspaceContent {...empty.props} />)
     expect(screen.getByRole('heading', { name: '项目内容', level: 3 })).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toBe('暂无项目内容。选择“导入 Word”即可添加。')
+    expect(screen.getByRole('status').textContent).toBe('暂无项目内容')
     expect(screen.queryByRole('region')).toBeNull()
   })
 
@@ -244,10 +247,15 @@ describe('WorkspaceContent', () => {
       phase: 'ready', resources: RESOURCES.resources, selected: null, error: null,
     })
     const view = render(<WorkspaceContent {...b.props} />)
-    fireEvent.click(screen.getByRole('button', { name: '文档类型' }))
+    const role = screen.getByRole('button', { name: '文档类型，当前：论文正文' })
+    expect(role.getAttribute('aria-haspopup')).toBe('menu')
+    expect(role.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(role)
+    expect(role.getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(screen.getByRole('menuitem', { name: '开题报告' }))
     const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
     expect(input).not.toBeNull()
+    expect(input?.getAttribute('aria-hidden')).toBe('true')
     fireEvent.change(input!, {
       target: { files: [new File(['word'], 'proposal.docx', { type: 'application/zip' })] },
     })
@@ -262,7 +270,7 @@ describe('WorkspaceContent', () => {
     expect(screen.queryByText('正在导入…')).toBeNull()
   })
 
-  it('surfaces an explicit Host import downgrade beside the resource tree', async () => {
+  it('localizes a Host import failure without exposing its internal diagnostic', async () => {
     const b = workspaceProps({
       phase: 'ready', resources: RESOURCES.resources, selected: null, error: null,
     })
@@ -272,12 +280,14 @@ describe('WorkspaceContent', () => {
     })
     const view = render(<WorkspaceContent {...b.props} />)
     const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input?.getAttribute('aria-hidden')).toBe('true')
     fireEvent.change(input!, {
       target: { files: [new File(['legacy'], 'legacy.doc', { type: 'application/msword' })] },
     })
 
-    expect((await screen.findByRole('alert')).textContent)
-      .toContain('legacy-doc-normalization: Microsoft Word is unavailable')
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('未能导入 Word 文档，请确认文件可用后重试。')
+    expect(alert.textContent).not.toContain('legacy-doc-normalization')
   })
 
   it('rejects an invalid browser file and shows the pending import state', async () => {
@@ -303,7 +313,7 @@ describe('WorkspaceContent', () => {
       target: { files: [new File(['word'], 'proposal.docx', { type: 'application/zip' })] },
     })
     expect(await screen.findByText('正在导入…')).not.toBeNull()
-    expect(screen.getByRole('button', { name: '文档类型' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '文档类型，当前：论文正文' }).hasAttribute('disabled')).toBe(true)
     await waitFor(() => { expect(pending.importDocument).toHaveBeenCalledOnce() })
     finish({ ok: true })
     await waitFor(() => { expect(screen.queryByText('正在导入…')).toBeNull() })
@@ -369,6 +379,7 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...b.props} />)
 
+    expect(document.activeElement).toBe(screen.getByText('当前节点也有外部修改'))
     expect(screen.getByRole('textbox', { name: '本地草稿' }))
       .toHaveProperty('value', 'Unsaved local draft')
     expect(screen.getByRole('textbox', { name: '外部最新文本' }))
@@ -380,6 +391,31 @@ describe('DocumentWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '使用合并内容' }))
     expect(b.resolveExternalConflict.mock.calls).toEqual([['local'], ['external'], ['merged']])
     expect(screen.getByRole('button', { name: '提交并创建版本' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('returns focus to the editor after conflict resolution removes its action buttons', () => {
+    const conflictState = workbenchState({
+      phase: 'ready',
+      tab: 'edit',
+      document: documentSnapshot(REVISION_2),
+      nodePhase: 'ready',
+      selectedNode: textNodeBuffer(REVISION_2, 'External rewrite'),
+      draft: 'Merged draft',
+      dirty: true,
+      externalConflict: {
+        localDraft: 'Unsaved local draft',
+        externalText: 'External rewrite',
+      },
+    })
+    const b = workbenchProps(conflictState)
+    render(<DocumentWorkbench {...b.props} />)
+    fireEvent.click(screen.getByRole('button', { name: '使用合并内容' }))
+    act(() => { b.store.set({
+      ...conflictState,
+      externalConflict: null,
+    }) })
+
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '编辑节点：Introduction' }))
   })
 
   it('keeps navigation, history, template, gate, and export actions locked until a clean-looking conflict is resolved', () => {
@@ -521,7 +557,11 @@ describe('DocumentWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '安装并解析' }))
     expect(b.installTemplate).toHaveBeenCalledWith(HIT_PACK_ID, HIT_PROPOSAL_MEMBER_ID)
 
-    fireEvent.click(screen.getByRole('button', { name: '模板用途' }))
+    const usage = screen.getByRole('button', { name: '模板用途，当前：内容表单模板' })
+    expect(usage.getAttribute('aria-haspopup')).toBe('menu')
+    expect(usage.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(usage)
+    expect(usage.getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(screen.getByRole('menuitem', { name: '格式参考模板' }))
     const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
     fireEvent.change(input!, {
@@ -535,6 +575,24 @@ describe('DocumentWorkbench', () => {
         usage: 'format-reference',
       })
     })
+  })
+
+  it('localizes a template upload failure without exposing its internal diagnostic', async () => {
+    const b = workbenchProps(workbenchState({
+      phase: 'ready',
+      tab: 'gate',
+      document: documentSnapshot(),
+      templates: { ...TEMPLATE_CATALOG, contracts: [] },
+    }))
+    b.uploadTemplate.mockResolvedValueOnce({ ok: false, error: 'provider upload stack' })
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(input!, {
+      target: { files: [new File(['word'], 'broken.docx', { type: 'application/zip' })] },
+    })
+
+    expect(await screen.findByText('未能上传 Word 模板，请确认文件可用后重试。')).not.toBeNull()
+    expect(screen.queryByText('provider upload stack')).toBeNull()
   })
 
   it('shows parsed requirements before confirmation and links only a confirmed template', () => {
@@ -633,7 +691,8 @@ describe('DocumentWorkbench', () => {
   it('renders a Remote failure with only its backed retry action', () => {
     const b = workbenchProps(workbenchState({ phase: 'error', error: 'internal: Host capability unavailable' }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByText('internal: Host capability unavailable')).not.toBeNull()
+    expect(screen.getByText('暂时无法打开文档。')).not.toBeNull()
+    expect(screen.queryByText('internal: Host capability unavailable')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '重新打开' }))
     expect(b.retryOpen).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: '提交并创建版本' })).toBeNull()

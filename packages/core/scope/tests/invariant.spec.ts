@@ -73,6 +73,7 @@ describe('scoped-dispatch invariants', () => {
       ...Object.entries(agentRows),
       ['approval/request', [{ agent, toolName: 'echo' }, () => Promise.resolve('unavailable')]],
       ['goal/changed', [{ agent, change: { operation: 'create', ref: { id: 'goal-a', revision: 1 } } }]],
+      ['permission/preset-apply', [{ agent, preset: 'read-only', sandbox: 'read-only', approval: 'ask', signal }, () => Promise.resolve({ ok: true })]],
       ['system-prompt/assemble', [[], { scope: agent }]],
       ['tools/code-dispatch-log', [{ exec: { callId: 'c', name: 't', arguments: {} }, agent, subCallId: 'c:code:1', name: 't', isError: false, content: [] }, () => Promise.resolve([])]],
       ['tools/execute', [{ callId: 'c', name: 't', arguments: {}, agent }, () => Promise.resolve({ content: [], isError: false })]],

@@ -43,8 +43,14 @@ interface CommandDefinition {
    * Whether `command/run` records `rawInput`. Defaults to true. A command
    * whose domain event owns the payload sets this false to avoid duplicating
    * that payload in the session log.
-   */
+  */
   readonly recordInput?: boolean
+  /**
+   * Whether a thrown handler's message may be stored in the user-visible
+   * `command/done` record. Defaults to true. Set false when exceptions carry
+   * provider or host diagnostics that belong only in logs.
+   */
+  readonly exposeThrownError?: boolean
   /** Execute against the receiving agent without sending the command to the model. */
   readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>
 }

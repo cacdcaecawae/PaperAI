@@ -1,5 +1,8 @@
 version: 2
 
+# PaperAI takes routine dependency baselines from synchronized DSH source.
+# Keeping each ecosystem at zero disables version-update pull requests while
+# Dependabot security updates remain available for actionable vulnerabilities.
 updates:
   - package-ecosystem: "npm"
     directory: "/"
@@ -12,6 +15,7 @@ updates:
       timezone: "Asia/Shanghai"
     cooldown:
       default-days: 30
+    open-pull-requests-limit: 0
     labels:
       - "kind/dependency"
       - "area/infra"
@@ -24,6 +28,7 @@ updates:
       timezone: "Asia/Shanghai"
     cooldown:
       default-days: 30
+    open-pull-requests-limit: 0
     labels:
       - "kind/dependency"
       - "area/infra"
@@ -36,6 +41,7 @@ updates:
       timezone: "Asia/Shanghai"
     cooldown:
       default-days: 30
+    open-pull-requests-limit: 0
     labels:
       - "kind/dependency"
       - "area/infra"

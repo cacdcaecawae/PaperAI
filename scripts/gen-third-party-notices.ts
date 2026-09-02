@@ -310,10 +310,14 @@ function installedMetadata(name: string): { license: string; repo: string } {
 }
 
 function collectClaudeDistribution(): ClaudeDistribution {
-  const manifest = installedManifest(CLAUDE_AGENT_SDK_PACKAGE)
+  const declaredVersion = declaredRuntimeVersion(
+    loadWorkspaceManifests().manifests,
+    CLAUDE_AGENT_SDK_PACKAGE,
+  )
+  const manifest = installedManifest(CLAUDE_AGENT_SDK_PACKAGE, declaredVersion)
   if (manifest === undefined) {
     throw new Error(
-      `gen-third-party-notices: cannot resolve ${CLAUDE_AGENT_SDK_PACKAGE}; run \`pnpm install\`.`,
+      `gen-third-party-notices: cannot resolve ${CLAUDE_AGENT_SDK_PACKAGE} ${declaredVersion}; run \`pnpm install\`.`,
     )
   }
   const distribution = claudeDistributionFromManifest(manifest)
@@ -389,6 +393,32 @@ export function tierExternalDeps(manifests: Map<string, Manifest>, names: Set<st
     }
   }
   return tiers
+}
+
+/**
+ * Resolve the one exact runtime version declared by shipping workspace packages.
+ * Installed pnpm link farms may expose a different transitive version at the
+ * repository root, so generated distribution facts must start from declarations.
+ * @param manifests - workspace manifests keyed by repository-relative path.
+ * @param name - external runtime package whose declared version is required.
+ * @returns the sole version string declared by a shipping runtime dependency.
+ */
+export function declaredRuntimeVersion(manifests: Map<string, Manifest>, name: string): string {
+  const versions = new Set<string>()
+  for (const [path, manifest] of manifests) {
+    const devOnly = DEV_ONLY_AREAS.some(area => (area.endsWith('/') ? path.startsWith(area) : path === area))
+    if (devOnly) continue
+    for (const kind of RUNTIME_KINDS) {
+      const declared = manifest[kind]?.[name]
+      if (declared !== undefined) versions.add(declared)
+    }
+  }
+  if (versions.size !== 1) {
+    throw new Error(
+      `gen-third-party-notices: expected one shipping runtime version of ${name}, got ${JSON.stringify([...versions].sort())}.`,
+    )
+  }
+  return [...versions][0] as string
 }
 
 /** A vendored package row parsed out of the `vendor/README.md` manifest table. */

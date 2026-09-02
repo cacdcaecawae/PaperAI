@@ -6,7 +6,7 @@
 
 `WorkspaceBrowser` 会在每个真实 Workspace 的二级详情视图中声明可叠加的 `sidebar.workspaces.content` 列表 slot。owner 提供 Workspace id、规范路径、当前标题以及它是否包含已选 Session；条目自行负责资源加载、区段与操作，并按升序渲染。Workspace 列表、Ungrouped、扁平展示与搜索展示都不会出现该 slot，因此扩展无法制造另一套顶层浏览器，也不会扰动 Session 列表。
 
-分组展示是一份 Workspace 列表。用户通过指针、Enter 或 Space 激活真实 Workspace 行后会进入二级详情视图；紧凑的返回控件用于回到列表，并把焦点恢复到对应 Workspace 行。详情页头沿用共用详情语法，把返回控件与可省略的标题、规范路径副标题组合在一起。可叠加条目自行提供紧凑的项目内容区段标题；`ui-workspace` 在同一个滚动区域中提供相匹配的 Session 标题与局部新建 Session 操作。内容 slot 无占用方时不会渲染空区段。详情默认显示五条 Session，其余条目通过临时的**展开其余**控件显示；离开并重新进入详情后恢复为五条。Ungrouped 没有 Workspace 详情，因此继续作为披露行。从 Workspace 行创建 Session 时，浏览器会先进入详情，使新行拥有稳定的显示位置。
+分组展示是一份 Workspace 列表。用户通过指针、Enter 或 Space 激活真实 Workspace 行后会进入二级详情视图，并把焦点放到紧凑的返回控件；该控件用于回到列表，并把焦点恢复到原 Workspace 行。详情页头沿用共用详情语法，把返回控件与可省略的标题、规范路径副标题组合在一起。可叠加条目自行提供紧凑的项目内容区段标题；`ui-workspace` 在同一个滚动区域中提供相匹配的 Session 标题与局部新建 Session 操作。内容 slot 无占用方时不会渲染空区段。详情默认显示五条 Session，其余条目通过临时的**展开其余**控件显示；离开并重新进入详情后恢复为五条。Ungrouped 没有 Workspace 详情，因此继续作为披露行。从 Workspace 行创建 Session 时，浏览器会先进入详情，使新行拥有稳定的显示位置。
 
 该浏览器通过全局运行时钩子将 Session 行渲染为分组或扁平形式，并负责 Workspace 添加、重命名、重排序以及 Session 重排序。Workspace 列表基线就绪后，浏览器持久化的查看状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 和单列表记账。视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 和跨 Workspace 的单列表则从最近更新时间顺序初始化。**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续用户提示词或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表因没有单一 Workspace 记账，其顺序始终只保存在浏览器本地。单列表没有父级层次，因此不显示空的左侧状态槽；Session 存在可见状态时仍保留该槽。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
 

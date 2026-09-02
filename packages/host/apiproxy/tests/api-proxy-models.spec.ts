@@ -478,6 +478,35 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('admits a prompt through an Agent-owned model controller without an LLM adapter route', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const followup = vi.fn()
+    Object.assign(agent, {
+      followup,
+      modelController: {
+        provider: { id: 'codex', name: 'Codex' },
+        currentModel: 'fake-alpha',
+        listModels: () => Promise.resolve([{ id: 'fake-alpha', name: 'Fake Alpha' }]),
+        selectModel: (model: string) => Promise.resolve(model),
+      },
+    })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const admitted = await api.sessions.prompt(request({
+      sessionId, mode: 'queue' as const, content: [{ type: 'text' as const, text: 'edit the paper' }],
+    }))
+    expect(admitted.result).toEqual({ ok: true, value: { accepted: true } })
+    expect(followup).toHaveBeenCalledOnce()
+    expect(expectValue(await api.sessions.models(request({ sessionId })))).toMatchObject({
+      current: { provider: 'codex', model: 'fake-alpha' },
+      routable: true,
+    })
+    await ctx.fiber.dispose()
+  })
+
   it('serves a session and its catalog when the stored default names a route that is gone', async () => {
     const { ctx, sessionId } = await harness()
     const api = createApiProxy(ctx, {

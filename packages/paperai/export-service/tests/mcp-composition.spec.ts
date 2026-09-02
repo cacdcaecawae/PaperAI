@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -77,10 +77,11 @@ describe('PaperAI export composition', () => {
           mode: 'draft-export',
         },
       })
+      const canonicalOutputPath = await realpath(outputPath)
       expect(result.isError).not.toBe(true)
       expect(result.structuredContent).toMatchObject({
         result: {
-          outputPath,
+          outputPath: canonicalOutputPath,
           gate: { mode: 'draft-export' },
           commit: { actor },
           provenance: actor,

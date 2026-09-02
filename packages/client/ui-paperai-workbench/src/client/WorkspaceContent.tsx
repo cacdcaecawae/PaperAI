@@ -145,7 +145,7 @@ export function WorkspaceContent({
         contentBase64: await readWordFileBase64(file),
         role,
       })
-      if (!result.ok) setImportError(result.error)
+      if (!result.ok) setImportError(t('import.failed'))
     } catch {
       setImportError(t('import.invalid'))
     } finally {
@@ -169,7 +169,8 @@ export function WorkspaceContent({
             <button
               type="button"
               className={css.roleSelect}
-              aria-label={t('import.role')}
+              aria-label={t('import.roleAria', { role: t(ROLE_KEYS[role]) })}
+              aria-haspopup="menu"
               aria-expanded={roleMenuOpen}
               disabled={importing}
               onClick={() => { setRoleMenuOpen(open => !open) }}
@@ -188,6 +189,7 @@ export function WorkspaceContent({
           ref={fileInput}
           className={css.visuallyHidden}
           type="file"
+          aria-hidden="true"
           accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           tabIndex={-1}
           onChange={(event) => {
@@ -196,15 +198,15 @@ export function WorkspaceContent({
             if (file !== undefined) void selectWord(file).finally(() => { input.value = '' })
           }}
         />
-        <Button
-          variant="toolbar"
-          size="sm"
-          icon={<IconPlusOutline16 />}
+        <button
+          type="button"
+          className={css.importAction}
           disabled={importing}
           onClick={() => { fileInput.current?.click() }}
         >
-          {importing ? t('import.importing') : t('import.word')}
-        </Button>
+          <IconPlusOutline16 />
+          <span>{importing ? t('import.importing') : t('import.word')}</span>
+        </button>
       </div>
       {importError !== null && <p className={css.inlineError} role="alert">{importError}</p>}
       {(state.phase === 'cold' || (state.phase === 'loading' && state.resources.length === 0)) && (
@@ -212,7 +214,7 @@ export function WorkspaceContent({
       )}
       {state.phase === 'error' && (
         <div className={css.failure} role="alert">
-          <span>{state.error ?? t('tree.error')}</span>
+          <span>{t('tree.error')}</span>
           <Button
             variant="toolbar"
             size="sm"
@@ -223,9 +225,9 @@ export function WorkspaceContent({
           </Button>
         </div>
       )}
+      {/* The empty row carries no glyph: the section heading above already has one. */}
       {state.phase === 'ready' && state.resources.length === 0 && (
         <div className={css.projectEmpty} role="status">
-          <span className={css.projectEmptyIcon} aria-hidden="true"><IconFolderClose16 /></span>
           <span>{t('tree.empty')}</span>
         </div>
       )}

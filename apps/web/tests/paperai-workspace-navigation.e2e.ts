@@ -112,6 +112,7 @@ describe('web e2e: PaperAI Workspace detail navigation', { concurrent: false }, 
 
     const back = page.getByRole('button', { name: '返回工作区列表' })
     await back.waitFor({ timeout: 15_000 })
+    await expect.poll(() => back.evaluate(element => document.activeElement === element)).toBe(true)
     const identity = page.getByRole('heading', { name: 'Paper project', level: 2 }).locator('xpath=..')
     await identity.waitFor({ timeout: 15_000 })
     const detail = page.getByRole('region', { name: '工作区详情' })
@@ -133,7 +134,7 @@ describe('web e2e: PaperAI Workspace detail navigation', { concurrent: false }, 
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-workspace-empty'))
     await page.getByRole('treeitem', { name: 'Empty project' }).click()
     await page.getByRole('heading', { name: 'Empty project', level: 2 }).waitFor({ timeout: 15_000 })
-    await page.getByText('暂无项目内容。选择“导入 Word”即可添加。').waitFor({ timeout: 15_000 })
+    await page.getByText('暂无项目内容').waitFor({ timeout: 15_000 })
     await page.getByRole('button', { name: '在“Empty project”中新建会话' }).waitFor({ timeout: 15_000 })
     await page.getByRole('treeitem', { name: '新会话' }).waitFor({ timeout: 15_000 })
     await compareOrRefreshGolden(EMPTY_EXPECTED, await captureWorkspaceDetail(page, scaffold.workspaceCwd), MODE)

@@ -86,7 +86,7 @@ export function PermissionSelect({ value, locked, command, onChangeFailed, t }: 
 
   if (value === undefined) return null
 
-  const currentValue = pick ?? value.currentValue
+  const currentValue = value.currentValue
   const current = value.options.find(option => option.value === currentValue)
   const busy = pick !== null || confirmation !== null
 
@@ -148,6 +148,9 @@ export function PermissionSelect({ value, locked, command, onChangeFailed, t }: 
             type="button"
             className={css.trigger}
             aria-label={t('input.accessMode', { name: current === undefined ? displayName(currentValue) : optionLabel(current) })}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            aria-busy={pick !== null}
             title={current?.description}
             disabled={locked || busy}
             onClick={() => { setOpen(!open) }}

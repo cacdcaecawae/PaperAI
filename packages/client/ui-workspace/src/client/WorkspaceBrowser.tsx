@@ -898,6 +898,7 @@ export function WorkspaceBrowser({
   // states; the menu anchors on this button).
   const [wsPickerOpen, setWsPickerOpen] = useState(false)
   const wsPlusRef = useRef<HTMLButtonElement>(null)
+  const detailBackRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
   const [detailWorkspaceId, setDetailWorkspaceId] = useState<WorkspaceId | null>(null)
   const [focusWorkspaceId, setFocusWorkspaceId] = useState<WorkspaceId | null>(null)
@@ -921,6 +922,10 @@ export function WorkspaceBrowser({
     setFocusWorkspaceId(null)
     setDetailWorkspaceId(workspaceId)
   }
+  useEffect(() => {
+    if (detailWorkspaceId === null) return
+    detailBackRef.current?.focus({ preventScroll: true })
+  }, [detailWorkspaceId])
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.
@@ -1113,6 +1118,7 @@ export function WorkspaceBrowser({
             <div className={clsx(css.detailHeading, css.wide, searchExpanded && css.sectionLabelHidden)}>
               <Tooltip label={t('workspace.back')} side="bottom" delayMs={500}>
                 <button
+                  ref={detailBackRef}
                   type="button"
                   className={css.detailBack}
                   aria-label={t('workspace.back')}

@@ -32,6 +32,7 @@ import { CallId } from '@deepseek-ai/dsh-llm/brand'
 import type {} from '@deepseek-ai/dsh-fs'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import { canonicalHeader, type Session, type SessionId, type TurnEndReason, type UserMessage } from '@deepseek-ai/dsh-session'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -311,7 +312,14 @@ export class AcpAgent implements Agent {
   private runtimeGeneration: AbortController | undefined
   private runtimeNeedsRestart = false
   private modeSync: Promise<void> = Promise.resolve()
+  private modelOperationTail: Promise<void> = Promise.resolve()
+  private modelOperationsPending = 0
+  private modelOperationWakeRequested = false
+  private closing = false
   private observedSandboxMode: SandboxMode
+  // Permission maintenance spans running -> idle -> maintenance. Keep its
+  // deferred wake outside Phase so no idle microtask can start the old mode.
+  private permissionTransition: { wakeRequested: boolean } | undefined
   private pendingSessionLink: {
     provider: 'codex' | 'claude'
     externalSessionId: string
@@ -338,6 +346,9 @@ export class AcpAgent implements Agent {
     this.observedSandboxMode = this.currentSandboxMode()
     this.scope = createScope(hostCtx, this)
     this.ctx = this.scope.ctx.extend({ agent: this })
+    this.ctx.on('permission/preset-apply', ({ sandbox, signal }, next) => (
+      this.transitionSandboxMode(sandbox, signal, next)
+    ))
     this.ctx.on('session/event', (subject, event) => {
       if (subject !== this.session || event.type !== 'sandbox/mode') return
       const previous = this.observedSandboxMode
@@ -352,8 +363,10 @@ export class AcpAgent implements Agent {
     this.modelController = {
       provider: { id: provider.id, name: provider.name },
       get currentModel() { return currentModel() },
-      listModels: () => Promise.resolve([...this.requireRuntime().models.models]),
-      selectModel: async (model: string) => await this.requireRuntime().selectModel(model),
+      listModels: async () => await this.withModelRuntime(runtime => [...runtime.models.models]),
+      selectModel: async (model: string) => await this.withModelRuntime(async runtime => (
+        await runtime.selectModel(model)
+      )),
       inputModalities: () => Promise.resolve(this.imageInput ? ['text', 'image'] : ['text']),
     }
   }
@@ -369,12 +382,13 @@ export class AcpAgent implements Agent {
   async start(signal: AbortSignal): Promise<void> {
     this.lifecycleSignal = signal
     const previousExternalSessionId = this.previousExternalSessionId()
-    const runtime = this.createRuntime(signal)
+    const { runtime, lifetimeSignal } = this.createRuntime(signal)
     const started = await runtime.start(
       previousExternalSessionId,
       this.currentSandboxMode(),
       signal,
       this.providerSessionIsReplaceable(),
+      lifetimeSignal,
     )
     this.applyRuntimeStart(started)
     if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
@@ -398,13 +412,16 @@ export class AcpAgent implements Agent {
    * @param signal Optional cancellation for startup or pre-prompt synchronization.
    */
   async syncSandboxMode(signal?: AbortSignal): Promise<void> {
+    await this.syncSandboxModeTo(this.currentSandboxMode(), signal)
+  }
+
+  private async syncSandboxModeTo(mode: SandboxMode, signal?: AbortSignal): Promise<void> {
     const runtime = this.requireRuntime()
     const generation = this.runtimeGeneration
     const lifecycleSignal = this.lifecycleSignal
     if (generation === undefined || lifecycleSignal === undefined) {
       throw new Error(`${this.provider.name} ACP lifecycle is unavailable`)
     }
-    const mode = this.currentSandboxMode()
     const operationSignal = AbortSignal.any([
       lifecycleSignal,
       generation.signal,
@@ -420,6 +437,45 @@ export class AcpAgent implements Agent {
     })
     this.modeSync = operation
     await operation
+  }
+
+  private async transitionSandboxMode<T>(
+    target: SandboxMode,
+    signal: AbortSignal,
+    next: () => Promise<T>,
+  ): Promise<T> {
+    if (this.permissionTransition !== undefined) {
+      throw new Error(`${this.provider.name} ACP permission transition is already active`)
+    }
+    const reservation = { wakeRequested: false }
+    this.permissionTransition = reservation
+    try {
+      signal.throwIfAborted()
+      if (this.phase.kind === 'running') {
+        this.cancel({ kind: 'hook', reason: 'permission preset changed during the active turn' }, { keepInbox: true })
+        await this.whenIdle()
+      }
+      signal.throwIfAborted()
+      return await this.runMaintenance(async (maintenanceSignal) => {
+        const transitionSignal = AbortSignal.any([signal, maintenanceSignal])
+        try {
+          await this.runtimeForSandboxMode(target, transitionSignal)
+          await this.syncSandboxModeTo(target, transitionSignal)
+          transitionSignal.throwIfAborted()
+          return await next()
+        } catch (error: unknown) {
+          this.runtimeGeneration?.abort(error)
+          this.runtimeNeedsRestart = true
+          this.runtime?.cancel()
+          throw error
+        }
+      })
+    } finally {
+      if (this.permissionTransition === reservation) this.permissionTransition = undefined
+      // Re-enter normal wake arbitration only after the provider and DSH
+      // permission state have either committed together or both failed.
+      if (reservation.wakeRequested && this.inbox.hasPending) this.wake()
+    }
   }
 
   send(message: UserMessage, target: InboxTarget, wakeup: boolean): void {
@@ -448,9 +504,9 @@ export class AcpAgent implements Agent {
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
     if (!options.keepInbox) this.inbox.clear()
     if (this.phase.kind === 'idle') return
-    this.runtimeGeneration?.abort(cause)
     this.runtimeNeedsRestart = true
     this.runtime?.cancel()
+    this.runtimeGeneration?.abort(cause)
     this.phase.abort.abort(cause)
   }
 
@@ -488,7 +544,11 @@ export class AcpAgent implements Agent {
 
   /** Close the provider process and the Agent-owned scope. */
   async close(): Promise<void> {
+    this.closing = true
+    const pendingModelOperations = this.modelOperationTail
     this.cancel({ kind: 'disposed' })
+    await this.whenIdle()
+    await pendingModelOperations
     await this.whenIdle()
     this.runtimeGeneration?.abort(new Error(`agent "${this.id}" lifecycle closed`))
     const pendingModeSync = this.modeSync
@@ -498,6 +558,15 @@ export class AcpAgent implements Agent {
   }
 
   private wake(): void {
+    if (this.closing) return
+    if (this.permissionTransition !== undefined) {
+      this.permissionTransition.wakeRequested = true
+      return
+    }
+    if (this.modelOperationsPending > 0) {
+      this.modelOperationWakeRequested = true
+      return
+    }
     if (this.phase.kind !== 'idle') {
       this.phase.wakeRequested = true
       return
@@ -518,7 +587,13 @@ export class AcpAgent implements Agent {
     try {
       while (this.inbox.hasPending
         && this.phase.kind === 'running'
-        && !this.phase.abort.signal.aborted) await this.turn()
+        && !this.phase.abort.signal.aborted) {
+        if (this.modelOperationsPending > 0) {
+          this.modelOperationWakeRequested = true
+          return
+        }
+        await this.turn()
+      }
     } catch {
       // Turn-level failures are logged and emitted at their exact boundary.
     } finally {
@@ -546,6 +621,8 @@ export class AcpAgent implements Agent {
       this.session.append('step/start', { turn, step })
       openedStep = true
       for (const message of claimed) this.session.append('user/message', message, { surfaceOp: 'append' })
+      const runtime = await this.runtimeForTurn(signal)
+      await this.syncSandboxMode(signal)
       const model = this.modelController.currentModel
       const previous = this.session.requestHeader()
       const header = canonicalHeader({ config: { provider: this.provider.id, model } })
@@ -564,9 +641,9 @@ export class AcpAgent implements Agent {
       )
       let response: PromptResponse | undefined
       try {
-        const runtime = await this.runtimeForTurn(signal)
-        await this.syncSandboxMode(signal)
-        response = await runtime.prompt(await this.promptBlocks(claimed, signal), signal)
+        const prompt = await this.promptBlocks(claimed, signal)
+        signal.throwIfAborted()
+        response = await runtime.prompt(prompt)
       } finally {
         const interrupted = signal.aborted || response?.stopReason === 'cancelled'
         if (response !== undefined) projection.finish(response, interrupted)
@@ -660,7 +737,10 @@ export class AcpAgent implements Agent {
     ])
   }
 
-  private createRuntime(lifecycleSignal: AbortSignal): AcpRuntime {
+  private createRuntime(lifecycleSignal: AbortSignal): {
+    runtime: AcpRuntime
+    lifetimeSignal: AbortSignal
+  } {
     const generation = new AbortController()
     this.runtimeGeneration = generation
     this.modeSync = Promise.resolve()
@@ -686,10 +766,51 @@ export class AcpAgent implements Agent {
       this.runtimeOptions,
     )
     this.runtime = runtime
-    return runtime
+    return {
+      runtime,
+      lifetimeSignal: lifecycleSignal,
+    }
+  }
+
+  private withModelRuntime<T>(operation: (runtime: AcpRuntime) => Promise<T> | T): Promise<T> {
+    if (this.closing) {
+      return Promise.reject(new Error(`${this.provider.name} ACP Agent lifecycle is closed`))
+    }
+    this.modelOperationsPending += 1
+    const result = this.modelOperationTail.then(async () => {
+      if (!this.needsRuntimeRestart()) return await operation(this.requireRuntime())
+      await this.whenIdle()
+      if (!this.needsRuntimeRestart()) return await operation(this.requireRuntime())
+      return await this.runMaintenance(async (signal) => {
+        const runtime = await this.runtimeForSandboxMode(this.currentSandboxMode(), signal)
+        await this.syncSandboxMode(signal)
+        return await operation(runtime)
+      })
+    })
+    this.modelOperationTail = result.then(
+      () => { this.finishModelOperation() },
+      () => { this.finishModelOperation() },
+    )
+    return result
+  }
+
+  private finishModelOperation(): void {
+    this.modelOperationsPending -= 1
+    if (this.modelOperationsPending !== 0) return
+    const wakeRequested = this.modelOperationWakeRequested
+    this.modelOperationWakeRequested = false
+    if (wakeRequested && this.inbox.hasPending) this.wake()
+  }
+
+  private needsRuntimeRestart(): boolean {
+    return this.runtimeNeedsRestart
   }
 
   private async runtimeForTurn(signal: AbortSignal): Promise<AcpRuntime> {
+    return await this.runtimeForSandboxMode(this.currentSandboxMode(), signal)
+  }
+
+  private async runtimeForSandboxMode(mode: SandboxMode, signal: AbortSignal): Promise<AcpRuntime> {
     if (!this.runtimeNeedsRestart) return this.requireRuntime()
     const lifecycleSignal = this.lifecycleSignal
     if (lifecycleSignal === undefined) throw new Error(`${this.provider.name} ACP lifecycle is unavailable`)
@@ -699,13 +820,14 @@ export class AcpAgent implements Agent {
     await previousRuntime?.close()
     await pendingModeSync.catch(() => undefined)
     signal.throwIfAborted()
-    const runtime = this.createRuntime(lifecycleSignal)
+    const { runtime, lifetimeSignal } = this.createRuntime(lifecycleSignal)
     try {
       const started = await runtime.start(
         previousExternalSessionId,
-        this.currentSandboxMode(),
+        mode,
         AbortSignal.any([lifecycleSignal, signal]),
         this.providerSessionIsReplaceable(),
+        lifetimeSignal,
       )
       this.applyRuntimeStart(started)
       if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {

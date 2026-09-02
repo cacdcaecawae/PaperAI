@@ -1508,19 +1508,24 @@ describe('command launcher chrome and control seats', () => {
     const trigger = view.getByLabelText(/^访问模式/) as HTMLButtonElement
     // Title-case display is presentation only; the menu ids stay machine names.
     expect(trigger.textContent).toBe('Read Only')
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect([...trigger.querySelectorAll('svg')]
       .every(icon => icon.closest('[aria-hidden="true"]') !== null)).toBe(true)
     fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
     const items = view.getAllByRole('menuitem')
     expect(items.map(o => o.textContent)).toEqual(['Read Only', 'Workspace Write', 'Full access'])
     fireEvent.click(items[1]!)
-    // Optimistic pick + disable until admission resolves (command stub resolves true).
+    // Keep the durable projection visible until provider admission resolves.
     const busy = view.getByLabelText(/^访问模式/) as HTMLButtonElement
-    expect(busy.textContent).toBe('Workspace Write')
+    expect(busy.textContent).toBe('Read Only')
+    expect(busy.getAttribute('aria-busy')).toBe('true')
     expect(busy.disabled).toBe(true)
     expect(command).toHaveBeenCalledWith('/permission workspace-write')
     await act(async () => {})
     expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).disabled).toBe(false)
+    expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).getAttribute('aria-busy')).toBe('false')
   })
 
   it('announces a rejected Access change and restores the projected value', async () => {
@@ -1585,7 +1590,7 @@ describe('command launcher chrome and control seats', () => {
     expect(command).toHaveBeenCalledOnce()
     expect(command).toHaveBeenCalledWith('/permission danger-full-access')
     expect(view.queryByRole('dialog')).toBeNull()
-    expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).textContent).toBe('Full access')
+    expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).textContent).toBe('Workspace Write')
     await act(async () => {})
   })
 

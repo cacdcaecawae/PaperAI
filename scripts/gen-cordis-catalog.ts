@@ -196,6 +196,7 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'goal': 'goal.md',
   'llm': 'llm-streaming.md',
   'paperai': 'workspace.md',
+  'permission': 'permission-presets.md',
   'session': 'session.md',
   'settings': 'settings.md',
   'skills': 'skills.md',

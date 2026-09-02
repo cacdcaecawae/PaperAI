@@ -88,8 +88,24 @@ function nonBlank(value: string, name: string): string {
   return trimmed
 }
 
-function pathKey(path: string): string {
-  return resolve(path)
+function isMissing(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && error.code === 'ENOENT'
+}
+
+function lexicalPathKey(path: string): string {
+  const absolute = resolve(path)
+  return process.platform === 'win32' ? absolute.toLowerCase() : absolute
+}
+
+async function canonicalPathKey(path: string): Promise<string> {
+  try {
+    return lexicalPathKey(await realpath(resolve(path)))
+  } catch (error) {
+    if (isMissing(error)) return lexicalPathKey(path)
+    throw error
+  }
 }
 
 function asError(error: unknown): Error {
@@ -164,7 +180,7 @@ export class PaperProjectService extends Service {
   async findByPath(rootPath: string): Promise<ProjectRecord | undefined> {
     if (rootPath.trim().length === 0) throw new Error('PaperAI project path must not be blank')
     const canonical = await realpath(resolve(rootPath))
-    return this.uniqueProject(canonical)
+    return await this.uniqueProject(canonical)
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -177,7 +193,7 @@ export class PaperProjectService extends Service {
     const layout = await prepareProjectLayout(input.rootPath)
     let createdWorkspace: Workspace | undefined
     try {
-      const existing = this.uniqueProject(layout.rootPath)
+      const existing = await this.uniqueProject(layout.rootPath)
       const name = existing?.name ?? this.resolveName(input.name, layout.rootPath)
       const priorWorkspace = await this.ctx.workspaceRegistry.resolveByPath(layout.rootPath)
       const workspace = priorWorkspace ?? await this.ctx.workspaceRegistry.create(layout.rootPath, name)
@@ -214,10 +230,11 @@ export class PaperProjectService extends Service {
     }
   }
 
-  private uniqueProject(rootPath: string): ProjectRecord | undefined {
-    const key = pathKey(rootPath)
-    const matches = this.ctx.paperRepository.listProjects()
-      .filter(project => pathKey(project.rootPath) === key)
+  private async uniqueProject(rootPath: string): Promise<ProjectRecord | undefined> {
+    const key = await canonicalPathKey(rootPath)
+    const projects = this.ctx.paperRepository.listProjects()
+    const keys = await Promise.all(projects.map(project => canonicalPathKey(project.rootPath)))
+    const matches = projects.filter((_project, index) => keys[index] === key)
     if (matches.length > 1) {
       throw new Error(`multiple PaperAI project records reference '${rootPath}'`)
     }

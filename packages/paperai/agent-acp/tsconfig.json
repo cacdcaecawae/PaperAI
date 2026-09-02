@@ -18,6 +18,7 @@
     { "path": "../../settings/settings" },
     { "path": "../../subprocess/subprocess" },
     { "path": "../../interaction/user-approval" },
+    { "path": "../../interaction/permission-presets" },
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../mcp" }
   ]

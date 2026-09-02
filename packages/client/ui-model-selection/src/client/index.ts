@@ -62,7 +62,7 @@ function optionsOf(directory: SessionModels, t: TranslateNS<'model'>): SelectOpt
     rows.push({
       id: `failure/${failure.id}`,
       label: failure.name,
-      detail: t('option.loadError', { message: failure.message }),
+      detail: t('option.loadError'),
     })
   }
   return rows
@@ -133,7 +133,11 @@ export function apply(ctx: ClientContext): void {
           if (sessions.subagentAddress(session.sessionId) !== undefined) {
             throw new Error('model selection is unavailable for addressed subagent sessions')
           }
-          return optionsOf(await models.directoryFor(session.sessionId).load(), t)
+          try {
+            return optionsOf(await models.directoryFor(session.sessionId).load(), t)
+          } catch {
+            throw new Error(t('error.load'))
+          }
         },
         onSelect: async (option, session) => {
           if (sessions.subagentAddress(session.sessionId) !== undefined) {
@@ -142,9 +146,13 @@ export function apply(ctx: ClientContext): void {
           const directory = models.directoryFor(session.sessionId)
           const selection = selectionOf(directory.store.getSnapshot(), option.id)
           if (selection === undefined) {
-            throw new Error('this provider\'s catalog failed to load — pick a model from a loaded group')
+            throw new Error(t('error.select'))
           }
-          await directory.select(selection)
+          try {
+            await directory.select(selection)
+          } catch {
+            throw new Error(t('error.select'))
+          }
         },
       },
     }), 'ui-model-selection: /model contribution')
