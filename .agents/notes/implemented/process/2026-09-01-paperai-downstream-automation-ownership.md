@@ -14,6 +14,8 @@ Pull-request CI is selected by repository identity. DSH keeps its complete relea
 
 The stable `all checks passed` verdict evaluates only the job set owned by the current repository. PaperAI retains the upstream jobs in the workflow source so synchronization stays reviewable, but skips them instead of replaying a release matrix for a different product. Automation that owns upstream-only external state is also selected by repository identity: DSH issue automation and DSH or vendored-framework npm release jobs run only in `deepseek-harness/deepseek-harness`. A skipped upstream-owned job is not a PaperAI product failure.
 
+The code job retains complete commit history with `fetch-depth: 0` and requests `filter: blob:none`. Checkout downloads the selected revision's file contents on demand, while changed-source coverage and archive verification can still read the exact pull-request base. This avoids the unresolved blob delta in the unfiltered GitHub history pack without truncating ancestry or weakening checks. Historical file reads can require additional network requests.
+
 The hosted real-API workflow follows its existing credential policy: upstream is enabled by default, while a downstream repository opts in with `DSH_REAL_API_E2E_ENABLED=true` only after configuring `DEEPSEEK_API_KEY_EXTERNAL`.
 
 Routine Dependabot version updates are disabled for npm, Python, and GitHub Actions with `open-pull-requests-limit: 0`. PaperAI receives those baselines through deliberate DSH synchronization and explicit product dependency work. Dependabot security updates remain a separate channel and are not subject to the version-update limit.
@@ -33,5 +35,7 @@ PaperAI needs its own release family before it publishes product packages. Addin
 **Run every portable DSH gate in PaperAI with smaller worker counts.** This still repeats full coverage, compatibility, language, and platform inventories on four-core runners. It spends most pull-request time validating the synchronized foundation rather than the PaperAI profile and turns upstream coverage debt into downstream product failures.
 
 ## Consequences
+
+The workflow regression test pins complete history, on-demand file downloads, and disabled credential persistence together. A fresh checkout must resolve the merge revision, read the exact base's files, and compute its diff before product checks run.
 
 PaperAI pull requests report product-relevant CI on runners the repository can allocate, instead of failures, indefinite queues, or exhaustive foundation checks owned upstream. Deliberate DSH synchronization and release preparation must still verify the upstream matrix before adopting a new baseline. The repository no longer receives routine version-update pull requests, so maintainers must schedule explicit PaperAI dependency upgrades; security advisories can still produce focused updates. DSH and vendored-framework publication remain verified in their owning repository, while PaperAI publication stays unavailable until a product-specific release family is designed and tested.
