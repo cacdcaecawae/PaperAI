@@ -1394,7 +1394,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'issueDescriptor(actor: PaperMcpAgentIdentity, scope: PaperMcpAccessScope): PaperMcpDescriptorLease',
         description: 'Issue one revocable HTTP descriptor bound to one Agent client, session, and access scope. The caller must retain and dispose the lease with the ACP Agent session.',
-        parameters: [{ name: 'actor', description: 'Local Codex or Claude identity recorded on every commit.' }, { name: 'scope', description: 'Session workspace root and live sandbox mode that bound every tool call.' }],
+        parameters: [{ name: 'actor', description: 'Local Codex or Claude identity recorded on every commit.' }, { name: 'scope', description: 'Session workspace root and live sandbox mode that constrain every tool call.' }],
         returns: 'the ACP-compatible descriptor and its idempotent disposer.',
       },
       {

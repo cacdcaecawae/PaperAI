@@ -34,7 +34,7 @@ vi.mock('../src/server.ts', async (importOriginal) => {
 
 import PaperMcpService from '../src/index.ts'
 import type { PaperMcpAgentIdentity, PaperMcpDependencies } from '../src/types.ts'
-import { actor, document, fakeDomain, workspaceScope } from './helpers.ts'
+import { actor, document, fakeDomain, project, workspaceScope } from './helpers.ts'
 
 let context: Context | undefined
 
@@ -179,7 +179,7 @@ describe('PaperAI MCP authenticated HTTP route', () => {
         documents: harness.domain.dependencies.documents,
       }),
       actor,
-      expect.objectContaining({ workspaceRoot: 'C:\\papers\\thesis' }),
+      expect.objectContaining({ workspaceRoot: project.rootPath }),
       expect.objectContaining({
         defaultNodesPerRead: 80,
         maxNodesPerRead: 200,

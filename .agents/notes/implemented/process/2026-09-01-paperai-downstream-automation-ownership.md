@@ -16,6 +16,8 @@ The stable `all checks passed` verdict evaluates only the job set owned by the c
 
 The code job retains complete commit history with `fetch-depth: 0` and requests `filter: blob:none`. Checkout downloads the selected revision's file contents on demand, while changed-source coverage and archive verification can still read the exact pull-request base. This avoids the unresolved blob delta in the unfiltered GitHub history pack without truncating ancestry or weakening checks. Historical file reads can require additional network requests.
 
+Focused test selection includes the owning tests for changed shared modules as well as product packages. Incidental execution through product tests does not replace direct coverage of a shared module's behavior; the workflow regression test guards the selected shared suites. CI passes Vitest options directly after the pnpm script name, without an intervening `--` that terminates Vitest option parsing. Path-sensitive MCP fixtures use native absolute paths and separators so Linux and Windows exercise the same export restrictions.
+
 The hosted real-API workflow follows its existing credential policy: upstream is enabled by default, while a downstream repository opts in with `DSH_REAL_API_E2E_ENABLED=true` only after configuring `DEEPSEEK_API_KEY_EXTERNAL`.
 
 Routine Dependabot version updates are disabled for npm, Python, and GitHub Actions with `open-pull-requests-limit: 0`. PaperAI receives those baselines through deliberate DSH synchronization and explicit product dependency work. Dependabot security updates remain a separate channel and are not subject to the version-update limit.

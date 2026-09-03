@@ -498,7 +498,7 @@ jobs:
 
       - name: Run focused PaperAI tests and changed-source coverage
         run: >-
-          pnpm run test:paperai:ci --
+          pnpm run test:paperai:ci
           --coverage.enabled
           --coverage.changed=${{ github.event.pull_request.base.sha }}
           --coverage.thresholds.perFile=true
@@ -596,7 +596,7 @@ jobs:
 
       - name: Run focused Windows integration tests
         shell: pwsh
-        run: pnpm run test:paperai:windows -- --maxWorkers=2 --testTimeout=30000
+        run: pnpm run test:paperai:windows --maxWorkers=2 --testTimeout=30000
 
       - name: Replay persistent PowerShell ACP snapshot
         shell: pwsh

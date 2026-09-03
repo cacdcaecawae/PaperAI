@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { join, resolve, sep } from 'node:path'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { DocumentCommitId } from '@paperai/domain'
 import { createPaperMcpServer, PAPERAI_MCP_TOOL_NAMES } from '../src/server.ts'
@@ -406,7 +407,7 @@ describe('PaperAI MCP server', () => {
 
       const blocked = await call(harness.client, 'paperai_export_document', {
         documentId: document.id,
-        destinationPath: 'C:\\papers\\thesis\\exports\\delivery\\proposal.docx',
+        destinationPath: join(project.rootPath, 'exports', 'delivery', 'proposal.docx'),
         mode: 'delivery-export',
       })
       expect(blocked.isError).toBe(true)
@@ -415,7 +416,7 @@ describe('PaperAI MCP server', () => {
 
       const draft = await call(harness.client, 'paperai_export_document', {
         documentId: document.id,
-        destinationPath: 'C:\\papers\\thesis\\exports\\drafts\\proposal.docx',
+        destinationPath: join(project.rootPath, 'exports', 'drafts', 'proposal.docx'),
         mode: 'draft-export',
       })
       expect(draft.isError).not.toBe(true)
@@ -425,7 +426,7 @@ describe('PaperAI MCP server', () => {
         mode: 'draft-export',
       }))
       expect(draft.structuredContent?.result).toMatchObject({
-        outputPath: 'C:\\papers\\thesis\\exports\\drafts\\proposal.docx',
+        outputPath: join(project.rootPath, 'exports', 'drafts', 'proposal.docx'),
         commit: { actor },
         provenance: actor,
       })
@@ -455,7 +456,7 @@ describe('PaperAI MCP server', () => {
       for (let index = 0; index < variants.length; index += 1) {
         const result = await call(harness.client, 'paperai_export_document', {
           documentId: document.id,
-          destinationPath: `C:\\papers\\thesis\\exports\\variant-${index}.docx`,
+          destinationPath: join(project.rootPath, 'exports', `variant-${index}.docx`),
           mode: 'draft-export',
         })
         expect(result.isError).toBe(true)
@@ -475,17 +476,18 @@ describe('PaperAI MCP server', () => {
       commit: commit(request.actor),
     }))
     let mode: 'workspace-write' | 'danger-full-access' = 'workspace-write'
+    const outsidePath = resolve(project.rootPath, '..', 'outside', 'proposal.docx')
     const harness = await mcpHarness(fakeDomain(), { exportDocument }, actor, workspaceScope(project.rootPath, () => mode))
     try {
       const outside = await call(harness.client, 'paperai_export_document', {
         documentId: document.id,
-        destinationPath: 'C:\\Users\\someone\\Desktop\\proposal.docx',
+        destinationPath: outsidePath,
         mode: 'draft-export',
       })
       expect(outside.structuredContent?.error?.code).toBe('WRITE_OUTSIDE_WORKSPACE')
       const traversal = await call(harness.client, 'paperai_export_document', {
         documentId: document.id,
-        destinationPath: 'C:\\papers\\thesis\\exports\\..\\..\\escape.docx',
+        destinationPath: ['exports', '..', '..', 'escape.docx'].join(sep),
         mode: 'draft-export',
       })
       expect(traversal.structuredContent?.error?.code).toBe('WRITE_OUTSIDE_WORKSPACE')
@@ -494,26 +496,26 @@ describe('PaperAI MCP server', () => {
       // A relative destination lands inside the workspace, resolved against it.
       const relativeInside = await call(harness.client, 'paperai_export_document', {
         documentId: document.id,
-        destinationPath: 'exports\\drafts\\proposal.docx',
+        destinationPath: join('exports', 'drafts', 'proposal.docx'),
         mode: 'draft-export',
       })
       expect(relativeInside.isError).not.toBe(true)
       // The provider gets the workspace as the writable root and re-checks
       // the real path at publish time, so a link cannot carry the file out.
       expect(exportDocument).toHaveBeenLastCalledWith(expect.objectContaining({
-        destinationPath: 'C:\\papers\\thesis\\exports\\drafts\\proposal.docx',
+        destinationPath: join(project.rootPath, 'exports', 'drafts', 'proposal.docx'),
         writableRoot: project.rootPath,
       }))
 
       mode = 'danger-full-access'
       const fullAccess = await call(harness.client, 'paperai_export_document', {
         documentId: document.id,
-        destinationPath: 'C:\\Users\\someone\\Desktop\\proposal.docx',
+        destinationPath: outsidePath,
         mode: 'draft-export',
       })
       expect(fullAccess.isError).not.toBe(true)
       expect(exportDocument).toHaveBeenLastCalledWith(expect.objectContaining({
-        destinationPath: 'C:\\Users\\someone\\Desktop\\proposal.docx',
+        destinationPath: outsidePath,
       }))
       expect(exportDocument.mock.calls.at(-1)?.[0]).not.toHaveProperty('writableRoot')
     } finally {
@@ -592,7 +594,7 @@ describe('PaperAI MCP server', () => {
       await harness.close()
     }
 
-    const homeless = await mcpHarness(fakeDomain(), undefined, actor, workspaceScope('C:\\elsewhere'))
+    const homeless = await mcpHarness(fakeDomain(), undefined, actor, workspaceScope(resolve(project.rootPath, '..', 'elsewhere')))
     try {
       const result = await call(homeless.client, 'paperai_read_document', { documentId: document.id })
       expect(result.structuredContent?.error?.code).toBe('NO_PROJECT_FOR_SESSION')

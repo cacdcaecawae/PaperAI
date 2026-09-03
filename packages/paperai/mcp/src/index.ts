@@ -185,7 +185,7 @@ export class PaperMcpService extends Service {
    * and access scope. The caller must retain and dispose the lease with the
    * ACP Agent session.
    * @param actor - Local Codex or Claude identity recorded on every commit.
-   * @param scope - Session workspace root and live sandbox mode that bound every tool call.
+   * @param scope - Session workspace root and live sandbox mode that constrain every tool call.
    * @returns the ACP-compatible descriptor and its idempotent disposer.
    */
   issueDescriptor(actor: PaperMcpAgentIdentity, scope: PaperMcpAccessScope): PaperMcpDescriptorLease {

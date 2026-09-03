@@ -16,6 +16,8 @@ Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与
 
 代码 job 通过 `fetch-depth: 0` 保留完整提交历史，并指定 `filter: blob:none`。Checkout 按需下载选定版本的文件内容，改动源码覆盖率和归档验证仍可读取 pull request 的精确基线。这避开了 GitHub 未过滤历史 pack 中无法解析的 blob delta，不会截断提交历史或削弱检查。读取历史文件可能需要额外网络请求。
 
+聚焦测试选择同时包含产品包测试与被修改共享模块的所属测试。产品测试间接执行共享代码，不能替代共享模块自身的行为覆盖；工作流回归测试约束这些共享测试套件的选择。CI 将 Vitest 选项直接放在 pnpm 脚本名之后，不插入会终止 Vitest 选项解析的 `--`。涉及路径的 MCP fixture（测试前置数据）使用当前平台的绝对路径和分隔符，使 Linux 与 Windows 验证相同的导出限制。
+
 托管真实 API 工作流沿用已有凭证策略：上游默认启用，下游仓库只有在配置 `DEEPSEEK_API_KEY_EXTERNAL` 后，才用 `DSH_REAL_API_E2E_ENABLED=true` 显式启用。
 
 npm、Python 与 GitHub Actions 的常规 Dependabot 版本更新通过 `open-pull-requests-limit: 0` 关闭。PaperAI 通过有意识的 DSH 同步与明确的产品依赖工作获取这些基线。Dependabot 安全更新是独立通道，不受版本更新数量限制。

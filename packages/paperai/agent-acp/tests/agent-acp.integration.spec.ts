@@ -627,6 +627,63 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
     expect(harness.mcp.leases[0]?.disposed).toBe(true)
   }, 20_000)
 
+  it('cancels pending setup without publishing the Agent or retaining its MCP lease', async () => {
+    const harness = await mountHarness()
+    const setupStarted = Promise.withResolvers<undefined>()
+    const setupRelease = Promise.withResolvers<undefined>()
+    const abort = new AbortController()
+    const reason = new Error('caller cancelled ACP creation')
+    const id = SessionId('cancelled-setup')
+    const creation = harness.ctx.agents.create({
+      sessionId: id,
+      factoryRoute: 'codex',
+      meta: { cwd: harness.root },
+      signal: abort.signal,
+      setup: () => {
+        setupStarted.resolve(undefined)
+        return setupRelease.promise
+      },
+    })
+    const rejected = expect(creation).rejects.toBe(reason)
+    try {
+      await setupStarted.promise
+      abort.abort(reason)
+      await rejected
+      expect(harness.ctx.agents.get(id)).toBeUndefined()
+      expect(harness.ctx.sessions.get(id)).toBeUndefined()
+      expect(harness.mcp.leases[0]?.disposed).toBe(true)
+    } finally {
+      setupRelease.resolve(undefined)
+    }
+    const retried = await createAgent(harness, id)
+    expect(harness.ctx.agents.get(id)).toBe(retried.agent)
+    await retried.dispose()
+  }, 20_000)
+
+  it('keeps each MCP lease bound to its own session and current sandbox mode', async () => {
+    const harness = await mountHarness()
+    const first = await createAgent(harness, 'mcp-scope-first')
+    const second = await createAgentWithSandboxMode(harness, 'mcp-scope-second', 'claude', 'read-only')
+    const firstScope = harness.mcp.leases[0]!.scope
+    const secondScope = harness.mcp.leases[1]!.scope
+
+    expect(firstScope.workspaceRoot).toBe(harness.root)
+    expect(secondScope.workspaceRoot).toBe(harness.root)
+    expect(firstScope.sandboxMode()).toBe('workspace-write')
+    expect(secondScope.sandboxMode()).toBe('read-only')
+
+    setSandboxMode(first.agent.session, 'read-only')
+    expect(firstScope.sandboxMode()).toBe('read-only')
+    setSandboxMode(first.agent.session, 'danger-full-access')
+    expect(firstScope.sandboxMode()).toBe('danger-full-access')
+    expect(secondScope.sandboxMode()).toBe('read-only')
+
+    await first.dispose()
+    expect(harness.mcp.leases[0]?.disposed).toBe(true)
+    expect(harness.mcp.leases[1]?.disposed).toBe(false)
+    await second.dispose()
+  }, 20_000)
+
   it('resumes the provider session and suppresses replay notifications from the live transcript', async () => {
     const records = new Map<string, StoredSession>()
     const sourceHarness = await mountHarness({ records })
