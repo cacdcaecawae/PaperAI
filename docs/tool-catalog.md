@@ -41,6 +41,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+| `@paperai/tool-document` | `paperai_check_gate`, `paperai_commit_document`, `paperai_get_template`, `paperai_list_documents`, `paperai_list_projects`, `paperai_list_templates`, `paperai_list_versions`, `paperai_prepare_export`, `paperai_read_document`, `paperai_revert_document` | `ctx.tools`, `ctx.sandboxPolicy`, `ctx.paperProjects`, `ctx.paperDocuments`, `ctx.paperTemplates`, `ctx.paperCommits`, `a calling Agent (its session workspace bounds every call and commit provenance names the session)` | `tool/call`, `tool/result`, `PaperAI document commits through ctx.paperCommits` | - | The ten tools mirror the PaperAI MCP names and result fields so the built-in DSH agent shares one document vocabulary with Codex and Claude over MCP; every call is confined to the project that owns the calling session workspace, mutations are refused under the read-only sandbox mode, and commits stamp the session and its current request route as provenance. |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2219,3 +2220,402 @@ Search the web for current information. Provide 1–4 queries in the required qu
 Source: [`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/index.ts)
 
 web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.
+
+<a id="paperaitool-document"></a>
+
+## `@paperai/tool-document`
+
+### `paperai_check_gate`
+
+Run continuous, draft-export, or formal delivery checks without modifying the document.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Gate mode.",
+      "enum": [
+        "continuous",
+        "draft-export",
+        "delivery-export"
+      ]
+    }
+  },
+  "required": [
+    "documentId",
+    "mode"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_commit_document`
+
+Apply supported Working DOCX mutations through PaperAI and create one recoverable commit with Agent provenance. The result carries gateSummary from the continuous template gate: fix error-level findings before writing on.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "baseCommitId": {
+      "type": "string",
+      "description": "Document head observed before editing."
+    },
+    "message": {
+      "type": "string",
+      "description": "User-visible version message."
+    },
+    "mutations": {
+      "type": "array",
+      "description": "Ordered semantic document mutations.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "replace-text"
+              },
+              "nodeId": {
+                "type": "string",
+                "description": "Stable PaperAI semantic node id."
+              },
+              "baseText": {
+                "type": "string",
+                "description": "Exact text observed before editing."
+              },
+              "nextText": {
+                "type": "string",
+                "description": "Replacement text."
+              }
+            },
+            "required": [
+              "type",
+              "nodeId",
+              "baseText",
+              "nextText"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "insert-node"
+              },
+              "text": {
+                "type": "string",
+                "description": "Paragraph text to insert."
+              },
+              "afterNodeId": {
+                "type": "string",
+                "description": "Insert after this node."
+              },
+              "beforeNodeId": {
+                "type": "string",
+                "description": "Insert before this node."
+              },
+              "style": {
+                "type": "string",
+                "description": "Existing Word paragraph style name."
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "delete-node"
+              },
+              "nodeId": {
+                "type": "string",
+                "description": "Stable PaperAI semantic node id."
+              },
+              "baseText": {
+                "type": "string",
+                "description": "Exact observed text for conflict detection."
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "bind-template"
+              },
+              "templateId": {
+                "type": "string",
+                "description": "Confirmed compatible template contract id."
+              }
+            },
+            "required": [
+              "type",
+              "templateId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "milestone"
+              },
+              "label": {
+                "type": "string",
+                "description": "Version milestone label."
+              }
+            },
+            "required": [
+              "type",
+              "label"
+            ]
+          }
+        ],
+        "description": "One semantic document mutation."
+      }
+    }
+  },
+  "required": [
+    "documentId",
+    "message",
+    "mutations"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_get_template`
+
+Read confirmed or draft rules, slots, evidence, and provenance for one template. Read the attached contract before drafting content it governs. Read-only.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "templateId": {
+      "type": "string",
+      "description": "PaperAI template contract id."
+    }
+  },
+  "required": [
+    "templateId"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_documents`
+
+List Working DOCX records in this session's PaperAI project. Read-only.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "PaperAI project id."
+    },
+    "role": {
+      "type": "string",
+      "description": "Optional academic document role.",
+      "enum": [
+        "manuscript",
+        "proposal",
+        "midterm",
+        "final",
+        "other"
+      ]
+    }
+  },
+  "required": [
+    "projectId"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_projects`
+
+List the PaperAI project that owns this session's workspace. Read-only.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_templates`
+
+List built-in template packs and contracts compiled for this session's project. Read-only.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "PaperAI project id."
+    }
+  },
+  "required": [
+    "projectId"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_versions`
+
+List recoverable commits from the current document head toward the root. Read-only.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    }
+  },
+  "required": [
+    "documentId"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_prepare_export`
+
+Check an export and return its authoritative Working DOCX source. This read-only tool does not publish a file.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Draft or formal delivery export.",
+      "enum": [
+        "draft-export",
+        "delivery-export"
+      ]
+    }
+  },
+  "required": [
+    "documentId",
+    "mode"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_read_document`
+
+Read metadata and a bounded page of semantic Word nodes. Read-only.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Zero-based node offset; defaults to 0."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum nodes to return, capped by the deployment limit."
+    },
+    "includeStyle": {
+      "type": "boolean",
+      "description": "Include structured Word style properties."
+    }
+  },
+  "required": [
+    "documentId"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_revert_document`
+
+Restore a reachable snapshot as a new recoverable child commit with Agent provenance.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "baseCommitId": {
+      "type": "string",
+      "description": "Current document head."
+    },
+    "targetCommitId": {
+      "type": "string",
+      "description": "Reachable historical commit to restore."
+    },
+    "message": {
+      "type": "string",
+      "description": "Optional version message."
+    }
+  },
+  "required": [
+    "documentId",
+    "baseCommitId",
+    "targetCommitId"
+  ]
+}
+```
+
+Source: [`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+The ten tools mirror the PaperAI MCP names and result fields so the built-in DSH agent shares one document vocabulary with Codex and Claude over MCP; every call is confined to the project that owns the calling session workspace, mutations are refused under the read-only sandbox mode, and commits stamp the session and its current request route as provenance.

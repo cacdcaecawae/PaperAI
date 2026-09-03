@@ -65,7 +65,18 @@ interface Harness {
   readonly revert: Mock<(request: MockRevertRequest) => Promise<DocumentCommit>>
   readonly check: ReturnType<typeof vi.fn>
   readonly exportDocument: ReturnType<typeof vi.fn>
+  readonly importDocument: Mock<(request: MockImportRequest) => Promise<unknown>>
+  readonly installPack: Mock<(input: { readonly memberIds?: readonly string[] }) => Promise<TemplateContract[]>>
+  readonly previewHtml: Mock<() => Promise<string>>
   contracts: TemplateContract[]
+  /** Template-source record returned for `template-source`; undefined until a test stores one. */
+  templateSource: DocumentRecord | undefined
+}
+
+interface MockImportRequest {
+  readonly sourcePath: string
+  readonly role: string
+  readonly name?: string
 }
 
 interface Deferred<T> {
@@ -202,14 +213,15 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
       headCommitId: next.id,
       updatedAt: `2026-08-28T00:00:0${harness.history.length}.000Z`,
     }
-    const mutation = request.mutations[0]
-    if (mutation?.nodeId !== undefined && mutation.nextText !== undefined) {
-      harness.nodes = harness.nodes.map(node => node.id === mutation.nodeId
-        ? { ...node, text: mutation.nextText!, lastCommitId: next.id }
-        : node)
-    }
-    if (mutation?.type === 'bind-template' && mutation.templateId !== undefined) {
-      harness.document = { ...harness.document, templateId: mutation.templateId }
+    for (const mutation of request.mutations) {
+      if (mutation.nodeId !== undefined && mutation.nextText !== undefined) {
+        harness.nodes = harness.nodes.map(node => node.id === mutation.nodeId
+          ? { ...node, text: mutation.nextText!, lastCommitId: next.id }
+          : node)
+      }
+      if (mutation.type === 'bind-template' && mutation.templateId !== undefined) {
+        harness.document = { ...harness.document, templateId: mutation.templateId }
+      }
     }
     return next
   })
@@ -230,6 +242,20 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
     checkedAt: '2026-08-28T00:01:00.000Z',
   }))
   const rollbackImport = vi.fn(async (_documentId: ReturnType<typeof DocumentId>) => {})
+  const previewHtml = vi.fn(async () => '<html><body><p>只读预览</p></body></html>')
+  const importDocument = vi.fn(async (request: MockImportRequest) => {
+    expect(await readFile(request.sourcePath, 'utf8')).toBe('word-upload')
+    return {
+      status: 'imported' as const,
+      document: structuredClone(harness.document),
+      nodes: structuredClone(harness.nodes),
+    }
+  })
+  const installPack = vi.fn(async (_input: { readonly memberIds?: readonly string[] }) => {
+    harness.contracts = [templateContract()]
+    return structuredClone(harness.contracts)
+  })
+  harness.templateSource = undefined
 
   ctx.provide('workspaceRegistry', {
     get: (id: typeof WORKSPACE_ID) => id === WORKSPACE_ID
@@ -245,15 +271,8 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
     readDocument: (id: typeof DOCUMENT_ID) => id === DOCUMENT_ID
       ? { document: structuredClone(harness.document), nodes: structuredClone(harness.nodes) }
       : undefined,
-    previewHtml: async () => '<html><body><p>只读预览</p></body></html>',
-    importDocument: async (request: { sourcePath: string }) => {
-      expect(await readFile(request.sourcePath, 'utf8')).toBe('word-upload')
-      return {
-        status: 'imported' as const,
-        document: structuredClone(harness.document),
-        nodes: structuredClone(harness.nodes),
-      }
-    },
+    previewHtml,
+    importDocument,
     rollbackImport,
   } as never)
   ctx.provide('paperCommits', {
@@ -271,10 +290,7 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
     }],
     listContracts: () => structuredClone(harness.contracts),
     getContract: (id: ReturnType<typeof TemplateContractId>) => harness.contracts.find(item => item.id === id),
-    installPack: async () => {
-      harness.contracts = [templateContract()]
-      return structuredClone(harness.contracts)
-    },
+    installPack,
     upload: async () => {
       harness.contracts = [templateContract('uploaded')]
       return structuredClone(harness.contracts[0])
@@ -318,9 +334,15 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
     getCommit: (id: ReturnType<typeof DocumentCommitId>) => (
       harness.history.find(commit => commit.id === id)
     ),
+    getDocument: (id: ReturnType<typeof DocumentId>) => (
+      id === DocumentId('template-source') ? harness.templateSource : undefined
+    ),
   } as never)
   const service = new PaperAiWorkbenchService(ctx)
-  Object.assign(harness, { ctx, service, project, submit, rollbackImport, revert, check, exportDocument })
+  Object.assign(harness, {
+    ctx, service, project, submit, rollbackImport, revert, check, exportDocument, importDocument, installPack,
+    previewHtml,
+  })
   return harness
 }
 
@@ -591,6 +613,37 @@ describe('PaperAiWorkbenchService', () => {
     })).rejects.toThrow('safe .doc or .docx')
   })
 
+  it('treats the root commit as the commit point: a failed or cancelled preview still returns the created document', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-preview-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    harness.previewHtml.mockRejectedValueOnce(new Error('OfficeCLI preview crashed'))
+    const controller = new AbortController()
+    const request = {
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      fileName: '开题报告.docx',
+      contentBase64: Buffer.from('word-upload').toString('base64'),
+      role: 'proposal' as const,
+    }
+    harness.submit.mockImplementationOnce(async (submission) => {
+      const implementation = harness.submit.getMockImplementation()
+      if (implementation === undefined) throw new Error('submit has no implementation')
+      // The caller gives up while the commit is being published: the commit
+      // still lands, and the response must say so.
+      controller.abort(new Error('caller cancelled'))
+      return await implementation(submission)
+    })
+
+    const result = await harness.service.importDocument(request, controller.signal)
+    expect(result).toMatchObject({ status: 'imported', createdCommitId: 'commit-1' })
+    if (result.status !== 'imported') throw new Error('expected an imported document')
+    expect(result.opened.document.previewHtml).toBe('')
+    expect(result.opened.document.headCommitId).toBe('commit-1')
+    expect(harness.rollbackImport).not.toHaveBeenCalled()
+    expect(harness.previewHtml).toHaveBeenCalledWith(DOCUMENT_ID, undefined)
+  })
+
   it('rolls back the imported document when root commit submission rejects', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-submit-reject-'))
     roots.push(root)
@@ -662,6 +715,126 @@ describe('PaperAiWorkbenchService', () => {
     if (!(failure instanceof AggregateError)) throw new Error('expected aggregate rollback failure')
     expect(failure.errors).toEqual([submissionFailure, rollbackFailure])
     expect(failure.message).toContain('root commit and import rollback failed')
+  })
+
+  it('starts a document from a built-in form template and binds it in the root commit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-template-start-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const templatePath = join(root, 'templates', 'hit-proposal.docx')
+    await mkdir(join(root, 'templates'), { recursive: true })
+    await writeFile(templatePath, 'word-upload')
+    harness.templateSource = {
+      ...harness.document,
+      id: DocumentId('template-source'),
+      documentKind: 'template-source',
+      name: 'hit-proposal',
+      immutableSourcePath: templatePath,
+      workingPath: templatePath,
+    }
+
+    const result = await harness.service.createFromTemplate({
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      packId: 'hit-master-thesis',
+      memberId: 'proposal',
+    })
+    expect(result).toMatchObject({ status: 'imported', createdCommitId: 'commit-1' })
+    if (result.status !== 'imported') throw new Error('expected an imported document')
+    expect(result.opened.document.template?.name).toBe('HIT 开题报告')
+    expect(harness.installPack).toHaveBeenCalledWith(
+      expect.objectContaining({ packId: 'hit-master-thesis', memberIds: ['proposal'] }),
+      undefined,
+    )
+    expect(harness.contracts[0]?.status).toBe('confirmed')
+    expect(harness.importDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ sourcePath: templatePath, role: 'proposal', name: 'HIT 开题报告' }),
+      undefined,
+    )
+    expect(harness.submit).toHaveBeenCalledWith(expect.objectContaining({
+      message: '从模板新建：开题报告',
+      mutations: [
+        { type: 'milestone', label: '从模板新建 HIT 开题报告' },
+        { type: 'bind-template', templateId: 'template-1' },
+      ],
+    }))
+
+    // A form template is the document itself: an upload cannot replace it.
+    await expect(harness.service.createFromTemplate({
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      packId: 'hit-master-thesis',
+      memberId: 'proposal',
+      upload: { fileName: '论文.docx', contentBase64: Buffer.from('word-upload').toString('base64') },
+    })).rejects.toThrow('accepts no upload')
+
+    // Starting again reuses the confirmed contract and the caller's own name.
+    const again = createHarness(root)
+    again.templateSource = harness.templateSource
+    again.installPack.mockImplementationOnce(async () => {
+      again.contracts = structuredClone(harness.contracts)
+      return structuredClone(again.contracts)
+    })
+    await again.service.createFromTemplate({
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      packId: 'hit-master-thesis',
+      memberId: 'proposal',
+      name: '开题报告二稿',
+    })
+    expect(again.importDocument).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: '开题报告二稿' }),
+      undefined,
+    )
+    expect(again.contracts[0]?.status).toBe('confirmed')
+
+    harness.templateSource = undefined
+    await expect(harness.service.createFromTemplate({
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      packId: 'hit-master-thesis',
+      memberId: 'proposal',
+    })).rejects.toThrow('no stored source document')
+  })
+
+  it('formats an uploaded manuscript with a reference template and rejects foreign roles', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-template-reference-'))
+    roots.push(root)
+    const harness = createHarness(root)
+    const reference = (): TemplateContract[] => {
+      harness.contracts = [{ ...templateContract(), usage: 'format-reference', appliesToRoles: ['manuscript'] }]
+      return structuredClone(harness.contracts)
+    }
+    harness.installPack.mockImplementation(async () => reference())
+    const start = { workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, packId: 'hit-master-thesis', memberId: 'thesis' }
+
+    await expect(harness.service.createFromTemplate(start)).rejects.toThrow('upload the manuscript')
+    expect(harness.importDocument).not.toHaveBeenCalled()
+    await expect(harness.service.createFromTemplate({ ...start, role: 'proposal' }))
+      .rejects.toThrow("does not apply to 'proposal' documents")
+
+    const result = await harness.service.createFromTemplate({
+      ...start,
+      upload: { fileName: '论文.docx', contentBase64: Buffer.from('word-upload').toString('base64') },
+    })
+    expect(result).toMatchObject({ status: 'imported', createdCommitId: 'commit-1' })
+    expect(harness.importDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'manuscript', name: 'HIT 开题报告' }),
+      undefined,
+    )
+    expect(harness.submit).toHaveBeenCalledWith(expect.objectContaining({
+      mutations: [
+        { type: 'milestone', label: '从模板新建 HIT 开题报告' },
+        { type: 'bind-template', templateId: 'template-1' },
+      ],
+    }))
+    expect(await readdir(join(root, '.paperai', 'uploads', 'v1'))).toEqual([])
+
+    harness.installPack.mockImplementationOnce(async () => {
+      harness.contracts = [{ ...templateContract(), appliesToRoles: [] }]
+      return structuredClone(harness.contracts)
+    })
+    await expect(harness.service.createFromTemplate(start)).rejects.toThrow('applies to no document role')
   })
 
   it('installs, confirms, and associates a compatible template through a commit', async () => {

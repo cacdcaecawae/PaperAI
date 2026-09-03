@@ -28,6 +28,8 @@ export const zh = {
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'switch.on': '开',
+  'switch.off': '关',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -53,4 +55,6 @@ export const en = {
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'switch.on': 'On',
+  'switch.off': 'Off',
 } satisfies Record<ModelKey, string>

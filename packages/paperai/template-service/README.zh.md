@@ -19,7 +19,7 @@
 
 `validateAssociation()` 拒绝草稿、跨项目以及不兼容 `DocumentRole` 的绑定。实际 `bind-template` 发布只由 `paperCommits` 完成，因此每次关联都有可恢复版本与操作者来源。关联 `format-reference` 不复制参考模板正文。
 
-`check()` 读取当前 Working DOCX，检查确认状态、角色、必填字段、固定文字、章节、受支持的样式与页面规则、最低字数、参考文献、占位符、表格和 Office 结构。草稿导出可以保留失败报告；`delivery-export` 中的 error 通过 `deliveryBlocked()` 阻止正式交付。
+`check()` 读取当前 Working DOCX，检查确认状态、角色、必填字段、固定文字、章节、受支持的样式与页面规则、最低字数、参考文献、占位符、表格和 Office 结构。草稿导出可以保留失败报告；`delivery-export` 中的 error 通过 `deliveryBlocked()` 阻止正式交付。未关联模板的文档以无模板自由模式检查：报告直接通过且没有任何发现，草稿与正式交付导出均不受模板检查约束。
 
 服务先发布仅作证据的模板源与解析节点，最后写入合同记录；模板源不会进入普通 Working 文档列表。因此解析失败的模板不会出现在列表中，确定性重试可以补全尚未发布的记录。
 

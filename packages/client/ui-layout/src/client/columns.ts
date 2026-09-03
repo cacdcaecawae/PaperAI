@@ -63,6 +63,8 @@ export function clampWidth(px: number, min: number, max: number): number {
  * @param details - details width preference in px (0 = closed).
  * @param geometry - validated center/details geometry; omitted for the original DSH values.
  * @param detailsNarrowMode - behavior when the minimum split does not fit.
+ * @param focusRequested - explicit focus demand: an open details panel takes
+ * the whole content area at any viewport width; ignored while details are closed.
  * @returns resolved widths and focus state; details 0 means visually closed but never unmounted.
  */
 export function computeColumns(
@@ -71,10 +73,15 @@ export function computeColumns(
   details: number,
   geometry: LayoutGeometry = DEFAULT_LAYOUT_GEOMETRY,
   detailsNarrowMode: DetailsNarrowMode = DEFAULT_DETAILS_NARROW_MODE,
+  focusRequested = false,
 ): Columns {
   // The sidebar is fixed at its preference (or the rail) — it never concedes.
   const s = sidebar === 0 ? SIDEBAR_COLLAPSED : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
   const d0 = details === 0 ? 0 : clampWidth(details, geometry.detailsMin, geometry.detailsMax)
+
+  if (focusRequested && d0 > 0) {
+    return { sidebar: s, center: 0, details: Math.max(0, viewport - s), detailsFocused: true }
+  }
 
   // Step 1: everything fits at preferred widths.
   if (s + d0 + geometry.centerMin <= viewport) {

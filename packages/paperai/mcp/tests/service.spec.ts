@@ -4,7 +4,7 @@ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PaperMcpService from '../src/index.ts'
 import type { PaperMcpAgentIdentity, PaperMcpExportAdapter } from '../src/types.ts'
-import { actor, fakeDomain } from './helpers.ts'
+import { actor, fakeDomain, workspaceScope } from './helpers.ts'
 
 let context: Context | undefined
 
@@ -60,7 +60,7 @@ describe('PaperMcpService', () => {
       path: '/paperai/mcp',
     }))
 
-    const lease = harness.ctx.paperMcp.issueDescriptor(actor)
+    const lease = harness.ctx.paperMcp.issueDescriptor(actor, workspaceScope())
     expect(lease.descriptor).toMatchObject({
       type: 'http',
       name: 'paperai-domain',
@@ -87,7 +87,7 @@ describe('PaperMcpService', () => {
     }))
     expect(missing.end).toHaveBeenCalledWith('unauthorized')
 
-    const lease = harness.ctx.paperMcp.issueDescriptor(actor)
+    const lease = harness.ctx.paperMcp.issueDescriptor(actor, workspaceScope())
     const authorization = lease.descriptor.headers[0]?.value
     await lease.dispose()
     const revoked = unauthorizedResponse()
@@ -102,22 +102,24 @@ describe('PaperMcpService', () => {
       client: 'codex',
       sessionId: '   ',
     }
-    expect(() => harness.ctx.paperMcp.issueDescriptor(invalid)).toThrow(/sessionId/)
+    expect(() => harness.ctx.paperMcp.issueDescriptor(invalid, workspaceScope())).toThrow(/sessionId/)
     const { sessionId: _sessionId, ...missingSession } = actor
     expect(() => harness.ctx.paperMcp.issueDescriptor(
       missingSession as PaperMcpAgentIdentity,
+      workspaceScope(),
     )).toThrow(/must be present/)
     expect(() => harness.ctx.paperMcp.issueDescriptor({
       ...actor,
       client: 'paperai',
-    } as unknown as PaperMcpAgentIdentity)).toThrow(/codex or claude/)
+    } as unknown as PaperMcpAgentIdentity, workspaceScope())).toThrow(/codex or claude/)
     expect(() => harness.ctx.paperMcp.issueDescriptor({
       ...actor,
       kind: 'human',
-    } as unknown as PaperMcpAgentIdentity)).toThrow(/must be an Agent/)
+    } as unknown as PaperMcpAgentIdentity, workspaceScope())).toThrow(/must be an Agent/)
+    expect(() => harness.ctx.paperMcp.issueDescriptor(actor, workspaceScope('  '))).toThrow(/workspaceRoot/)
 
     const { provider: _provider, model: _model, ...minimalActor } = actor
-    const lease = harness.ctx.paperMcp.issueDescriptor(minimalActor)
+    const lease = harness.ctx.paperMcp.issueDescriptor(minimalActor, workspaceScope())
     expect(lease.actor).not.toHaveProperty('provider')
     expect(lease.actor).not.toHaveProperty('model')
     await lease.dispose()
@@ -125,7 +127,7 @@ describe('PaperMcpService', () => {
 
   it('updates model provenance only within the descriptor client and session', async () => {
     const harness = await mountService()
-    const lease = harness.ctx.paperMcp.issueDescriptor(actor)
+    const lease = harness.ctx.paperMcp.issueDescriptor(actor, workspaceScope())
     const switched: PaperMcpAgentIdentity = {
       ...actor,
       name: 'Codex Thesis Agent',
@@ -163,7 +165,7 @@ describe('PaperMcpService', () => {
 
   it('unregisters its HTTP route when the plugin fiber is disposed', async () => {
     const harness = await mountService()
-    const lease = harness.ctx.paperMcp.issueDescriptor(actor)
+    const lease = harness.ctx.paperMcp.issueDescriptor(actor, workspaceScope())
     expect(harness.route()).toBeDefined()
     await harness.ctx.fiber.dispose()
     context = undefined
@@ -209,6 +211,6 @@ describe('PaperMcpService', () => {
     expect(register).toHaveBeenCalledWith(expect.objectContaining({
       path: '/api/paperai/mcp',
     }))
-    expect(() => service.issueDescriptor(actor)).toThrow(/must be listening/)
+    expect(() => service.issueDescriptor(actor, workspaceScope())).toThrow(/must be listening/)
   })
 })

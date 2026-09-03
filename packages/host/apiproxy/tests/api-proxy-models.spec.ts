@@ -507,6 +507,71 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('projects and forwards driver-owned reasoning efforts and switches', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const reasoning = {
+      efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High', description: 'Deeper reasoning' }],
+      defaultEffort: 'high',
+    }
+    const controller = {
+      provider: { id: 'codex', name: 'Codex' },
+      currentModel: 'fake-alpha',
+      currentReasoningEffort: 'high',
+      switches: [{ id: 'fast-mode', name: 'Fast mode', description: '1.5x speed', enabled: false }],
+      listModels: () => Promise.resolve([
+        { id: 'fake-alpha', name: 'Fake Alpha', reasoning },
+        { id: 'fake-beta', name: 'Fake Beta', reasoning },
+      ]),
+      selectModel: vi.fn((model: string, options?: { reasoningEffort?: string; switches?: Record<string, boolean> }) => {
+        if (options?.switches?.['unknown'] !== undefined) return Promise.reject(new Error('unknown switch'))
+        controller.currentModel = model
+        if (options?.reasoningEffort !== undefined) controller.currentReasoningEffort = options.reasoningEffort
+        for (const [id, enabled] of Object.entries(options?.switches ?? {})) {
+          controller.switches = controller.switches.map(entry => (entry.id === id ? { ...entry, enabled } : entry))
+        }
+        return Promise.resolve(model)
+      }),
+    }
+    Object.assign(agent, { modelController: controller })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    expect(expectValue(await api.sessions.models(request({ sessionId })))).toEqual({
+      current: {
+        provider: 'codex', model: 'fake-alpha', reasoningEffort: 'high', switches: { 'fast-mode': false },
+      },
+      routable: true,
+      groups: [{
+        id: 'codex',
+        name: 'Codex',
+        models: [
+          { id: 'fake-alpha', name: 'Fake Alpha', reasoning },
+          { id: 'fake-beta', name: 'Fake Beta', reasoning },
+        ],
+      }],
+      failures: [],
+      switches: [{ id: 'fast-mode', name: 'Fast mode', description: '1.5x speed', enabled: false }],
+    })
+
+    const selected = expectValue(await api.sessions.selectModel(request({
+      sessionId, provider: 'codex', model: 'fake-beta', reasoningEffort: 'low', switches: { 'fast-mode': true },
+    })))
+    expect(controller.selectModel).toHaveBeenCalledWith('fake-beta', {
+      reasoningEffort: 'low', switches: { 'fast-mode': true },
+    })
+    expect(selected).toEqual({
+      selected: { provider: 'codex', model: 'fake-beta', reasoningEffort: 'low', switches: { 'fast-mode': true } },
+    })
+
+    const rejected = await api.sessions.selectModel(request({
+      sessionId, provider: 'codex', model: 'fake-beta', switches: { unknown: true },
+    }))
+    expect(rejected.result).toMatchObject({ ok: false, error: { code: 'model-unavailable' } })
+    await ctx.fiber.dispose()
+  })
+
   it('serves a session and its catalog when the stored default names a route that is gone', async () => {
     const { ctx, sessionId } = await harness()
     const api = createApiProxy(ctx, {

@@ -1281,9 +1281,75 @@ importers:
 
   packages/bundle/paperai-web:
     dependencies:
+      '@deepseek-ai/dsh-agent-instructions':
+        specifier: workspace:^
+        version: link:../../context/agent-instructions
+      '@deepseek-ai/dsh-command-compact':
+        specifier: workspace:^
+        version: link:../../compaction/command-compact
+      '@deepseek-ai/dsh-compaction-basic':
+        specifier: workspace:^
+        version: link:../../compaction/compaction-basic
+      '@deepseek-ai/dsh-compaction-tool-result-pruner':
+        specifier: workspace:^
+        version: link:../../compaction/compaction-tool-result-pruner
+      '@deepseek-ai/dsh-persona':
+        specifier: workspace:^
+        version: link:../../preset/persona
+      '@deepseek-ai/dsh-plan-mode':
+        specifier: workspace:^
+        version: link:../../plan/plan-mode
+      '@deepseek-ai/dsh-skill-filesystem':
+        specifier: workspace:^
+        version: link:../../skill/skill-filesystem
       '@deepseek-ai/dsh-storage-sqlite':
         specifier: workspace:^
         version: link:../../storage/storage-sqlite
+      '@deepseek-ai/dsh-tool-ask-user':
+        specifier: workspace:^
+        version: link:../../interaction/tool-ask-user
+      '@deepseek-ai/dsh-tool-bash':
+        specifier: workspace:^
+        version: link:../../shell/tool-bash
+      '@deepseek-ai/dsh-tool-fs':
+        specifier: workspace:^
+        version: link:../../fs/tool-fs
+      '@deepseek-ai/dsh-tool-fs-search':
+        specifier: workspace:^
+        version: link:../../fs/tool-fs-search
+      '@deepseek-ai/dsh-tool-goal':
+        specifier: workspace:^
+        version: link:../../goal/tool-goal
+      '@deepseek-ai/dsh-tool-jobs':
+        specifier: workspace:^
+        version: link:../../jobs/tool-jobs
+      '@deepseek-ai/dsh-tool-pwsh':
+        specifier: workspace:^
+        version: link:../../shell/tool-pwsh
+      '@deepseek-ai/dsh-tool-ralph':
+        specifier: workspace:^
+        version: link:../../workflow/tool-ralph
+      '@deepseek-ai/dsh-tool-skill':
+        specifier: workspace:^
+        version: link:../../skill/tool-skill
+      '@deepseek-ai/dsh-tool-subagent':
+        specifier: workspace:^
+        version: link:../../subagent/tool-subagent
+      '@deepseek-ai/dsh-tool-subagent-control':
+        specifier: workspace:^
+        version: link:../../subagent/tool-subagent-control
+      '@deepseek-ai/dsh-tool-todo':
+        specifier: workspace:^
+        version: link:../../todo/tool-todo
+      '@deepseek-ai/dsh-tool-web':
+        specifier: workspace:^
+        version: link:../../web/tool-web
+      '@deepseek-ai/dsh-tool-workflow':
+        specifier: workspace:^
+        version: link:../../workflow/tool-workflow
+      '@deepseek-ai/dsh-workflow-worker-thread':
+        specifier: workspace:^
+        version: link:../../workflow/workflow-worker-thread
       '@paperai/agent-acp':
         specifier: workspace:*
         version: link:../../paperai/agent-acp
@@ -1314,6 +1380,9 @@ importers:
       '@paperai/template-service':
         specifier: workspace:*
         version: link:../../paperai/template-service
+      '@paperai/tool-document':
+        specifier: workspace:*
+        version: link:../../paperai/tool-document
       '@paperai/ui-brand':
         specifier: workspace:*
         version: link:../../client/ui-paperai-brand
@@ -2404,6 +2473,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-sidebar':
         specifier: workspace:^
         version: link:../ui-sidebar
+      '@deepseek-ai/dsh-client-ui-theme':
+        specifier: workspace:^
+        version: link:../ui-theme
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
@@ -6324,6 +6396,61 @@ importers:
       '@paperai/repository':
         specifier: workspace:*
         version: link:../repository
+
+  packages/paperai/tool-document:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../../vendor/loader
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-sandbox-policy':
+        specifier: workspace:^
+        version: link:../../sandbox/sandbox-policy
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
+      '@paperai/commit-service':
+        specifier: workspace:*
+        version: link:../commit-service
+      '@paperai/document-service':
+        specifier: workspace:*
+        version: link:../document-service
+      '@paperai/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@paperai/mcp':
+        specifier: workspace:*
+        version: link:../mcp
+      '@paperai/project-service':
+        specifier: workspace:*
+        version: link:../project-service
+      '@paperai/template-service':
+        specifier: workspace:*
+        version: link:../template-service
 
   packages/paperai/workbench-service:
     dependencies:

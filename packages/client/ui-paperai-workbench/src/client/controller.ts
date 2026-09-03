@@ -11,7 +11,8 @@ import type {
   PaperAIDocumentSnapshot, PaperAIResourceId, PaperAIResourceTreeState,
   PaperAIResourceDirectoryState, PaperAIResourceDirectoryStore, PaperAIResourceTreeStore,
   PaperAISelectedNodeBuffer, PaperAIWorkbenchRemote,
-  PaperAITemplateCatalog, PaperAITemplateUsage, PaperAIWorkbenchAction,
+  PaperAIImportDocumentResult, PaperAITemplateCatalog, PaperAITemplateChoicesResult,
+  PaperAITemplateStartInput, PaperAITemplateUsage, PaperAIWorkbenchAction,
   PaperAIWorkbenchState, PaperAIWorkbenchStore, PaperAIWorkbenchTab,
 } from './types.ts'
 
@@ -209,6 +210,53 @@ export class PaperAIWorkbenchController {
       readonly name?: string
     },
   ): Promise<PaperAIActionResult> {
+    return await this.establishDocument(workspaceId, sessionId, signal => this.remote.importDocument({
+      workspaceId,
+      sessionId,
+      ...input,
+    }, signal))
+  }
+
+  /**
+   * Start one document from a built-in template pack member and open its Working copy.
+   * @param workspaceId - Workspace that receives the new document.
+   * @param sessionId - Session that displays the new Working copy.
+   * @param input - pack member, optional manuscript upload, role, and display name.
+   * @returns the settled local result after the resource tree and workbench projection are updated.
+   */
+  async createFromTemplate(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    input: PaperAITemplateStartInput,
+  ): Promise<PaperAIActionResult> {
+    return await this.establishDocument(workspaceId, sessionId, signal => this.remote.createFromTemplate({
+      workspaceId,
+      sessionId,
+      ...input,
+    }, signal))
+  }
+
+  /**
+   * Read the built-in template packs offered when starting a document.
+   * @param workspaceId - Workspace whose project catalog is consulted.
+   * @returns the pack choices, or the Host diagnostic when the catalog is unavailable.
+   */
+  async templateChoices(workspaceId: WorkspaceId): Promise<PaperAITemplateChoicesResult> {
+    this.assertLive()
+    const result = await callRemote(() => this.remote.listTemplates({ workspaceId }))
+    if (!result.ok) return { ok: false, error: remoteError(result.error) }
+    return { ok: true, packs: result.value.packs }
+  }
+
+  /**
+   * Run one Host document-establishing call (import or template start) and
+   * open the resulting Working copy in the Session's workbench.
+   */
+  private async establishDocument(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    call: (signal: AbortSignal) => Promise<RemoteResult<PaperAIImportDocumentResult>>,
+  ): Promise<PaperAIActionResult> {
     this.assertLive()
     const workbench = this.workbenchEntry(sessionId)
     const current = workbench.store.getSnapshot()
@@ -237,11 +285,7 @@ export class PaperAIWorkbenchController {
       state.phase = 'loading'
       state.error = null
     })
-    const result = await callRemote(() => this.remote.importDocument({
-      workspaceId,
-      sessionId,
-      ...input,
-    }, request.signal))
+    const result = await callRemote(() => call(request.signal))
     if (!this.isCurrent(workbench, request)) return { ok: false, error: 'request superseded' }
     if (!result.ok) {
       resources.store.update((state) => {

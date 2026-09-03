@@ -15,7 +15,10 @@ export function DetailsViewHost(props: DetailsViewHostProps) {
     const toolProps: DetailsSlotProps = props
     return <DetailsPanel {...toolProps} />
   }
-  return props.renderSlot('conversation.details.view', { closeDetails: props.closeDetails }, {
+  return props.renderSlot('conversation.details.view', {
+    closeDetails: props.closeDetails,
+    setDraft: props.actions.setDraft,
+  }, {
     only: active,
     fallback: (
       <DetailsViewShell

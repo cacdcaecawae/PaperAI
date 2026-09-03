@@ -5,6 +5,7 @@
  * @module @paperai/domain
  */
 
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 
 /** PaperAI project identity. */
@@ -284,6 +285,57 @@ export function deliveryBlocked(report: GateReport): boolean {
     && report.findings.some(finding => finding.severity === 'error' && finding.overridden !== true)
 }
 
+/** Compact digest of one gate report for model-facing tool results. */
+export interface GateSummary {
+  status: GateReport['status']
+  errorCount: number
+  warningCount: number
+  infoCount: number
+  /** Most severe active findings first, capped for prompt economy. */
+  topFindings: { severity: RuleSeverity; code: string; message: string }[]
+  /** One actionable Chinese next step for the writing agent. */
+  nextActions: string
+}
+
+const GATE_SUMMARY_TOP_FINDINGS = 5
+
+/**
+ * Digest a gate report into severity counts, the most severe findings first,
+ * and one actionable next step. Overridden findings are excluded because they
+ * no longer demand work; a clean report without a template id names the
+ * templateless free-writing mode instead of a repair step, while a corrupt
+ * association (no resolvable template, error findings) still demands repair.
+ * @param report - complete gate report from a commit or export check.
+ * @returns the digest embedded in model-facing mutating results.
+ */
+export function summarizeGate(report: GateReport): GateSummary {
+  const active = report.findings.filter(finding => finding.overridden !== true)
+  const countOf = (severity: RuleSeverity): number =>
+    active.filter(finding => finding.severity === severity).length
+  const errorCount = countOf('error')
+  const warningCount = countOf('warning')
+  const rank: Record<RuleSeverity, number> = { error: 0, warning: 1, info: 2 }
+  const topFindings = [...active]
+    .sort((first, second) => rank[first.severity] - rank[second.severity])
+    .slice(0, GATE_SUMMARY_TOP_FINDINGS)
+    .map(finding => ({ severity: finding.severity, code: finding.code, message: finding.message }))
+  const nextActions = report.templateId === undefined && active.length === 0
+    ? '未关联模板：自由写作模式，无模板检查。'
+    : errorCount > 0
+      ? `修复 ${errorCount} 处 error 级发现后再继续写作，然后用 paperai_check_gate 复核。`
+      : warningCount > 0
+        ? `无 error 级发现；${warningCount} 处 warning 建议与用户确认后处理。`
+        : '门禁通过，可继续写作。'
+  return {
+    status: report.status,
+    errorCount,
+    warningCount,
+    infoCount: countOf('info'),
+    topFindings,
+    nextActions,
+  }
+}
+
 /** Recoverable commit over one exact Working DOCX snapshot. */
 export interface DocumentCommit {
   id: DocumentCommitId
@@ -318,4 +370,97 @@ export interface SectionBuffer {
   selectedNodeId: DocumentNodeId
   nodes: DocumentNode[]
   loadedAt: string
+}
+
+/** Why a document operation is refused for the calling Agent session. */
+export type PaperAccessDeniedCode =
+  | 'NO_PROJECT_FOR_SESSION'
+  | 'PROJECT_OUT_OF_SCOPE'
+  | 'READ_ONLY_SESSION'
+  | 'WRITE_OUTSIDE_WORKSPACE'
+
+/**
+ * The DSH sandbox modes as the document routes read them: `read-only` refuses
+ * mutations, `workspace-write` confines file output to the session workspace,
+ * and `danger-full-access` lifts that confinement.
+ */
+export type PaperSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+/**
+ * Refusal raised by the shared document-access checks that every Agent route
+ * (native DSH tools and the MCP bridge) applies before touching a domain service.
+ * The message carries the code prefix so a plain error text stays self-describing.
+ */
+export class PaperAccessError extends Error {
+  constructor(readonly code: PaperAccessDeniedCode, message: string) {
+    super(`${code}: ${message}`)
+    this.name = 'PaperAccessError'
+  }
+}
+
+/**
+ * What one Agent session may touch: exactly the PaperAI project that owns its
+ * workspace, and the sandbox mode that decides mutations and file output.
+ */
+export interface PaperAccessScope {
+  /** The project resolved from the session workspace root. */
+  readonly projectId: ProjectId
+  /** Absolute session workspace root; the writable root under `workspace-write`. */
+  readonly workspaceRoot: string
+  /** Effective sandbox mode of the session at the time of the call. */
+  readonly sandboxMode: PaperSandboxMode
+}
+
+/**
+ * Refuse any project other than the session's own.
+ * @param scope - the calling session's resolved scope.
+ * @param projectId - project the requested record belongs to.
+ * @param subject - model-facing name of the requested record, for the refusal text.
+ * @throws PaperAccessError `PROJECT_OUT_OF_SCOPE` when the project differs.
+ */
+export function assertProjectInScope(scope: PaperAccessScope, projectId: ProjectId, subject: string): void {
+  if (projectId !== scope.projectId) {
+    throw new PaperAccessError(
+      'PROJECT_OUT_OF_SCOPE',
+      `${subject} belongs to PaperAI project '${projectId}', outside this session's workspace project '${scope.projectId}'`,
+    )
+  }
+}
+
+/**
+ * Refuse document mutations under the `read-only` sandbox mode.
+ * @param scope - the calling session's resolved scope.
+ * @param operation - model-facing name of the refused operation.
+ * @throws PaperAccessError `READ_ONLY_SESSION` when the session is read-only.
+ */
+export function assertMutationAllowed(scope: PaperAccessScope, operation: string): void {
+  if (scope.sandboxMode === 'read-only') {
+    throw new PaperAccessError(
+      'READ_ONLY_SESSION',
+      `${operation} is refused: this session runs in read-only sandbox mode; switch the session to workspace-write first`,
+    )
+  }
+}
+
+/**
+ * Confine a file the Agent asks the Host to write — an export destination —
+ * to the session workspace, the same writable root the filesystem tools
+ * enforce under `workspace-write`; only `danger-full-access` may write
+ * elsewhere. A relative path resolves against the workspace root. The check is
+ * lexical over the resolved path, matching the commit service's containment.
+ * @param scope - the calling session's resolved scope.
+ * @param path - destination the Agent supplied.
+ * @param subject - model-facing name of the destination, for the refusal text.
+ * @returns the absolute destination path to write.
+ * @throws PaperAccessError `WRITE_OUTSIDE_WORKSPACE` when the path escapes the workspace without full access.
+ */
+export function assertWriteWithinWorkspace(scope: PaperAccessScope, path: string, subject: string): string {
+  const destination = resolve(scope.workspaceRoot, path)
+  if (scope.sandboxMode === 'danger-full-access') return destination
+  const inside = relative(scope.workspaceRoot, destination)
+  if (inside === '' || (inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))) return destination
+  throw new PaperAccessError(
+    'WRITE_OUTSIDE_WORKSPACE',
+    `${subject} '${path}' is outside this session's workspace '${scope.workspaceRoot}'; only a danger-full-access session may write there`,
+  )
 }

@@ -18,9 +18,14 @@ type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'mes
 
 /**
  * Check the current Working DOCX against its attached template contract.
+ * A document that names no template is in templateless free mode: the report
+ * passes with no findings in every mode, so neither draft nor formal delivery
+ * export is blocked; attaching a template is what opts into checks. A document
+ * that names a template whose record cannot be resolved is corrupt, not free:
+ * it fails with `template_missing` until the association is repaired.
  * @param engine - Office document engine used for live text, style, and structure evidence.
  * @param document - authoritative Working DOCX record.
- * @param template - attached template, or `undefined` when none is attached.
+ * @param template - resolved attached template, or `undefined` when the document names none or its record is missing.
  * @param mode - continuous, draft-export, or formal delivery behavior.
  * @param signal - optional cancellation signal.
  * @returns a complete report; hard findings block only formal delivery export.
@@ -34,7 +39,11 @@ export async function checkTemplateContract(
 ): Promise<GateReport> {
   const findings: GateFinding[] = []
   if (template === undefined) {
-    findings.push(finding('template-missing', 'error', 'template_missing', '正式交付前必须关联已确认模板'))
+    if (document.templateId !== undefined) {
+      findings.push(finding('template-missing', 'error', 'template_missing', `文档关联的模板 ${document.templateId} 已不存在，请重新关联模板`, {
+        expected: document.templateId,
+      }))
+    }
     return report(document, undefined, mode, findings)
   }
   if (template.status !== 'confirmed') {

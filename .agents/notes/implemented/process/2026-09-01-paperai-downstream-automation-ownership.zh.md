@@ -14,6 +14,10 @@ Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与
 
 稳定的 `all checks passed` 结论只评估当前仓库拥有的 job 集合。PaperAI 在工作流源码中保留上游 job，使同步仍可审查，但会跳过这些 job，而不是重复执行另一产品的发布矩阵。拥有上游专属外部状态的自动化同样按仓库身份选择：DSH issue 自动化以及 DSH 或 vendored-framework npm 发布 job 只在 `deepseek-harness/deepseek-harness` 运行。跳过一个由上游拥有的 job 不算 PaperAI 产品失败。
 
+代码 job 通过 `fetch-depth: 0` 保留完整提交历史，并指定 `filter: blob:none`。Checkout 按需下载选定版本的文件内容，改动源码覆盖率和归档验证仍可读取 pull request 的精确基线。这避开了 GitHub 未过滤历史 pack 中无法解析的 blob delta，不会截断提交历史或削弱检查。读取历史文件可能需要额外网络请求。
+
+聚焦测试选择同时包含产品包测试与被修改共享模块的所属测试。产品测试间接执行共享代码，不能替代共享模块自身的行为覆盖；工作流回归测试约束这些共享测试套件的选择。CI 将 Vitest 选项直接放在 pnpm 脚本名之后，不插入会终止 Vitest 选项解析的 `--`。涉及路径的 MCP fixture（测试前置数据）使用当前平台的绝对路径和分隔符，使 Linux 与 Windows 验证相同的导出限制。
+
 托管真实 API 工作流沿用已有凭证策略：上游默认启用，下游仓库只有在配置 `DEEPSEEK_API_KEY_EXTERNAL` 后，才用 `DSH_REAL_API_E2E_ENABLED=true` 显式启用。
 
 npm、Python 与 GitHub Actions 的常规 Dependabot 版本更新通过 `open-pull-requests-limit: 0` 关闭。PaperAI 通过有意识的 DSH 同步与明确的产品依赖工作获取这些基线。Dependabot 安全更新是独立通道，不受版本更新数量限制。
@@ -33,5 +37,7 @@ PaperAI 发布产品包之前需要自己的发布族。把 `@paperai/*` 包塞�
 **在 PaperAI 以更小 worker 数运行每个可移植 DSH 门禁。** 这仍会在四核 runner 上重复完整覆盖率、兼容性、语言和平台清单。pull request 的大部分时间会用于验证同步来的底座，而不是 PaperAI profile，并把上游覆盖率债务变成下游产品失败。
 
 ## 后果
+
+工作流回归测试同时约束完整历史、按需文件下载和禁用凭证持久化。全新 checkout 必须能够解析合并版本、读取精确基线的文件并计算差异，随后才能运行产品检查。
 
 PaperAI pull request 会在仓库能够分配的 runner 上报告与产品相关的 CI，不再因缺少上游权限、无限排队或上游拥有的底座穷举检查而失败。有意识的 DSH 同步与发布准备仍必须在采用新基线前验证上游矩阵。仓库不再收到常规版本更新 PR，因此维护者必须安排明确的 PaperAI 依赖升级；安全公告仍可产生聚焦更新。DSH 与 vendored-framework 发布继续在其所属仓库中验证；在产品专属发布族完成设计和测试前，PaperAI 发布保持不可用。

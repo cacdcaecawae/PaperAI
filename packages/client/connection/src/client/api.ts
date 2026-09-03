@@ -12,7 +12,7 @@ export type {
   ResponseValue, WorkspaceApi, WorkspaceId, WorkspaceView,
   SkillsApi, SkillEntry,
   ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
-  ModelReasoningEffort, ModelSelection, QueueAction, QueuedInboxItem, SessionModels,
+  ModelReasoningEffort, ModelSelection, ModelSwitch, QueueAction, QueuedInboxItem, SessionModels,
   GoalsApi, GoalRef,
   SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView,
   CredentialsApi, CredentialView, ConfigurableProviderView, DiscoveredModelView, LlmApi,

@@ -21,7 +21,14 @@ import {
  * `narrowExpanded` is the manual override that re-expands the auto-collapsed
  * sidebar over the squeezed center without rewriting the width preference.
  */
-type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowExpanded: boolean }
+type LayoutState = {
+  sidebar: number
+  details: number
+  narrow: boolean
+  narrowExpanded: boolean
+  /** Explicit focus demand: an open details panel takes the whole content area regardless of viewport width. */
+  detailsFocus: boolean
+}
 
 /**
  * Annotation twin of the actions literal below (the export needs a declared
@@ -34,6 +41,7 @@ type LayoutActions = {
   setNarrow: (draft: LayoutState, narrow: boolean) => void
   openDetails: (draft: LayoutState, activeGeometry?: LayoutGeometry) => void
   closeDetails: (draft: LayoutState) => void
+  setDetailsFocus: (draft: LayoutState, active: boolean) => void
 }
 
 /**
@@ -51,7 +59,9 @@ export function createLayoutStore(
   geometry: LayoutGeometry = DEFAULT_LAYOUT_GEOMETRY,
 ): EngineStoreHandle<LayoutState, LayoutActions>  {
   const handle = defineStore({
-    init: (): LayoutState => ({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false }),
+    init: (): LayoutState => ({
+      sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, detailsFocus: false,
+    }),
     actions: {
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
       setDetails: (d, px: number, activeGeometry: LayoutGeometry = geometry) => {
@@ -73,7 +83,12 @@ export function createLayoutStore(
       openDetails: (d, activeGeometry: LayoutGeometry = geometry) => {
         if (d.details === 0) d.details = activeGeometry.detailsDefault
       },
-      closeDetails: (d) => { d.details = 0 },
+      // Closing also drops the focus demand: a later reopen starts split.
+      closeDetails: (d) => {
+        d.details = 0
+        d.detailsFocus = false
+      },
+      setDetailsFocus: (d, active: boolean) => { d.detailsFocus = active },
     },
   })
   return handle

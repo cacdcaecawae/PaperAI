@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-模型选择插件（浏览器侧）：**两个入口共用一份会话级目录**，由 `ModelDirectoryResolver`（`ctx.modelDirectories`）持有。对于普通会话，`/model` popupSelect 贡献项（经 `ctx.commandUi` 注册）与 composer 的具名 `conversation.input.model` slot 都通过同一个 `ModelDirectory` 实例，经 `session.models` 加载会话的建议目录，并经 `session.selectModel` 提交。紧凑型 composer 触发器会打开两级 Model/Effort 菜单：模型仍按提供方分组，所选具体模型则提供由其适配器持有的推理强度名称、说明和默认值。`/model` 应用所选模型的默认推理强度，composer 随后可以选择任一已公布的推理强度。
+模型选择插件（浏览器侧）：**两个入口共用一份会话级目录**，由 `ModelDirectoryResolver`（`ctx.modelDirectories`）持有。对于普通会话，`/model` popupSelect 贡献项（经 `ctx.commandUi` 注册）与 composer 的具名 `conversation.input.model` slot 都通过同一个 `ModelDirectory` 实例，经 `session.models` 加载会话的建议目录，并经 `session.selectModel` 提交。紧凑型 composer 触发器会打开两级 Model/Effort 菜单：模型仍按提供方分组，所选具体模型则提供由其适配器持有的推理强度名称、说明和默认值。`/model` 应用所选模型的默认推理强度，composer 随后可以选择任一已公布的推理强度。当会话的 Agent 驱动公布布尔开关（ACP 提供方的 fast 模式）时，根菜单会按开关逐个追加可勾选行，名称与说明取自驱动方自己的文案；翻转一次会把当前模型与推理强度连同这一个值一起提交，被接受的选择就地更新该行，已开启的开关会跟在推理强度之后进入触发器说明文字。走 LLM 路由的会话收不到开关，保持两行菜单。
 
 Host 报告的 `ModelSelection` 是唯一的选择事实，其中包含提供方、模型与推理（reasoning）强度；但只有当该提供方／模型对仍在已公布分组中时才会回显。目录行缺席时，可路由的选择保持不变，但触发器会提示 `Select model`；系统不会合成陈旧行，且在用户选择已公布的模型之前不会显示 Effort 行。目录加载与选择共享一个代次计数器，旧响应不会覆盖新结果；连接重置会丢弃所有常驻目录投影，并在显示前重新拉取 Host 恢复的选择。各提供方的元数据获取失败会列出对应提供方，同时可用分组仍可选择；选择失败会保留先前的选择和目录。提供方与 RPC 诊断只保留在线路和 controller 界面；composer 与 `/model` 界面会显示本地化的通用失败文案，不会呈现内部错误文本。
 

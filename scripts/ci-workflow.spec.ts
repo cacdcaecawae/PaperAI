@@ -2,12 +2,40 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
+import { parseCLI } from 'vitest/node'
 
 const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js'
 
 describe('CI workflow', () => {
+  it.each([
+    {
+      job: 'paperai-code',
+      script: 'test:paperai:ci',
+      expected: {
+        coverage: { enabled: true, changed: 'ci-base', thresholds: { perFile: true, statements: 85, branches: 65, functions: 85, lines: 85 } },
+        maxWorkers: 2,
+        testTimeout: 30_000,
+      },
+    },
+    {
+      job: 'paperai-windows',
+      script: 'test:paperai:windows',
+      expected: { maxWorkers: 2, testTimeout: 30_000 },
+    },
+  ])('passes $job script arguments through to Vitest options', ({ job, script, expected }) => {
+    const config = workflowJob(loadWorkflow('.github/workflows/ci.yml'), job)
+    if (!Array.isArray(config.steps)) throw new TypeError(`${job} must define steps`)
+    const step = config.steps.filter(isRecord).find(
+      entry => typeof entry.run === 'string' && entry.run.startsWith(`pnpm run ${script}`),
+    )
+    if (typeof step?.run !== 'string') throw new TypeError(`${job} must invoke ${script}`)
+    const invocation = step.run.replace(/\$\{\{.*?\}\}/g, 'ci-base').trim().split(/\s+/)
+    expect(invocation.slice(0, 3)).toEqual(['pnpm', 'run', script])
+    expect(parseCLI(['vitest', 'run', ...invocation.slice(3)]).options).toMatchObject(expected)
+  })
+
   it('isolates every pnpm action setup destination per runner', () => {
     const files = ['.github/workflows/ci.yml', '.github/workflows/ci-master.yml']
     const setups: Array<{ jobName: string; step: unknown }> = []
@@ -88,11 +116,17 @@ describe('CI workflow', () => {
     expect(code['runs-on']).toBe('ubuntu-24.04')
     expect(ui['runs-on']).toBe('ubuntu-24.04')
     expect(paperaiWindows['runs-on']).toBe('windows-2025')
+    const codeCheckout = code.steps.filter(isRecord).find(
+      step => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
+    )
+    expect(codeCheckout).toMatchObject({
+      with: { 'fetch-depth': 0, filter: 'blob:none', 'persist-credentials': false },
+    })
     const codeCommands = commandText(code.steps)
     expect(codeCommands).toContain('pnpm run check:ci:static')
     expect(codeCommands).toContain('pnpm run typecheck:contracts-ready')
     expect(codeCommands).toContain('pnpm run lint:contracts-ready')
-    expect(codeCommands).toContain('pnpm run test:paperai:ci')
+    expect(codeCommands).toContain('pnpm run test:paperai:ci --coverage.enabled')
     expect(codeCommands).toContain('--coverage.changed=')
     expect(codeCommands).toContain('--coverage.thresholds.perFile=true')
     expect(codeCommands).toContain('--coverage.thresholds.statements=85')
@@ -111,7 +145,11 @@ describe('CI workflow', () => {
       throw new TypeError('PaperAI CI scripts must be strings')
     }
     for (const selection of [
+      'packages/client/connection/tests/client-apply.client.spec.ts',
+      'packages/client/connection/tests/api-helpers.client.spec.ts',
       'packages/client/ui-paperai-workbench/tests',
+      'packages/client/ui-primitives/tests/tooltip.client.spec.tsx',
+      'packages/host/apiproxy/tests/rpc-schemas.spec.ts',
       'packages/interaction/permission-presets/tests',
       'packages/paperai',
     ]) {
@@ -149,7 +187,7 @@ describe('CI workflow', () => {
     expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
 
     const windowsCommands = commandText(paperaiWindows.steps)
-    expect(windowsCommands).toContain('pnpm run test:paperai:windows')
+    expect(windowsCommands).toContain('pnpm run test:paperai:windows --maxWorkers=2')
     expect(windowsCommands).toContain('snapshot: persistent-pwsh-tool-turn matches')
     expect(windowsCommands).not.toContain('check:ci:windows-complete')
     expect(typeof windowsNative['runs-on']).toBe('string')

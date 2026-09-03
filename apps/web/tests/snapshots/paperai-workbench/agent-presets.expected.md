@@ -1,6 +1,6 @@
 - menu:
-  - menuitem "标准模式 功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。"
-  - menuitem "Codex 通过本地 Codex ACP 运行时直接处理论文、代码与项目文件。":
-    - text: Codex 通过本地 Codex ACP 运行时直接处理论文、代码与项目文件。
+  - menuitem "DSH 标准 PaperAI 论文智能体，由内置 DSH 标准循环驱动：标准模式全部能力加文档工具、写作规程与门禁自检，修改与 Codex/Claude 记入同一版本账本。"
+  - menuitem "Codex PaperAI 论文智能体，由本地 Codex ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。":
+    - text: Codex PaperAI 论文智能体，由本地 Codex ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。
     - img
-  - menuitem "Claude 通过本地 Claude ACP 运行时直接处理论文、代码与项目文件。"
+  - menuitem "Claude PaperAI 论文智能体，由本地 Claude ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。"

@@ -30,7 +30,7 @@ The product is built on a pinned [DeepSeek Harness](https://github.com/deepseek-
 | Multiple Agent routes | Use the built-in DeepSeek Harness Agent or local Codex and Claude adapters through ACP. |
 | Human and Agent parity | The workbench and authenticated PaperAI MCP tools call the same document, template, version, restore, and export services. |
 | Recoverable history | Every successful human or Agent document change advances a version with actor, client, provider, and model provenance. |
-| Formal export checks | Drafts remain available; formal delivery must pass the confirmed template requirements. |
+| Formal export checks | Drafts remain available; formal delivery must pass the attached confirmed template requirements, and templateless documents export freely. |
 | Local-first operation | Projects, source files, Working documents, templates, version objects, and application state remain on the local machine. |
 
 ## Document workflow

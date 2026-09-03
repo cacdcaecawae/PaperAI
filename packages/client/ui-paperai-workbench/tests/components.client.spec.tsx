@@ -50,6 +50,10 @@ function workspaceProps(state: PaperAIResourceTreeState) {
   const openResource = vi.fn(async () => {})
   const importDocument = vi.fn<PaperAIWorkspaceContentProps['importDocument']>()
     .mockResolvedValue({ ok: true })
+  const createFromTemplate = vi.fn<PaperAIWorkspaceContentProps['createFromTemplate']>()
+    .mockResolvedValue({ ok: true })
+  const loadTemplateChoices = vi.fn<PaperAIWorkspaceContentProps['loadTemplateChoices']>()
+    .mockResolvedValue({ ok: true, packs: TEMPLATE_CATALOG.packs })
   const props = {
     workspaceId: WORKSPACE_ID,
     path: 'F:/paper',
@@ -60,9 +64,28 @@ function workspaceProps(state: PaperAIResourceTreeState) {
     refreshResources,
     openResource,
     importDocument,
+    createFromTemplate,
+    loadTemplateChoices,
     t,
   } as unknown as PaperAIWorkspaceContentProps
-  return { props, store, ensureResources, refreshResources, openResource, importDocument }
+  return {
+    props, store, ensureResources, refreshResources, openResource, importDocument,
+    createFromTemplate, loadTemplateChoices,
+  }
+}
+
+const THESIS_FORMAT_MEMBER = {
+  memberId: 'thesis-format',
+  name: 'Thesis format',
+  description: 'Formatting reference for the manuscript.',
+  appliesToRoles: ['manuscript' as const],
+  usage: 'format-reference' as const,
+  originalFileName: '硕士学位论文书写范例.docx',
+}
+
+/** Open the folded start flow (it folds once the project holds a document). */
+function openStartFlow(): void {
+  fireEvent.click(screen.getByRole('button', { name: '新建文档' }))
 }
 
 function workbenchProps(state: PaperAIWorkbenchState) {
@@ -85,9 +108,13 @@ function workbenchProps(state: PaperAIWorkbenchState) {
   const reloadExternal = vi.fn(async () => ({ ok: true as const }))
   const resolveExternalConflict = vi.fn()
   const restore = vi.fn(async () => ({ ok: true as const }))
+  const setDraft = vi.fn()
+  const setDetailsFocus = vi.fn()
   const props = {
     sessionId: SESSION_ID,
     closeDetails,
+    setDraft,
+    setDetailsFocus,
     useWorkbench: bind(store),
     selectTab,
     retryOpen,
@@ -111,7 +138,7 @@ function workbenchProps(state: PaperAIWorkbenchState) {
     props, store, closeDetails, selectTab, retryOpen, selectNode, updateDraft,
     discardDraft, commitSelected, validate, loadTemplates, installTemplate,
     uploadTemplate, confirmTemplate, associateTemplate, exportDocument,
-    reloadExternal, resolveExternalConflict, restore,
+    reloadExternal, resolveExternalConflict, restore, setDraft, setDetailsFocus,
   }
 }
 
@@ -175,7 +202,96 @@ describe('WorkspaceContent', () => {
     render(<WorkspaceContent {...empty.props} />)
     expect(screen.getByRole('heading', { name: '项目内容', level: 3 })).toBeTruthy()
     expect(screen.getByRole('status').textContent).toBe('暂无项目内容')
-    expect(screen.queryByRole('region')).toBeNull()
+    for (const label of ['文档', '模板', '图像', '实验', '代码']) {
+      expect(screen.queryByRole('region', { name: label })).toBeNull()
+    }
+    // An empty project leads with the start flow instead of the tree.
+    expect(screen.getByRole('button', { name: '新建文档' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('leads an empty project with the built-in templates and starts a form template directly', async () => {
+    const b = workspaceProps({
+      phase: 'ready', resources: [], selected: null, error: null,
+    })
+    let finish!: (value: { readonly ok: true }) => void
+    b.createFromTemplate.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    render(<WorkspaceContent {...b.props} />)
+    expect(screen.getByText('正在读取模板…')).not.toBeNull()
+    const start = await screen.findByRole('button', { name: '从模板新建：Master thesis proposal' })
+    expect(b.loadTemplateChoices).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(screen.getByText('HIT master thesis')).not.toBeNull()
+    expect(start.textContent).toContain('从模板新建')
+
+    fireEvent.click(start)
+    expect(b.createFromTemplate).toHaveBeenCalledWith(WORKSPACE_ID, {
+      packId: HIT_PACK_ID,
+      memberId: HIT_PROPOSAL_MEMBER_ID,
+    })
+    expect(await screen.findByText('正在新建…')).not.toBeNull()
+    expect(screen.getByRole('button', { name: '导入 Word' }).hasAttribute('disabled')).toBe(true)
+    finish({ ok: true })
+    await waitFor(() => { expect(screen.queryByText('正在新建…')).toBeNull() })
+
+    b.createFromTemplate.mockResolvedValueOnce({ ok: false, error: 'paperai-workbench: pack unknown' })
+    fireEvent.click(screen.getByRole('button', { name: '从模板新建：Master thesis proposal' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('未能从模板新建文档，请重试。')
+    expect(alert.textContent).not.toContain('paperai-workbench')
+  })
+
+  it('formats an uploaded manuscript with a formatting-reference member', async () => {
+    const b = workspaceProps({
+      phase: 'ready', resources: [], selected: null, error: null,
+    })
+    const pack = TEMPLATE_CATALOG.packs[0]!
+    b.loadTemplateChoices.mockResolvedValueOnce({
+      ok: true,
+      packs: [{ ...pack, members: [...pack.members, THESIS_FORMAT_MEMBER] }],
+    })
+    const view = render(<WorkspaceContent {...b.props} />)
+    const format = await screen.findByRole('button', { name: '导入 Word 并套用格式：Thesis format' })
+    expect(format.textContent).toContain('导入并套用格式')
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
+    const click = vi.spyOn(input, 'click')
+    fireEvent.click(format)
+    expect(click).toHaveBeenCalledOnce()
+    expect(b.createFromTemplate).not.toHaveBeenCalled()
+
+    fireEvent.change(input, {
+      target: { files: [new File(['word'], 'thesis.docx', { type: 'application/zip' })] },
+    })
+    await waitFor(() => {
+      expect(b.createFromTemplate).toHaveBeenCalledWith(WORKSPACE_ID, {
+        packId: HIT_PACK_ID,
+        memberId: 'thesis-format',
+        upload: { fileName: 'thesis.docx', contentBase64: 'd29yZA==' },
+      })
+    })
+    expect(b.importDocument).not.toHaveBeenCalled()
+  })
+
+  it('folds the start flow behind its heading once documents exist and retries a failed catalog', async () => {
+    const b = workspaceProps({
+      phase: 'ready', resources: RESOURCES.resources, selected: null, error: null,
+    })
+    b.loadTemplateChoices.mockResolvedValueOnce({ ok: false, error: 'internal: catalog offline' })
+    render(<WorkspaceContent {...b.props} />)
+    const heading = screen.getByRole('button', { name: '新建文档' })
+    expect(heading.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: '导入 Word' })).toBeNull()
+
+    fireEvent.click(heading)
+    expect(heading.getAttribute('aria-expanded')).toBe('true')
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('暂时无法读取模板目录。')
+    expect(alert.textContent).not.toContain('catalog offline')
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByRole('button', { name: '从模板新建：Master thesis proposal' })).not.toBeNull()
+    expect(b.loadTemplateChoices).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(heading)
+    expect(heading.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: '从模板新建：Master thesis proposal' })).toBeNull()
   })
 
   it('renders cold, loading, inline-error, selected, and server snapshots', () => {
@@ -235,6 +351,7 @@ describe('WorkspaceContent', () => {
     expect(screen.getByText('proposal-template.docx')).not.toBeNull()
     const input = rendered.container.querySelector<HTMLInputElement>('input[type="file"]')!
     const click = vi.spyOn(input, 'click')
+    openStartFlow()
     fireEvent.click(screen.getByRole('button', { name: '导入 Word' }))
     expect(click).toHaveBeenCalledOnce()
     fireEvent.change(input, { target: { files: [] } })
@@ -247,6 +364,7 @@ describe('WorkspaceContent', () => {
       phase: 'ready', resources: RESOURCES.resources, selected: null, error: null,
     })
     const view = render(<WorkspaceContent {...b.props} />)
+    openStartFlow()
     const role = screen.getByRole('button', { name: '文档类型，当前：论文正文' })
     expect(role.getAttribute('aria-haspopup')).toBe('menu')
     expect(role.getAttribute('aria-expanded')).toBe('false')
@@ -309,6 +427,7 @@ describe('WorkspaceContent', () => {
     })
     pending.importDocument.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const pendingView = render(<WorkspaceContent {...pending.props} />)
+    openStartFlow()
     fireEvent.change(pendingView.container.querySelector<HTMLInputElement>('input[type="file"]')!, {
       target: { files: [new File(['word'], 'proposal.docx', { type: 'application/zip' })] },
     })
@@ -336,7 +455,7 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...b.props} />)
     expect(screen.getByTitle('文档预览').getAttribute('sandbox')).toBe('')
-    expect(screen.queryByText('Codex / gpt-5.6')).toBeNull()
+    expect(screen.queryByText('Codex · gpt-5.6')).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: '编辑' }))
     expect(b.selectTab).toHaveBeenCalledWith('edit')
   })
@@ -444,16 +563,24 @@ describe('DocumentWorkbench', () => {
     expect(screen.getByRole('button', { name: '恢复此版本' }).hasAttribute('disabled')).toBe(true)
 
     cleanup()
-    const gate = workbenchProps(workbenchState({
+    const gate = workbenchProps(workbenchState({ ...conflict, tab: 'gate' }))
+    render(<DocumentWorkbench {...gate.props} />)
+    expect(screen.getByRole('button', { name: '运行门禁' }).hasAttribute('disabled')).toBe(true)
+
+    cleanup()
+    const template = workbenchProps(workbenchState({
       ...conflict,
-      tab: 'gate',
+      tab: 'template',
       templates: { ...TEMPLATE_CATALOG, contracts: [] },
     }))
-    render(<DocumentWorkbench {...gate.props} />)
-    expect(screen.getByText('请先解决当前节点的外部修改冲突。')).not.toBeNull()
-    expect(screen.getByRole('button', { name: '运行门禁' }).hasAttribute('disabled')).toBe(true)
+    render(<DocumentWorkbench {...template.props} />)
     expect(screen.getByRole('button', { name: '安装并解析' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '上传模板' }).hasAttribute('disabled')).toBe(true)
+
+    cleanup()
+    const exportTab = workbenchProps(workbenchState({ ...conflict, tab: 'export' }))
+    render(<DocumentWorkbench {...exportTab.props} />)
+    expect(screen.getByText('请先解决当前节点的外部修改冲突。')).not.toBeNull()
     expect(screen.getByRole('button', { name: '导出草稿' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '导出正式版' }).hasAttribute('disabled')).toBe(true)
   })
@@ -463,9 +590,39 @@ describe('DocumentWorkbench', () => {
       phase: 'ready', tab: 'versions', document: documentSnapshot(),
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByText('Codex / gpt-5.6')).not.toBeNull()
+    expect(screen.getByText('Codex · gpt-5.6')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '恢复此版本' }))
     expect(b.restore).toHaveBeenCalledWith(COMMIT_0)
+  })
+
+  it('surfaces template, gate, and ledger chips with tab jumps and a layout focus demand', () => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', tab: 'preview', document: documentSnapshot() }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    fireEvent.click(screen.getByRole('button', { name: /门禁未通过/ }))
+    expect(b.selectTab).toHaveBeenCalledWith('gate')
+    fireEvent.click(screen.getByRole('button', { name: /^版本 / }))
+    expect(b.selectTab).toHaveBeenCalledWith('versions')
+    fireEvent.click(screen.getByRole('button', { name: 'HIT master thesis' }))
+    expect(b.selectTab).toHaveBeenCalledWith('template')
+
+    fireEvent.click(screen.getByRole('button', { name: '专注写作' }))
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(true)
+    fireEvent.click(screen.getByRole('button', { name: '退出专注' }))
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '专注写作' }))
+    view.unmount()
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
+  })
+
+  it('drafts an agent fix request from the failing gate without sending it', () => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', tab: 'gate', document: documentSnapshot() }))
+    render(<DocumentWorkbench {...b.props} />)
+    fireEvent.click(screen.getByRole('button', { name: '让 Agent 修复' }))
+    expect(b.setDraft).toHaveBeenCalledOnce()
+    const text = b.setDraft.mock.calls[0]?.[0] as string
+    expect(text).toContain('模板门禁未通过')
+    expect(text).toContain('Heading font')
   })
 
   it('explains and disables version restore while a node draft is dirty', () => {
@@ -547,7 +704,7 @@ describe('DocumentWorkbench', () => {
   it('installs a compatible built-in template and uploads a custom Word template', async () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready',
-      tab: 'gate',
+      tab: 'template',
       document: documentSnapshot(),
       templates: { ...TEMPLATE_CATALOG, contracts: [] },
     }))
@@ -580,7 +737,7 @@ describe('DocumentWorkbench', () => {
   it('localizes a template upload failure without exposing its internal diagnostic', async () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready',
-      tab: 'gate',
+      tab: 'template',
       document: documentSnapshot(),
       templates: { ...TEMPLATE_CATALOG, contracts: [] },
     }))
@@ -597,7 +754,7 @@ describe('DocumentWorkbench', () => {
 
   it('shows parsed requirements before confirmation and links only a confirmed template', () => {
     const draft = workbenchProps(workbenchState({
-      phase: 'ready', tab: 'gate', document: documentSnapshot(), templates: TEMPLATE_CATALOG,
+      phase: 'ready', tab: 'template', document: documentSnapshot(), templates: TEMPLATE_CATALOG,
     }))
     const view = render(<DocumentWorkbench {...draft.props} />)
 
@@ -619,7 +776,7 @@ describe('DocumentWorkbench', () => {
     view.unmount()
     const confirmed = workbenchProps(workbenchState({
       phase: 'ready',
-      tab: 'gate',
+      tab: 'template',
       document: {
         ...documentSnapshot(),
         template: {
@@ -638,7 +795,7 @@ describe('DocumentWorkbench', () => {
   it('exports drafts and formal copies, then locks both while a node draft is dirty', () => {
     const clean = workbenchProps(workbenchState({
       phase: 'ready',
-      tab: 'gate',
+      tab: 'export',
       document: documentSnapshot(),
       templates: TEMPLATE_CATALOG,
       exportReceipt: {
@@ -660,7 +817,7 @@ describe('DocumentWorkbench', () => {
     view.unmount()
     const dirty = workbenchProps(workbenchState({
       phase: 'ready',
-      tab: 'gate',
+      tab: 'export',
       document: documentSnapshot(),
       nodePhase: 'ready',
       selectedNode: textNodeBuffer(),
@@ -672,20 +829,22 @@ describe('DocumentWorkbench', () => {
     expect(screen.getByText('请先提交或放弃当前节点的临时修改，再导出。')).not.toBeNull()
     expect(screen.getByRole('button', { name: '导出草稿' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '导出正式版' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByRole('button', { name: '运行门禁' }).hasAttribute('disabled')).toBe(true)
   })
 
-  it('keeps draft export available but explains why formal export needs a linked template', () => {
+  it('exports formal copies without a template in free mode and says so', () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready',
-      tab: 'gate',
+      tab: 'export',
       document: { ...documentSnapshot(), template: null },
       templates: TEMPLATE_CATALOG,
     }))
     render(<DocumentWorkbench {...b.props} />)
     expect(screen.getByRole('button', { name: '导出草稿' }).hasAttribute('disabled')).toBe(false)
-    expect(screen.getByRole('button', { name: '导出正式版' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByText('请先确认并关联一个适用模板，才能导出正式版。')).not.toBeNull()
+    const formal = screen.getByRole('button', { name: '导出正式版' })
+    expect(formal.hasAttribute('disabled')).toBe(false)
+    expect(screen.getByText('未关联模板：自由写作模式，正式导出不做模板检查。')).not.toBeNull()
+    fireEvent.click(formal)
+    expect(b.exportDocument).toHaveBeenCalledWith('delivery-export')
   })
 
   it('renders a Remote failure with only its backed retry action', () => {

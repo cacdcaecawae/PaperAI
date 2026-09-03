@@ -34,6 +34,13 @@ export interface ILayout {
   /** Close the details panel. */
   closeDetails(): void
   /**
+   * Demand or release details focus: while active and details are open, the
+   * details column takes the whole content area at any viewport width.
+   * Closing the details panel releases the demand.
+   * @param active - whether the focus demand is on.
+   */
+  setDetailsFocus(active: boolean): void
+  /**
    * Apply a product-level layout profile without changing the generic DSH
    * defaults. The returned disposer restores the deployment baseline unless
    * a newer profile has replaced it.
@@ -79,6 +86,11 @@ export class LayoutController implements ILayout {
   /** Close the details panel. */
   closeDetails(): void {
     this.#require().closeDetails()
+  }
+
+  /** Demand or release the whole-content-area details focus. */
+  setDetailsFocus(active: boolean): void {
+    this.#require().setDetailsFocus(active)
   }
 
   /** Apply one runtime product profile and return its stale-safe disposer. */

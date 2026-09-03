@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { basename, resolve } from 'node:path'
+import { basename, resolve, sep } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -22,13 +22,40 @@ import {
   prepareProjectLayout,
   type PreparedProjectLayout,
 } from './layout.ts'
+import {
+  renderWritingCharter,
+  syncWritingCharter,
+  type WritingCharterSync,
+  type WritingCharterSyncResult,
+} from './charter.ts'
 
 export {
   PAPERAI_CONTEXT_FILE,
   PAPERAI_CONTEXT_TEMPLATE,
   PAPERAI_PROJECT_DIRECTORIES,
 } from './layout.ts'
+export {
+  CHARTER_BLOCK_END,
+  CHARTER_BLOCK_START_PREFIX,
+  PAPERAI_AGENTS_FILE,
+  PAPERAI_CLAUDE_FILE,
+  PAPERAI_CLAUDE_TEMPLATE,
+  composeAgentsContent,
+  composeClaudeContent,
+  renderWritingCharter,
+  syncWritingCharter,
+} from './charter.ts'
+export type { WritingCharterSync, WritingCharterSyncResult } from './charter.ts'
 export type { ProjectGitStatus } from './git.ts'
+
+type DurableDomainChange = {
+  readonly domain: string
+  readonly table: string
+  readonly key: string
+} & (
+  | { readonly operation: 'put'; readonly value: unknown }
+  | { readonly operation: 'deleted'; readonly value?: never }
+)
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -68,6 +95,8 @@ export interface CreatePaperProjectResult {
   readonly projectCreated: boolean
   /** Whether this call created or preserved `PAPERAI.md`. */
   readonly contextFile: 'created' | 'preserved'
+  /** Writing-charter outcome for `AGENTS.md` and `CLAUDE.md`. */
+  readonly charter: WritingCharterSyncResult
   /** Git readiness, including non-fatal degradation. */
   readonly git: ProjectGitStatus
 }
@@ -141,13 +170,24 @@ export class PaperProjectService extends Service {
     positiveSafeInteger(outputMaxBytes, 'gitOutputMaxBytes')
     positiveSafeInteger(terminateGraceMs, 'gitTerminateGraceMs')
     this.config = { command, initialBranch, timeoutMs, outputMaxBytes, terminateGraceMs }
+    ctx.on('domain/changed', (change) => {
+      const targets = this.charterTargets(change)
+      if (targets.length === 0) return
+      void this.enqueue(async () => {
+        for (const project of targets) await this.syncCharter(project)
+      }).catch((error: unknown) => {
+        ctx.logger.warn(`paperai-project: writing-charter sync failed: ${String(error)}`)
+      })
+    })
   }
 
   /**
    * Create or adopt one directory, initialize missing project artifacts, and
    * publish exactly one ProjectRecord associated with its DSH workspace.
    * Repeating the operation for the same canonical path preserves the first
-   * record identity, name, creation time, and all existing files.
+   * record identity, name, creation time, and all existing files. The writing
+   * charter is synchronized before the record is published, and a failed
+   * publication restores the charter files it created or rewrote.
    * @param input - Selected directory and optional first-use display name.
    * @returns the durable record, context-file outcome, and Git readiness.
    */
@@ -183,6 +223,26 @@ export class PaperProjectService extends Service {
     return await this.uniqueProject(canonical)
   }
 
+  /**
+   * Resolve the project whose root owns a path: the session workspace root
+   * itself or any directory inside it. Agent routes use this to scope document
+   * tools to the calling session's project. A path that no project root
+   * contains resolves to `undefined`; a missing path is compared lexically.
+   * @param path - workspace root or a path inside one.
+   * @returns the deepest owning project, or `undefined`.
+   */
+  async resolveForPath(path: string): Promise<ProjectRecord | undefined> {
+    if (path.trim().length === 0) throw new Error('PaperAI project path must not be blank')
+    const key = await canonicalPathKey(path)
+    let owner: ProjectRecord | undefined
+    for (const project of this.list()) {
+      const root = lexicalPathKey(project.rootPath)
+      if (key !== root && !key.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)) continue
+      if (owner === undefined || root.length > lexicalPathKey(owner.rootPath).length) owner = project
+    }
+    return owner
+  }
+
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.operationTail.then(operation, operation)
     this.operationTail = run.then(() => undefined, () => undefined)
@@ -192,6 +252,7 @@ export class PaperProjectService extends Service {
   private async createNow(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult> {
     const layout = await prepareProjectLayout(input.rootPath)
     let createdWorkspace: Workspace | undefined
+    let charter: WritingCharterSync | undefined
     try {
       const existing = await this.uniqueProject(layout.rootPath)
       const name = existing?.name ?? this.resolveName(input.name, layout.rootPath)
@@ -221,13 +282,48 @@ export class PaperProjectService extends Service {
             updatedAt: now,
           }
           : existing
+      charter = await this.syncCharter(project)
       if (needsWrite) await this.ctx.paperRepository.putProject(project)
 
       const git = await ensureGitRepository(this.ctx, layout.rootPath, this.config)
-      return { project, projectCreated, contextFile: layout.contextFile, git }
+      return {
+        project,
+        projectCreated,
+        contextFile: layout.contextFile,
+        charter: { agents: charter.agents, claude: charter.claude },
+        git,
+      }
     } catch (error) {
-      return await this.rollback(error, layout, createdWorkspace)
+      return await this.rollback(error, layout, createdWorkspace, charter)
     }
+  }
+
+  /**
+   * A `paperai` documents change names the projects whose charter may differ.
+   * A put resolves its record's project loudly; a delete cannot name one, so
+   * every known project re-syncs.
+   */
+  private charterTargets(change: DurableDomainChange): ProjectRecord[] {
+    if (change.domain !== 'paperai' || change.table !== 'documents') return []
+    if (change.operation !== 'put') return this.ctx.paperRepository.listProjects()
+    if (typeof change.value !== 'object' || change.value === null) {
+      throw new Error('paperai-project: durable document put has no record object')
+    }
+    const projectId = (change.value as Record<string, unknown>).projectId
+    if (typeof projectId !== 'string') {
+      throw new Error(`paperai-project: durable document put '${change.key}' names no project`)
+    }
+    const project = this.ctx.paperRepository.getProject(ProjectId(projectId))
+    if (project === undefined) {
+      throw new Error(`paperai-project: durable document put '${change.key}' references missing project '${projectId}'`)
+    }
+    return [project]
+  }
+
+  private async syncCharter(project: ProjectRecord): Promise<WritingCharterSync> {
+    const documents = this.ctx.paperRepository.listDocuments(project.id)
+    const charter = renderWritingCharter(documents, id => this.ctx.paperRepository.getTemplate(id))
+    return await syncWritingCharter(project.rootPath, charter)
   }
 
   private async uniqueProject(rootPath: string): Promise<ProjectRecord | undefined> {
@@ -250,8 +346,16 @@ export class PaperProjectService extends Service {
     error: unknown,
     layout: PreparedProjectLayout,
     createdWorkspace: Workspace | undefined,
+    charter: WritingCharterSync | undefined,
   ): Promise<never> {
     const failures: Error[] = []
+    if (charter !== undefined) {
+      try {
+        await charter.restore()
+      } catch (rollbackError) {
+        failures.push(asError(rollbackError))
+      }
+    }
     if (createdWorkspace !== undefined) {
       try {
         const deleted = await this.ctx.workspaceRegistry.delete(createdWorkspace.id)

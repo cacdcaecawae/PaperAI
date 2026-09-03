@@ -9,6 +9,12 @@ import {
 const logPath = process.env.FAKE_ACP_LOG
 const label = process.env.FAKE_ACP_LABEL ?? 'fake'
 let currentModel = process.env.FAKE_ACP_MODEL ?? 'fake-alpha'
+let currentEffort = 'medium'
+let fastMode = false
+/** Comma-separated config values whose `session/set_config_option` is rejected. */
+const rejectedConfigValues = new Set(
+  (process.env.FAKE_ACP_REJECT_SET_CONFIG_VALUE ?? '').split(',').filter(value => value.length > 0),
+)
 let currentMode = label === 'codex'
   ? process.env.INITIAL_AGENT_MODE ?? 'agent'
   : 'default'
@@ -34,6 +40,27 @@ function modelOptions() {
         { value: 'fake-beta', name: 'Fake Beta', description: 'Alternate fake model' },
       ],
     }],
+  }, {
+    // The shape both pinned adapters advertise: a `thought_level` select for
+    // the current model and a boolean fast-mode switch (`model_config`).
+    type: 'select',
+    id: 'effort',
+    name: 'Effort',
+    description: 'Available effort levels for this model',
+    category: 'thought_level',
+    currentValue: currentEffort,
+    options: [
+      { value: 'low', name: 'Low' },
+      { value: 'medium', name: 'Medium' },
+      { value: 'high', name: 'High', description: 'Deeper reasoning' },
+    ],
+  }, {
+    type: 'boolean',
+    id: 'fast',
+    name: 'Fast mode',
+    description: '1.5x speed, increased usage',
+    category: 'model_config',
+    currentValue: fastMode,
   }]
 }
 
@@ -148,7 +175,27 @@ function makeAgent(connection) {
       if (process.env.FAKE_ACP_NEVER_SET_CONFIG === String(params.value)) {
         await new Promise(() => {})
       }
-      currentModel = String(params.value)
+      if (rejectedConfigValues.has(String(params.value))) {
+        throw new Error(`scripted ACP set-config rejection for value ${String(params.value)}`)
+      }
+      if (params.configId === 'effort') {
+        currentEffort = String(params.value)
+      } else if (params.configId === 'fast') {
+        fastMode = params.value === true
+      } else {
+        currentModel = String(params.value)
+        // Like real adapters, a model switch may re-advertise the effort at the
+        // model's own default instead of carrying the previous model's level.
+        if (process.env.FAKE_ACP_MODEL_RESETS_EFFORT === '1') currentEffort = 'medium'
+      }
+      if (process.env.FAKE_ACP_NOTIFY_CONFIG_UPDATES === '1') {
+        // Providers may announce the change before answering; the client must
+        // not publish such a notification as a settled selection mid-transaction.
+        void connection.sessionUpdate({
+          sessionId: params.sessionId,
+          update: { sessionUpdate: 'config_option_update', configOptions: modelOptions() },
+        })
+      }
       return { configOptions: modelOptions() }
     },
 

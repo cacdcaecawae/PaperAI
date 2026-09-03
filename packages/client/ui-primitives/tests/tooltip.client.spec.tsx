@@ -318,6 +318,32 @@ describe('Tooltip', () => {
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
+  it('leaves script-driven focus quiet unless the platform marks it focus-visible', () => {
+    render(
+      <Tooltip label="Back to list">
+        <button type="button">anchor</button>
+      </Tooltip>,
+    )
+    const anchor = screen.getByText('anchor')
+    // Real focus makes the anchor the active element, so :focus-visible is the
+    // platform's call: pointer-modality focus (a row click that moves focus
+    // here) stays quiet, keyboard focus still shows the label at once.
+    const matches = vi.spyOn(anchor, 'matches').mockImplementation(selector => selector !== ':focus-visible')
+    act(() => { anchor.focus() })
+    expect(document.activeElement).toBe(anchor)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    act(() => { anchor.blur() })
+    matches.mockImplementation(selector => selector === ':focus-visible')
+    act(() => { anchor.focus() })
+    expect(screen.getByRole('tooltip').textContent).toBe('Back to list')
+    act(() => { anchor.blur() })
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    // A platform without :focus-visible keeps focus as an immediate trigger.
+    matches.mockImplementation(() => { throw new SyntaxError('unsupported pseudo-class') })
+    act(() => { anchor.focus() })
+    expect(screen.getByRole('tooltip').textContent).toBe('Back to list')
+  })
+
   it('forwards the anchor element to the child ref (object and callback)', () => {
     const objectRef = { current: null as HTMLButtonElement | null }
     const callbackRef = vi.fn()

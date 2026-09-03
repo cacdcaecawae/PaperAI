@@ -262,6 +262,30 @@ export type PaperAIImportDocumentResult =
     readonly detail: string
   }
 
+/** Browser Word upload carried by a template-first document start. */
+export interface PaperAIWordUpload {
+  readonly fileName: string
+  readonly contentBase64: string
+}
+
+/**
+ * Start one Working document from a built-in template pack member. A form
+ * template becomes the document itself; a formatting reference requires the
+ * manuscript `upload` it should govern. The member's contract is bound in the
+ * root commit either way.
+ */
+export interface PaperAICreateFromTemplateRequest {
+  readonly workspaceId: WorkspaceId
+  readonly sessionId: SessionId
+  readonly packId: string
+  readonly memberId: string
+  readonly upload?: PaperAIWordUpload
+  /** Defaults to the member's first applicable role; must be one the member applies to. */
+  readonly role?: PaperAIDocumentRole
+  /** Defaults to the member's display name. */
+  readonly name?: string
+}
+
 /** How a Word template contributes to generated academic content. */
 export type PaperAITemplateUsage = 'form-template' | 'format-reference'
 

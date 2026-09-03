@@ -471,6 +471,8 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # Keep ancestry for changed-source checks; fetch file contents on demand.
+          filter: blob:none
           persist-credentials: false
 
       - uses: pnpm/action-setup@v4
@@ -496,7 +498,7 @@ jobs:
 
       - name: Run focused PaperAI tests and changed-source coverage
         run: >-
-          pnpm run test:paperai:ci --
+          pnpm run test:paperai:ci
           --coverage.enabled
           --coverage.changed=${{ github.event.pull_request.base.sha }}
           --coverage.thresholds.perFile=true
@@ -551,6 +553,7 @@ jobs:
       - name: Replay PaperAI and affected assembled browser snapshots
         run: >-
           pnpm exec vitest run --config vitest.web.config.ts
+          apps/web/tests/paperai-dsh-preset.e2e.ts
           apps/web/tests/paperai-permissions.e2e.ts
           apps/web/tests/paperai-workspace-navigation.e2e.ts
           apps/web/tests/built-boot.snapshot.ts
@@ -593,7 +596,7 @@ jobs:
 
       - name: Run focused Windows integration tests
         shell: pwsh
-        run: pnpm run test:paperai:windows -- --maxWorkers=2 --testTimeout=30000
+        run: pnpm run test:paperai:windows --maxWorkers=2 --testTimeout=30000
 
       - name: Replay persistent PowerShell ACP snapshot
         shell: pwsh

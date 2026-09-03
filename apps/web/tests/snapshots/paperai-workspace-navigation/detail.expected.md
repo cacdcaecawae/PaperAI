@@ -4,12 +4,8 @@
 - text: {{cwd}}/paper-project
 - region "工作区详情":
   - heading "项目内容" [level=3]
-  - button "文档类型，当前：论文正文":
-    - text: 论文正文
-    - img
-  - button "导入 Word":
-    - img
-    - text: 导入 Word
+  - region "新建文档":
+    - button "新建文档"
   - region "文档":
     - text: 文档 1
     - button "打开 Workspace brief.docx": Workspace brief.docx 已同步

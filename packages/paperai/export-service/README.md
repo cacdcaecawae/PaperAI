@@ -15,7 +15,7 @@ English | [中文](README.zh.md)
 
 An allowed export submits one `milestone` mutation through `paperCommits` using the head observed in the supplied `DocumentRecord`. Head movement rejects through commit-service optimistic concurrency. The commit receives the supplied human or Agent identity unchanged, including client, provider, model, revision, session, and run provenance.
 
-The service publishes from the new commit's immutable `snapshotPath`, never from the Working DOCX. It verifies the size and SHA-256, copies to a random same-directory temporary file, synchronizes it, rechecks protected paths, and renames it into place. A failed publication removes the temporary file and leaves imported sources and Working DOCX files unchanged.
+The service publishes from the new commit's immutable `snapshotPath`, never from the Working DOCX. It verifies the size and SHA-256, copies to a random same-directory temporary file, synchronizes it, rechecks protected paths, and renames it into place. A failed publication removes the temporary file and leaves imported sources and Working DOCX files unchanged. A request that names a `writableRoot` (the MCP bridge passes the session workspace for every sandbox mode but full access) is confined at publish time on real paths: the destination's real parent directory must lie inside the real root, compared with the platform's case semantics (case folded only on Windows, so a case-sensitive filesystem keeps `paper` and `Paper` apart), so a directory link under the workspace cannot carry the file elsewhere; the check runs before the milestone commit and again before the rename, and rejects with `DESTINATION_OUTSIDE_WORKSPACE`.
 
 ## Model Experience
 

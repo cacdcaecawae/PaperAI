@@ -2,7 +2,13 @@ import { realpath } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import type { Workspace, WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { WorkspaceId as brandWorkspaceId } from '@deepseek-ai/dsh-workspace'
-import type { ProjectId, ProjectRecord } from '@paperai/domain'
+import type {
+  DocumentRecord,
+  ProjectId,
+  ProjectRecord,
+  TemplateContract,
+  TemplateContractId,
+} from '@paperai/domain'
 import { vi } from 'vitest'
 import PaperProjectService, { type Config } from '../src/index.ts'
 
@@ -11,6 +17,8 @@ export interface ProjectHarnessOptions {
   readonly failDelete?: unknown
   readonly deleteReturnsFalse?: boolean
   readonly projects?: ProjectRecord[]
+  readonly documents?: DocumentRecord[]
+  readonly templates?: TemplateContract[]
   readonly subprocess?: object
 }
 
@@ -34,10 +42,15 @@ export async function projectHarness(options: ProjectHarnessOptions = {}) {
       value: record,
     })
   })
+  const documents = [...(options.documents ?? [])]
+  const templates = [...(options.templates ?? [])]
   ctx.provide('paperRepository', {
     getProject: (id: ProjectId) => projects.find(project => project.id === id),
     listProjects: () => [...projects],
     putProject,
+    listDocuments: (projectId?: ProjectId) => documents.filter(document =>
+      projectId === undefined || document.projectId === projectId),
+    getTemplate: (id: TemplateContractId) => templates.find(template => template.id === id),
   } as never)
 
   const create = vi.fn(async (path: string, title?: string) => {
@@ -88,6 +101,8 @@ export async function projectHarness(options: ProjectHarnessOptions = {}) {
   return {
     ctx,
     projects,
+    documents,
+    templates,
     workspaces,
     putProject,
     createWorkspace: create,

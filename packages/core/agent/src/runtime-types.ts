@@ -49,6 +49,24 @@ export interface CancelOptions {
  */
 export type AgentStatus = 'idle' | 'running'
 
+/** One reasoning effort a non-DSH Agent driver advertises for a model. */
+export interface AgentDriverReasoningEffort {
+  /** Driver-owned effort identifier accepted by {@link AgentModelController.selectModel}. */
+  readonly id: string
+  /** Human-facing effort label. */
+  readonly name: string
+  /** Optional driver description. */
+  readonly description?: string
+}
+
+/** Reasoning efforts a non-DSH Agent driver advertises for one model. */
+export interface AgentDriverReasoning {
+  /** Efforts in driver-preferred display order; never empty. */
+  readonly efforts: readonly AgentDriverReasoningEffort[]
+  /** The effort the driver applies when the caller names none. */
+  readonly defaultEffort?: string
+}
+
 /** One model advertised by a non-DSH Agent driver. */
 export interface AgentDriverModel {
   /** Provider-owned model identifier accepted by {@link AgentModelController.selectModel}. */
@@ -59,6 +77,31 @@ export interface AgentDriverModel {
   readonly description?: string
   /** Optional visual grouping from the provider's own catalog. */
   readonly group?: string
+  /** Reasoning efforts selectable for this model, when the driver advertises them. */
+  readonly reasoning?: AgentDriverReasoning
+}
+
+/**
+ * One driver-owned boolean switch shown beside the model selection, such as a
+ * provider's fast mode. The driver owns the vocabulary; the Host renders it.
+ */
+export interface AgentDriverSwitch {
+  /** Driver-owned switch identifier accepted by {@link AgentModelController.selectModel}. */
+  readonly id: string
+  /** Human-facing switch label. */
+  readonly name: string
+  /** Optional driver description, including why the switch is unavailable. */
+  readonly description?: string
+  /** Whether the switch is currently on. */
+  readonly enabled: boolean
+}
+
+/** Optional parts of one driver model selection beyond the model itself. */
+export interface AgentDriverSelectionOptions {
+  /** Effort to apply after the model; omission keeps the driver's current effort. */
+  readonly reasoningEffort?: string
+  /** Switch values to apply by id; omitted switches keep their current value. */
+  readonly switches?: Readonly<Record<string, boolean>>
 }
 
 /**
@@ -71,10 +114,18 @@ export interface AgentModelController {
   readonly provider: { readonly id: string; readonly name: string }
   /** Current provider-owned model identifier. */
   readonly currentModel: string
+  /** Current driver-owned reasoning effort, when the driver advertises efforts. */
+  readonly currentReasoningEffort?: string | undefined
+  /** Driver-owned switches in display order; absent when the driver has none. */
+  readonly switches?: readonly AgentDriverSwitch[] | undefined
   /** Read the provider's live session model options. */
   listModels(): Promise<readonly AgentDriverModel[]>
-  /** Switch this live Agent session and return the accepted current model. */
-  selectModel(model: string): Promise<string>
+  /**
+   * Switch this live Agent session and return the accepted current model.
+   * Drivers that advertise efforts or switches apply the requested options
+   * after the model; a driver without them rejects an option it cannot apply.
+   */
+  selectModel(model: string, options?: AgentDriverSelectionOptions): Promise<string>
   /**
    * Input modalities advertised for a model, when the driver knows them.
    * Undefined means the Host should defer validation to the driver.

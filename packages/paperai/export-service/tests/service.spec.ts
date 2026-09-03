@@ -1,5 +1,6 @@
-import { link, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { link, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DocumentCommitId, type GateReport } from '@paperai/domain'
@@ -61,6 +62,87 @@ describe('PaperExportService', () => {
     expect(result.commit.actor).toEqual(humanActor)
     expect(result.commit.snapshotPath).toBe(harness.snapshotPath)
   })
+
+  it('confines a writable-root export on real paths, so a link inside the root cannot carry it out', async () => {
+    const harness = await createHarness()
+    const outside = await mkdtemp(join(tmpdir(), 'paperai-export-outside-'))
+    try {
+      // `exports` inside the workspace is a directory link to a place outside it.
+      await symlink(outside, join(harness.root, 'exports'), 'junction')
+      const escape = harness.ctx.paperExports.exportDocument({
+        document: harness.document,
+        destinationPath: join(harness.root, 'exports', 'escape.docx'),
+        writableRoot: harness.root,
+        mode: 'draft-export',
+        actor: humanActor,
+        gate: report(harness.document.id, 'draft-export', true),
+      })
+      await expect(escape).rejects.toMatchObject({
+        name: 'PaperExportError',
+        code: 'DESTINATION_OUTSIDE_WORKSPACE',
+      })
+      expect(await readdir(outside)).toEqual([])
+      expect(harness.submit).not.toHaveBeenCalled()
+
+      // A link that stays inside the root is fine, and so is an unconfined export.
+      await mkdir(join(harness.root, 'delivery'))
+      await symlink(join(harness.root, 'delivery'), join(harness.root, 'published'), 'junction')
+      const inside = await harness.ctx.paperExports.exportDocument({
+        document: harness.document,
+        destinationPath: join(harness.root, 'published', 'inside.docx'),
+        writableRoot: harness.root,
+        mode: 'draft-export',
+        actor: humanActor,
+        gate: report(harness.document.id, 'draft-export', true),
+      })
+      expect(inside.outputPath).toBe(join(await realpath(join(harness.root, 'delivery')), 'inside.docx'))
+      const unconfined = await harness.ctx.paperExports.exportDocument({
+        document: harness.document,
+        destinationPath: join(harness.root, 'exports', 'unconfined.docx'),
+        mode: 'draft-export',
+        actor: humanActor,
+        gate: report(harness.document.id, 'draft-export', true),
+      })
+      expect(unconfined.outputPath).toBe(join(await realpath(outside), 'unconfined.docx'))
+      await expect(harness.ctx.paperExports.exportDocument({
+        document: harness.document,
+        destinationPath: join(harness.root, 'missing-root.docx'),
+        writableRoot: join(harness.root, 'does-not-exist'),
+        mode: 'draft-export',
+        actor: humanActor,
+        gate: report(harness.document.id, 'draft-export', true),
+      })).rejects.toMatchObject({ code: 'DESTINATION_OUTSIDE_WORKSPACE' })
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32' || process.platform === 'darwin')(
+    'keeps a sibling directory that differs only by case outside a case-sensitive writable root',
+    async () => {
+      const harness = await createHarness()
+      // The sibling's name differs from the root's only by letter case.
+      const swapped = basename(harness.root)
+        .replace(/[a-z]/giu, char => (char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()))
+      const sibling = join(dirname(harness.root), swapped)
+      await mkdir(sibling)
+      try {
+        await symlink(sibling, join(harness.root, 'exports'), 'junction')
+        await expect(harness.ctx.paperExports.exportDocument({
+          document: harness.document,
+          destinationPath: join(harness.root, 'exports', 'escape.docx'),
+          writableRoot: harness.root,
+          mode: 'draft-export',
+          actor: humanActor,
+          gate: report(harness.document.id, 'draft-export', true),
+        })).rejects.toMatchObject({ code: 'DESTINATION_OUTSIDE_WORKSPACE' })
+        expect(await readdir(sibling)).toEqual([])
+        expect(harness.submit).not.toHaveBeenCalled()
+      } finally {
+        await rm(sibling, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('blocks a formal delivery before creating a commit or output', async () => {
     const harness = await createHarness({ blocked: true })

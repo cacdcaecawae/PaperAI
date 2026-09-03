@@ -36,8 +36,21 @@ describe('PaperAI export composition', () => {
       operations: [],
       createdAt: harness.document.createdAt,
     }
+    const project = {
+      id: harness.document.projectId,
+      workspaceId: 'workspace-export',
+      name: 'export',
+      rootPath: harness.root,
+      createdAt: harness.document.createdAt,
+      updatedAt: harness.document.updatedAt,
+    }
+    const scope = { workspaceRoot: harness.root, sandboxMode: () => 'workspace-write' as const }
     const dependencies: PaperMcpDependencies = {
-      projects: { get: vi.fn(), list: vi.fn(() => []) },
+      projects: {
+        get: vi.fn(() => project),
+        list: vi.fn(() => [project]),
+        resolveForPath: vi.fn(() => Promise.resolve(project)),
+      },
       documents: {
         listDocuments: vi.fn(() => [harness.document]),
         readDocument: vi.fn(() => ({ document: harness.document, nodes: [] })),
@@ -56,7 +69,7 @@ describe('PaperAI export composition', () => {
         revert: vi.fn(),
       },
     }
-    const server = createPaperMcpServer(dependencies, actor, {
+    const server = createPaperMcpServer(dependencies, actor, scope, {
       defaultNodesPerRead: 10,
       maxNodesPerRead: 20,
       maxMutationsPerCommit: 8,
@@ -96,7 +109,7 @@ describe('PaperAI export composition', () => {
     await harness.ctx.fiber.dispose()
     expect(harness.adapter()).toBeUndefined()
 
-    const after = createPaperMcpServer(dependencies, actor, {
+    const after = createPaperMcpServer(dependencies, actor, scope, {
       defaultNodesPerRead: 10,
       maxNodesPerRead: 20,
       maxMutationsPerCommit: 8,

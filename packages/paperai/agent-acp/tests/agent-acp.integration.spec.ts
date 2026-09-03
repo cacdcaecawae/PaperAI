@@ -31,6 +31,7 @@ import {
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import ApprovalService, { type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type {
+  PaperMcpAccessScope,
   PaperMcpAgentIdentity,
   PaperMcpDescriptorLease,
 } from '@paperai/mcp'
@@ -38,6 +39,7 @@ import PaperAiAcpAgents, {
   ACP_AGENT_SETTINGS_NAMESPACE,
   type AcpProviderDefinition,
 } from '../src/index.ts'
+import { AcpSelectionError } from '../src/runtime.ts'
 
 const fakeAgentPath = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url))
 const lifecycleProbePath = fileURLToPath(new URL('./fixtures/lifecycle-probe.ts', import.meta.url))
@@ -151,6 +153,7 @@ interface LogEntry {
 class TestPaperMcp extends Service {
   readonly leases: Array<{
     readonly descriptor: PaperMcpDescriptorLease['descriptor']
+    readonly scope: PaperMcpAccessScope
     actor: PaperMcpAgentIdentity
     disposed: boolean
   }> = []
@@ -159,7 +162,7 @@ class TestPaperMcp extends Service {
     super(ctx, 'paperMcp')
   }
 
-  issueDescriptor(actor: PaperMcpAgentIdentity): PaperMcpDescriptorLease {
+  issueDescriptor(actor: PaperMcpAgentIdentity, scope: PaperMcpAccessScope): PaperMcpDescriptorLease {
     const state = {
       descriptor: {
         type: 'http' as const,
@@ -167,6 +170,7 @@ class TestPaperMcp extends Service {
         url: 'http://127.0.0.1:3210/api/paperai/mcp',
         headers: [{ name: 'Authorization', value: 'Bearer fake-paperai-token' }],
       },
+      scope,
       actor: structuredClone(actor),
       disposed: false,
     }
@@ -403,7 +407,7 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
     const controller = handle.agent.modelController
     expect(controller?.provider).toEqual({ id: 'codex', name: 'Codex' })
     expect(controller?.currentModel).toBe('fake-beta')
-    await expect(controller?.listModels()).resolves.toEqual([
+    await expect(controller?.listModels()).resolves.toMatchObject([
       {
         id: 'fake-alpha',
         name: 'Fake Alpha',
@@ -441,12 +445,243 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
 
   }, 20_000)
 
+  it('applies reasoning effort and fast mode through the provider config options', async () => {
+    const harness = await mountHarness()
+    const handle = await createAgent(harness, 'routed-effort', 'codex', 'fake-beta')
+    const controller = handle.agent.modelController
+    if (controller === undefined) throw new Error('expected an ACP model controller')
+    expect(controller.currentReasoningEffort).toBe('medium')
+    expect(controller.switches).toEqual([{
+      id: 'fast', name: 'Fast mode', description: '1.5x speed, increased usage', enabled: false,
+    }])
+    const reasoning = {
+      efforts: [
+        { id: 'low', name: 'Low' },
+        { id: 'medium', name: 'Medium' },
+        { id: 'high', name: 'High', description: 'Deeper reasoning' },
+      ],
+      defaultEffort: 'medium',
+    }
+    expect((await controller.listModels()).map(model => model.reasoning)).toEqual([reasoning, reasoning])
+
+    const before = (await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option').length
+    await expect(controller.selectModel('fake-beta', { reasoningEffort: 'high', switches: { fast: true } }))
+      .resolves.toBe('fake-beta')
+    expect(controller.currentReasoningEffort).toBe('high')
+    expect(controller.switches?.[0]?.enabled).toBe(true)
+    // The unchanged model is not re-sent; effort and switch each travel once.
+    const applied = (await readLog(harness.logPath))
+      .filter(entry => entry.event === 'set-config-option')
+      .slice(before)
+    expect(applied.map(entry => [entry['configId'], entry['value']])).toEqual([['effort', 'high'], ['fast', true]])
+
+    await expect(controller.selectModel('fake-beta', { reasoningEffort: 'extreme' }))
+      .rejects.toThrow('did not advertise reasoning effort "extreme"')
+    await expect(controller.selectModel('fake-beta', { switches: { turbo: true } }))
+      .rejects.toThrow('did not advertise switch "turbo"')
+    // Re-applying the current values sends nothing to the provider.
+    await controller.selectModel('fake-beta', { reasoningEffort: 'high', switches: { fast: true } })
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option'))
+      .toHaveLength(before + 2)
+
+    // Model-visible ⟺ logged: the applied selection is a durable session fact,
+    // recorded once per change, and the next request header carries the effort.
+    const configEvents = handle.agent.session.events
+      .filter(event => event.type === 'paperai/acp/config')
+      .map(event => event.data)
+    expect(configEvents).toEqual([
+      { provider: 'codex', model: 'fake-beta', reasoningEffort: 'medium', switches: { fast: false } },
+      { provider: 'codex', model: 'fake-beta', reasoningEffort: 'high', switches: { fast: true } },
+    ])
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: '记录推理强度' }],
+      source: { kind: 'user' },
+    }))
+    await handle.agent.whenIdle()
+    expect(handle.agent.session.requestHeader()?.config).toMatchObject({
+      provider: 'codex', model: 'fake-beta', reasoningEffort: 'high',
+    })
+    await handle.dispose()
+  }, 20_000)
+
+  it('restores earlier selection steps when a later provider step is rejected', async () => {
+    const harness = await mountHarness({
+      env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'true', FAKE_ACP_NOTIFY_CONFIG_UPDATES: '1' },
+    })
+    const handle = await createAgent(harness, 'routed-atomic', 'codex', 'fake-beta')
+    const controller = handle.agent.modelController
+    if (controller === undefined) throw new Error('expected an ACP model controller')
+    const before = (await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option').length
+
+    // The effort applies first; the fast switch (boolean true) is rejected, so
+    // the effort is put back and the caller sees one restored failure.
+    const failure = await controller.selectModel('fake-beta', { reasoningEffort: 'high', switches: { fast: true } })
+      .then(() => undefined, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(AcpSelectionError)
+    expect(failure).toMatchObject({ restored: true, restoreErrors: [] })
+    expect(controller.currentReasoningEffort).toBe('medium')
+    expect(controller.switches?.[0]?.enabled).toBe(false)
+    const applied = (await readLog(harness.logPath))
+      .filter(entry => entry.event === 'set-config-option')
+      .slice(before)
+      .map(entry => [entry['configId'], entry['value']])
+    expect(applied).toEqual([['effort', 'high'], ['fast', true], ['effort', 'medium']])
+    // The provider announced every step; none of the intermediate states
+    // reached the session log, and the runtime stays in service.
+    const configEvents = handle.agent.session.events
+      .filter(event => event.type === 'paperai/acp/config')
+      .map(event => event.data)
+    expect(configEvents).toEqual([
+      { provider: 'codex', model: 'fake-beta', reasoningEffort: 'medium', switches: { fast: false } },
+    ])
+    await controller.listModels()
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')).toHaveLength(1)
+    await handle.dispose()
+  }, 20_000)
+
+  it('restores the effort the previous model carried, not the one the switched model re-advertised', async () => {
+    const harness = await mountHarness({
+      env: {
+        FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'true',
+        FAKE_ACP_MODEL_RESETS_EFFORT: '1',
+        FAKE_ACP_NOTIFY_CONFIG_UPDATES: '1',
+      },
+    })
+    const handle = await createAgent(harness, 'routed-effort-restore', 'codex', 'fake-beta')
+    const controller = handle.agent.modelController
+    if (controller === undefined) throw new Error('expected an ACP model controller')
+    await controller.selectModel('fake-beta', { reasoningEffort: 'high' })
+    const before = (await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option').length
+
+    // Switching to fake-alpha re-advertises the effort at "medium"; the fast
+    // switch is rejected; the restore must bring back beta AND its "high".
+    const failure = await controller.selectModel('fake-alpha', { switches: { fast: true } })
+      .then(() => undefined, (error: unknown) => error)
+    expect(failure).toMatchObject({ name: 'AcpSelectionError', restored: true, restoreErrors: [] })
+    expect(controller.currentModel).toBe('fake-beta')
+    expect(controller.currentReasoningEffort).toBe('high')
+    const applied = (await readLog(harness.logPath))
+      .filter(entry => entry.event === 'set-config-option')
+      .slice(before)
+      .map(entry => [entry['configId'], entry['value']])
+    expect(applied).toEqual([['model', 'fake-alpha'], ['fast', true], ['model', 'fake-beta'], ['effort', 'high']])
+    const configEvents = handle.agent.session.events
+      .filter(event => event.type === 'paperai/acp/config')
+      .map(event => event.data)
+    expect(configEvents).toEqual([
+      { provider: 'codex', model: 'fake-beta', reasoningEffort: 'medium', switches: { fast: false } },
+      { provider: 'codex', model: 'fake-beta', reasoningEffort: 'high', switches: { fast: false } },
+    ])
+    await handle.dispose()
+  }, 20_000)
+
+  it('restores in dependency order and rebuilds the runtime when a restore step is rejected too', async () => {
+    const harness = await mountHarness({
+      env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'true,medium', FAKE_ACP_NOTIFY_CONFIG_UPDATES: '1' },
+    })
+    const handle = await createAgent(harness, 'routed-unrestored', 'codex', 'fake-beta')
+    const controller = handle.agent.modelController
+    if (controller === undefined) throw new Error('expected an ACP model controller')
+    const before = (await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option').length
+
+    // Model and effort apply, the switch is rejected; the model goes back
+    // before the effort (the provider validates efforts per model), and the
+    // effort restore is rejected as well, so the session is left mid-way.
+    const failure = await controller
+      .selectModel('fake-alpha', { reasoningEffort: 'high', switches: { fast: true } })
+      .then(() => undefined, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(AcpSelectionError)
+    expect(failure).toMatchObject({ restored: false })
+    expect((failure as AcpSelectionError).restoreErrors).toHaveLength(1)
+    const applied = (await readLog(harness.logPath))
+      .filter(entry => entry.event === 'set-config-option')
+      .slice(before)
+      .map(entry => [entry['configId'], entry['value']])
+    expect(applied).toEqual([
+      ['model', 'fake-alpha'], ['effort', 'high'], ['fast', true], ['model', 'fake-beta'], ['effort', 'medium'],
+    ])
+    const loggedBefore = handle.agent.session.events.filter(event => event.type === 'paperai/acp/config')
+    expect(loggedBefore).toHaveLength(1)
+
+    // The next operation rebuilds the provider runtime and records the
+    // selection the provider actually applies, so the log matches reality again.
+    await controller.listModels()
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')).toHaveLength(2)
+    const logged = handle.agent.session.events
+      .filter(event => event.type === 'paperai/acp/config')
+      .map(event => event.data)
+    expect(logged.at(-1)).toEqual({
+      provider: 'codex',
+      model: controller.currentModel,
+      reasoningEffort: controller.currentReasoningEffort,
+      switches: Object.fromEntries((controller.switches ?? []).map(entry => [entry.id, entry.enabled])),
+    })
+    await handle.dispose()
+  }, 20_000)
+
   it('revokes the PaperAI MCP descriptor with the Agent lifecycle', async () => {
     const harness = await mountHarness()
     const handle = await createAgent(harness, 'mcp-lease-disposal')
     expect(harness.mcp.leases[0]?.disposed).toBe(false)
     await handle.dispose()
     expect(harness.mcp.leases[0]?.disposed).toBe(true)
+  }, 20_000)
+
+  it('cancels pending setup without publishing the Agent or retaining its MCP lease', async () => {
+    const harness = await mountHarness()
+    const setupStarted = Promise.withResolvers<undefined>()
+    const setupRelease = Promise.withResolvers<undefined>()
+    const abort = new AbortController()
+    const reason = new Error('caller cancelled ACP creation')
+    const id = SessionId('cancelled-setup')
+    const creation = harness.ctx.agents.create({
+      sessionId: id,
+      factoryRoute: 'codex',
+      meta: { cwd: harness.root },
+      signal: abort.signal,
+      setup: () => {
+        setupStarted.resolve(undefined)
+        return setupRelease.promise
+      },
+    })
+    const rejected = expect(creation).rejects.toBe(reason)
+    try {
+      await setupStarted.promise
+      abort.abort(reason)
+      await rejected
+      expect(harness.ctx.agents.get(id)).toBeUndefined()
+      expect(harness.ctx.sessions.get(id)).toBeUndefined()
+      expect(harness.mcp.leases[0]?.disposed).toBe(true)
+    } finally {
+      setupRelease.resolve(undefined)
+    }
+    const retried = await createAgent(harness, id)
+    expect(harness.ctx.agents.get(id)).toBe(retried.agent)
+    await retried.dispose()
+  }, 20_000)
+
+  it('keeps each MCP lease bound to its own session and current sandbox mode', async () => {
+    const harness = await mountHarness()
+    const first = await createAgent(harness, 'mcp-scope-first')
+    const second = await createAgentWithSandboxMode(harness, 'mcp-scope-second', 'claude', 'read-only')
+    const firstScope = harness.mcp.leases[0]!.scope
+    const secondScope = harness.mcp.leases[1]!.scope
+
+    expect(firstScope.workspaceRoot).toBe(harness.root)
+    expect(secondScope.workspaceRoot).toBe(harness.root)
+    expect(firstScope.sandboxMode()).toBe('workspace-write')
+    expect(secondScope.sandboxMode()).toBe('read-only')
+
+    setSandboxMode(first.agent.session, 'read-only')
+    expect(firstScope.sandboxMode()).toBe('read-only')
+    setSandboxMode(first.agent.session, 'danger-full-access')
+    expect(firstScope.sandboxMode()).toBe('danger-full-access')
+    expect(secondScope.sandboxMode()).toBe('read-only')
+
+    await first.dispose()
+    expect(harness.mcp.leases[0]?.disposed).toBe(true)
+    expect(harness.mcp.leases[1]?.disposed).toBe(false)
+    await second.dispose()
   }, 20_000)
 
   it('resumes the provider session and suppresses replay notifications from the live transcript', async () => {
@@ -502,7 +737,7 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       { provider: 'codex', externalSessionId: 'external-paper-session-old', resumed: false },
       { provider: 'codex', externalSessionId: 'external-paper-session-new', resumed: false },
     ])
-    await expect(resumed.agent.modelController?.listModels()).resolves.toEqual([
+    await expect(resumed.agent.modelController?.listModels()).resolves.toMatchObject([
       {
         id: 'fake-alpha',
         name: 'Fake Alpha',

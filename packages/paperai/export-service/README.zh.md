@@ -15,7 +15,7 @@
 
 允许导出后，服务使用传入 `DocumentRecord` 中观察到的 head，通过 `paperCommits` 提交一个 `milestone` 变更。head 已移动时由 commit-service 的乐观并发检查拒绝。提交原样保留传入的人工或 Agent 身份，包括 client、provider、model、revision、session 和 run 来源。
 
-服务只从新提交的不可变 `snapshotPath` 发布，不读取 Working DOCX 作为导出源。它校验大小和 SHA-256，将内容复制到目标目录中的随机临时文件，同步后再次检查受保护路径，再通过重命名发布。发布失败会删除临时文件，且不会修改导入源文件或 Working DOCX。
+服务只从新提交的不可变 `snapshotPath` 发布，不读取 Working DOCX 作为导出源。它校验大小和 SHA-256，将内容复制到目标目录中的随机临时文件，同步后再次检查受保护路径，再通过重命名发布。发布失败会删除临时文件，且不会修改导入源文件或 Working DOCX。携带 `writableRoot` 的请求（MCP 桥在除完全访问外的所有沙箱模式下都传入会话工作区）会在发布时按真实路径约束：目标文件的真实父目录必须位于真实根目录之内，比较时遵循平台的大小写语义（只在 Windows 上折叠大小写，区分大小写的文件系统上 `paper` 与 `Paper` 仍是两个目录），因此工作区内的目录链接无法把文件带到别处；该检查在里程碑提交之前和重命名之前各执行一次，失败时以 `DESTINATION_OUTSIDE_WORKSPACE` 拒绝。
 
 ## 模型体验
 

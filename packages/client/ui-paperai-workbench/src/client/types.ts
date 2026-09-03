@@ -20,6 +20,7 @@ export type PaperAIWorkbenchRemote = Pick<
   | 'validate'
   | 'restore'
   | 'importDocument'
+  | 'createFromTemplate'
   | 'listTemplates'
   | 'installTemplatePack'
   | 'uploadTemplate'
@@ -55,7 +56,7 @@ export type PaperAIWorkbenchPhase = 'idle' | 'loading' | 'ready' | 'error'
 /** Selected-node buffer phase inside a ready workbench. */
 export type PaperAINodeBufferPhase = 'idle' | 'loading' | 'ready' | 'error'
 /** Tabs owned by the PaperAI details view. */
-export type PaperAIWorkbenchTab = 'preview' | 'edit' | 'versions' | 'gate'
+export type PaperAIWorkbenchTab = 'preview' | 'edit' | 'versions' | 'template' | 'gate' | 'export'
 /** Host-backed action currently excluding competing document operations. */
 export type PaperAIWorkbenchAction =
   | 'importing-document'
@@ -108,3 +109,18 @@ export type PaperAIWorkbenchStore = SnapshotStore<PaperAIWorkbenchState>
 
 /** Settled result used by UI actions that report failure through state. */
 export type PaperAIActionResult = { readonly ok: true } | { readonly ok: false; readonly error: string }
+
+/** Built-in template packs offered when starting a document, or the Host diagnostic. */
+export type PaperAITemplateChoicesResult =
+  | { readonly ok: true; readonly packs: readonly import('@paperai/workbench-service/types').PaperAITemplatePackChoice[] }
+  | { readonly ok: false; readonly error: string }
+
+/** Browser-side input for starting one document from a built-in template pack member. */
+export interface PaperAITemplateStartInput {
+  readonly packId: string
+  readonly memberId: string
+  /** Manuscript upload; required by formatting-reference members. */
+  readonly upload?: import('@paperai/workbench-service/types').PaperAIWordUpload
+  readonly role?: import('@paperai/workbench-service/types').PaperAIDocumentRole
+  readonly name?: string
+}

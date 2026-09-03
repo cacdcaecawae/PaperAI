@@ -9,6 +9,7 @@ import {
   CodexAgentMark,
   PaperAIBrandMark,
   PaperAIBrandName,
+  DshAgentMark,
 } from '../src/client/PaperAIBrand.tsx'
 
 afterEach(cleanup)
@@ -24,6 +25,17 @@ async function bench(declare = true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
+  const themeLayers: { source: string; tokens: Record<string, { light: string; dark: string }> }[] = []
+  ctx.provide('theme', {
+    overrideTokens: (source: string, tokens: Record<string, { light: string; dark: string }>) => {
+      const layer = { source, tokens }
+      themeLayers.push(layer)
+      return () => {
+        const at = themeLayers.indexOf(layer)
+        if (at >= 0) themeLayers.splice(at, 1)
+      }
+    },
+  } as never)
   const declareHoles = () => slots.register({
     name: 'root',
     children: {
@@ -32,12 +44,28 @@ async function bench(declare = true) {
     },
   } as never, () => null)
   const disposeHoles = declare ? declareHoles() : undefined
-  return { ctx, slots, declareHoles, disposeHoles }
+  return { ctx, slots, themeLayers, declareHoles, disposeHoles }
 }
 
 describe('PaperAI browser-brand plugin', () => {
-  it('declares only the slot service it uses', () => {
-    expect(inject).toEqual(['slots'])
+  it('declares the slot and theme services it uses', () => {
+    expect(inject).toEqual(['slots', 'theme'])
+  })
+
+  it('installs one dual-scheme accent layer and removes it on teardown', async () => {
+    const { ctx, themeLayers } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    expect(themeLayers).toHaveLength(1)
+    expect(themeLayers[0]?.source).toBe('paperai-brand')
+    const tokens = themeLayers[0]?.tokens ?? {}
+    expect(Object.keys(tokens).length).toBeGreaterThan(0)
+    for (const value of Object.values(tokens)) {
+      expect(typeof value.light).toBe('string')
+      expect(typeof value.dark).toBe('string')
+    }
+    await fiber.dispose()
+    expect(themeLayers).toHaveLength(0)
   })
 
   it('fills declarations before or after apply and removes every occupant on teardown', async () => {
@@ -45,7 +73,7 @@ describe('PaperAI browser-brand plugin', () => {
     const fiber = before.ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(1)
-    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(2)
+    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(3)
 
     before.disposeHoles?.()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(0)
@@ -53,7 +81,7 @@ describe('PaperAI browser-brand plugin', () => {
     before.declareHoles()
     await Promise.resolve()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(1)
-    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(2)
+    expect(before.slots.entries(AGENT_PRESET_MARK)).toHaveLength(3)
 
     await fiber.dispose()
     for (const hole of HOLES) expect(before.slots.entries(hole)).toHaveLength(0)
@@ -65,7 +93,7 @@ describe('PaperAI browser-brand plugin', () => {
     after.declareHoles()
     await Promise.resolve()
     for (const hole of HOLES) expect(after.slots.entries(hole)).toHaveLength(1)
-    expect(after.slots.entries(AGENT_PRESET_MARK)).toHaveLength(2)
+    expect(after.slots.entries(AGENT_PRESET_MARK)).toHaveLength(3)
   })
 
   it('renders the Chinese product wordmark and host-sized document mark', () => {
@@ -89,6 +117,7 @@ describe('PaperAI browser-brand plugin', () => {
     const marks = render(<>
       <CodexAgentMark presetId="codex" size={18} />
       <ClaudeAgentMark presetId="claude" size={18} />
+      <DshAgentMark presetId="dsh" size={18} />
     </>)
     for (const svg of marks.container.querySelectorAll('svg')) {
       expect(svg.getAttribute('aria-hidden')).toBe('true')

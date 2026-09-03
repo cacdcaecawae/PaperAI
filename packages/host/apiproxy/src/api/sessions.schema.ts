@@ -12,7 +12,8 @@ import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
 import type {
   HistoryEntry, ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
-  ModelReasoningEffort, ModelSelection, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem, SessionSummary,
+  ModelReasoningEffort, ModelSelection, ModelSwitch, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
+  SessionSummary,
 } from './sessions.ts'
 import type { ToolEventView } from './events.ts'
 import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -150,7 +151,16 @@ export const modelSelectionSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
   reasoningEffort: z.string().min(1).optional(),
+  switches: z.record(z.string().min(1), z.boolean()).optional(),
 }) satisfies z.ZodType<Wire<ModelSelection>>
+
+/** One driver-owned boolean switch. */
+export const modelSwitchSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  enabled: z.boolean(),
+}) satisfies z.ZodType<Wire<ModelSwitch>>
 
 /** One adapter-owned reasoning effort. */
 export const modelReasoningEffortSchema = z.object({
@@ -253,6 +263,7 @@ export const sessionModelsValueSchema = z.object({
   routable: z.boolean(),
   groups: z.array(modelProviderGroupSchema),
   failures: z.array(modelCatalogFailureSchema),
+  switches: z.array(modelSwitchSchema).optional(),
 }) satisfies z.ZodType<Wire<ResponseValue<'session.models'>>>
 
 /** session.selectModel request payload. */
@@ -261,6 +272,7 @@ export const sessionSelectModelRequestSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
   reasoningEffort: z.string().min(1).optional(),
+  switches: z.record(z.string().min(1), z.boolean()).optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'session.selectModel'>>>
 
 /** session.selectModel response value. */

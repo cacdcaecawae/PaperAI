@@ -293,6 +293,39 @@ describe('PaperAI workbench browser plugin', () => {
     await b.ctx.fiber.dispose()
   })
 
+  it('connects the Workspace before starting a document from a built-in template', async () => {
+    const b = await bench()
+    declare(b.slots)
+    const createFromTemplate = vi.spyOn(b.remote, 'createFromTemplate')
+    const listTemplates = vi.spyOn(b.remote, 'listTemplates')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const workspace = (b.slots.entries('sidebar.workspaces.content')[0]!.inject as unknown as
+      () => PaperAIWorkspaceContentInjected)()
+
+    await expect(workspace.loadTemplateChoices(WORKSPACE_ID)).resolves.toMatchObject({ ok: true })
+    expect(listTemplates).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID })
+    await expect(workspace.createFromTemplate(WORKSPACE_ID, {
+      packId: HIT_PACK_ID,
+      memberId: HIT_PROPOSAL_MEMBER_ID,
+    })).resolves.toEqual({ ok: true })
+    expect(b.connectWorkspace).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(b.openSession).toHaveBeenCalledWith(SESSION_ID)
+    expect(b.openDetails).toHaveBeenCalledWith(PAPERAI_DETAILS_VIEW_ID, SESSION_ID)
+    expect(createFromTemplate).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      packId: HIT_PACK_ID,
+      memberId: HIT_PROPOSAL_MEMBER_ID,
+    }, expect.any(AbortSignal))
+
+    b.connectWorkspace.mockRejectedValueOnce(new Error('Template connect failed'))
+    await expect(workspace.createFromTemplate(WORKSPACE_ID, {
+      packId: HIT_PACK_ID,
+      memberId: HIT_PROPOSAL_MEMBER_ID,
+    })).resolves.toEqual({ ok: false, error: 'Template connect failed' })
+    await b.ctx.fiber.dispose()
+  })
+
   it('projects Workspace callback failures and refreshes loaded state after reconnect', async () => {
     const b = await bench()
     declare(b.slots)

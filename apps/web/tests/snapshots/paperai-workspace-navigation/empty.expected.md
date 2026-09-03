@@ -4,12 +4,19 @@
 - text: {{cwd}}/empty-project
 - region "工作区详情":
   - heading "项目内容" [level=3]
-  - button "文档类型，当前：论文正文":
-    - text: 论文正文
-    - img
-  - button "导入 Word":
-    - img
-    - text: 导入 Word
+  - region "新建文档":
+    - button "新建文档" [expanded]
+    - text: HIT 硕士毕设
+    - button "从模板新建：硕士学位论文开题报告": 硕士学位论文开题报告 从模板新建
+    - button "从模板新建：硕士学位论文中期报告": 硕士学位论文中期报告 从模板新建
+    - button "导入 Word 并套用格式：研究生学位论文书写范例（理工类）": 研究生学位论文书写范例（理工类） 导入并套用格式
+    - text: 不用模板 · 自由写作
+    - button "文档类型，当前：论文正文":
+      - text: 论文正文
+      - img
+    - button "导入 Word":
+      - img
+      - text: 导入 Word
   - status: 暂无项目内容
   - heading "会话" [level=3]
   - button "在“Empty project”中新建会话":

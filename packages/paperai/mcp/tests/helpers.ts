@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { vi } from 'vitest'
+import { join, resolve, sep } from 'node:path'
 import {
   DocumentCommitId,
   DocumentId,
@@ -18,6 +19,7 @@ import {
 import { TemplatePackId } from '@paperai/template-service'
 import { createPaperMcpServer } from '../src/server.ts'
 import type {
+  PaperMcpAccessScope,
   PaperMcpAgentIdentity,
   PaperMcpDependencies,
   PaperMcpExportAdapter,
@@ -36,7 +38,7 @@ export const project: ProjectRecord = {
   id: ProjectId('project-1'),
   workspaceId: 'workspace-1',
   name: 'Thesis',
-  rootPath: 'C:\\papers\\thesis',
+  rootPath: resolve('test-fixtures', 'papers', 'thesis'),
   createdAt: '2026-08-28T00:00:00.000Z',
   updatedAt: '2026-08-28T00:00:00.000Z',
 }
@@ -46,14 +48,32 @@ export const document: DocumentRecord = {
   projectId: project.id,
   name: 'proposal',
   role: 'proposal',
-  immutableSourcePath: 'C:\\papers\\thesis\\sources\\proposal.docx',
-  workingPath: 'C:\\papers\\thesis\\working\\proposal.docx',
+  immutableSourcePath: join(project.rootPath, 'sources', 'proposal.docx'),
+  workingPath: join(project.rootPath, 'working', 'proposal.docx'),
   mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   sourceSha256: 'a'.repeat(64),
   headCommitId: DocumentCommitId('commit-head'),
   nodeCount: 3,
   createdAt: '2026-08-28T00:00:00.000Z',
   updatedAt: '2026-08-28T00:00:00.000Z',
+}
+
+/** A document of another project, reachable by id but outside the lease's workspace. */
+export const foreignDocument: DocumentRecord = {
+  ...document,
+  id: DocumentId('document-2'),
+  projectId: ProjectId('project-2'),
+  name: 'other-proposal',
+  immutableSourcePath: resolve(project.rootPath, '..', 'other', 'sources', 'proposal.docx'),
+  workingPath: resolve(project.rootPath, '..', 'other', 'working', 'proposal.docx'),
+}
+
+/** The lease scope of a session opened at the project root with workspace-write. */
+export function workspaceScope(
+  workspaceRoot: string = project.rootPath,
+  sandboxMode: () => 'read-only' | 'workspace-write' | 'danger-full-access' = () => 'workspace-write',
+): PaperMcpAccessScope {
+  return { workspaceRoot, sandboxMode }
 }
 
 export const nodes: DocumentNode[] = [0, 1, 2].map(ordinal => ({
@@ -125,7 +145,7 @@ export function commit(identity: PaperMcpAgentIdentity = actor): DocumentCommit 
     ...(document.headCommitId === undefined ? {} : { parentId: document.headCommitId }),
     message: 'Improve introduction',
     actor: structuredClone(identity),
-    snapshotPath: 'C:\\papers\\thesis\\history\\commit-next.docx',
+    snapshotPath: join(project.rootPath, 'history', 'commit-next.docx'),
     documentSha256: 'b'.repeat(64),
     gate: gate('pass'),
     operations: [],
@@ -152,12 +172,17 @@ export function fakeDomain(report: GateReport = gate('pass')): FakeDomain {
       projects: {
         get: vi.fn(id => id === project.id ? project : undefined),
         list: vi.fn(() => [project]),
+        resolveForPath: vi.fn((path: string) => Promise.resolve(
+          path === project.rootPath || path.startsWith(`${project.rootPath}${sep}`) ? project : undefined,
+        )),
       },
       documents: {
         listDocuments: vi.fn(projectId => projectId === project.id ? [document] : []),
         readDocument: vi.fn(documentId => documentId === document.id
           ? { document, nodes }
-          : undefined),
+          : documentId === foreignDocument.id
+            ? { document: foreignDocument, nodes }
+            : undefined),
       },
       templates: {
         check,
@@ -185,8 +210,9 @@ export async function mcpHarness(
   domain: FakeDomain = fakeDomain(),
   exportAdapter?: PaperMcpExportAdapter,
   identity: PaperMcpAgentIdentity = actor,
+  scope: PaperMcpAccessScope = workspaceScope(),
 ) {
-  const server = createPaperMcpServer(domain.dependencies, identity, {
+  const server = createPaperMcpServer(domain.dependencies, identity, scope, {
     defaultNodesPerRead: 2,
     maxNodesPerRead: 3,
     maxMutationsPerCommit: 4,

@@ -18,6 +18,7 @@ import type {} from '@paperai/project-service'
 import type {} from '@paperai/template-service'
 import { createPaperMcpServer } from './server.ts'
 import type {
+  PaperMcpAccessScope,
   PaperMcpAgentIdentity,
   PaperMcpDependencies,
   PaperMcpDescriptorLease,
@@ -28,6 +29,7 @@ import type {
 
 export { createPaperMcpServer, PAPERAI_MCP_TOOL_NAMES } from './server.ts'
 export type {
+  PaperMcpAccessScope,
   PaperMcpAgentIdentity,
   PaperMcpDependencies,
   PaperMcpDescriptorLease,
@@ -160,7 +162,7 @@ export class PaperMcpService extends Service {
   })
 
   private readonly config: ResolvedConfig
-  private readonly actors = new Map<string, PaperMcpAgentIdentity>()
+  private readonly leases = new Map<string, { actor: PaperMcpAgentIdentity; scope: PaperMcpAccessScope }>()
   private exportAdapter: PaperMcpExportAdapter | undefined
 
   /**
@@ -179,20 +181,23 @@ export class PaperMcpService extends Service {
   }
 
   /**
-   * Issue one revocable HTTP descriptor bound to one Agent client and session.
-   * The caller must retain and dispose the lease with the ACP Agent session.
+   * Issue one revocable HTTP descriptor bound to one Agent client, session,
+   * and access scope. The caller must retain and dispose the lease with the
+   * ACP Agent session.
    * @param actor - Local Codex or Claude identity recorded on every commit.
+   * @param scope - Session workspace root and live sandbox mode that constrain every tool call.
    * @returns the ACP-compatible descriptor and its idempotent disposer.
    */
-  issueDescriptor(actor: PaperMcpAgentIdentity): PaperMcpDescriptorLease {
+  issueDescriptor(actor: PaperMcpAgentIdentity, scope: PaperMcpAccessScope): PaperMcpDescriptorLease {
     let currentActor = validateActor(actor)
+    nonBlank(scope.workspaceRoot, 'scope.workspaceRoot')
     const token = randomBytes(TOKEN_BYTES).toString('base64url')
     let active = true
     const disposeEffect = this.ctx.effect(() => {
-      this.actors.set(token, currentActor)
+      this.leases.set(token, { actor: currentActor, scope })
       return () => {
         active = false
-        this.actors.delete(token)
+        this.leases.delete(token)
       }
     }, 'paperai-mcp: Agent descriptor lease')
     let disposal: Promise<void> | undefined
@@ -217,14 +222,14 @@ export class PaperMcpService extends Service {
           throw new Error('paperai-mcp: descriptor lease sessionId cannot change')
         }
         currentActor = next
-        this.actors.set(token, currentActor)
+        this.leases.set(token, { actor: currentActor, scope })
         return structuredClone(currentActor)
       },
       dispose: () => {
         if (disposal !== undefined) return disposal
         if (!active) return Promise.resolve()
         active = false
-        this.actors.delete(token)
+        this.leases.delete(token)
         disposal = Promise.resolve(disposeEffect())
         return disposal
       },
@@ -267,8 +272,8 @@ export class PaperMcpService extends Service {
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const token = bearerToken(request)
-    const actor = token === undefined ? undefined : this.actors.get(token)
-    if (actor === undefined) {
+    const lease = token === undefined ? undefined : this.leases.get(token)
+    if (lease === undefined) {
       response.writeHead(401, {
         'cache-control': 'no-store',
         'www-authenticate': 'Bearer realm="paperai-mcp"',
@@ -279,7 +284,8 @@ export class PaperMcpService extends Service {
 
     const server = createPaperMcpServer(
       this.dependencies(),
-      structuredClone(actor),
+      structuredClone(lease.actor),
+      lease.scope,
       this.config,
       this.exportAdapter,
     )

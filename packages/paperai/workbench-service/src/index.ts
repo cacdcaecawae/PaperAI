@@ -39,6 +39,7 @@ import type {
   PaperAIAssociateTemplateRequest,
   PaperAICommitDocumentRequest,
   PaperAIConfirmTemplateRequest,
+  PaperAICreateFromTemplateRequest,
   PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult,
   PaperAIDocumentChangedEvent,
@@ -46,6 +47,7 @@ import type {
   PaperAIDocumentNodeSummary,
   PaperAIDocumentOpenResult,
   PaperAIDocumentRevision,
+  PaperAIDocumentRole,
   PaperAIDocumentSnapshot,
   PaperAIDocumentVersion,
   PaperAIGateFinding,
@@ -475,50 +477,86 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     signal?: AbortSignal,
   ): Promise<PaperAIImportDocumentResult> {
     const { project } = await this.projectForWorkspace(request.workspaceId)
-    return await this.withUploadedWord(project, request.fileName, request.contentBase64, async (sourcePath) => {
-      const imported = await this.ctx.paperDocuments.importDocument({
-        projectId: project.id,
+    return await this.withUploadedWord(project, request.fileName, request.contentBase64, sourcePath => (
+      this.establishDocument(project, {
         sourcePath,
         role: request.role,
         ...(request.name === undefined ? {} : { name: request.name }),
+      }, {
+        sessionId: request.sessionId,
+        messagePrefix: '导入',
+        milestone: `导入 ${request.fileName}`,
       }, signal)
-      if (imported.status === 'degraded') {
-        return {
-          status: 'degraded',
-          capability: imported.capability,
-          detail: imported.detail,
-        }
+    ))
+  }
+
+  /**
+   * Start one Working document from a built-in template pack member and bind
+   * that member's contract in the root commit. A form template is imported as
+   * the document itself; a formatting reference governs the uploaded
+   * manuscript instead. Built-in members ship reviewed requirements, so the
+   * contract is confirmed here without a separate review step.
+   * @param request - Workspace, Session, pack member, optional manuscript upload, role, and display name.
+   * @param signal - optional cancellation signal for installation, import, commit, and preview work.
+   * @returns the opened document and root commit, or an explicit native-engine downgrade.
+   * @throws when the member is unknown, a formatting reference has no upload, the role does not apply,
+   * or import or commit work fails; an AggregateError includes any rollback failure.
+   */
+  @Remote('createFromTemplate')
+  async createFromTemplate(
+    request: PaperAICreateFromTemplateRequest,
+    signal?: AbortSignal,
+  ): Promise<PaperAIImportDocumentResult> {
+    const { project } = await this.projectForWorkspace(request.workspaceId)
+    const [installed] = await this.ctx.paperTemplates.installPack({
+      projectId: project.id,
+      packId: TemplatePackId(request.packId),
+      memberIds: [TemplatePackMemberId(request.memberId)],
+    }, signal)
+    /* v8 ignore next 3 -- installPack rejects an unknown member instead of returning an empty list. */
+    if (installed === undefined) {
+      throw new Error(`paperai-workbench: pack '${request.packId}' has no member '${request.memberId}'`)
+    }
+    const contract = installed.status === 'confirmed'
+      ? installed
+      : await this.ctx.paperTemplates.confirm(installed.id)
+    const role = request.role ?? contract.appliesToRoles[0]
+    if (role === undefined) {
+      throw new Error(`paperai-workbench: template '${contract.name}' applies to no document role`)
+    }
+    if (!contract.appliesToRoles.includes(role)) {
+      throw new Error(`paperai-workbench: template '${contract.name}' does not apply to '${role}' documents`)
+    }
+    const name = request.name ?? contract.name
+    const establish = (sourcePath: string): Promise<PaperAIImportDocumentResult> => (
+      this.establishDocument(project, { sourcePath, role, name }, {
+        sessionId: request.sessionId,
+        messagePrefix: '从模板新建',
+        milestone: `从模板新建 ${contract.name}`,
+        templateId: contract.id,
+      }, signal)
+    )
+    // The member's usage decides the content source, never the caller: a form
+    // template is the document, so no upload may replace it; a formatting
+    // reference governs an upload, so one is required.
+    if (contract.usage === 'form-template') {
+      if (request.upload !== undefined) {
+        throw new Error(
+          `paperai-workbench: template '${contract.name}' is a form template that becomes the document itself; it accepts no upload`,
+        )
       }
-      let commit: DocumentCommit
-      try {
-        commit = await this.ctx.paperCommits.submit({
-          documentId: imported.document.id,
-          message: `导入：${imported.document.name}`,
-          actor: {
-            kind: 'human', name: '用户', client: 'paperai', sessionId: String(request.sessionId),
-          },
-          mutations: [{ type: 'milestone', label: `导入 ${request.fileName}` }],
-          ...(signal === undefined ? {} : { signal }),
-        })
-      } catch (error) {
-        try {
-          await this.ctx.paperDocuments.rollbackImport(imported.document.id)
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            `PaperAI document '${String(imported.document.id)}' root commit and import rollback failed`,
-          )
-        }
-        throw error
+      const source = this.ctx.paperRepository.getDocument(contract.sourceDocumentId)
+      if (source === undefined) {
+        throw new Error(`paperai-workbench: template '${contract.id}' has no stored source document`)
       }
-      const current = this.requireDocument(imported.document.id)
-      const opened = await this.projectOpen(project, current.document, current.nodes, request.sessionId, signal)
-      return {
-        status: 'imported',
-        opened,
-        createdCommitId: commit.id,
-      }
-    })
+      return await establish(source.workingPath)
+    }
+    if (request.upload === undefined) {
+      throw new Error(
+        `paperai-workbench: template '${contract.name}' is a formatting reference; upload the manuscript it should format`,
+      )
+    }
+    return await this.withUploadedWord(project, request.upload.fileName, request.upload.contentBase64, establish)
   }
 
   /**
@@ -912,6 +950,70 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
   }
 
+  /**
+   * Import a Word source, create its root version, and open it. A rejected
+   * root submission is followed by non-cancellable import rollback.
+   */
+  private async establishDocument(
+    project: ProjectRecord,
+    source: { readonly sourcePath: string; readonly role: PaperAIDocumentRole; readonly name?: string },
+    root: {
+      readonly sessionId: SessionId
+      /** Commit message verb; the published document name follows it. */
+      readonly messagePrefix: string
+      readonly milestone: string
+      readonly templateId?: TemplateContractId
+    },
+    signal?: AbortSignal,
+  ): Promise<PaperAIImportDocumentResult> {
+    const imported = await this.ctx.paperDocuments.importDocument({ projectId: project.id, ...source }, signal)
+    if (imported.status === 'degraded') {
+      return {
+        status: 'degraded',
+        capability: imported.capability,
+        detail: imported.detail,
+      }
+    }
+    let commit: DocumentCommit
+    try {
+      commit = await this.ctx.paperCommits.submit({
+        documentId: imported.document.id,
+        message: `${root.messagePrefix}：${imported.document.name}`,
+        actor: {
+          kind: 'human', name: '用户', client: 'paperai', sessionId: String(root.sessionId),
+        },
+        mutations: [
+          { type: 'milestone', label: root.milestone },
+          ...(root.templateId === undefined ? [] : [{ type: 'bind-template' as const, templateId: root.templateId }]),
+        ],
+        ...(signal === undefined ? {} : { signal }),
+      })
+    } catch (error) {
+      try {
+        await this.ctx.paperDocuments.rollbackImport(imported.document.id)
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `PaperAI document '${String(imported.document.id)}' root commit and import rollback failed`,
+        )
+      }
+      throw error
+    }
+    // The root commit is the commit point: the document and its version exist
+    // now, so neither a preview failure nor a caller cancellation may report
+    // the creation as failed (a retry would create a second document). The
+    // projection runs without the caller's signal and tolerates a missing preview.
+    const current = this.requireDocument(imported.document.id)
+    const opened = await this.projectOpen(
+      project, current.document, current.nodes, root.sessionId, undefined, undefined, 'best-effort',
+    )
+    return {
+      status: 'imported',
+      opened,
+      createdCommitId: commit.id,
+    }
+  }
+
   private async withUploadedWord<T>(
     project: ProjectRecord,
     fileName: string,
@@ -1017,8 +1119,9 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     sessionId: SessionId,
     signal?: AbortSignal,
     selectedNodeId?: DocumentNode['id'],
+    preview: 'required' | 'best-effort' = 'required',
   ): Promise<PaperAIDocumentOpenResult> {
-    const previewHtml = await this.ctx.paperDocuments.previewHtml(document.id, signal)
+    const previewHtml = await this.previewFor(document.id, signal, preview)
     const history = this.ctx.paperCommits.listHistory(document.id)
     const contract = document.templateId === undefined
       ? undefined
@@ -1045,6 +1148,28 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     return {
       document: snapshot,
       selectedNode: selected === undefined ? null : this.bufferFor(document, nodes, selected.id),
+    }
+  }
+
+  /**
+   * Render the read-only preview. After a commit point the projection must
+   * still describe the document the caller now owns, so `best-effort` turns a
+   * preview failure into an empty preview (the browser shows its unavailable
+   * notice) and logs the cause instead of failing the whole result.
+   */
+  private async previewFor(
+    documentId: DocumentId,
+    signal: AbortSignal | undefined,
+    preview: 'required' | 'best-effort',
+  ): Promise<string> {
+    if (preview === 'required') return await this.ctx.paperDocuments.previewHtml(documentId, signal)
+    try {
+      return await this.ctx.paperDocuments.previewHtml(documentId, signal)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(
+        `paperai-workbench: preview unavailable for document '${String(documentId)}' after its root commit: ${String(error)}`,
+      )
+      return ''
     }
   }
 

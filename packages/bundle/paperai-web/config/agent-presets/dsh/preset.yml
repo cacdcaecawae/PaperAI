@@ -1,0 +1,3 @@
+name: DSH 标准
+description: PaperAI 论文智能体，由内置 DSH 标准循环驱动：标准模式全部能力加文档工具、写作规程与门禁自检，修改与 Codex/Claude 记入同一版本账本。
+order: 1

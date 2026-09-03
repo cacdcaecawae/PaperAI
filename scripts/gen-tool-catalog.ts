@@ -66,6 +66,7 @@ import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
+import * as ToolDocument from '@paperai/tool-document'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -605,6 +606,48 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.',
+  },
+  {
+    pkg: '@paperai/tool-document',
+    dir: 'tool-document',
+    source: 'packages/paperai/tool-document/src/index.ts',
+    requires: [
+      'ctx.tools',
+      'ctx.sandboxPolicy',
+      'ctx.paperProjects',
+      'ctx.paperDocuments',
+      'ctx.paperTemplates',
+      'ctx.paperCommits',
+      'a calling Agent (its session workspace bounds every call and commit provenance names the session)',
+    ],
+    writes: ['tool/call', 'tool/result', 'PaperAI document commits through ctx.paperCommits'],
+    async mount(ctx) {
+      // Schemas depend only on the tool definitions; the domain services are
+      // satisfied with inert seams because no execute path runs at harvest.
+      ctx.provide('sandboxPolicy', {
+        resolve: () => ({ mode: 'read-only', workspaceRoot: root }),
+      } as never)
+      ctx.provide('paperProjects', {
+        get: () => undefined,
+        list: () => [],
+        resolveForPath: () => Promise.resolve(undefined),
+      } as never)
+      ctx.provide('paperDocuments', { listDocuments: () => [], readDocument: () => undefined } as never)
+      ctx.provide('paperTemplates', {
+        listPacks: () => [],
+        listContracts: () => [],
+        getContract: () => undefined,
+        check: () => Promise.reject(new Error('catalog harvest never checks a gate')),
+      } as never)
+      ctx.provide('paperCommits', {
+        listHistory: () => [],
+        submit: () => Promise.reject(new Error('catalog harvest never commits')),
+        revert: () => Promise.reject(new Error('catalog harvest never reverts')),
+      } as never)
+      await ctx.plugin(ToolDocument)
+    },
+    note:
+      'The ten tools mirror the PaperAI MCP names and result fields so the built-in DSH agent shares one document vocabulary with Codex and Claude over MCP; every call is confined to the project that owns the calling session workspace, mutations are refused under the read-only sandbox mode, and commits stamp the session and its current request route as provenance.',
   },
 ]
 

@@ -303,18 +303,11 @@ class FakePaperTemplates extends Service implements PaperTemplateCommitPeer {
       return Promise.resolve(structuredClone(report))
     }
     return Promise.resolve({
-      status: input.templateId === undefined ? 'fail' : 'pass',
+      status: 'pass',
       mode: input.mode,
       documentId: input.document.id,
       ...(input.templateId === undefined ? {} : { templateId: input.templateId }),
-      findings: input.templateId === undefined
-        ? [{
-          id: 'template-missing',
-          severity: 'error',
-          code: 'template_missing',
-          message: 'template missing',
-        }]
-        : [],
+      findings: [],
       checkedAt: '2026-08-28T00:00:00.000Z',
     })
   }

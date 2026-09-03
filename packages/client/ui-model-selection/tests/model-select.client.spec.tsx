@@ -39,6 +39,7 @@ function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryStat
       models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', reasoning }],
     }],
     failures: [],
+    switches: [],
     status: 'ready',
     error: null,
     ...overrides,
@@ -46,6 +47,66 @@ function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryStat
 }
 
 afterEach(cleanup)
+
+describe('ModelSelect driver switches', () => {
+  it('renders driver switches as checkable rows and submits one flipped value with the selection', async () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({
+      current: { provider: 'codex', model: 'gpt', reasoningEffort: 'high', switches: { 'fast-mode': false } },
+      groups: [{ id: 'codex', name: 'Codex', models: [{ id: 'gpt', name: 'GPT', reasoning }] }],
+      switches: [{ id: 'fast-mode', name: 'Fast mode', description: '1.5x speed, increased usage', enabled: false }],
+    }))
+    const select = vi.fn(async (selection: ModelSelection) => {
+      directory.update((s) => {
+        s.current = selection
+        s.switches = s.switches.map(entry => ({ ...entry, enabled: selection.switches?.[entry.id] === true }))
+      })
+      return true
+    })
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} select={select} t={t} />)
+
+    const trigger = screen.getByRole('button', { name: '选择模型，当前 GPT，推理等级 High' })
+    expect(trigger.textContent).toBe('GPTHigh')
+    fireEvent.click(trigger)
+    const fast = screen.getByRole('menuitemcheckbox', { name: /Fast mode/ })
+    expect(fast.getAttribute('aria-checked')).toBe('false')
+    expect(fast.getAttribute('title')).toBe('1.5x speed, increased usage')
+    fast.focus()
+    fireEvent.click(fast)
+
+    await waitFor(() => {
+      expect(select).toHaveBeenCalledWith({
+        provider: 'codex', model: 'gpt', reasoningEffort: 'high', switches: { 'fast-mode': true },
+      })
+    })
+    // The menu stays open so the switch reads back in place; the trigger caption follows,
+    // and focus returns to the row the busy state disabled.
+    const flipped = screen.getByRole('menuitemcheckbox', { name: /Fast mode/ })
+    expect(flipped.getAttribute('aria-checked')).toBe('true')
+    expect(trigger.textContent).toBe('GPTHigh · Fast mode')
+    await waitFor(() => { expect(document.activeElement).toBe(flipped) })
+    fireEvent.keyDown(flipped, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('announces a rejected switch through the selection toast', async () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({
+      current: { provider: 'codex', model: 'gpt', switches: { fast: true } },
+      groups: [{ id: 'codex', name: 'Codex', models: [{ id: 'gpt', name: 'GPT' }] }],
+      switches: [{ id: 'fast', name: 'Fast mode', enabled: true }],
+    }))
+    const select = vi.fn(async () => {
+      directory.update((s) => { s.status = 'error'; s.error = 'select' })
+      return false
+    })
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} select={select} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: '选择模型，当前 GPT' }))
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /Fast mode/ }))
+    await waitFor(() => {
+      expect(select).toHaveBeenCalledWith({ provider: 'codex', model: 'gpt', switches: { fast: false } })
+    })
+    expect(await screen.findByText('未能切换模型，请重试。')).not.toBeNull()
+  })
+})
 
 describe('ModelSelect reasoning effort', () => {
   it('renders adapter metadata and submits the effort as part of the session selection', async () => {

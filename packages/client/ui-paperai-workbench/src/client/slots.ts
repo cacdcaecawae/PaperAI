@@ -5,7 +5,8 @@ import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/cli
 import type {
   PaperAIActionResult, PaperAIDocumentCommitId, PaperAIDocumentNodeId,
   PaperAIDocumentRole, PaperAIExportMode, PaperAIResourceId,
-  PaperAIResourceDirectoryState, PaperAITemplateUsage, PaperAIWorkbenchState, PaperAIWorkbenchTab,
+  PaperAIResourceDirectoryState, PaperAITemplateChoicesResult, PaperAITemplateStartInput,
+  PaperAITemplateUsage, PaperAIWorkbenchState, PaperAIWorkbenchTab,
 } from './types.ts'
 
 /** Operations and sources injected into each Workspace resource-tree contribution. */
@@ -26,6 +27,10 @@ export interface PaperAIWorkspaceContentInjected {
     readonly contentBase64: string
     readonly role: PaperAIDocumentRole
   }) => Promise<PaperAIActionResult>
+  /** Connect the Workspace and start one document from a built-in template pack member. */
+  createFromTemplate: (workspaceId: WorkspaceId, input: PaperAITemplateStartInput) => Promise<PaperAIActionResult>
+  /** Read the built-in template packs offered by the start flow. */
+  loadTemplateChoices: (workspaceId: WorkspaceId) => Promise<PaperAITemplateChoicesResult>
 }
 
 /** Full props assembled for the Workspace content list entry. */
@@ -77,6 +82,8 @@ export interface PaperAIDocumentWorkbenchInjected {
   resolveExternalConflict: (resolution: 'local' | 'external' | 'merged') => void
   /** Restore one backed commit through a newly created version. */
   restore: (commitId: PaperAIDocumentCommitId) => Promise<PaperAIActionResult>
+  /** Demand or release the layout's whole-content-area details focus. */
+  setDetailsFocus: (active: boolean) => void
 }
 
 /** Full props assembled for the PaperAI details view entry. */

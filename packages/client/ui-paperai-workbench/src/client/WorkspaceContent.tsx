@@ -1,16 +1,17 @@
 /** Flat DSH-native PaperAI resource sections rendered in one Workspace detail. */
 
 import {
-  useEffect, useRef, useState, type CSSProperties, type ReactNode,
+  useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode,
 } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconBrowseOutline16, IconChecklistOutline14, IconCodeOutline16,
-  IconChevronDownOutline14, IconDataOutline16, IconFolderClose16, IconPlusOutline16,
-  IconRefreshOutline14, IconSkillOutline16, Menu, StateDot, type StateDotState,
+  IconChevronDownOutline14, IconChevronRightOutline14, IconDataOutline16, IconFolderClose16,
+  IconPlusOutline16, IconRefreshOutline14, IconSkillOutline16, Menu, StateDot, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
-  PaperAIDocumentRole, PaperAIResourceCategory, PaperAIResourceRow, PaperAIResourceStatus,
+  PaperAIActionResult, PaperAIDocumentRole, PaperAIResourceCategory, PaperAIResourceRow,
+  PaperAIResourceStatus, PaperAITemplatePackChoice, PaperAITemplatePackMemberChoice,
 } from './types.ts'
 import { readWordFileBase64 } from './browser-file.ts'
 import type { PaperAIWorkspaceContentProps } from './slots.ts'
@@ -58,6 +59,17 @@ const ROLE_KEYS = {
   final: 'role.final',
   other: 'role.other',
 } satisfies Record<PaperAIDocumentRole, PaperAIWorkbenchKey>
+
+/** Which start gesture the next browser file selection belongs to. */
+type StartIntent =
+  | { readonly kind: 'free'; readonly role: PaperAIDocumentRole }
+  | { readonly kind: 'template'; readonly packId: string; readonly memberId: string }
+
+const FREE_START = 'free'
+
+function memberKey(packId: string, memberId: string): string {
+  return `${packId}/${memberId}`
+}
 
 /** Category icon using the shared DSH icon vocabulary. */
 function CategoryIcon({ category }: { category: PaperAIResourceCategory }): ReactNode {
@@ -121,36 +133,114 @@ function IconTreeFile({ category }: { category: PaperAIResourceCategory }): Reac
       : <IconBrowseOutline16 size={14} />
 }
 
-/** Render one additive PaperAI resource tree. */
+/** One built-in pack member as a start action: form templates create, references format an upload. */
+function TemplateStartRow({ member, running, disabled, start, t }: {
+  member: PaperAITemplatePackMemberChoice
+  running: boolean
+  disabled: boolean
+  start: () => void
+  t: PaperAIWorkspaceContentProps['t']
+}): ReactNode {
+  const creates = member.usage === 'form-template'
+  return (
+    <button
+      type="button"
+      className={clsx(css.resourceRow, css.resourceAction, css.startRow)}
+      disabled={disabled}
+      aria-label={t(creates ? 'start.createAria' : 'start.formatAria', { name: member.name })}
+      title={member.description}
+      onClick={start}
+    >
+      <span className={css.resourceIcon} aria-hidden="true">
+        {creates ? <IconSkillOutline16 size={14} /> : <IconBrowseOutline16 size={14} />}
+      </span>
+      <span className={css.resourceName}>{member.name}</span>
+      <span className={css.startVerb}>
+        {running ? t('start.creating') : t(creates ? 'start.create' : 'start.format')}
+      </span>
+    </button>
+  )
+}
+
+/** Render one additive PaperAI resource tree headed by the template-first start flow. */
 export function WorkspaceContent({
-  workspaceId, useResources, ensureResources, refreshResources, openResource, importDocument, t,
+  workspaceId, useResources, ensureResources, refreshResources, openResource,
+  importDocument, createFromTemplate, loadTemplateChoices, t,
 }: PaperAIWorkspaceContentProps): ReactNode {
   const fileInput = useRef<HTMLInputElement>(null)
+  const intent = useRef<StartIntent | null>(null)
   const [role, setRole] = useState<PaperAIDocumentRole>('manuscript')
   const [roleMenuOpen, setRoleMenuOpen] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
+  const [running, setRunning] = useState<string | null>(null)
+  const [startError, setStartError] = useState<string | null>(null)
+  const [packs, setPacks] = useState<readonly PaperAITemplatePackChoice[] | null>(null)
+  const [packsFailed, setPacksFailed] = useState(false)
+  const [startOpen, setStartOpen] = useState<boolean | null>(null)
   const state = useResources(directory => directory.workspaces[workspaceId] ?? EMPTY_RESOURCES)
 
   useEffect(() => {
     void ensureResources(workspaceId)
   }, [ensureResources, workspaceId])
 
-  const selectWord = async (file: File): Promise<void> => {
-    setImporting(true)
-    setImportError(null)
+  const loadPacks = useCallback(async (): Promise<void> => {
+    setPacksFailed(false)
+    const result = await loadTemplateChoices(workspaceId)
+    if (result.ok) setPacks(result.packs)
+    else setPacksFailed(true)
+  }, [loadTemplateChoices, workspaceId])
+
+  useEffect(() => {
+    void loadPacks()
+  }, [loadPacks])
+
+  // The start flow leads until the project holds a document; afterwards the
+  // tree is what the sidebar is for and the flow folds behind its heading.
+  const hasDocuments = state.resources.some(row => row.category === 'document')
+  const settled = state.phase === 'ready' || state.phase === 'error'
+  const open = startOpen ?? (settled && !hasDocuments)
+  const busy = running !== null
+
+  const run = async (key: string, action: () => Promise<PaperAIActionResult>, failure: PaperAIWorkbenchKey) => {
+    setRunning(key)
+    setStartError(null)
     try {
-      const result = await importDocument(workspaceId, {
+      const result = await action()
+      if (!result.ok) setStartError(t(failure))
+    } catch {
+      setStartError(t('import.invalid'))
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  const selectWord = async (file: File): Promise<void> => {
+    const chosen = intent.current ?? { kind: 'free', role }
+    intent.current = null
+    if (chosen.kind === 'free') {
+      await run(FREE_START, async () => importDocument(workspaceId, {
         fileName: file.name,
         contentBase64: await readWordFileBase64(file),
-        role,
-      })
-      if (!result.ok) setImportError(t('import.failed'))
-    } catch {
-      setImportError(t('import.invalid'))
-    } finally {
-      setImporting(false)
+        role: chosen.role,
+      }), 'import.failed')
+      return
     }
+    await run(memberKey(chosen.packId, chosen.memberId), async () => createFromTemplate(workspaceId, {
+      packId: chosen.packId,
+      memberId: chosen.memberId,
+      upload: { fileName: file.name, contentBase64: await readWordFileBase64(file) },
+    }), 'start.failed')
+  }
+
+  const startMember = (pack: PaperAITemplatePackChoice, member: PaperAITemplatePackMemberChoice): void => {
+    if (member.usage === 'form-template') {
+      void run(memberKey(pack.packId, member.memberId), () => createFromTemplate(workspaceId, {
+        packId: pack.packId,
+        memberId: member.memberId,
+      }), 'start.failed')
+      return
+    }
+    intent.current = { kind: 'template', packId: pack.packId, memberId: member.memberId }
+    fileInput.current?.click()
   }
 
   return (
@@ -159,32 +249,93 @@ export function WorkspaceContent({
         <span className={css.sectionTitleIcon} aria-hidden="true"><IconFolderClose16 /></span>
         <h3>{t('tree.title')}</h3>
       </div>
-      <div className={css.importBar}>
-        <Menu
-          compact
-          open={roleMenuOpen}
-          selectedId={role}
-          items={DOCUMENT_ROLES.map(value => ({ id: value, label: t(ROLE_KEYS[value]) }))}
-          anchor={(
-            <button
-              type="button"
-              className={css.roleSelect}
-              aria-label={t('import.roleAria', { role: t(ROLE_KEYS[role]) })}
-              aria-haspopup="menu"
-              aria-expanded={roleMenuOpen}
-              disabled={importing}
-              onClick={() => { setRoleMenuOpen(open => !open) }}
-            >
-              <span>{t(ROLE_KEYS[role])}</span>
-              <IconChevronDownOutline14 />
-            </button>
-          )}
-          onSelect={(value) => {
-            setRole(value as PaperAIDocumentRole)
-            setRoleMenuOpen(false)
-          }}
-          onClose={() => { setRoleMenuOpen(false) }}
-        />
+      <section className={css.start} aria-label={t('start.title')}>
+        <button
+          type="button"
+          className={css.startHeading}
+          aria-expanded={open}
+          onClick={() => { setStartOpen(!open) }}
+        >
+          <span className={css.startChevron} aria-hidden="true">
+            {open ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
+          </span>
+          <span>{t('start.title')}</span>
+        </button>
+        {open && (
+          <>
+            {packs === null && !packsFailed && (
+              <p className={css.message} aria-live="polite">{t('start.loading')}</p>
+            )}
+            {packsFailed && (
+              <div className={css.failure} role="alert">
+                <span>{t('start.error')}</span>
+                <Button
+                  variant="toolbar"
+                  size="sm"
+                  icon={<IconRefreshOutline14 />}
+                  onClick={() => { void loadPacks() }}
+                >
+                  {t('tree.retry')}
+                </Button>
+              </div>
+            )}
+            {packs?.map(pack => (
+              <div className={css.pack} key={pack.packId}>
+                <div className={css.packName} title={pack.description}>{pack.name}</div>
+                {pack.members.map(member => (
+                  <TemplateStartRow
+                    key={member.memberId}
+                    member={member}
+                    running={running === memberKey(pack.packId, member.memberId)}
+                    disabled={busy}
+                    start={() => { startMember(pack, member) }}
+                    t={t}
+                  />
+                ))}
+              </div>
+            ))}
+            <div className={css.packName}>{t('start.free')}</div>
+            <div className={css.importBar}>
+              <Menu
+                compact
+                open={roleMenuOpen}
+                selectedId={role}
+                items={DOCUMENT_ROLES.map(value => ({ id: value, label: t(ROLE_KEYS[value]) }))}
+                anchor={(
+                  <button
+                    type="button"
+                    className={css.roleSelect}
+                    aria-label={t('import.roleAria', { role: t(ROLE_KEYS[role]) })}
+                    aria-haspopup="menu"
+                    aria-expanded={roleMenuOpen}
+                    disabled={busy}
+                    onClick={() => { setRoleMenuOpen(menuOpen => !menuOpen) }}
+                  >
+                    <span>{t(ROLE_KEYS[role])}</span>
+                    <IconChevronDownOutline14 />
+                  </button>
+                )}
+                onSelect={(value) => {
+                  setRole(value as PaperAIDocumentRole)
+                  setRoleMenuOpen(false)
+                }}
+                onClose={() => { setRoleMenuOpen(false) }}
+              />
+              <button
+                type="button"
+                className={css.importAction}
+                disabled={busy}
+                onClick={() => {
+                  intent.current = { kind: 'free', role }
+                  fileInput.current?.click()
+                }}
+              >
+                <IconPlusOutline16 />
+                <span>{running === FREE_START ? t('import.importing') : t('import.word')}</span>
+              </button>
+            </div>
+          </>
+        )}
         <input
           ref={fileInput}
           className={css.visuallyHidden}
@@ -198,17 +349,8 @@ export function WorkspaceContent({
             if (file !== undefined) void selectWord(file).finally(() => { input.value = '' })
           }}
         />
-        <button
-          type="button"
-          className={css.importAction}
-          disabled={importing}
-          onClick={() => { fileInput.current?.click() }}
-        >
-          <IconPlusOutline16 />
-          <span>{importing ? t('import.importing') : t('import.word')}</span>
-        </button>
-      </div>
-      {importError !== null && <p className={css.inlineError} role="alert">{importError}</p>}
+        {startError !== null && <p className={css.inlineError} role="alert">{startError}</p>}
+      </section>
       {(state.phase === 'cold' || (state.phase === 'loading' && state.resources.length === 0)) && (
         <p className={css.message} aria-live="polite">{t('tree.loading')}</p>
       )}

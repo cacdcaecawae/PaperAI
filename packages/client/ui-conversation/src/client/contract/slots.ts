@@ -816,6 +816,8 @@ export interface DetailsInjected {
 export interface DetailsViewOwnerProps {
   /** Close the layout-owned details column. */
   closeDetails: () => void
+  /** Replace the session composer draft; the user reviews before sending. */
+  setDraft: (text: string) => void
 }
 
 /** Injected state and operations of the generic details host. */

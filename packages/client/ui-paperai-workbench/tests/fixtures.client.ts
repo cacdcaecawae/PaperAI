@@ -292,6 +292,14 @@ export function successfulRemote(): PaperAIWorkbenchRemote {
         createdCommitId: COMMIT_1,
       },
     }),
+    createFromTemplate: async () => ({
+      ok: true,
+      value: {
+        status: 'imported',
+        opened: documentOpenResult(),
+        createdCommitId: COMMIT_1,
+      },
+    }),
     listTemplates: async () => ({ ok: true, value: TEMPLATE_CATALOG }),
     installTemplatePack: async () => ({ ok: true, value: TEMPLATE_CATALOG }),
     uploadTemplate: async () => ({ ok: true, value: UPLOADED_TEMPLATE_CATALOG }),

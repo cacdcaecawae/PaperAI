@@ -22,7 +22,9 @@ import {
   extname,
   isAbsolute,
   join,
+  relative,
   resolve,
+  sep,
 } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -77,6 +79,7 @@ interface ResolvedConfig {
 interface ResolvedExportRequest {
   readonly document: ExportDocumentRequest['document']
   readonly destinationPath: string
+  readonly writableRoot: string | undefined
   readonly mode: ExportDocumentRequest['mode']
   readonly actor: ExportDocumentRequest['actor']
   readonly signal: AbortSignal | undefined
@@ -118,8 +121,15 @@ function resolveConfig(config: Config): ResolvedConfig {
   }
 }
 
+/**
+ * Comparison key for two paths on this platform: absolute, and case-folded
+ * only where the filesystem ignores case (Windows). Folding unconditionally
+ * would make `/work/Paper` and `/work/paper` one directory on Linux, where
+ * they are two — and a link to the second must count as outside the first.
+ */
 function pathKey(path: string): string {
-  return resolve(path).toLocaleLowerCase('en-US')
+  const absolute = resolve(path)
+  return process.platform === 'win32' ? absolute.toLocaleLowerCase('en-US') : absolute
 }
 
 function isMissing(error: unknown): boolean {
@@ -167,10 +177,35 @@ async function assertDistinctDestination(
   }
 }
 
+/**
+ * Confine the real parent directory of a destination to the caller's
+ * writable root, compared on real paths so a link under the root cannot
+ * carry the file elsewhere. Runs at publish time, right before the write.
+ */
+async function assertInsideWritableRoot(parentPath: string, writableRoot: string): Promise<void> {
+  let root: string
+  try {
+    root = await realpath(writableRoot)
+  } catch (error) {
+    if (!isMissing(error)) throw error
+    throw new PaperExportError(
+      'DESTINATION_OUTSIDE_WORKSPACE',
+      `export writable root '${writableRoot}' does not exist`,
+    )
+  }
+  const inside = relative(pathKey(root), pathKey(parentPath))
+  if (inside === '' || (inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))) return
+  throw new PaperExportError(
+    'DESTINATION_OUTSIDE_WORKSPACE',
+    `export destination resolves to '${parentPath}', outside the session workspace '${root}'`,
+  )
+}
+
 async function resolveDestination(
   destinationPath: string,
   protectedPaths: readonly string[],
   overwriteExisting: boolean,
+  writableRoot: string | undefined,
 ): Promise<string> {
   const trimmed = destinationPath.trim()
   if (!isAbsolute(trimmed) || extname(trimmed).toLocaleLowerCase('en-US') !== '.docx') {
@@ -184,6 +219,7 @@ async function resolveDestination(
   if (!parent.isDirectory()) {
     throw new PaperExportError('DESTINATION_INVALID', `export parent '${parentPath}' is not a directory`)
   }
+  if (writableRoot !== undefined) await assertInsideWritableRoot(parentPath, writableRoot)
   const canonical = join(parentPath, basename(trimmed))
   const existing = await fileIdentity(canonical)
   if (existing !== undefined) {
@@ -213,6 +249,7 @@ async function publishSnapshot(
   destinationPath: string,
   protectedPaths: readonly string[],
   config: ResolvedConfig,
+  writableRoot: string | undefined,
 ): Promise<string> {
   const snapshotMetadata = await lstat(commit.snapshotPath)
   if (!snapshotMetadata.isFile() || snapshotMetadata.isSymbolicLink()) {
@@ -228,6 +265,7 @@ async function publishSnapshot(
     destinationPath,
     [...protectedPaths, commit.snapshotPath],
     config.overwriteExisting,
+    writableRoot,
   )
   const temporaryPath = join(
     dirname(destination),
@@ -254,6 +292,7 @@ async function publishSnapshot(
       destination,
       [...protectedPaths, commit.snapshotPath],
       config.overwriteExisting,
+      writableRoot,
     )
     await rename(temporaryPath, destination)
     published = true
@@ -305,6 +344,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
     const retained: ResolvedExportRequest = {
       document: structuredClone(request.document),
       destinationPath: request.destinationPath,
+      writableRoot: request.writableRoot,
       mode: request.mode,
       actor: structuredClone(request.actor),
       signal: request.signal,
@@ -347,6 +387,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
       request.destinationPath,
       [request.document.immutableSourcePath, request.document.workingPath],
       this.config.overwriteExisting,
+      request.writableRoot,
     )
     request.signal?.throwIfAborted()
     const label = milestoneLabel(request.mode, destination)
@@ -365,6 +406,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
       destination,
       [request.document.immutableSourcePath, request.document.workingPath],
       this.config,
+      request.writableRoot,
     )
     const retainedReport = structuredClone(report)
     return {

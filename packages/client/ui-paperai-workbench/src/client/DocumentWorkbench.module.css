@@ -718,16 +718,6 @@
   gap: 6px;
 }
 
-.exportActionAnchor {
-  display: inline-flex;
-  border-radius: 6px;
-}
-
-.exportActionAnchor:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
-}
-
 .exportReceipt {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -887,6 +877,88 @@
   .nativeSelect {
     max-width: 100%;
   }
+}
+
+.statusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusChip:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.statusChip[data-kind='template'][data-attached='true'] {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
+.statusChip[data-kind='gate'][data-status='failed'] {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.statusChip[data-kind='gate'][data-status='passed'] {
+  border-color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.focusChip {
+  margin-left: auto;
+}
+
+.focusChip[aria-pressed='true'] {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
+.actorBadge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actorBadge[data-client='dsh'],
+.actorBadge[data-client='codex'],
+.actorBadge[data-client='claude'] {
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {
