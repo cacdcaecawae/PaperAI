@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { inspect } from 'node:util'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
@@ -44,6 +45,12 @@ const MODE = webSnapshotMode()
 interface AcpLogEntry {
   readonly event: string
   readonly modeId?: string
+}
+
+/** Include engine validation evidence when setup fails before browser assertions. */
+function reportDocumentSetupFailure(error: unknown): never {
+  console.error(`PaperAI browser document setup failed: ${inspect(error, { depth: null })}`)
+  throw error
 }
 
 async function readAcpLog(path: string): Promise<AcpLogEntry[]> {
@@ -140,7 +147,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       contentBase64: fixtureDocxBase64(),
       role: 'proposal',
       name: 'Browser conflict proposal',
-    })
+    }).catch(reportDocumentSetupFailure)
     if (imported.status !== 'imported') {
       throw new Error(`PaperAI browser fixture import unavailable: ${imported.capability}: ${imported.detail}`)
     }
@@ -171,7 +178,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
         baseText: initial.selectedNode.text,
         nextText: 'Initial browser paragraph — normalized',
       }],
-    })
+    }).catch(reportDocumentSetupFailure)
 
     browser = await chromium.launch()
     page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
