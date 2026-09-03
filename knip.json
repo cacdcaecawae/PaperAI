@@ -122,7 +122,7 @@
     },
     "packages/bundle/paperai-web": {
       "ignoreDependencies": [
-        "@deepseek-ai/dsh-storage-sqlite",
+        "@deepseek-ai/.+",
         "@paperai/agent-acp",
         "@paperai/commit-service",
         "@paperai/document-engine-officecli",
@@ -133,6 +133,7 @@
         "@paperai/repository",
         "@paperai/template-pack-hit",
         "@paperai/template-service",
+        "@paperai/tool-document",
         "@paperai/ui-brand",
         "@paperai/ui-workbench",
         "@paperai/workbench-service"

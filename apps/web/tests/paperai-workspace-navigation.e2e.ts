@@ -137,6 +137,9 @@ describe('web e2e: PaperAI Workspace detail navigation', { concurrent: false }, 
     await page.getByText('暂无项目内容').waitFor({ timeout: 15_000 })
     await page.getByRole('button', { name: '在“Empty project”中新建会话' }).waitFor({ timeout: 15_000 })
     await page.getByRole('treeitem', { name: '新会话' }).waitFor({ timeout: 15_000 })
+    // The template catalog is its own asynchronous request; the start flow is
+    // complete only once the built-in template rows have replaced the loading line.
+    await page.getByRole('button', { name: '从模板新建：硕士学位论文开题报告' }).waitFor({ timeout: 15_000 })
     await compareOrRefreshGolden(EMPTY_EXPECTED, await captureWorkspaceDetail(page, scaffold.workspaceCwd), MODE)
     await page.getByRole('button', { name: '返回工作区列表' }).click()
   }, 60_000)

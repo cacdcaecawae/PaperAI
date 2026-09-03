@@ -1,0 +1,62 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "paths": {
+      "@deepseek-ai/cordis": ["../../../vendor/cordis/src"],
+      "@deepseek-ai/schemastery": ["../../../vendor/schemastery/src"],
+      "@deepseek-ai/dsh-agent": ["../../core/agent/src/index.ts"],
+      "@deepseek-ai/dsh-invariants": ["../../runtime-diagnostics/invariants/src/index.ts"],
+      "@deepseek-ai/dsh-sandbox-policy": ["../../sandbox/sandbox-policy/src/index.ts"],
+      "@deepseek-ai/dsh-session": ["../../core/session/src/index.ts"],
+      "@deepseek-ai/dsh-tools": ["../../core/tools/src/index.ts"],
+      "@paperai/commit-service": ["../commit-service/src/index.ts"],
+      "@paperai/document-service": ["../document-service/src/index.ts"],
+      "@paperai/domain": ["../domain/src/index.ts"],
+      "@paperai/project-service": ["../project-service/src/index.ts"],
+      "@paperai/template-service": ["../template-service/src/index.ts"]
+    }
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../core/tools"
+    },
+    {
+      "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../sandbox/sandbox-policy"
+    },
+    {
+      "path": "../commit-service"
+    },
+    {
+      "path": "../document-service"
+    },
+    {
+      "path": "../domain"
+    },
+    {
+      "path": "../project-service"
+    },
+    {
+      "path": "../template-service"
+    }
+  ]
+}

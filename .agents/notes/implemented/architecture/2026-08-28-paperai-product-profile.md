@@ -20,13 +20,13 @@ The fork keeps upstream packages under `@deepseek-ai/dsh-*`. New product-owned p
 
 The PaperAI profile exposes three peer top-level Agent presets:
 
-- **DSH** uses the existing full `standard` system preset, including the bundled DSH agent harness and `dsh-agent-loop`, with providers configured through the existing Models settings.
+- **DSH** uses the bundled DSH agent harness and `dsh-agent-loop`, with providers configured through the existing Models settings. It originally selected the shared `standard` system preset by id; since the [multi-agent thesis writing baseline](../feature/2026-09-02-multi-agent-thesis-writing-baseline.md) it ships as the product-owned `dsh` preset, which re-lists the `standard` rows and adds the native document tools and writing persona.
 - **Codex** uses the installed local Codex ACP adapter and maps ACP lifecycle, configuration options, permissions, streamed content, plans, tools, cancellation, and errors into DSH sessions.
 - **Claude** uses the installed local Claude ACP adapter through the same top-level ACP Agent implementation.
 
 These are session-time Agent choices, not DSH subagents. Codex and Claude obtain their actual model choices from ACP `session/new.configOptions` and apply changes through `session/set_config_option`; the UI does not invent model identifiers. Existing DSH credentials and model settings remain the place to configure the bundled DSH provider, including API key, Base URL, protocol, and model list.
 
-The PaperAI launcher restricts the shared system preset root to `standard`, then adds the product-owned Codex and Claude root. The roster therefore presents exactly those three system choices on a fresh harness home without copying the DSH composition. Other profiles keep the complete shipped DSH root, and the preset service continues to append its user-authoring root for locally created choices.
+The PaperAI launcher originally restricted the shared system preset root to `standard`, then added the product-owned Codex and Claude root. Since the [multi-agent thesis writing baseline](../feature/2026-09-02-multi-agent-thesis-writing-baseline.md) it offers only the product-owned root — `dsh`, Codex, and Claude, one PaperAI writing agent per engine — because the shared presets carry no document capability. Other profiles keep the complete shipped DSH root, and the preset service continues to append its user-authoring root for locally created choices.
 
 PaperAI MCP tools are the model-facing document capability surface for all Agents. Host commands and MCP handlers call the same domain services, and actor/model provenance is resolved from the active DSH session when each document command runs.
 

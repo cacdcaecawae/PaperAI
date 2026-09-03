@@ -6,7 +6,7 @@
 
 ## Host 服务
 
-插件提供 `ctx.paperMcp`，并在 `ctx.webServer` 注册一个精确匹配的 Streamable HTTP 路由。`issueDescriptor(actor)` 返回兼容 ACP 的 HTTP MCP descriptor 及幂等 disposer。随机 Bearer token 绑定由 lease 管理的 Agent 身份，因此调用方不能通过工具参数伪造或改写修改来源。
+插件提供 `ctx.paperMcp`，并在 `ctx.webServer` 注册一个精确匹配的 Streamable HTTP 路由。`issueDescriptor(actor, scope)` 返回兼容 ACP 的 HTTP MCP descriptor 及幂等 disposer。随机 Bearer token 绑定由 lease 管理的 Agent 身份，因此调用方不能通过工具参数伪造或改写修改来源。lease 的访问范围记录所属会话的工作区根目录，并按请求读取其沙箱模式：每个工具都解析拥有该根目录的 PaperAI 项目，其他项目的记录一律以 `PROJECT_OUT_OF_SCOPE` 拒绝（没有项目拥有该工作区时为 `NO_PROJECT_FOR_SESSION`），修改类工具在 `read-only` 下以 `READ_ONLY_SESSION` 拒绝——与原生 DSH 文档工具施加的是 `@paperai/domain` 里同一套共享检查，因此在 DSH 会话上执行 `/permission` 切换后，下一次 MCP 调用即受其约束，无需重新签发 descriptor。导出工具还会像文件系统工具约束写入那样约束目标路径：`workspace-write` 下解析后的路径必须位于会话工作区内（相对路径按工作区解析），否则以 `WRITE_OUTSIDE_WORKSPACE` 失败；工作区还会作为 `writableRoot` 传给导出提供方，由它在发布时按真实路径复查父目录，工作区内的目录链接也无法把文件带出去（`DESTINATION_OUTSIDE_WORKSPACE`）；只有 `danger-full-access` 才能发布到别处。
 
 ACP 会话所有者让 descriptor lease 与 Agent 生命周期一致：
 
@@ -60,7 +60,7 @@ try {
 | `paperai_commit_document` | 修改 | `paperCommits.submit()` |
 | `paperai_revert_document` | 修改 | `paperCommits.revert()` |
 
-提交 schema 只暴露当前提交服务已经实现的修改：替换文字、插入段落、删除节点、绑定模板和记录里程碑。提交 `bind-template` 前，handler 要求 contract 存在、已经确认，并且 `appliesToRoles` 包含目标文档角色；draft 或角色不兼容的 contract 不会进入 `paperCommits.submit()`。修改成功后同时返回完整 `DocumentCommit` 及其中记录的 `provenance`。乐观 head 冲突和节点文字冲突会在 MCP 错误结果中保留领域错误码。
+提交 schema 只暴露当前提交服务已经实现的修改：替换文字、插入段落、删除节点、绑定模板和记录里程碑。提交 `bind-template` 前，handler 要求 contract 存在、已经确认，并且 `appliesToRoles` 包含目标文档角色；draft 或角色不兼容的 contract 不会进入 `paperCommits.submit()`。修改成功后返回完整 `DocumentCommit`、其中记录的 `provenance`，以及对存储的 continuous 门禁报告的 `gateSummary` 摘要：按严重度计数、最严重的发现排在前面，并给出一条可执行的下一步；未关联模板时给出明确的自由模式提示。乐观 head 冲突和节点文字冲突会在 MCP 错误结果中保留领域错误码。
 
 `registerExportAdapter(adapter)` 会按条件增加 `paperai_export_document`。适配器接收已检查的文档、目标路径、模式和 descriptor 绑定的 actor，并且必须返回属于同一文档和 actor 的 commit；否则 MCP 调用返回 `INVALID_EXPORT_PROVENANCE`。正式交付检查失败时不会调用适配器。调用方通过 Cordis effect 注册适配器并持有 disposer。
 

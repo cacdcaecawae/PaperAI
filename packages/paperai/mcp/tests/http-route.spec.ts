@@ -34,7 +34,7 @@ vi.mock('../src/server.ts', async (importOriginal) => {
 
 import PaperMcpService from '../src/index.ts'
 import type { PaperMcpAgentIdentity, PaperMcpDependencies } from '../src/types.ts'
-import { actor, document, fakeDomain } from './helpers.ts'
+import { actor, document, fakeDomain, workspaceScope } from './helpers.ts'
 
 let context: Context | undefined
 
@@ -65,7 +65,7 @@ async function mountRoute() {
   ctx.provide('paperTemplates', domain.dependencies.templates as never)
   ctx.provide('paperCommits', domain.dependencies.commits as never)
   await ctx.plugin(PaperMcpService)
-  const lease = ctx.paperMcp.issueDescriptor(actor)
+  const lease = ctx.paperMcp.issueDescriptor(actor, workspaceScope())
   const registered = route
   if (registered === undefined) throw new Error('expected PaperAI MCP route')
   return { ctx, domain, lease, route: registered }
@@ -123,6 +123,7 @@ describe('PaperAI MCP authenticated HTTP route', () => {
     const mutationServer = actual.createPaperMcpServer(
       harness.domain.dependencies,
       selectedActor,
+      workspaceScope(),
       {
         defaultNodesPerRead: 2,
         maxNodesPerRead: 3,
@@ -178,6 +179,7 @@ describe('PaperAI MCP authenticated HTTP route', () => {
         documents: harness.domain.dependencies.documents,
       }),
       actor,
+      expect.objectContaining({ workspaceRoot: 'C:\\papers\\thesis' }),
       expect.objectContaining({
         defaultNodesPerRead: 80,
         maxNodesPerRead: 200,

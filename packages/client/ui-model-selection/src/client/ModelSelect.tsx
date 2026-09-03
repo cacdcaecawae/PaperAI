@@ -201,8 +201,29 @@ export function ModelSelect(
     void select(selection).then(settleSelection)
   }
 
+  // A driver switch (an Agent driver's fast mode) rides the same complete
+  // selection: the current model and effort travel with the one flipped value,
+  // so the Host never has to guess which parts of the selection changed.
+  const toggleSwitch = (id: string, enabled: boolean): void => {
+    if (state.current === null || busy) return
+    const selection: ModelSelection = {
+      provider: state.current.provider,
+      model: state.current.model,
+      ...state.current.reasoningEffort === undefined ? {} : { reasoningEffort: state.current.reasoningEffort },
+      switches: { [id]: enabled },
+    }
+    lastActionRef.current = 'select'
+    void select(selection).then((accepted) => { if (!accepted) settleSelection(false) })
+  }
+
+  const enabledSwitches = state.switches.filter(entry => entry.enabled).map(entry => entry.name)
   const modelLabel = currentChoice?.model.name ?? t('trigger.fallback')
-  const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
+  const captionParts = [
+    ...effortLabel === undefined ? [] : [effortLabel],
+    ...enabledSwitches,
+  ]
+  const captionLabel = captionParts.length === 0 ? undefined : captionParts.join(' · ')
+  const triggerLabel = captionLabel === undefined ? modelLabel : `${modelLabel} · ${captionLabel}`
   const triggerAria = currentChoice === undefined
     ? t('trigger.selectAria')
     : effortLabel === undefined
@@ -236,7 +257,7 @@ export function ModelSelect(
         }}
       >
         <span className={css.triggerLabel}>{modelLabel}</span>
-        {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
+        {captionLabel !== undefined && <span className={css.triggerEffort}>{captionLabel}</span>}
         <IconChevronDownOutline14 className={clsx(css.chevron, open && css.chevronOpen)} />
       </button>
 
@@ -262,6 +283,29 @@ export function ModelSelect(
                   <IconChevronRightOutline14 className={css.cellChevron} />
                 </button>
               )}
+              {state.current !== null && state.switches.map((entry) => {
+                // The row stays enabled while the flip applies: the menu keeps
+                // it open, and a disabled control silently drops keyboard focus
+                // (no blur), which would strand Escape. Clicks are ignored
+                // while busy instead.
+                return (
+                  <button
+                    ref={itemRef()}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={entry.enabled}
+                    aria-disabled={busy}
+                    className={css.cell}
+                    key={entry.id}
+                    title={entry.description}
+                    onClick={() => { toggleSwitch(entry.id, !entry.enabled) }}
+                  >
+                    <span className={css.cellLabel}>{entry.name}</span>
+                    <span className={css.cellValue}>{entry.enabled ? t('switch.on') : t('switch.off')}</span>
+                    <span className={css.cellChevron}>{entry.enabled ? <IconCheckOutline16 /> : null}</span>
+                  </button>
+                )
+              })}
             </>
           )}
 

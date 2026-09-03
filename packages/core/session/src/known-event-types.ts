@@ -36,6 +36,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'hook/result',
   'llm/retry',
   'llm/retry-started',
+  'paperai/acp/config',
   'paperai/acp/session',
   'permission/preset',
   'plan/mode',

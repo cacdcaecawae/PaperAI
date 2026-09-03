@@ -21,7 +21,6 @@ const PAPERAI_OVERLAY = fileURLToPath(new URL(
   '../../../packages/bundle/paperai-web/cordis.patch.yml',
   import.meta.url,
 ))
-const SHIPPED_PRESETS = fileURLToPath(new URL('../../cli/config/agent-presets', import.meta.url))
 const PAPERAI_PRESETS = fileURLToPath(new URL(
   '../../../packages/bundle/paperai-web/config/agent-presets',
   import.meta.url,
@@ -36,6 +35,7 @@ const DEFAULT_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-default.expec
 const READ_ONLY_PERMISSION_EXPECTED = join(SNAPSHOT_DIR, 'permission-read-only.expected.md')
 const PERMISSION_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'permission-failure.expected.md')
 const MODEL_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'model-failure.expected.md')
+const MODEL_MENU_EXPECTED = join(SNAPSHOT_DIR, 'model-menu.expected.md')
 const CANCEL_BEFORE_PROMPT_EXPECTED = join(SNAPSHOT_DIR, 'cancel-before-prompt.expected.md')
 const CANCEL_FINAL_TOOL_EXPECTED = join(SNAPSHOT_DIR, 'cancel-final-tool.expected.md')
 const CONFLICT_EXPECTED = join(SNAPSHOT_DIR, 'external-conflict.expected.md')
@@ -109,7 +109,6 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       agentPresets: {
         default: 'codex',
         roots: [
-          { path: SHIPPED_PRESETS, trust: 'system', ids: ['standard'] },
           { path: PAPERAI_PRESETS, trust: 'system' },
         ],
       },
@@ -349,6 +348,43 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(CANCEL_BEFORE_PROMPT_EXPECTED, snapshot, MODE)
   }, 60_000)
 
+  it('selects the provider reasoning effort and fast mode from the model menu', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-model-effort'))
+    const model = page.locator('button[aria-label^="选择模型"]').first()
+    await model.waitFor({ timeout: 10_000 })
+    expect(await model.getAttribute('aria-label')).toBe('选择模型，当前 Fake Alpha，推理等级 Medium')
+    const logBefore = (await readAcpLog(acpLogPath)).length
+
+    await model.click()
+    const menu = page.getByRole('menu', { name: '模型与推理等级' })
+    await menu.waitFor({ timeout: 10_000 })
+    await compareOrRefreshGolden(MODEL_MENU_EXPECTED, await menu.ariaSnapshot(), MODE)
+    await page.getByRole('menuitem', { name: /^推理等级/ }).click()
+    await page.getByRole('menuitemradio', { name: /High/ }).click()
+    await expect.poll(() => model.getAttribute('aria-label'), { timeout: 10_000 })
+      .toBe('选择模型，当前 Fake Alpha，推理等级 High')
+
+    await model.click()
+    const fast = page.getByRole('menuitemcheckbox', { name: /Fast mode/ })
+    await fast.waitFor({ timeout: 10_000 })
+    expect(await fast.getAttribute('aria-checked')).toBe('false')
+    await fast.click()
+    await expect.poll(() => fast.getAttribute('aria-checked'), { timeout: 10_000 }).toBe('true')
+    await expect.poll(() => model.textContent(), { timeout: 10_000 }).toContain('Fast mode')
+    // The menu stays open after a flip so the row reads back in place; the
+    // trigger toggles it closed (a mouse click keeps keyboard focus in the
+    // composer, so Escape is the keyboard path, covered by the unit tests).
+    await model.click()
+    await expect.poll(() => page.getByRole('menu').count(), { timeout: 10_000 }).toBe(0)
+
+    const applied = (await readAcpLog(acpLogPath)).slice(logBefore)
+      .filter(entry => entry.event === 'set-config-option')
+    expect(applied).toEqual([
+      expect.objectContaining({ configId: 'effort', value: 'high' }),
+      expect.objectContaining({ configId: 'fast', value: true }),
+    ])
+  }, 60_000)
+
   it('localizes a rejected provider model switch without exposing its diagnostic', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-model-failure'))
     const model = page.locator('button[aria-label^="选择模型"]').first()
@@ -465,6 +501,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'cancel-final-tool.expected.md',
       'external-conflict.expected.md',
       'model-failure.expected.md',
+      'model-menu.expected.md',
       'permission-default.expected.md',
       'permission-failure.expected.md',
       'permission-read-only.expected.md',

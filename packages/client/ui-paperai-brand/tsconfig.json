@@ -24,6 +24,9 @@
       "path": "../ui-sidebar"
     },
     {
+      "path": "../ui-theme"
+    },
+    {
       "path": "../ui-slots"
     }
   ]

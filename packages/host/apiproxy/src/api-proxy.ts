@@ -10,7 +10,9 @@ import { dirname } from 'node:path'
 import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
+import type {
+  Agent, AgentModelController, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus,
+} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -38,7 +40,7 @@ import type { PresetBearingSession } from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {
   ApiProxy, ConfigurableProviderView, CredentialView, GoalRef, HistoryEntry, HostFrame,
-  ModelCatalogFailure, ModelProviderGroup,
+  ModelCatalogFailure, ModelProviderGroup, ModelSelection as SessionModelSelection, ModelSwitch,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
   WorkspaceId, WorkspaceView,
@@ -1116,7 +1118,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if (picked !== undefined) return picked
         const controlled = agent.modelController
         if (controlled !== undefined) {
-          return { provider: controlled.provider.id, model: controlled.currentModel }
+          const effort = controlled.currentReasoningEffort
+          return {
+            provider: controlled.provider.id,
+            model: controlled.currentModel,
+            ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
+          }
         }
         // Incrementally folded by the session, so a per-step read costs
         // O(new events) rather than a rescan.
@@ -1815,6 +1822,35 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
    * cannot judge the adapter route and says yes — the dispatch it would have
    * refused fails on its own terms.
    */
+  /** The driver-owned switches as displayed rows, or undefined when the driver has none. */
+  function driverSwitches(controlled: AgentModelController): ModelSwitch[] | undefined {
+    const switches = controlled.switches
+    if (switches === undefined || switches.length === 0) return undefined
+    return switches.map(entry => ({
+      id: entry.id,
+      name: entry.name,
+      ...entry.description === undefined ? {} : { description: entry.description },
+      enabled: entry.enabled,
+    }))
+  }
+
+  /** The complete selection a driver reports: its current model, effort, and switch values. */
+  function driverSelection(
+    controlled: AgentModelController,
+    model = controlled.currentModel,
+  ): SessionModelSelection {
+    const effort = controlled.currentReasoningEffort
+    const switches = driverSwitches(controlled)
+    return {
+      provider: controlled.provider.id,
+      model,
+      ...effort === undefined ? {} : { reasoningEffort: effort },
+      ...switches === undefined
+        ? {}
+        : { switches: Object.fromEntries(switches.map(entry => [entry.id, entry.enabled])) },
+    }
+  }
+
   function routeServed(agent: Agent, provider: string): boolean {
     if (agent.modelController?.provider.id === provider) return true
     const llm = ctx.get('llm')
@@ -2231,12 +2267,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if (controlled !== undefined) {
           try {
             const models = await controlled.listModels()
-            const current: ModelSelection = {
-              provider: controlled.provider.id,
-              model: controlled.currentModel,
-            }
+            const switches = driverSwitches(controlled)
             return ok(request, {
-              current,
+              current: driverSelection(controlled),
               routable: true,
               groups: [{
                 id: controlled.provider.id,
@@ -2245,16 +2278,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                   id: model.id,
                   name: model.name,
                   ...model.description === undefined ? {} : { description: model.description },
+                  ...model.reasoning === undefined
+                    ? {}
+                    : {
+                      reasoning: {
+                        efforts: model.reasoning.efforts.map(effort => ({
+                          id: effort.id,
+                          name: effort.name,
+                          ...effort.description === undefined ? {} : { description: effort.description },
+                        })),
+                        ...model.reasoning.defaultEffort === undefined
+                          ? {}
+                          : { defaultEffort: model.reasoning.defaultEffort },
+                      },
+                    },
                 })),
               }],
               failures: [],
+              ...switches === undefined ? {} : { switches },
             })
           } catch (error: unknown) {
             return ok(request, {
-              current: {
-                provider: controlled.provider.id,
-                model: controlled.currentModel,
-              },
+              current: driverSelection(controlled),
               routable: false,
               groups: [],
               failures: [{
@@ -2272,7 +2317,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async selectModel(request) {
-        const { sessionId, provider, model, reasoningEffort } = request.payload
+        const { sessionId, provider, model, reasoningEffort, switches } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         return serializeImageAdmission(found.agent, async () => {
@@ -2282,12 +2327,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               if (provider !== controlled.provider.id) {
                 throw new Error(`Agent driver "${controlled.provider.name}" does not serve provider "${provider}"`)
               }
-              if (reasoningEffort !== undefined) {
-                throw new Error(`Agent driver "${controlled.provider.name}" does not expose reasoning-effort selection`)
-              }
-              const accepted = await controlled.selectModel(model)
-              const selected: ModelSelection = { provider: controlled.provider.id, model: accepted }
-              return ok(request, { selected })
+              // The driver owns effort and switch validation: it rejects an
+              // option it does not advertise instead of the Host guessing.
+              const accepted = await controlled.selectModel(model, {
+                ...reasoningEffort === undefined ? {} : { reasoningEffort },
+                ...switches === undefined ? {} : { switches },
+              })
+              return ok(request, { selected: driverSelection(controlled, accepted) })
             }
             const resolved = await ctx.llm.resolveCallConfig({
               provider,

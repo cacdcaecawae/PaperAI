@@ -17,6 +17,12 @@ export interface ExportDocumentRequest {
   readonly document: DocumentRecord
   /** Absolute `.docx` path selected by the caller. */
   readonly destinationPath: string
+  /**
+   * Directory the published file must resolve inside, checked on real paths
+   * at publish time so a link under it cannot carry the file elsewhere;
+   * absent leaves the destination unconfined.
+   */
+  readonly writableRoot?: string
   /** Draft exports retain findings; delivery exports reject blocking errors. */
   readonly mode: PaperExportMode
   /** Human or Agent provenance retained by the export milestone commit. */
@@ -44,6 +50,7 @@ export type PaperExportErrorCode =
   | 'DELIVERY_BLOCKED'
   | 'DESTINATION_EXISTS'
   | 'DESTINATION_INVALID'
+  | 'DESTINATION_OUTSIDE_WORKSPACE'
   | 'DESTINATION_PROTECTED'
   | 'EXPORT_TOO_LARGE'
   | 'SNAPSHOT_CORRUPT'

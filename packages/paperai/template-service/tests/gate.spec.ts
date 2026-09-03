@@ -34,10 +34,23 @@ const document: DocumentRecord = {
 }
 
 describe('checkTemplateContract', () => {
-  it('reports a missing template without opening Word', async () => {
+  it('passes a templateless document in free mode without opening Word', async () => {
     const engine = { readTextNodes: vi.fn() }
     const report = await checkTemplateContract(engine as never, document, undefined, 'delivery-export')
-    expect(report).toMatchObject({ status: 'fail', findings: [{ code: 'template_missing' }] })
+    expect(report).toMatchObject({ status: 'pass', findings: [] })
+    expect(report.templateId).toBeUndefined()
+    expect(engine.readTextNodes).not.toHaveBeenCalled()
+  })
+
+  it('fails a document whose attached template record is missing without opening Word', async () => {
+    const engine = { readTextNodes: vi.fn() }
+    const dangling = { ...document, templateId: TemplateContractId('contract-missing') }
+    const report = await checkTemplateContract(engine as never, dangling, undefined, 'delivery-export')
+    expect(report).toMatchObject({
+      status: 'fail',
+      findings: [{ code: 'template_missing', expected: 'contract-missing' }],
+    })
+    expect(report.templateId).toBeUndefined()
     expect(engine.readTextNodes).not.toHaveBeenCalled()
   })
 

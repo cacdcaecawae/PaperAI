@@ -270,6 +270,20 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 @Remote('importDocument') async importDocument( request: PaperAIImportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>
 
 /**
+ * Start one Working document from a built-in template pack member and bind
+ * that member's contract in the root commit. A form template is imported as
+ * the document itself; a formatting reference governs the uploaded
+ * manuscript instead. Built-in members ship reviewed requirements, so the
+ * contract is confirmed here without a separate review step.
+ * @param request - Workspace, Session, pack member, optional manuscript upload, role, and display name.
+ * @param signal - optional cancellation signal for installation, import, commit, and preview work.
+ * @returns the opened document and root commit, or an explicit native-engine downgrade.
+ * @throws when the member is unknown, a formatting reference has no upload, the role does not apply,
+ * or import or commit work fails; an AggregateError includes any rollback failure.
+ */
+@Remote('createFromTemplate') async createFromTemplate( request: PaperAICreateFromTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>
+
+/**
  * List registered institutional packs and this project's compiled contracts.
  * @param request - Workspace whose template catalog should be projected.
  * @returns built-in pack choices and the project's installed contracts.
@@ -529,12 +543,14 @@ Authenticated PaperAI MCP route and descriptor registry.
 
 ```ts cordis-catalog
 /**
- * Issue one revocable HTTP descriptor bound to one Agent client and session.
- * The caller must retain and dispose the lease with the ACP Agent session.
+ * Issue one revocable HTTP descriptor bound to one Agent client, session,
+ * and access scope. The caller must retain and dispose the lease with the
+ * ACP Agent session.
  * @param actor - Local Codex or Claude identity recorded on every commit.
+ * @param scope - Session workspace root and live sandbox mode that bound every tool call.
  * @returns the ACP-compatible descriptor and its idempotent disposer.
  */
-issueDescriptor(actor: PaperMcpAgentIdentity): PaperMcpDescriptorLease
+issueDescriptor(actor: PaperMcpAgentIdentity, scope: PaperMcpAccessScope): PaperMcpDescriptorLease
 
 /**
  * Register the sole provider for file-producing export tools. The caller
@@ -558,7 +574,9 @@ Idempotent PaperAI project lifecycle with no separate open-project action.
  * Create or adopt one directory, initialize missing project artifacts, and
  * publish exactly one ProjectRecord associated with its DSH workspace.
  * Repeating the operation for the same canonical path preserves the first
- * record identity, name, creation time, and all existing files.
+ * record identity, name, creation time, and all existing files. The writing
+ * charter is synchronized before the record is published, and a failed
+ * publication restores the charter files it created or rewrote.
  * @param input - Selected directory and optional first-use display name.
  * @returns the durable record, context-file outcome, and Git readiness.
  */
@@ -583,6 +601,16 @@ list(): ProjectRecord[]
  * @returns the unique record for its canonical path, or `undefined`.
  */
 async findByPath(rootPath: string): Promise<ProjectRecord | undefined>
+
+/**
+ * Resolve the project whose root owns a path: the session workspace root
+ * itself or any directory inside it. Agent routes use this to scope document
+ * tools to the calling session's project. A path that no project root
+ * contains resolves to `undefined`; a missing path is compared lexically.
+ * @param path - workspace root or a path inside one.
+ * @returns the deepest owning project, or `undefined`.
+ */
+async resolveForPath(path: string): Promise<ProjectRecord | undefined>
 ```
 
 Source: [`packages/paperai/project-service/src/index.ts`](../../packages/paperai/project-service/src/index.ts)

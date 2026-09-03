@@ -6,10 +6,12 @@
 
 ## 项目结构
 
-服务只创建缺失目录，绝不改写已有文件。
+服务只创建缺失目录，绝不改写已有文件，唯一例外是下文描述的 `AGENTS.md` 中 PaperAI 拥有的区块。
 
 ```text
 PAPERAI.md
+AGENTS.md
+CLAUDE.md
 documents/
   source/
   working/
@@ -27,6 +29,10 @@ exports/
 ```
 
 `documents/source/` 保存不可变的导入原件，`documents/working/` 保存权威 Working DOCX，`documents/history/` 保存可恢复快照。`PAPERAI.md` 为后续 Agent 提供精简的当前目标、进展、工作约定和下一步。服务以独占创建方式生成该文件；文件已存在时绝不覆盖，同名路径若不是普通文件则初始化失败且不会替换该路径。
+
+## 写作规程
+
+`AGENTS.md` 承载 Agent 写作规程：文档工作流、红线约定，以及按仓库状态渲染的逐文档模板摘要。文件中只有 `<!-- paperai:charter:start` 与 `<!-- paperai:charter:end -->` 之间的区块归 PaperAI 所有：初始化时写入，之后每次持久化的 `paperai` documents 变更（导入、模板关联、删除）都会经同一串行队列重新渲染，且仅在内容变化时改写文件；标记之外的文字逐字节保留，标记残缺时同步会明确失败而不是猜测。`CLAUDE.md` 创建时内容为 `@AGENTS.md`，让 Claude Code 导入同一份规程；已存在的 `CLAUDE.md` 内容逐字节保留，若其中既没有 `@AGENTS.md` 也没有 `@./AGENTS.md` 的导入行，则在末尾追加一行 `@AGENTS.md`，因此带有自己 Claude 指令的既有项目也会把 Claude 引向规程。两个文件都可再生，写入被中断也会在下一次同步时修复。
 
 ## 服务 API
 

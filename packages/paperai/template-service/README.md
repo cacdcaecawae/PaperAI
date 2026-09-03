@@ -19,7 +19,7 @@ Pack plugins call `registerPack()` through a Cordis effect. `listPacks()` return
 
 `validateAssociation()` rejects draft, cross-project, and incompatible `DocumentRole` bindings. The actual `bind-template` publication belongs to `paperCommits`, so every association receives a recoverable version and actor provenance. A `format-reference` binding never copies the reference body.
 
-`check()` reads the current Working DOCX and evaluates confirmation, role, required fields, fixed text, sections, supported style/page rules, minimum characters, references, placeholders, tables, and Office validation. Draft export may retain a failing report; errors in `delivery-export` block formal delivery through `deliveryBlocked()`.
+`check()` reads the current Working DOCX and evaluates confirmation, role, required fields, fixed text, sections, supported style/page rules, minimum characters, references, placeholders, tables, and Office validation. Draft export may retain a failing report; errors in `delivery-export` block formal delivery through `deliveryBlocked()`. A document with no attached template checks in templateless free mode: the report passes with no findings, so draft and formal delivery exports proceed without template checks.
 
 The service publishes an evidence-only template source and compiled nodes before writing the contract record last. Template sources are excluded from normal Working-document lists. A failed compilation is therefore absent from template listings, and a deterministic retry can complete unpublished records.
 

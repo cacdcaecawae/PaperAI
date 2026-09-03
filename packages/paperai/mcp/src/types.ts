@@ -7,6 +7,7 @@ import type {
   DocumentCommit,
   DocumentRecord,
   GateReport,
+  PaperSandboxMode,
 } from '@paperai/domain'
 import type { PaperProjectService } from '@paperai/project-service'
 import type { PaperTemplateService } from '@paperai/template-service'
@@ -16,6 +17,20 @@ export interface PaperMcpAgentIdentity extends ActorIdentity {
   readonly kind: 'agent'
   readonly client: 'codex' | 'claude'
   readonly sessionId: string
+}
+
+/**
+ * What one descriptor lease may reach: the session workspace whose owning
+ * project bounds every tool call, and the live sandbox mode that decides
+ * whether mutations are admitted. Both come from the DSH session that owns
+ * the local Agent; the mode is read per call so a `/permission` switch
+ * applies to the next MCP request without reissuing the descriptor.
+ */
+export interface PaperMcpAccessScope {
+  /** Absolute session workspace root; the project that owns it is the only one in scope. */
+  readonly workspaceRoot: string
+  /** Current effective sandbox mode of the owning session. */
+  readonly sandboxMode: () => PaperSandboxMode
 }
 
 /** ACP-compatible Streamable HTTP descriptor passed to one local Agent. */
@@ -52,7 +67,7 @@ export interface PaperMcpToolLimits {
 
 /** Narrow domain consumers required by the MCP tool implementation. */
 export interface PaperMcpDependencies {
-  readonly projects: Pick<PaperProjectService, 'get' | 'list'>
+  readonly projects: Pick<PaperProjectService, 'get' | 'list' | 'resolveForPath'>
   readonly documents: Pick<PaperDocumentService, 'listDocuments' | 'readDocument'>
   readonly templates: Pick<PaperTemplateService, 'check' | 'getContract' | 'listContracts' | 'listPacks'>
   readonly commits: Pick<PaperCommitService, 'listHistory' | 'revert' | 'submit'>
@@ -62,6 +77,11 @@ export interface PaperMcpDependencies {
 export interface PaperMcpExportRequest {
   readonly document: DocumentRecord
   readonly destinationPath: string
+  /**
+   * Directory the published file must resolve inside, verified on real
+   * paths at publish time; absent only for a session with full access.
+   */
+  readonly writableRoot?: string
   readonly mode: 'draft-export' | 'delivery-export'
   readonly gate: GateReport
   readonly actor: PaperMcpAgentIdentity

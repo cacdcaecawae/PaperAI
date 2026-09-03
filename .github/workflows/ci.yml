@@ -551,6 +551,7 @@ jobs:
       - name: Replay PaperAI and affected assembled browser snapshots
         run: >-
           pnpm exec vitest run --config vitest.web.config.ts
+          apps/web/tests/paperai-dsh-preset.e2e.ts
           apps/web/tests/paperai-permissions.e2e.ts
           apps/web/tests/paperai-workspace-navigation.e2e.ts
           apps/web/tests/built-boot.snapshot.ts

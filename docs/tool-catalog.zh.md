@@ -45,6 +45,7 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
+| `@paperai/tool-document` | `paperai_check_gate`、`paperai_commit_document`、`paperai_get_template`、`paperai_list_documents`、`paperai_list_projects`、`paperai_list_templates`、`paperai_list_versions`、`paperai_prepare_export`、`paperai_read_document`、`paperai_revert_document` | `ctx.tools`、`ctx.sandboxPolicy`、`ctx.paperProjects`、`ctx.paperDocuments`、`ctx.paperTemplates`、`ctx.paperCommits`、`a calling Agent (its session workspace bounds every call and commit provenance names the session)` | `tool/call`、`tool/result`、`PaperAI document commits through ctx.paperCommits` | - | 这十个工具沿用 PaperAI MCP 的名称与结果字段，使内置 DSH agent 与经 MCP 接入的 Codex、Claude 共用同一套文档词汇；每次调用都被限制在拥有调用会话工作区的项目内，read-only 沙箱模式下拒绝修改，提交会把会话及其当前请求路由记录为溯源。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -2227,3 +2228,402 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 来源：[`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/index.ts)
 
 web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。
+
+<a id="paperaitool-document"></a>
+
+## `@paperai/tool-document`
+
+### `paperai_check_gate`
+
+运行 continuous、draft-export 或正式交付检查，不修改文档。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Gate mode.",
+      "enum": [
+        "continuous",
+        "draft-export",
+        "delivery-export"
+      ]
+    }
+  },
+  "required": [
+    "documentId",
+    "mode"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_commit_document`
+
+通过 PaperAI 应用受支持的 Working DOCX 修改，创建一条带 Agent 溯源的可恢复提交。结果携带来自 continuous 模板门禁的 gateSummary：先修复 error 级发现，再继续写作。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "baseCommitId": {
+      "type": "string",
+      "description": "Document head observed before editing."
+    },
+    "message": {
+      "type": "string",
+      "description": "User-visible version message."
+    },
+    "mutations": {
+      "type": "array",
+      "description": "Ordered semantic document mutations.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "replace-text"
+              },
+              "nodeId": {
+                "type": "string",
+                "description": "Stable PaperAI semantic node id."
+              },
+              "baseText": {
+                "type": "string",
+                "description": "Exact text observed before editing."
+              },
+              "nextText": {
+                "type": "string",
+                "description": "Replacement text."
+              }
+            },
+            "required": [
+              "type",
+              "nodeId",
+              "baseText",
+              "nextText"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "insert-node"
+              },
+              "text": {
+                "type": "string",
+                "description": "Paragraph text to insert."
+              },
+              "afterNodeId": {
+                "type": "string",
+                "description": "Insert after this node."
+              },
+              "beforeNodeId": {
+                "type": "string",
+                "description": "Insert before this node."
+              },
+              "style": {
+                "type": "string",
+                "description": "Existing Word paragraph style name."
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "delete-node"
+              },
+              "nodeId": {
+                "type": "string",
+                "description": "Stable PaperAI semantic node id."
+              },
+              "baseText": {
+                "type": "string",
+                "description": "Exact observed text for conflict detection."
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "bind-template"
+              },
+              "templateId": {
+                "type": "string",
+                "description": "Confirmed compatible template contract id."
+              }
+            },
+            "required": [
+              "type",
+              "templateId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "milestone"
+              },
+              "label": {
+                "type": "string",
+                "description": "Version milestone label."
+              }
+            },
+            "required": [
+              "type",
+              "label"
+            ]
+          }
+        ],
+        "description": "One semantic document mutation."
+      }
+    }
+  },
+  "required": [
+    "documentId",
+    "message",
+    "mutations"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_get_template`
+
+读取一个模板的已确认或草稿规则、槽位、证据与溯源。撰写受其约束的内容前先读取所关联契约。只读。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "templateId": {
+      "type": "string",
+      "description": "PaperAI template contract id."
+    }
+  },
+  "required": [
+    "templateId"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_documents`
+
+列出本会话 PaperAI 项目中的 Working DOCX 记录。只读。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "PaperAI project id."
+    },
+    "role": {
+      "type": "string",
+      "description": "Optional academic document role.",
+      "enum": [
+        "manuscript",
+        "proposal",
+        "midterm",
+        "final",
+        "other"
+      ]
+    }
+  },
+  "required": [
+    "projectId"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_projects`
+
+列出拥有本会话工作区的 PaperAI 项目。只读。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_templates`
+
+列出内置模板包与为本会话项目编译的契约。只读。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "PaperAI project id."
+    }
+  },
+  "required": [
+    "projectId"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_list_versions`
+
+从当前文档 head 向根方向列出可恢复提交。只读。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    }
+  },
+  "required": [
+    "documentId"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_prepare_export`
+
+检查一次导出并返回其权威 Working DOCX 来源。该只读工具不发布文件。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Draft or formal delivery export.",
+      "enum": [
+        "draft-export",
+        "delivery-export"
+      ]
+    }
+  },
+  "required": [
+    "documentId",
+    "mode"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_read_document`
+
+读取元数据与一页有界的语义 Word 节点。只读。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Zero-based node offset; defaults to 0."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum nodes to return, capped by the deployment limit."
+    },
+    "includeStyle": {
+      "type": "boolean",
+      "description": "Include structured Word style properties."
+    }
+  },
+  "required": [
+    "documentId"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+### `paperai_revert_document`
+
+把可达的历史快照恢复为新的可恢复子提交，并带 Agent 溯源。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "documentId": {
+      "type": "string",
+      "description": "PaperAI document id."
+    },
+    "baseCommitId": {
+      "type": "string",
+      "description": "Current document head."
+    },
+    "targetCommitId": {
+      "type": "string",
+      "description": "Reachable historical commit to restore."
+    },
+    "message": {
+      "type": "string",
+      "description": "Optional version message."
+    }
+  },
+  "required": [
+    "documentId",
+    "baseCommitId",
+    "targetCommitId"
+  ]
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts`](../packages/paperai/tool-document/src/index.ts)
+
+这十个工具沿用 PaperAI MCP 的名称与结果字段，使内置 DSH agent 与经 MCP 接入的 Codex、Claude 共用同一套文档词汇；提交会把调用方 DSH 会话记录为溯源。

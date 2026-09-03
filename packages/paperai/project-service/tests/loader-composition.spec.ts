@@ -42,6 +42,8 @@ describe('project-service real Loader composition', () => {
               domain: 'paperai', table: 'projects', key: record.id, operation: 'put', value: record,
             })
           },
+          listDocuments: () => [],
+          getTemplate: () => undefined,
         } as never)
       },
     }

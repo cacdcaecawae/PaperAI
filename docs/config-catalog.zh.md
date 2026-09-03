@@ -1764,7 +1764,7 @@ export interface JsonRpcConfig {
 
 依赖：`Readable`（`node:stream`）· `Writable`（`node:stream`）
 
-来源：[`packages/sdk/server/src/index.ts:29`](../packages/sdk/server/src/index.ts)
+来源：[`packages/sdk/server/src/index.ts:25`](../packages/sdk/server/src/index.ts)
 
 <a id="deepseek-aidsh-session-persistence-jsonl"></a>
 
@@ -3358,7 +3358,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/export-service/src/index.ts:65`](../packages/paperai/export-service/src/index.ts)
+来源：[`packages/paperai/export-service/src/index.ts:67`](../packages/paperai/export-service/src/index.ts)
 
 <a id="paperaimcp"></a>
 
@@ -3382,7 +3382,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/mcp/src/index.ts:48`](../packages/paperai/mcp/src/index.ts)
+来源：[`packages/paperai/mcp/src/index.ts:50`](../packages/paperai/mcp/src/index.ts)
 
 <a id="paperaiproject-service"></a>
 
@@ -3406,7 +3406,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/project-service/src/index.ts:40`](../packages/paperai/project-service/src/index.ts)
+来源：[`packages/paperai/project-service/src/index.ts:67`](../packages/paperai/project-service/src/index.ts)
 
 <a id="paperaitemplate-service"></a>
 
@@ -3434,6 +3434,26 @@ export interface Config {
 
 来源：[`packages/paperai/template-service/src/index.ts:80`](../packages/paperai/template-service/src/index.ts)
 
+<a id="paperaitool-document"></a>
+
+## `@paperai/tool-document`
+
+需要：`tools` · `sandboxPolicy` · `paperProjects` · `paperDocuments` · `paperTemplates` · `paperCommits`
+
+```ts config-catalog
+/** Result and mutation bounds advertised in the tool schemas. */
+export interface Config {
+  /** Node-page size when a read names no `maxNodes`. */
+  defaultNodesPerRead?: number
+  /** Upper bound for one read's node page. */
+  maxNodesPerRead?: number
+  /** Maximum ordered mutations in one document commit. */
+  maxMutationsPerCommit?: number
+}
+```
+
+来源：[`packages/paperai/tool-document/src/index.ts:47`](../packages/paperai/tool-document/src/index.ts)
+
 <a id="paperaiworkbench-service"></a>
 
 ## `@paperai/workbench-service`
@@ -3448,7 +3468,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/workbench-service/src/index.ts:324`](../packages/paperai/workbench-service/src/index.ts)
+来源：[`packages/paperai/workbench-service/src/index.ts:326`](../packages/paperai/workbench-service/src/index.ts)
 
 ## 无配置的可加载插件
 

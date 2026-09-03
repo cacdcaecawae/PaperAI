@@ -20,13 +20,13 @@ fork 中的上游包继续使用 `@deepseek-ai/dsh-*`，新增的产品自有包
 
 PaperAI 配置提供三个并列的顶级 Agent preset：
 
-- **DSH** 使用既有的完整 `standard` 系统 preset，其中包含内置 DSH agent harness 和 `dsh-agent-loop`；提供方由既有 Models Settings 配置。
+- **DSH** 使用内置 DSH agent harness 和 `dsh-agent-loop`；提供方由既有 Models Settings 配置。它最初按 id 选用共享的 `standard` 系统 preset；自[多智能体论文写作基线](../feature/2026-09-02-multi-agent-thesis-writing-baseline.zh.md)起以产品自有的 `dsh` preset 交付，该 preset 复列 `standard` 各行并加入原生文档工具与写作 persona。
 - **Codex** 使用已安装的本地 Codex ACP 适配器，把 ACP 生命周期、配置选项、权限、流式内容、计划、工具、取消和错误映射到 DSH 会话。
 - **Claude** 使用已安装的本地 Claude ACP 适配器，并复用同一个顶级 ACP Agent 实现。
 
 它们是创建会话时的 Agent 选择，不是 DSH subagent。Codex 和 Claude 从 ACP `session/new.configOptions` 获取真实模型选择，并通过 `session/set_config_option` 应用变更；UI 不虚构模型 id。既有 DSH 凭据和模型 Settings 继续负责内置 DSH 提供方，包括 API key、Base URL、协议和模型列表。
 
-PaperAI 启动器把共享系统 preset 根目录限制为 `standard`，随后加入产品自有的 Codex 与 Claude 根目录。因此，全新的 harness home 只会呈现这 3 个系统选项，且无需复制 DSH 组装。其他 profile 保留完整的随附 DSH 根目录；preset 服务继续追加用户创作根目录，以提供本地创建的选项。
+PaperAI 启动器最初把共享系统 preset 根目录限制为 `standard`，随后加入产品自有的 Codex 与 Claude 根目录。自[多智能体论文写作基线](../feature/2026-09-02-multi-agent-thesis-writing-baseline.zh.md)起，它只提供产品自有根目录——`dsh`、Codex 与 Claude，即每个引擎一个 PaperAI 写作智能体——因为共享 preset 不具备文档能力。其他 profile 保留完整的随附 DSH 根目录；preset 服务继续追加用户创作根目录，以提供本地创建的选项。
 
 PaperAI MCP 工具是所有 Agent 可见的文档能力面。Host 命令与 MCP handler 调用相同的领域服务；每次执行文档命令时，都从当前 DSH 会话解析 actor/model 来源信息。
 

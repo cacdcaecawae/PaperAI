@@ -6,12 +6,7 @@ import styles from './PaperAIBrand.module.css'
 
 type PaperAIBrandMarkProps = HeroBrandMarkOwnerProps & SidebarBrandMarkOwnerProps
 
-/**
- * Render the PaperAI document mark with the presentation requested by its host.
- * @param props - Host-supplied mark presentation.
- * @returns the decorative PaperAI document mark.
- */
-export function PaperAIBrandMark({ size, className }: PaperAIBrandMarkProps) {
+function DocumentMarkSvg({ size, className }: { size: number; className?: string | undefined }) {
   return (
     <svg
       aria-hidden="true"
@@ -30,6 +25,24 @@ export function PaperAIBrandMark({ size, className }: PaperAIBrandMarkProps) {
       <path className={styles.accentRule} d="M8.5 17.6h4.2" />
     </svg>
   )
+}
+
+/**
+ * Render the PaperAI document mark with the presentation requested by its host.
+ * @param props - Host-supplied mark presentation.
+ * @returns the decorative PaperAI document mark.
+ */
+export function PaperAIBrandMark({ size, className }: PaperAIBrandMarkProps) {
+  return <DocumentMarkSvg className={className} size={size} />
+}
+
+/**
+ * Present the PaperAI document mark as the built-in thesis agent's identity.
+ * @param props - Host-supplied preset-mark presentation.
+ * @returns the decorative thesis-agent mark.
+ */
+export function DshAgentMark({ size, className }: AgentPresetBrandMarkOwnerProps) {
+  return <DocumentMarkSvg className={className} size={size} />
 }
 
 /**

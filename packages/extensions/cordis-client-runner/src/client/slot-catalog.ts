@@ -484,7 +484,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Owner operation supplied to every additive full-column details view. */\nexport interface DetailsViewOwnerProps {\n  /** Close the layout-owned details column. */\n  closeDetails: () => void\n}',
+      '/** Owner operation supplied to every additive full-column details view. */\nexport interface DetailsViewOwnerProps {\n  /** Close the layout-owned details column. */\n  closeDetails: () => void\n  /** Replace the session composer draft; the user reviews before sending. */\n  setDraft: (text: string) => void\n}',
     ],
     ownerPropsReferences: [],
     standardProps: [
@@ -557,13 +557,14 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'useSessions: SnapshotSelectorHook<SessionListState>',
       'useWorkspaces: SnapshotSelectorHook<import(\'./workspaces/service.ts\').WorkspaceListState>',
     ],
-    keyDomain: 'open: any string the owner dispatches (no compile-time key set), already taken: claude, codex',
+    keyDomain: 'open: any string the owner dispatches (no compile-time key set), already taken: claude, codex, dsh',
     hookContext: '',
     slotInject: '',
     declaredBy: 'an entry in \'conversation.hero.agentPreset\' (client-ui-agent-preset), so it exists while that entry is mounted',
     occupants: [
       '@paperai/ui-brand CodexAgentMark key \'codex\'',
       '@paperai/ui-brand ClaudeAgentMark key \'claude\'',
+      '@paperai/ui-brand DshAgentMark key \'dsh\'',
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.hero.agentPreset.mark\', () => ctx.slots.register(\n      { name: \'conversation.hero.agentPreset.mark\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',

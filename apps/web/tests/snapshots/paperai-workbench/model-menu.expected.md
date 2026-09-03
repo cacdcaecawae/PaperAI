@@ -1,0 +1,8 @@
+- menu "模型与推理等级":
+  - menuitem "模型 Fake Alpha":
+    - text: 模型 Fake Alpha
+    - img
+  - menuitem "推理等级 Medium":
+    - text: 推理等级 Medium
+    - img
+  - menuitemcheckbox "Fast mode 关"

@@ -170,6 +170,7 @@ export function AppFrame({
     detailsSession === undefined ? 0 : panels.details,
     configuration,
     configuration.detailsNarrowMode,
+    panels.detailsFocus,
   )
   const colsRef = useRef(cols)
   colsRef.current = cols

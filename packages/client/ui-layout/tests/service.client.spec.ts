@@ -16,6 +16,7 @@ function fakePanels(): PanelActions {
     setNarrow: vi.fn(),
     openDetails: vi.fn(),
     closeDetails: vi.fn(),
+    setDetailsFocus: vi.fn(),
   }
 }
 

@@ -355,10 +355,16 @@ describe('PaperTemplateService', () => {
   it('allows draft export reports but blocks formal delivery on confirmation, fields, fixed text, and styles', async () => {
     const unattached = targetDocument('unattached-target', 'proposal')
     repository.documents.set(unattached.id, unattached)
-    await expect(service.check({ documentId: unattached.id, mode: 'delivery-export' })).resolves.toMatchObject({
-      status: 'fail',
-      findings: [expect.objectContaining({ code: 'template_missing' })],
-    })
+    const free = await service.check({ documentId: unattached.id, mode: 'delivery-export' })
+    expect(free).toMatchObject({ status: 'pass', findings: [] })
+    expect(free.templateId).toBeUndefined()
+    expect(deliveryBlocked(free)).toBe(false)
+
+    const dangling = { ...targetDocument('dangling-target', 'proposal'), templateId: TemplateContractId('contract-missing') }
+    repository.documents.set(dangling.id, dangling)
+    const corrupt = await service.check({ documentId: dangling.id, mode: 'delivery-export' })
+    expect(corrupt).toMatchObject({ status: 'fail', findings: [expect.objectContaining({ code: 'template_missing' })] })
+    expect(deliveryBlocked(corrupt)).toBe(true)
 
     const uploadPath = join(root, 'gate.docx')
     await writeFile(uploadPath, 'gate-template')

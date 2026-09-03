@@ -8,7 +8,7 @@
 
 `detailsVisibility` 控制哪种当前 Session 可以保留已打开的详情栏。默认值 `nonblank-session` 保持 DSH 行为：hero、无 Session 和 blank Session 状态都将详情栏渲染为零宽度，但不会改动存储的宽度偏好。`current-session` 还允许 blank 的当前 Session，因此产品插件可以在首次非 blank Agent 回合之前调用 `ctx.layout.openDetails()`；该选项本身不会创建 Session，也不会打开面板。切换到另一个符合条件的 Session 时，详情栏仍会在绘制前关闭。
 
-`detailsNarrowMode` 控制已打开的详情栏无法与 `centerMin` 和 `detailsMin` 共存时的布局。默认值 `close` 将详情栏渲染为零宽度，并把剩余空间交给中栏。`focus` 保留当前侧栏，将仍保持挂载的中栏设为不可交互的零宽度，并让详情栏占用其余空间。聚焦模式继续沿用侧栏原有的断点、展开收起和拖动行为。两种模式都保留已存储的宽度偏好，并在三栏重新容得下时自动恢复分栏。
+`detailsNarrowMode` 控制已打开的详情栏无法与 `centerMin` 和 `detailsMin` 共存时的布局。默认值 `close` 将详情栏渲染为零宽度，并把剩余空间交给中栏。`focus` 保留当前侧栏，将仍保持挂载的中栏设为不可交互的零宽度，并让详情栏占用其余空间。聚焦模式继续沿用侧栏原有的断点、展开收起和拖动行为。两种模式都保留已存储的宽度偏好，并在三栏重新容得下时自动恢复分栏。与窄屏兜底无关，产品可以在详情栏打开时通过 `ctx.layout.setDetailsFocus(active)` 在任意视口宽度下主动要求同样的聚焦呈现；关闭详情栏即释放该要求，宽度偏好始终不被改写。
 
 AppFrame 始终挂载会话栏和详情栏的位置。布局 store 是瞬时状态，侧边栏以默认宽度启动，详情栏则保持关闭，且该 store 从不读写 `localStorage`。会话 owner share 为空，侧边栏 owner share 只包含 `collapsed` 和 `width`；注册方通过标准钩子获取业务数据，并从各自的 inject 接口获取操作。
 

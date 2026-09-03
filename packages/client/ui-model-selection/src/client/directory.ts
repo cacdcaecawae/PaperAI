@@ -6,7 +6,7 @@
  * either entry is what the other shows next.
  */
 import type {
-  IApiClient, ModelCatalogFailure, ModelProviderGroup, ModelSelection, SessionId, SessionModels,
+  IApiClient, ModelCatalogFailure, ModelProviderGroup, ModelSelection, ModelSwitch, SessionId, SessionModels,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
@@ -27,6 +27,8 @@ export interface ModelDirectoryState {
   groups: readonly ModelProviderGroup[]
   /** Provider-local failures from the last load; usable groups stay usable. */
   failures: readonly ModelCatalogFailure[]
+  /** Driver-owned switches (an Agent driver's fast mode); empty for LLM-routed sessions. */
+  switches: readonly ModelSwitch[]
   /** Lifecycle of the in-flight operation. */
   status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
   /** User-facing operation that failed; protocol diagnostics stay off the UI state. */
@@ -37,7 +39,7 @@ export interface ModelDirectoryState {
 export class ModelDirectory {
   /** The shared snapshot both entries render from (uSES-safe store). */
   readonly store: SnapshotStore<ModelDirectoryState> = createSnapshotStore<ModelDirectoryState>({
-    current: null, routable: null, groups: [], failures: [], status: 'idle', error: null,
+    current: null, routable: null, groups: [], failures: [], switches: [], status: 'idle', error: null,
   })
 
   /** Latest operation wins; an older response never overwrites a newer one. */
@@ -73,12 +75,13 @@ export class ModelDirectory {
       this.store.update((s) => { s.status = 'error'; s.error = 'load' })
       throw new Error(`session.models failed: ${result.error.code}: ${result.error.message}`)
     }
-    const { current, routable, groups, failures } = result.value
+    const { current, routable, groups, failures, switches } = result.value
     this.store.update((s) => {
       s.current = current
       s.routable = routable
       s.groups = groups
       s.failures = failures
+      s.switches = switches ?? []
       s.status = 'ready'
       s.error = null
     })
@@ -89,7 +92,7 @@ export class ModelDirectory {
    * Select the complete provider/model/reasoning selection (both entries submit through here). Success
    * updates the shared current; failure surfaces on the store and throws so
    * each entry's own retry surface engages.
-   * @param selection - provider, provider-owned model id, and optional adapter-owned effort.
+   * @param selection - provider, provider-owned model id, optional adapter-owned effort, and driver switch values.
  */
   async select(selection: ModelSelection): Promise<void> {
     this.assertAvailable()
@@ -102,6 +105,7 @@ export class ModelDirectory {
       ...selection.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: selection.reasoningEffort },
+      ...selection.switches === undefined ? {} : { switches: selection.switches },
     })
     if (this.disposed || generation !== this.generation) {
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
@@ -113,9 +117,18 @@ export class ModelDirectory {
     }
     // The Host validated the route before accepting it, so a selection that
     // landed is by construction one it can serve.
+    const { selected } = result.value
     this.store.update((s) => {
-      s.current = result.value.selected
+      s.current = selected
       s.routable = true
+      // The driver echoes every switch value with the accepted selection;
+      // the displayed rows follow it without another directory load.
+      if (selected.switches !== undefined) {
+        const values = selected.switches
+        s.switches = s.switches.map(entry => (
+          entry.id in values ? { ...entry, enabled: values[entry.id] === true } : entry
+        ))
+      }
       s.status = 'ready'
       s.error = null
     })
@@ -134,6 +147,7 @@ export class ModelDirectory {
       s.routable = null
       s.groups = []
       s.failures = []
+      s.switches = []
       s.status = 'idle'
       s.error = null
     })

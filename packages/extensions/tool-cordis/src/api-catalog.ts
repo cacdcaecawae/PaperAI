@@ -1190,6 +1190,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when upload, project, import, or commit work fails; an AggregateError includes any rollback failure.'],
       },
       {
+        signature: '@Remote(\'createFromTemplate\') async createFromTemplate( request: PaperAICreateFromTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>',
+        description: 'Start one Working document from a built-in template pack member and bind that member\'s contract in the root commit. A form template is imported as the document itself; a formatting reference governs the uploaded manuscript instead. Built-in members ship reviewed requirements, so the contract is confirmed here without a separate review step.',
+        parameters: [{ name: 'request', description: 'Workspace, Session, pack member, optional manuscript upload, role, and display name.' }, { name: 'signal', description: 'optional cancellation signal for installation, import, commit, and preview work.' }],
+        returns: 'the opened document and root commit, or an explicit native-engine downgrade.',
+        throws: ['when the member is unknown, a formatting reference has no upload, the role does not apply, or import or commit work fails; an AggregateError includes any rollback failure.'],
+      },
+      {
         signature: '@Remote(\'listTemplates\') async listTemplates(request: PaperAIListTemplatesRequest): Promise<PaperAITemplateCatalog>',
         description: 'List registered institutional packs and this project\'s compiled contracts.',
         parameters: [{ name: 'request', description: 'Workspace whose template catalog should be projected.' }],
@@ -1385,9 +1392,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Authenticated PaperAI MCP route and descriptor registry.',
     methods: [
       {
-        signature: 'issueDescriptor(actor: PaperMcpAgentIdentity): PaperMcpDescriptorLease',
-        description: 'Issue one revocable HTTP descriptor bound to one Agent client and session. The caller must retain and dispose the lease with the ACP Agent session.',
-        parameters: [{ name: 'actor', description: 'Local Codex or Claude identity recorded on every commit.' }],
+        signature: 'issueDescriptor(actor: PaperMcpAgentIdentity, scope: PaperMcpAccessScope): PaperMcpDescriptorLease',
+        description: 'Issue one revocable HTTP descriptor bound to one Agent client, session, and access scope. The caller must retain and dispose the lease with the ACP Agent session.',
+        parameters: [{ name: 'actor', description: 'Local Codex or Claude identity recorded on every commit.' }, { name: 'scope', description: 'Session workspace root and live sandbox mode that bound every tool call.' }],
         returns: 'the ACP-compatible descriptor and its idempotent disposer.',
       },
       {
@@ -1405,7 +1412,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult>',
-        description: 'Create or adopt one directory, initialize missing project artifacts, and publish exactly one ProjectRecord associated with its DSH workspace. Repeating the operation for the same canonical path preserves the first record identity, name, creation time, and all existing files.',
+        description: 'Create or adopt one directory, initialize missing project artifacts, and publish exactly one ProjectRecord associated with its DSH workspace. Repeating the operation for the same canonical path preserves the first record identity, name, creation time, and all existing files. The writing charter is synchronized before the record is published, and a failed publication restores the charter files it created or rewrote.',
         parameters: [{ name: 'input', description: 'Selected directory and optional first-use display name.' }],
         returns: 'the durable record, context-file outcome, and Git readiness.',
       },
@@ -1426,6 +1433,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve a project by an existing directory spelling.',
         parameters: [{ name: 'rootPath', description: 'Existing directory path.' }],
         returns: 'the unique record for its canonical path, or `undefined`.',
+      },
+      {
+        signature: 'async resolveForPath(path: string): Promise<ProjectRecord | undefined>',
+        description: 'Resolve the project whose root owns a path: the session workspace root itself or any directory inside it. Agent routes use this to scope document tools to the calling session\'s project. A path that no project root contains resolves to `undefined`; a missing path is compared lexically.',
+        parameters: [{ name: 'path', description: 'workspace root or a path inside one.' }],
+        returns: 'the deepest owning project, or `undefined`.',
       },
     ],
   },
@@ -3438,7 +3451,23 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentDriverModel',
-    declaration: 'export interface AgentDriverModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly group?: string;\n}',
+    declaration: 'export interface AgentDriverModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly group?: string;\n    readonly reasoning?: AgentDriverReasoning;\n}',
+  },
+  {
+    name: 'AgentDriverReasoning',
+    declaration: 'export interface AgentDriverReasoning {\n    readonly efforts: readonly AgentDriverReasoningEffort[];\n    readonly defaultEffort?: string;\n}',
+  },
+  {
+    name: 'AgentDriverReasoningEffort',
+    declaration: 'export interface AgentDriverReasoningEffort {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
+    name: 'AgentDriverSelectionOptions',
+    declaration: 'export interface AgentDriverSelectionOptions {\n    readonly reasoningEffort?: string;\n    readonly switches?: Readonly<Record<string, boolean>>;\n}',
+  },
+  {
+    name: 'AgentDriverSwitch',
+    declaration: 'export interface AgentDriverSwitch {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly enabled: boolean;\n}',
   },
   {
     name: 'AgentFactory',
@@ -3450,7 +3479,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentModelController',
-    declaration: 'export interface AgentModelController {\n    readonly provider: {\n        readonly id: string;\n        readonly name: string;\n    };\n    readonly currentModel: string;\n    listModels(): Promise<readonly AgentDriverModel[]>;\n    selectModel(model: string): Promise<string>;\n    inputModalities?(model: string): Promise<readonly (\'text\' | \'image\')[] | undefined>;\n}',
+    declaration: 'export interface AgentModelController {\n    readonly provider: {\n        readonly id: string;\n        readonly name: string;\n    };\n    readonly currentModel: string;\n    readonly currentReasoningEffort?: string | undefined;\n    readonly switches?: readonly AgentDriverSwitch[] | undefined;\n    listModels(): Promise<readonly AgentDriverModel[]>;\n    selectModel(model: string, options?: AgentDriverSelectionOptions): Promise<string>;\n    inputModalities?(model: string): Promise<readonly (\'text\' | \'image\')[] | undefined>;\n}',
   },
   {
     name: 'AgentOptions',
@@ -3822,7 +3851,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreatePaperProjectResult',
-    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile: \'created\' | \'preserved\';\n    readonly git: ProjectGitStatus;\n}',
+    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile: \'created\' | \'preserved\';\n    readonly charter: WritingCharterSyncResult;\n    readonly git: ProjectGitStatus;\n}',
   },
   {
     name: 'CreateSessionOptions',
@@ -4034,7 +4063,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ExportDocumentRequest',
-    declaration: 'export interface ExportDocumentRequest {\n    readonly document: DocumentRecord;\n    readonly destinationPath: string;\n    readonly mode: PaperExportMode;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly gate?: GateReport;\n    readonly signal?: AbortSignal;\n}',
+    declaration: 'export interface ExportDocumentRequest {\n    readonly document: DocumentRecord;\n    readonly destinationPath: string;\n    readonly writableRoot?: string;\n    readonly mode: PaperExportMode;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly gate?: GateReport;\n    readonly signal?: AbortSignal;\n}',
   },
   {
     name: 'ExportDocumentResult',
@@ -4549,6 +4578,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIConfirmTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly templateId: string;\n}',
   },
   {
+    name: 'PaperAICreateFromTemplateRequest',
+    declaration: 'export interface PaperAICreateFromTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly packId: string;\n    readonly memberId: string;\n    readonly upload?: PaperAIWordUpload;\n    readonly role?: PaperAIDocumentRole;\n    readonly name?: string;\n}',
+  },
+  {
     name: 'PaperAIDocumentChangedEvent',
     declaration: 'export interface PaperAIDocumentChangedEvent {\n    readonly documentId: PaperAIDocumentId;\n    readonly headCommitId: PaperAIDocumentCommitId;\n    readonly updatedAt: string;\n}',
   },
@@ -4745,12 +4778,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIVersionActor {\n    readonly kind: \'human\' | \'agent\' | \'system\';\n    readonly name: string;\n    readonly client?: string;\n    readonly provider?: string;\n    readonly model?: string;\n}',
   },
   {
+    name: 'PaperAIWordUpload',
+    declaration: 'export interface PaperAIWordUpload {\n    readonly fileName: string;\n    readonly contentBase64: string;\n}',
+  },
+  {
     name: 'PaperDocumentSnapshot',
     declaration: 'export interface PaperDocumentSnapshot {\n    document: DocumentRecord;\n    nodes: readonly DocumentNode[];\n}',
   },
   {
     name: 'PaperExportMode',
     declaration: 'export type PaperExportMode = Extract<GateMode, \'draft-export\' | \'delivery-export\'>;',
+  },
+  {
+    name: 'PaperMcpAccessScope',
+    declaration: 'export interface PaperMcpAccessScope {\n    readonly workspaceRoot: string;\n    readonly sandboxMode: () => PaperSandboxMode;\n}',
   },
   {
     name: 'PaperMcpAgentIdentity',
@@ -4766,7 +4807,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperMcpExportRequest',
-    declaration: 'export interface PaperMcpExportRequest {\n    readonly document: DocumentRecord;\n    readonly destinationPath: string;\n    readonly mode: \'draft-export\' | \'delivery-export\';\n    readonly gate: GateReport;\n    readonly actor: PaperMcpAgentIdentity;\n}',
+    declaration: 'export interface PaperMcpExportRequest {\n    readonly document: DocumentRecord;\n    readonly destinationPath: string;\n    readonly writableRoot?: string;\n    readonly mode: \'draft-export\' | \'delivery-export\';\n    readonly gate: GateReport;\n    readonly actor: PaperMcpAgentIdentity;\n}',
   },
   {
     name: 'PaperMcpExportResult',
@@ -4775,6 +4816,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PaperMcpHttpServerDescriptor',
     declaration: 'export interface PaperMcpHttpServerDescriptor {\n    readonly type: \'http\';\n    readonly name: string;\n    readonly url: string;\n    readonly headers: Array<{\n        readonly name: string;\n        readonly value: string;\n    }>;\n}',
+  },
+  {
+    name: 'PaperSandboxMode',
+    declaration: 'export type PaperSandboxMode = \'read-only\' | \'workspace-write\' | \'danger-full-access\';',
   },
   {
     name: 'PermissionSelect',
@@ -6115,6 +6160,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WritingCharterSyncResult',
+    declaration: 'export interface WritingCharterSyncResult {\n    readonly agents: \'created\' | \'updated\' | \'unchanged\';\n    readonly claude: \'created\' | \'updated\' | \'preserved\';\n}',
   },
 ]
 

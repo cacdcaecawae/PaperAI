@@ -10,15 +10,22 @@ import {
   DocumentCommitId,
   DocumentId,
   DocumentNodeId,
+  PaperAccessError,
   ProjectId,
   TemplateContractId,
+  assertMutationAllowed,
+  assertProjectInScope,
+  assertWriteWithinWorkspace,
   deliveryBlocked,
+  summarizeGate,
   type ActorIdentity,
   type DocumentCommit,
   type DocumentMutation,
   type GateMode,
+  type PaperAccessScope,
 } from '@paperai/domain'
 import type {
+  PaperMcpAccessScope,
   PaperMcpAgentIdentity,
   PaperMcpDependencies,
   PaperMcpExportAdapter,
@@ -252,7 +259,7 @@ function assertLimits(limits: PaperMcpToolLimits): void {
 }
 
 function commitResult(commit: DocumentCommit) {
-  return { commit, provenance: commit.actor }
+  return { commit, provenance: commit.actor, gateSummary: summarizeGate(commit.gate) }
 }
 
 function sameActor(commit: DocumentCommit, actor: PaperMcpAgentIdentity): boolean {
@@ -265,9 +272,13 @@ function sameActor(commit: DocumentCommit, actor: PaperMcpAgentIdentity): boolea
 }
 
 /**
- * Create one MCP server bound to a single authenticated Agent identity.
+ * Create one MCP server bound to a single authenticated Agent identity and
+ * access scope. Every tool resolves the project that owns the scope's
+ * workspace root and refuses records of any other project; mutating tools
+ * additionally refuse under the `read-only` sandbox mode, read per call.
  * @param dependencies - Narrow PaperAI service consumers used by tool handlers.
  * @param actor - Provenance written by every mutating tool.
+ * @param scope - Session workspace root and live sandbox mode of the lease.
  * @param limits - Result and mutation bounds advertised in tool schemas.
  * @param exportAdapter - Optional formal export provider; omission hides the write tool.
  * @returns an unconnected MCP server ready for any SDK server transport.
@@ -275,6 +286,7 @@ function sameActor(commit: DocumentCommit, actor: PaperMcpAgentIdentity): boolea
 export function createPaperMcpServer(
   dependencies: PaperMcpDependencies,
   actor: PaperMcpAgentIdentity,
+  scope: PaperMcpAccessScope,
   limits: PaperMcpToolLimits,
   exportAdapter?: PaperMcpExportAdapter,
 ): McpServer {
@@ -284,23 +296,52 @@ export function createPaperMcpServer(
     { capabilities: { tools: {} } },
   )
 
+  const accessScope = async (): Promise<PaperAccessScope> => {
+    const project = await dependencies.projects.resolveForPath(scope.workspaceRoot)
+    if (project === undefined) {
+      throw new PaperAccessError(
+        'NO_PROJECT_FOR_SESSION',
+        `no PaperAI project owns this session's workspace '${scope.workspaceRoot}'`,
+      )
+    }
+    return { projectId: project.id, workspaceRoot: scope.workspaceRoot, sandboxMode: scope.sandboxMode() }
+  }
+
+  const scopedDocument = async (rawId: string) => {
+    const access = await accessScope()
+    const snapshot = requireDocument(dependencies, rawId)
+    assertProjectInScope(access, snapshot.document.projectId, `document '${snapshot.document.id}'`)
+    return { access, snapshot }
+  }
+
+  const scopedProject = async (rawId: string): Promise<ProjectId> => {
+    const access = await accessScope()
+    const projectId = ProjectId(rawId)
+    assertProjectInScope(access, projectId, `project '${projectId}'`)
+    return projectId
+  }
+
   server.registerTool('paperai_list_projects', {
     title: 'List PaperAI projects',
-    description: 'List PaperAI projects known to this Host. Read-only.',
+    description: 'List the PaperAI project that owns this session\'s workspace. Read-only.',
     inputSchema: {},
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async () => execute(() => ({ projects: dependencies.projects.list() })))
+  }, async () => execute(async () => {
+    const access = await accessScope()
+    const project = dependencies.projects.get(access.projectId)
+    return { projects: project === undefined ? [] : [project] }
+  }))
 
   server.registerTool('paperai_list_documents', {
     title: 'List project documents',
-    description: 'List Working DOCX records in one PaperAI project. Read-only.',
+    description: 'List Working DOCX records in this session\'s PaperAI project. Read-only.',
     inputSchema: {
       projectId: wordId.describe('PaperAI project id.'),
       role: documentRole.optional().describe('Optional academic document role.'),
     },
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async input => execute(() => ({
-    documents: dependencies.documents.listDocuments(ProjectId(input.projectId), input.role),
+  }, async input => execute(async () => ({
+    documents: dependencies.documents.listDocuments(await scopedProject(input.projectId), input.role),
   })))
 
   server.registerTool('paperai_read_document', {
@@ -315,8 +356,8 @@ export function createPaperMcpServer(
       includeStyle: z.boolean().default(false).describe('Include structured Word style properties.'),
     },
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async input => execute(() => {
-    const snapshot = requireDocument(dependencies, input.documentId)
+  }, async input => execute(async () => {
+    const { snapshot } = await scopedDocument(input.documentId)
     const selected = snapshot.nodes.slice(input.offset, input.offset + input.limit)
       .map(node => input.includeStyle ? node : (({ style: _style, ...rest }) => rest)(node))
     return {
@@ -335,24 +376,26 @@ export function createPaperMcpServer(
 
   server.registerTool('paperai_list_templates', {
     title: 'List template choices',
-    description: 'List built-in template packs and contracts compiled for one project. Read-only.',
+    description: 'List built-in template packs and contracts compiled for this session\'s project. Read-only.',
     inputSchema: { projectId: wordId.describe('PaperAI project id.') },
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async input => execute(() => ({
+  }, async input => execute(async () => ({
     packs: dependencies.templates.listPacks(),
-    contracts: dependencies.templates.listContracts(ProjectId(input.projectId)),
+    contracts: dependencies.templates.listContracts(await scopedProject(input.projectId)),
   })))
 
   server.registerTool('paperai_get_template', {
     title: 'Read a template contract',
-    description: 'Read confirmed or draft rules, slots, evidence, and provenance for one template. Read-only.',
+    description: 'Read confirmed or draft rules, slots, evidence, and provenance for one template. Read the attached contract before drafting content it governs. Read-only.',
     inputSchema: { templateId: wordId.describe('PaperAI template contract id.') },
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async input => execute(() => {
+  }, async input => execute(async () => {
+    const access = await accessScope()
     const template = dependencies.templates.getContract(TemplateContractId(input.templateId))
     if (template === undefined) {
       throw new ToolFailure('TEMPLATE_NOT_FOUND', `PaperAI template '${input.templateId}' was not found`)
     }
+    assertProjectInScope(access, template.projectId, `template '${template.id}'`)
     return { template }
   }))
 
@@ -361,9 +404,10 @@ export function createPaperMcpServer(
     description: 'List recoverable commits from the current document head toward the root. Read-only.',
     inputSchema: { documentId: wordId.describe('PaperAI document id.') },
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async input => execute(() => ({
-    commits: dependencies.commits.listHistory(DocumentId(input.documentId)),
-  })))
+  }, async input => execute(async () => {
+    const { snapshot } = await scopedDocument(input.documentId)
+    return { commits: dependencies.commits.listHistory(snapshot.document.id) }
+  }))
 
   server.registerTool('paperai_check_gate', {
     title: 'Check template requirements',
@@ -373,12 +417,15 @@ export function createPaperMcpServer(
       mode: gateMode.describe('Gate mode.'),
     },
     annotations: READ_ONLY_ANNOTATIONS,
-  }, async input => execute(async () => ({
-    report: await dependencies.templates.check({
-      documentId: DocumentId(input.documentId),
-      mode: input.mode,
-    }),
-  })))
+  }, async input => execute(async () => {
+    const { snapshot } = await scopedDocument(input.documentId)
+    return {
+      report: await dependencies.templates.check({
+        documentId: snapshot.document.id,
+        mode: input.mode,
+      }),
+    }
+  }))
 
   server.registerTool('paperai_prepare_export', {
     title: 'Prepare a document export',
@@ -389,7 +436,7 @@ export function createPaperMcpServer(
     },
     annotations: READ_ONLY_ANNOTATIONS,
   }, async input => execute(async () => {
-    const snapshot = requireDocument(dependencies, input.documentId)
+    const { snapshot } = await scopedDocument(input.documentId)
     const report = await dependencies.templates.check({
       documentId: snapshot.document.id,
       mode: input.mode,
@@ -405,7 +452,7 @@ export function createPaperMcpServer(
 
   server.registerTool('paperai_commit_document', {
     title: 'Commit document changes',
-    description: 'Apply supported Working DOCX mutations through PaperAI and create one recoverable commit with Agent provenance.',
+    description: 'Apply supported Working DOCX mutations through PaperAI and create one recoverable commit with Agent provenance. The result carries gateSummary from the continuous template gate: fix error-level findings before writing on.',
     inputSchema: {
       documentId: wordId.describe('PaperAI document id.'),
       baseCommitId: wordId.optional().describe('Document head observed before editing.'),
@@ -415,10 +462,12 @@ export function createPaperMcpServer(
     },
     annotations: MUTATION_ANNOTATIONS,
   }, async input => execute(async () => {
+    const { access, snapshot } = await scopedDocument(input.documentId)
+    assertMutationAllowed(access, 'paperai_commit_document')
     const mutations = input.mutations.map(toMutation)
     validateTemplateBindings(dependencies, input.documentId, mutations)
     const commit = await dependencies.commits.submit({
-      documentId: DocumentId(input.documentId),
+      documentId: snapshot.document.id,
       ...(input.baseCommitId === undefined
         ? {}
         : { baseCommitId: DocumentCommitId(input.baseCommitId) }),
@@ -440,8 +489,10 @@ export function createPaperMcpServer(
     },
     annotations: MUTATION_ANNOTATIONS,
   }, async input => execute(async () => {
+    const { access, snapshot } = await scopedDocument(input.documentId)
+    assertMutationAllowed(access, 'paperai_revert_document')
     const commit = await dependencies.commits.revert({
-      documentId: DocumentId(input.documentId),
+      documentId: snapshot.document.id,
       baseCommitId: DocumentCommitId(input.baseCommitId),
       targetCommitId: DocumentCommitId(input.targetCommitId),
       ...(input.message === undefined ? {} : { message: input.message }),
@@ -461,7 +512,10 @@ export function createPaperMcpServer(
       },
       annotations: MUTATION_ANNOTATIONS,
     }, async input => execute(async () => {
-      const snapshot = requireDocument(dependencies, input.documentId)
+      const { access, snapshot } = await scopedDocument(input.documentId)
+      assertMutationAllowed(access, 'paperai_export_document')
+      // The Agent names the file; the session's sandbox mode decides where it may land.
+      const destinationPath = assertWriteWithinWorkspace(access, input.destinationPath, 'export destination')
       const mode: GateMode = input.mode
       const report = await dependencies.templates.check({
         documentId: snapshot.document.id,
@@ -476,7 +530,10 @@ export function createPaperMcpServer(
       }
       const result = await exportAdapter.exportDocument({
         document: snapshot.document,
-        destinationPath: input.destinationPath,
+        destinationPath,
+        // The provider re-checks the real path at publish time, so a link
+        // inside the workspace cannot carry the file out of it.
+        ...access.sandboxMode === 'danger-full-access' ? {} : { writableRoot: access.workspaceRoot },
         mode,
         gate: report,
         actor: structuredClone(actor),

@@ -136,6 +136,58 @@ describe('PaperAIWorkbenchController', () => {
     controller.dispose()
   })
 
+  it('starts a template-backed document through the same establishing path as import', async () => {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.loadResources(WORKSPACE_ID)
+    const createFromTemplate = vi.spyOn(remote, 'createFromTemplate')
+    const input = { packId: HIT_PACK_ID, memberId: HIT_PROPOSAL_MEMBER_ID }
+
+    await expect(controller.createFromTemplate(WORKSPACE_ID, SESSION_ID, input)).resolves.toEqual({ ok: true })
+    expect(createFromTemplate).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      packId: HIT_PACK_ID,
+      memberId: HIT_PROPOSAL_MEMBER_ID,
+    }, expect.any(AbortSignal))
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      phase: 'ready', action: null, document: { documentId: DOCUMENT_ID },
+    })
+    expect(controller.resourceStore(WORKSPACE_ID).getSnapshot()).toMatchObject({
+      phase: 'ready', selected: RESOURCE_ID,
+    })
+
+    remote.createFromTemplate = vi.fn<PaperAIWorkbenchRemote['createFromTemplate']>()
+      .mockResolvedValueOnce(REMOTE_FAILURE)
+    await expect(controller.createFromTemplate(WORKSPACE_ID, SESSION_ID, {
+      ...input,
+      upload: { fileName: 'thesis.docx', contentBase64: 'UEsDBAoAAAAA' },
+    })).resolves.toEqual({ ok: false, error: 'internal: Host unavailable' })
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot()).toMatchObject({
+      phase: 'ready', action: null, actionError: 'internal: Host unavailable',
+    })
+    controller.dispose()
+  })
+
+  it('reads the built-in template choices and folds Host failures into one diagnostic', async () => {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await expect(controller.templateChoices(WORKSPACE_ID)).resolves.toEqual({
+      ok: true, packs: TEMPLATE_CATALOG.packs,
+    })
+    remote.listTemplates = vi.fn<PaperAIWorkbenchRemote['listTemplates']>()
+      .mockResolvedValueOnce(REMOTE_FAILURE)
+      .mockRejectedValueOnce(new Error('wire unavailable'))
+    await expect(controller.templateChoices(WORKSPACE_ID)).resolves.toEqual({
+      ok: false, error: 'internal: Host unavailable',
+    })
+    await expect(controller.templateChoices(WORKSPACE_ID)).resolves.toEqual({
+      ok: false, error: 'remote-rejected: wire unavailable',
+    })
+    controller.dispose()
+    await expect(controller.templateChoices(WORKSPACE_ID)).rejects.toThrow()
+  })
+
   it('rejects stale and mismatched open projections without losing the latest open document', async () => {
     const remote = successfulRemote()
     const first = deferred<RemoteResult<ReturnType<typeof documentOpenResult>>>()

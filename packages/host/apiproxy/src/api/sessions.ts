@@ -100,6 +100,24 @@ export interface ModelSelection {
   model: string
   /** Adapter-owned reasoning effort; absence preserves adapter/provider default behavior. */
   reasoningEffort?: string
+  /**
+   * Driver-owned switch values by id (an Agent driver's fast mode, for
+   * example). Present only for sessions whose Agent driver advertises switches;
+   * a selection request that omits a switch keeps its current value.
+   */
+  switches?: Record<string, boolean>
+}
+
+/** One driver-owned boolean switch displayed beside the model selection. */
+export interface ModelSwitch {
+  /** Opaque value submitted back to the owning Agent driver. */
+  id: string
+  /** Driver-supplied display name. */
+  name: string
+  /** Optional driver-supplied description, including why the switch is unavailable. */
+  description?: string
+  /** Whether the switch is currently on. */
+  enabled: boolean
 }
 
 /** One adapter-owned reasoning effort displayed for an exact model route. */
@@ -169,6 +187,8 @@ export interface SessionModels {
   groups: ModelProviderGroup[]
   /** Provider-local failures; successful groups remain usable. */
   failures: ModelCatalogFailure[]
+  /** Driver-owned switches in display order; absent when the session's driver has none. */
+  switches?: ModelSwitch[]
 }
 
 /** A client-requested mutation of one still-pending queue item. */
@@ -302,6 +322,7 @@ export interface SessionsApi {
     provider: string
     model: string
     reasoningEffort?: string
+    switches?: Record<string, boolean>
   }>):
   Promise<RpcResponse<{ selected: ModelSelection }>>
 

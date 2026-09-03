@@ -117,3 +117,18 @@ describe('computeColumns — degenerate viewports', () => {
       .toEqual(split({ sidebar: SIDEBAR_COLLAPSED, center: 500 - SIDEBAR_COLLAPSED, details: 0 }))
   })
 })
+
+describe('computeColumns — explicit focus demand', () => {
+  it('an open details panel takes the whole content area at any viewport width', () => {
+    const cols = computeColumns(1920, 280, DETAILS_DEFAULT, undefined, undefined, true)
+    expect(cols).toEqual({ sidebar: 280, center: 0, details: 1920 - 280, detailsFocused: true })
+  })
+
+  it('is inert while details are closed and absent by default', () => {
+    const closedCols = computeColumns(1920, 280, 0, undefined, undefined, true)
+    expect(closedCols.detailsFocused).toBe(false)
+    expect(closedCols.details).toBe(0)
+    const unfocused = computeColumns(1920, 280, DETAILS_DEFAULT)
+    expect(unfocused.detailsFocused).toBe(false)
+  })
+})

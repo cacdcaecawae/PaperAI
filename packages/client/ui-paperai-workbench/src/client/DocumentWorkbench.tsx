@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import {
   Button, DetailsViewShell, DisclosureRow, IconCheckOutline14, IconChecklistOutline14,
   IconChevronDownOutline14, IconDownloadOutline16, IconPlusOutline16, IconRefreshOutline14,
-  IconWarningOutline16, Menu, Pill, StateDot, Tooltip,
+  IconWarningOutline16, Menu, Pill, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   PaperAIDocumentNodeKind, PaperAIDocumentRole, PaperAIDocumentSnapshot,
@@ -17,13 +17,15 @@ import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import type { PaperAIWorkbenchKey } from './locales.ts'
 import css from './DocumentWorkbench.module.css'
 
-const TABS: readonly PaperAIWorkbenchTab[] = ['preview', 'edit', 'versions', 'gate']
+const TABS: readonly PaperAIWorkbenchTab[] = ['preview', 'edit', 'versions', 'template', 'gate', 'export']
 
 const TAB_KEYS = {
   preview: 'tab.preview',
   edit: 'tab.edit',
   versions: 'tab.versions',
+  template: 'tab.template',
   gate: 'tab.gate',
+  export: 'tab.export',
 } satisfies Record<PaperAIWorkbenchTab, PaperAIWorkbenchKey>
 
 const NODE_KIND_KEYS = {
@@ -58,11 +60,30 @@ function versionDate(value: string): string {
     }).format(date)
 }
 
-/** Visible actor line preserving Agent client and exact model provenance. */
-function actorLabel(version: PaperAIDocumentVersion): string {
-  if (version.actor.kind !== 'agent') return version.actor.name
-  const agent = [version.actor.client, version.actor.model].filter(value => value !== undefined && value !== '')
-  return agent.length === 0 ? version.actor.name : agent.join(' / ')
+/** Ledger badge id for one version author; drives the badge accent color. */
+function actorClient(version: PaperAIDocumentVersion): string {
+  if (version.actor.kind !== 'agent') return 'human'
+  const client = version.actor.client
+  return client === undefined || client === '' ? 'agent' : client
+}
+
+/** Ledger badge text: the author identity, then the exact model when known. */
+function actorBadge(version: PaperAIDocumentVersion, t: PaperAIDocumentWorkbenchProps['t']): string {
+  const client = actorClient(version)
+  const name = client === 'human'
+    ? t('actor.human')
+    : client === 'dsh'
+      ? 'DSH'
+      : client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude' : version.actor.name
+  const model = version.actor.kind === 'agent' ? version.actor.model : undefined
+  return model === undefined || model === '' ? name : `${name} · ${model}`
+}
+
+/** Composer draft asking the session agent to clear the failing findings. */
+function fixPromptText(document: PaperAIDocumentSnapshot, t: PaperAIDocumentWorkbenchProps['t']): string {
+  const failing = document.gate.findings.filter(finding => !finding.passed)
+  const lines = failing.slice(0, 8).map((finding, index) => `${index + 1}. ${finding.title}：${finding.message}`)
+  return [t('gate.fixPrompt', { count: failing.length }), ...lines].join('\n')
 }
 
 /** Whether document actions must wait for the selected-node edit to settle. */
@@ -324,7 +345,9 @@ function VersionsView({ document, state, restore, t }: {
             <li className={css.versionRow} key={version.commitId}>
               <div className={css.versionMain}>
                 <strong>{version.summary}</strong>
-                <span>{actorLabel(version)}</span>
+                <span className={css.actorBadge} data-client={actorClient(version)}>
+                  {actorBadge(version, t)}
+                </span>
               </div>
               <div className={css.versionMeta}>
                 <time dateTime={version.createdAt}>{versionDate(version.createdAt)}</time>
@@ -669,8 +692,8 @@ function ExportView({ document, state, exportDocument, t }: {
 }): ReactNode {
   const unresolved = hasUnresolvedEdit(state)
   const busy = state.action !== null || state.nodePhase === 'loading' || unresolved
-  const deliveryUnavailable = document.template === null
-  const deliveryBlocked = document.gate.status === 'failed'
+  const freeMode = document.template === null
+  const deliveryBlocked = !freeMode && document.gate.status === 'failed'
   return (
     <section className={css.gateSection} aria-labelledby="paperai-export-heading">
       <div className={css.sectionHeading}>
@@ -688,19 +711,15 @@ function ExportView({ document, state, exportDocument, t }: {
           >
             {state.action === 'exporting-draft' ? t('export.exporting') : t('export.draft')}
           </Button>
-          <Tooltip label={t('export.noTemplate')} side="bottom" disabled={!deliveryUnavailable}>
-            <span className={css.exportActionAnchor} tabIndex={deliveryUnavailable ? 0 : -1}>
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<IconCheckOutline14 />}
-                disabled={busy || deliveryUnavailable}
-                onClick={() => { void exportDocument('delivery-export') }}
-              >
-                {state.action === 'exporting-delivery' ? t('export.checking') : t('export.delivery')}
-              </Button>
-            </span>
-          </Tooltip>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<IconCheckOutline14 />}
+            disabled={busy}
+            onClick={() => { void exportDocument('delivery-export') }}
+          >
+            {state.action === 'exporting-delivery' ? t('export.checking') : t('export.delivery')}
+          </Button>
         </div>
       </div>
       {unresolved && (
@@ -708,8 +727,8 @@ function ExportView({ document, state, exportDocument, t }: {
           {t(state.externalConflict === null ? 'export.dirtyLock' : 'edit.conflictLock')}
         </p>
       )}
-      {!unresolved && deliveryUnavailable && <p className={css.inlineNotice}>{t('export.noTemplate')}</p>}
-      {!unresolved && !deliveryUnavailable && deliveryBlocked && (
+      {!unresolved && freeMode && <p className={css.inlineNotice}>{t('export.freeMode')}</p>}
+      {!unresolved && deliveryBlocked && (
         <p className={css.inlineNotice} role="alert">{t('export.gateBlocked')}</p>
       )}
       {state.exportReceipt !== null && (
@@ -726,16 +745,15 @@ function ExportView({ document, state, exportDocument, t }: {
   )
 }
 
-/** Template relationship, backed gate, template contracts, and delivery export. */
-function GateView({
-  document, state, validate, loadTemplates, installTemplate, uploadTemplate,
-  confirmTemplate, associateTemplate, exportDocument, t,
-}: Pick<PaperAIDocumentWorkbenchProps,
-  | 'validate' | 'loadTemplates' | 'installTemplate' | 'uploadTemplate'
-  | 'confirmTemplate' | 'associateTemplate' | 'exportDocument' | 't'
-> & { document: PaperAIDocumentSnapshot; state: PaperAIWorkbenchState }): ReactNode {
+/** Template relationship and the backed gate report; catalog and export own their tabs. */
+function GateView({ document, state, validate, onSendFix, t }: Pick<PaperAIDocumentWorkbenchProps, 'validate' | 't'> & {
+  document: PaperAIDocumentSnapshot
+  state: PaperAIWorkbenchState
+  onSendFix: () => void
+}): ReactNode {
   const report = document.gate
   const unresolved = hasUnresolvedEdit(state)
+  const busy = state.action !== null || state.nodePhase === 'loading' || unresolved
   return (
     <div className={css.scrollView}>
       <section className={css.gateOverview} aria-labelledby="paperai-gate-heading">
@@ -745,14 +763,26 @@ function GateView({
             <p>{t('gate.description')}</p>
           </div>
           {document.template !== null && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={state.action !== null || state.nodePhase === 'loading' || unresolved}
-              onClick={() => { void validate() }}
-            >
-              {state.action === 'validating' ? t('gate.validating') : t('gate.validate')}
-            </Button>
+            <div className={css.exportActions}>
+              {report.status === 'failed' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={onSendFix}
+                >
+                  {t('gate.sendFix')}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => { void validate() }}
+              >
+                {state.action === 'validating' ? t('gate.validating') : t('gate.validate')}
+              </Button>
+            </div>
           )}
         </div>
         {document.template === null ? <p className={css.empty}>{t('gate.noTemplate')}</p> : (
@@ -782,17 +812,63 @@ function GateView({
           </>
         )}
       </section>
-      <TemplateCatalogView
-        document={document}
-        state={state}
-        loadTemplates={loadTemplates}
-        installTemplate={installTemplate}
-        uploadTemplate={uploadTemplate}
-        confirmTemplate={confirmTemplate}
-        associateTemplate={associateTemplate}
-        t={t}
-      />
-      <ExportView document={document} state={state} exportDocument={exportDocument} t={t} />
+    </div>
+  )
+}
+
+/** Persistent document status strip: template, gate, and ledger at a glance. */
+function StatusBar({ document, selectTab, focusActive, toggleFocus, t }: {
+  document: PaperAIDocumentSnapshot
+  selectTab: PaperAIDocumentWorkbenchProps['selectTab']
+  focusActive: boolean
+  toggleFocus: () => void
+  t: PaperAIDocumentWorkbenchProps['t']
+}): ReactNode {
+  const failing = document.gate.findings.filter(finding => !finding.passed).length
+  const gateKey: PaperAIWorkbenchKey = document.gate.status === 'passed'
+    ? 'statusbar.gatePassed'
+    : document.gate.status === 'failed' ? 'statusbar.gateFailed' : 'statusbar.gateNotRun'
+  return (
+    <div className={css.statusBar} data-paperai-status-bar>
+      <button
+        type="button"
+        className={css.statusChip}
+        data-kind="template"
+        data-attached={document.template !== null ? 'true' : 'false'}
+        onClick={() => { selectTab('template') }}
+      >
+        {document.template?.name ?? t('statusbar.templateNone')}
+      </button>
+      <button
+        type="button"
+        className={css.statusChip}
+        data-kind="gate"
+        data-status={document.gate.status}
+        onClick={() => { selectTab('gate') }}
+      >
+        <StateDot
+          state={document.gate.status === 'passed' ? 'done' : document.gate.status === 'failed' ? 'error' : 'warning'}
+          size={8}
+        />
+        <span>{t(gateKey, { count: failing })}</span>
+      </button>
+      <button
+        type="button"
+        className={css.statusChip}
+        data-kind="versions"
+        onClick={() => { selectTab('versions') }}
+      >
+        {t('statusbar.versions', { count: document.versions.length })}
+      </button>
+      <button
+        type="button"
+        className={clsx(css.statusChip, css.focusChip)}
+        data-kind="focus"
+        aria-pressed={focusActive}
+        onClick={toggleFocus}
+      >
+        {t(focusActive ? 'statusbar.focusExit' : 'statusbar.focus')}
+      </button>
     </div>
   )
 }
@@ -802,7 +878,7 @@ function ReadyView(props: Pick<
   PaperAIDocumentWorkbenchProps,
   | 'selectNode' | 'updateDraft' | 'discardDraft' | 'commitSelected' | 'validate' | 'restore'
   | 'loadTemplates' | 'installTemplate' | 'uploadTemplate' | 'confirmTemplate'
-  | 'associateTemplate' | 'exportDocument' | 'resolveExternalConflict' | 't'
+  | 'associateTemplate' | 'exportDocument' | 'resolveExternalConflict' | 'setDraft' | 't'
 > & { state: PaperAIWorkbenchState }): ReactNode {
   const document = props.state.document
   if (document === null) return null
@@ -821,33 +897,55 @@ function ReadyView(props: Pick<
       />
     )
     case 'versions': return <VersionsView document={document} state={props.state} restore={props.restore} t={props.t} />
+    case 'template': return (
+      <div className={css.scrollView}>
+        <TemplateCatalogView
+          document={document}
+          state={props.state}
+          loadTemplates={props.loadTemplates}
+          installTemplate={props.installTemplate}
+          uploadTemplate={props.uploadTemplate}
+          confirmTemplate={props.confirmTemplate}
+          associateTemplate={props.associateTemplate}
+          t={props.t}
+        />
+      </div>
+    )
     case 'gate': return (
       <GateView
         document={document}
         state={props.state}
         validate={props.validate}
-        loadTemplates={props.loadTemplates}
-        installTemplate={props.installTemplate}
-        uploadTemplate={props.uploadTemplate}
-        confirmTemplate={props.confirmTemplate}
-        associateTemplate={props.associateTemplate}
-        exportDocument={props.exportDocument}
+        onSendFix={() => { props.setDraft(fixPromptText(document, props.t)) }}
         t={props.t}
       />
+    )
+    case 'export': return (
+      <div className={css.scrollView}>
+        <ExportView document={document} state={props.state} exportDocument={props.exportDocument} t={props.t} />
+      </div>
     )
   }
 }
 
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
-  closeDetails, useWorkbench, selectTab, retryOpen, selectNode, updateDraft,
+  closeDetails, setDraft, useWorkbench, selectTab, retryOpen, selectNode, updateDraft,
   discardDraft, commitSelected, validate, loadTemplates, installTemplate,
   uploadTemplate, confirmTemplate, associateTemplate, exportDocument,
-  reloadExternal, resolveExternalConflict, restore, t,
+  reloadExternal, resolveExternalConflict, restore, setDetailsFocus, t,
 }: PaperAIDocumentWorkbenchProps): ReactNode {
   const state = useWorkbench(value => value)
   const document = state.document
   const tabs = document === null ? [] : TABS.map(tab => ({ id: tab, label: t(TAB_KEYS[tab]) }))
+  const [focusActive, setFocusActive] = useState(false)
+  // Unmount releases a still-active focus demand so the split returns.
+  useEffect(() => () => { setDetailsFocus(false) }, [setDetailsFocus])
+  const toggleFocus = (): void => {
+    const next = !focusActive
+    setFocusActive(next)
+    setDetailsFocus(next)
+  }
   return (
     <DetailsViewShell
       className={css.root ?? ''}
@@ -859,6 +957,15 @@ export function DocumentWorkbench({
       activeTab={state.tab}
       onSelectTab={(tab) => { selectTab(tab as PaperAIWorkbenchTab) }}
     >
+      {state.phase === 'ready' && document !== null && (
+        <StatusBar
+          document={document}
+          selectTab={selectTab}
+          focusActive={focusActive}
+          toggleFocus={toggleFocus}
+          t={t}
+        />
+      )}
       {state.externalUpdate !== null && (
         <div className={css.externalUpdate} role="status">
           <div>
@@ -912,6 +1019,7 @@ export function DocumentWorkbench({
             exportDocument={exportDocument}
             resolveExternalConflict={resolveExternalConflict}
             restore={restore}
+            setDraft={setDraft}
             t={t}
           />
         )}

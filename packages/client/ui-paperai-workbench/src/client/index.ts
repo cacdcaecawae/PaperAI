@@ -1,6 +1,6 @@
 /** DSH-native PaperAI Workspace tree and document details workbench plugin. */
 
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -15,7 +15,7 @@ import type {
   PaperAIDocumentWorkbenchInjected, PaperAIWorkspaceContentInjected,
 } from './slots.ts'
 import { WorkspaceContent } from './WorkspaceContent.tsx'
-import type { PaperAIWorkbenchRemote } from './types.ts'
+import type { PaperAIActionResult, PaperAIWorkbenchRemote } from './types.ts'
 
 export type {
   PaperAIDocumentWorkbenchInjected, PaperAIDocumentWorkbenchProps,
@@ -40,8 +40,8 @@ export const PAPERAI_DETAILS_VIEW_ID = 'paperai'
 export const PAPERAI_LAYOUT_CONFIG: Readonly<LayoutConfig> = Object.freeze({
   centerMin: 560,
   detailsMin: 420,
-  detailsDefault: 600,
-  detailsMax: 960,
+  detailsDefault: 760,
+  detailsMax: 1280,
   detailsVisibility: 'current-session',
   detailsNarrowMode: 'focus',
 })
@@ -116,6 +116,25 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       'paperai-ui-workbench: durable document heads',
     )
 
+    // Import and template start share one gesture: connect the Workspace,
+    // show its Session, open the document view, then establish the document.
+    const startDocument = async (
+      workspaceId: WorkspaceId,
+      establish: (sessionId: SessionId) => Promise<PaperAIActionResult>,
+    ): Promise<PaperAIActionResult> => {
+      try {
+        const sessionId = await ctx.workspaces.connectWorkspace(workspaceId)
+        ctx.sessions.open(sessionId)
+        ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
+        const result = await establish(sessionId)
+        await settleDetailsSelection(ctx, sessionId)
+        return result
+      } catch (error: unknown) {
+        controller.failWorkspace(workspaceId, error)
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+
     const workspaceInjected: PaperAIWorkspaceContentInjected = {
       hooks: { resources: controller.resourceDirectoryStore() },
       ensureResources: workspaceId => controller.ensureResources(workspaceId),
@@ -136,19 +155,15 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           controller.failWorkspace(workspaceId, error)
         }
       },
-      importDocument: async (workspaceId, input) => {
-        try {
-          const sessionId = await ctx.workspaces.connectWorkspace(workspaceId)
-          ctx.sessions.open(sessionId)
-          ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
-          const result = await controller.importDocument(workspaceId, sessionId, input)
-          await settleDetailsSelection(ctx, sessionId)
-          return result
-        } catch (error: unknown) {
-          controller.failWorkspace(workspaceId, error)
-          return { ok: false, error: error instanceof Error ? error.message : String(error) }
-        }
-      },
+      importDocument: (workspaceId, input) => startDocument(
+        workspaceId,
+        sessionId => controller.importDocument(workspaceId, sessionId, input),
+      ),
+      createFromTemplate: (workspaceId, input) => startDocument(
+        workspaceId,
+        sessionId => controller.createFromTemplate(workspaceId, sessionId, input),
+      ),
+      loadTemplateChoices: workspaceId => controller.templateChoices(workspaceId),
     }
 
     ctx.slots.inject('sidebar.workspaces.content', () => ctx.slots.register({
@@ -182,6 +197,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         reloadExternal: () => controller.reloadExternal(sessionId),
         resolveExternalConflict: (resolution) => { controller.resolveExternalConflict(sessionId, resolution) },
         restore: commitId => controller.restore(sessionId, commitId),
+        setDetailsFocus: (active) => { ctx.layout.setDetailsFocus(active) },
       }),
     }, DocumentWorkbench))
   } catch (error) {

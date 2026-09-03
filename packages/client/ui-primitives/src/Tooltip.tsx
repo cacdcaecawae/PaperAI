@@ -26,6 +26,20 @@ interface AnchorProps {
 
 type TooltipLabel = string | (() => string)
 
+// Script-driven focus after a pointer gesture (a row click that moves focus to
+// a back control) must not raise the bubble: the pointer is elsewhere and the
+// label would hang there until blur. Once the anchor really is the active
+// element the platform's :focus-visible heuristic decides; a focus event that
+// did not make it active (synthetic dispatch) keeps the immediate path.
+function focusRaisesBubble(el: Element): boolean {
+  if (el.ownerDocument.activeElement !== el) return true
+  try {
+    return el.matches(':focus-visible')
+  } catch {
+    return true
+  }
+}
+
 /**
  * Attach a hover/focus tooltip to an anchor element.
  * @param props.label - bubble text, or a resolver evaluated only while the bubble is visible.
@@ -149,7 +163,13 @@ export function Tooltip({ label, side = 'right', delayMs = 0, disabled = false, 
         ref: mergedRef,
         onMouseEnter: (e) => { children.props.onMouseEnter?.(e); triggers.current.hover = true; showAfterHoverDelay() },
         onMouseLeave: (e) => { children.props.onMouseLeave?.(e); triggers.current.hover = false; cancelShow(); setPos(null) },
-        onFocus: (e) => { children.props.onFocus?.(e); triggers.current.focus = true; cancelShow(); show() },
+        onFocus: (e) => {
+          children.props.onFocus?.(e)
+          if (!focusRaisesBubble(e.currentTarget)) return
+          triggers.current.focus = true
+          cancelShow()
+          show()
+        },
         onBlur: (e) => { children.props.onBlur?.(e); triggers.current.focus = false; hide() },
       })}
       {pos !== null && (

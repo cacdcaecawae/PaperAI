@@ -500,6 +500,27 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 
 ### `paperai/*`
 
+<a id="paperaiacpconfig--log-only"></a>
+
+#### `paperai/acp/config` — log-only
+
+```ts persistence-catalog
+/**
+ * The driver selection applied to the provider session — model, reasoning
+ * effort, and boolean switches such as fast mode — recorded whenever it
+ * changes, so every later model call is reconstructable from this log
+ * alone. Log-only: not a surface event.
+ */
+'paperai/acp/config': {
+  provider: 'codex' | 'claude'
+  model: string
+  reasoningEffort?: string
+  switches?: Record<string, boolean>
+}
+```
+
+Source: [`packages/paperai/agent-acp/src/agent.ts:60`](../packages/paperai/agent-acp/src/agent.ts)
+
 <a id="paperaiacpsession--log-only"></a>
 
 #### `paperai/acp/session` — log-only
@@ -513,7 +534,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:44`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:49`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 

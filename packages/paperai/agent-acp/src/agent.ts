@@ -14,6 +14,8 @@ import {
   Inbox,
   type Agent,
   type AgentCancelCause,
+  type AgentDriverSelectionOptions,
+  type AgentDriverSwitch,
   type AgentModelController,
   type AgentOptions,
   type AgentStatus,
@@ -24,6 +26,7 @@ import {
   BlockAssembler,
   createAssistantMessage,
   createToolResultMessage,
+  ReasoningEffortId,
   type ContentBlock,
   type StreamChunk,
   type TokenUsage,
@@ -36,7 +39,9 @@ import type {} from '@deepseek-ai/dsh-permission-presets'
 import { canonicalHeader, type Session, type SessionId, type TurnEndReason, type UserMessage } from '@deepseek-ai/dsh-session'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { AcpRuntime, type AcpProviderDefinition, type AcpRuntimeOptions } from './runtime.ts'
+import {
+  AcpRuntime, AcpSelectionError, type AcpProviderDefinition, type AcpRuntimeOptions, type AcpSelection,
+} from './runtime.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -46,8 +51,23 @@ declare module '@deepseek-ai/dsh-session/types' {
       externalSessionId: string
       resumed: boolean
     }
+    /**
+     * The driver selection applied to the provider session — model, reasoning
+     * effort, and boolean switches such as fast mode — recorded whenever it
+     * changes, so every later model call is reconstructable from this log
+     * alone. Log-only: not a surface event.
+     */
+    'paperai/acp/config': {
+      provider: 'codex' | 'claude'
+      model: string
+      reasoningEffort?: string
+      switches?: Record<string, boolean>
+    }
   }
 }
+
+/** The `paperai/acp/config` payload: the provider plus the runtime's applied selection. */
+type AcpLoggedSelection = { provider: 'codex' | 'claude' } & AcpSelection
 
 type Phase =
   | { kind: 'idle'; lastTurn: number }
@@ -325,6 +345,9 @@ export class AcpAgent implements Agent {
     externalSessionId: string
     resumed: boolean
   } | undefined
+  /** Selection observed before the DSH Session was live; flushed by {@link commitSessionLink}. */
+  private pendingSelection: AcpLoggedSelection | undefined
+  private sessionLive = false
 
   constructor(
     private readonly hostCtx: Context,
@@ -360,13 +383,39 @@ export class AcpAgent implements Agent {
       this.scheduleSandboxModeSync()
     })
     const currentModel = (): string => this.runtime?.currentModel ?? 'default'
+    const currentReasoningEffort = (): string | undefined => this.runtime?.currentReasoningEffort
+    const switches = (): readonly AgentDriverSwitch[] | undefined => {
+      const advertised = this.runtime?.switches ?? []
+      return advertised.length === 0
+        ? undefined
+        : advertised.map(entry => ({
+          id: entry.configId,
+          name: entry.name,
+          ...entry.description === undefined ? {} : { description: entry.description },
+          enabled: entry.enabled,
+        }))
+    }
     this.modelController = {
       provider: { id: provider.id, name: provider.name },
       get currentModel() { return currentModel() },
+      get currentReasoningEffort() { return currentReasoningEffort() },
+      get switches() { return switches() },
       listModels: async () => await this.withModelRuntime(runtime => [...runtime.models.models]),
-      selectModel: async (model: string) => await this.withModelRuntime(async runtime => (
-        await runtime.selectModel(model)
-      )),
+      selectModel: async (model: string, options?: AgentDriverSelectionOptions) => (
+        await this.withModelRuntime(async (runtime) => {
+          try {
+            return await runtime.selectModel(model, options)
+          } catch (error: unknown) {
+            // A provider session left part-way between two selections holds a
+            // state no log describes: the next operation rebuilds the runtime,
+            // which re-reads and records what the provider actually applies.
+            if (error instanceof AcpSelectionError && !error.restored && this.runtime === runtime) {
+              this.runtimeNeedsRestart = true
+            }
+            throw error
+          }
+        })
+      ),
       inputModalities: () => Promise.resolve(this.imageInput ? ['text', 'image'] : ['text']),
     }
   }
@@ -400,11 +449,42 @@ export class AcpAgent implements Agent {
     }
   }
 
-  /** Persist the provider session link only after the DSH Session is live. */
+  /**
+   * Persist the provider session link and the applied driver selection only
+   * after the DSH Session is live; later selection changes append directly.
+   */
   commitSessionLink(): void {
-    if (this.pendingSessionLink === undefined) return
-    this.session.append('paperai/acp/session', this.pendingSessionLink)
-    this.pendingSessionLink = undefined
+    this.sessionLive = true
+    if (this.pendingSessionLink !== undefined) {
+      this.session.append('paperai/acp/session', this.pendingSessionLink)
+      this.pendingSessionLink = undefined
+    }
+    if (this.pendingSelection !== undefined) {
+      this.appendSelection(this.pendingSelection)
+      this.pendingSelection = undefined
+    }
+  }
+
+  /**
+   * Record the selection the provider session now applies. Model-visible ⟺
+   * logged: effort and switches change the provider's model calls, so the
+   * DSH log carries them beside the model instead of relying on provider state.
+   */
+  private recordSelection(): void {
+    const runtime = this.runtime
+    if (runtime === undefined) return
+    const selection: AcpLoggedSelection = { provider: this.provider.id, ...runtime.selection }
+    if (!this.sessionLive) {
+      this.pendingSelection = selection
+      return
+    }
+    this.appendSelection(selection)
+  }
+
+  private appendSelection(selection: AcpLoggedSelection): void {
+    const last = this.session.events.findLast(event => event.type === 'paperai/acp/config')?.data
+    if (last !== undefined && JSON.stringify(last) === JSON.stringify(selection)) return
+    this.session.append('paperai/acp/config', selection)
   }
 
   /**
@@ -623,9 +703,18 @@ export class AcpAgent implements Agent {
       for (const message of claimed) this.session.append('user/message', message, { surfaceOp: 'append' })
       const runtime = await this.runtimeForTurn(signal)
       await this.syncSandboxMode(signal)
-      const model = this.modelController.currentModel
+      const selection = runtime.selection
+      const model = selection.model
       const previous = this.session.requestHeader()
-      const header = canonicalHeader({ config: { provider: this.provider.id, model } })
+      const header = canonicalHeader({
+        config: {
+          provider: this.provider.id,
+          model,
+          ...selection.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: ReasoningEffortId(selection.reasoningEffort) },
+        },
+      })
       this.session.append('request/header', {
         header,
         reason: previous === undefined ? 'initial' : 'change',
@@ -750,7 +839,10 @@ export class AcpAgent implements Agent {
       this.session.header.cwd ?? process.cwd(),
       {
         update: update => this.activeProjection?.update(update),
-        modelChanged: (model) => { this.modelChanged(model) },
+        modelChanged: (model) => {
+          this.modelChanged(model)
+          this.recordSelection()
+        },
         modeChanged: () => { this.scheduleSandboxModeSync() },
         readTextFile: (path, requestSignal) => this.readTextFile(
           path,
@@ -865,6 +957,7 @@ export class AcpAgent implements Agent {
 
   private applyRuntimeStart(started: Awaited<ReturnType<AcpRuntime['start']>>): void {
     this.modelChanged(this.requireRuntime().currentModel)
+    this.recordSelection()
     this.imageInput = started.initialized.agentCapabilities?.promptCapabilities?.image === true
   }
 

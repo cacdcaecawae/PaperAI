@@ -36,6 +36,97 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* The start flow is a foldable block above the tree: template members read
+   as rows of the same rank as documents, headed by their pack name. */
+.start {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0 0 4px;
+}
+
+.startHeading {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 8px 2px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: left;
+}
+
+.startHeading:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.startHeading:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+.startChevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+}
+
+.pack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.packName {
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 8px 0;
+  color: var(--dsw-alias-label-quaternary);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.startRow {
+  min-height: 30px;
+}
+
+.resourceAction:disabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+}
+
+.resourceAction:disabled:hover {
+  background: transparent;
+}
+
+/* The verb names what the row does to the reader's document: create it, or
+   format the one they upload. It takes the brand accent so the start rows
+   read as actions, not as another list of files. */
+.startVerb {
+  flex: none;
+  margin-left: auto;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.resourceAction:disabled .startVerb {
+  color: var(--dsw-alias-label-dimmed);
+}
+
 /* Role and import read as one "import as this role" unit: adjacent and
    left-grouped, both weightless, so neither outranks the document rows the
    panel exists to show. */

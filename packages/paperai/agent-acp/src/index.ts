@@ -260,6 +260,9 @@ export class PaperAiAcpAgents extends Service {
       }, `paperAiAcpAgents.lifecycle(${id})`)
 
       const runId = randomUUID()
+      // The lease carries the session's workspace and live sandbox mode so
+      // the MCP tools stay inside this session's project and refuse mutations
+      // under read-only, the same fence the ACP file callbacks enforce.
       mcpLease = this.ctx.paperMcp.issueDescriptor({
         kind: 'agent',
         name: provider.name,
@@ -267,6 +270,9 @@ export class PaperAiAcpAgents extends Service {
         provider: provider.id,
         sessionId: String(id),
         runId,
+      }, {
+        workspaceRoot: this.ctx.sandboxPolicy.resolve({ session }).workspaceRoot,
+        sandboxMode: () => this.ctx.sandboxPolicy.resolve({ session }).mode,
       })
       const runtimeOptions: AcpRuntimeOptions = {
         mcpServers: [mcpLease.descriptor],
@@ -319,7 +325,7 @@ export class PaperAiAcpAgents extends Service {
 export { AcpAgent } from './agent.ts'
 export { modelStateFromConfigOptions } from './catalog.ts'
 export type { AcpModelState } from './catalog.ts'
-export { paperAiClientCapabilities } from './runtime.ts'
-export type { AcpProviderDefinition, AcpRuntimeOptions } from './runtime.ts'
+export { AcpSelectionError, paperAiClientCapabilities } from './runtime.ts'
+export type { AcpProviderDefinition, AcpRuntimeOptions, AcpSelection } from './runtime.ts'
 
 export default PaperAiAcpAgents

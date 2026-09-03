@@ -1,3 +1,3 @@
 name: Codex
-description: 通过本地 Codex ACP 运行时直接处理论文、代码与项目文件。
+description: PaperAI 论文智能体，由本地 Codex ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。
 order: 2

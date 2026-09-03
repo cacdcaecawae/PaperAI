@@ -8,7 +8,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PaperMcpService from '../src/index.ts'
-import { actor, fakeDomain } from './helpers.ts'
+import { actor, fakeDomain, workspaceScope } from './helpers.ts'
 
 let context: Context | undefined
 let temporaryDirectory: string | undefined
@@ -87,7 +87,7 @@ describe('PaperAI MCP real Loader composition', () => {
     await ctx.loader.await()
 
     expect(route).toMatchObject({ kind: 'exact', path: '/loader/paperai/mcp' })
-    const lease = ctx.paperMcp.issueDescriptor(actor)
+    const lease = ctx.paperMcp.issueDescriptor(actor, workspaceScope())
     expect(lease.descriptor).toMatchObject({
       type: 'http',
       name: 'paperai-loader',
