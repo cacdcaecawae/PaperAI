@@ -220,7 +220,10 @@ export class PaperDocumentService extends Service {
       const engineNodes = await this.ctx.documentEngine.readTextNodes(staged.workingPath, signal)
       const nodes = this.buildIndex(id, engineNodes, [], updatedAt)
       const sourceSha256 = await sha256File(staged.sourcePath, signal)
-      published = await publishStagedDocument(project.rootPath, staged, stem, sourceSha256, signal)
+      published = await publishStagedDocument(
+        project.rootPath, staged, stem, sourceSha256,
+        this.listDocuments(project.id).map(document => document.name), signal,
+      )
       await cleanupStagedDocument(staged)
       staged = undefined
       const document: DocumentRecord = {

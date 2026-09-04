@@ -1,0 +1,23 @@
+- dialog "本项目用哪套模板？":
+  - heading "本项目用哪套模板？" [level=2]
+  - button "关闭":
+    - img
+  - paragraph: 选择一套模板后，新建开题报告、中期报告等文档会自动套用其中对应的格式。
+  - list:
+    - listitem:
+      - strong: HIT 硕士毕设
+      - text: 内置
+      - button "用于本项目"
+      - paragraph: 哈尔滨工业大学硕士学位论文开题、中期和论文书写模板
+      - text: 格式
+      - strong: 开题报告
+      - text: 内容表单
+      - strong: 中期报告
+      - text: 内容表单
+      - strong: 学位论文
+      - text: 排版参考
+    - listitem:
+      - button "不用模板，自由写"
+  - button "添加自定义模板":
+    - img
+    - text: 添加自定义模板

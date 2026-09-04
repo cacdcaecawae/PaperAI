@@ -4,6 +4,8 @@ Status: implemented
 
 [English](2026-08-28-paperai-product-profile.md) | 中文
 
+> 产品定位、分叉策略与领域服务划分仍然有效。客户端贡献表中的两行被 [PaperAI UI 大改](../feature/2026-09-03-paperai-ui-overhaul.zh.md)取代：`ui-workspace` 的槽位现在只列出被追踪的 Word 文档，`ui-conversation` 的详情视图是一个以预览为主的文档界面，配模板、门禁、版本和导出面板，而不是四个并列视图。模板的选择与上传遵循 [PaperAI 模板模型](2026-09-03-paperai-template-model.zh.md)：一套模板按文档类型各存一个格式，由项目选择使用哪一套。
+
 ## 问题
 
 PaperAI 需要成为完整的本地论文文档产品，但第一版实现把 DeepSeek Harness 的呈现复制进了另一套 React/Fastify 应用。通用 Agent 壳、Settings、权限、模型选择、会话生命周期和响应式行为因此被重复实现，外观与交互仍然不像固定版本的上游客户端。每次采用上游改进都变得昂贵，文档业务代码也耦合在第二套应用框架中。

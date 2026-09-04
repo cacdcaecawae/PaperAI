@@ -188,6 +188,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
     /**
+     * The whole blank-session headline block above the workspace row and the
+     * composer. Declared by this package's `conversation` entry with the DSH
+     * headline (mark, title, preview badge) as fallback; a product occupies it
+     * with its own start surface. Root scope: the occupant reads the blank
+     * session's workspace from the owner share rather than from a session.
+     */
+    'conversation.hero.content': { kind: 'single'; scope: 'root'; owner: HeroContentOwnerProps }
+    /**
      * The agent-preset chip beside the workspace picker on the new-session
      * screen. Root scope: no session exists yet, so the choice is staged for
      * the next one rather than applied to a current one.
@@ -638,6 +646,19 @@ export interface HeroBrandMarkOwnerProps {
 }
 
 /**
+ * Owner share of the blank-session headline seat: the facts a start surface
+ * needs to address the session it is about to start.
+ */
+export interface HeroContentOwnerProps {
+  /** The blank session, once one exists; undefined on a cold start with no session. */
+  sessionId: SessionId | undefined
+  /** Workspace the blank session belongs to, once the workspace list resolved it. */
+  workspaceId: WorkspaceId | undefined
+  /** Open the workspace picker menu (the same menu the workspace chip opens). */
+  openWorkspacePicker: () => void
+}
+
+/**
  * Full conversation-slot component props: runtime & child-render (view ring
  * + composer chain/bar + input-region + hero picker slots) & store & injected
  * shares & the locale seat.
@@ -650,6 +671,7 @@ export type ConversationSlotProps =
     | 'conversation.input.dock' | 'conversation.composer.dock'
     | 'conversation.input.left' | 'conversation.input.right'
     | 'conversation.hero.brand.mark'
+    | 'conversation.hero.content'
     | 'conversation.hero.workspace'
     | 'conversation.hero.agentPreset'
   >

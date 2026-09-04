@@ -1,0 +1,5 @@
+- text: Empty project
+- paragraph:
+  - text: 本项目的模板已不在模板库中
+  - button "更换…"
+- button "导入 Word，自由写"

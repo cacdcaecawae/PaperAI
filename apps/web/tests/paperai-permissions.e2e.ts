@@ -39,7 +39,8 @@ const MODEL_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'model-failure.expected.md')
 const MODEL_MENU_EXPECTED = join(SNAPSHOT_DIR, 'model-menu.expected.md')
 const CANCEL_BEFORE_PROMPT_EXPECTED = join(SNAPSHOT_DIR, 'cancel-before-prompt.expected.md')
 const CANCEL_FINAL_TOOL_EXPECTED = join(SNAPSHOT_DIR, 'cancel-final-tool.expected.md')
-const CONFLICT_EXPECTED = join(SNAPSHOT_DIR, 'external-conflict.expected.md')
+const EXTERNAL_UPDATE_EXPECTED = join(SNAPSHOT_DIR, 'external-update.expected.md')
+const BLOCK_EDITOR_EXPECTED = join(SNAPSHOT_DIR, 'block-editor.expected.md')
 const MODE = webSnapshotMode()
 
 interface AcpLogEntry {
@@ -95,8 +96,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   let browser: Browser
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
-  let workspaceId: Parameters<WebScaffold['ctx']['paperaiWorkbench']['list']>[0]['workspaceId']
-  let resourceId: Awaited<ReturnType<WebScaffold['ctx']['paperaiWorkbench']['list']>>['resources'][number]['id']
+  let workspaceId: Parameters<WebScaffold['ctx']['paperaiWorkbench']['overview']>[0]['workspaceId']
+  let resourceId: Awaited<ReturnType<WebScaffold['ctx']['paperaiWorkbench']['overview']>>['documents'][number]['id']
   let originalPermissionMode: string | undefined
   let acpFixtureRoot: string | undefined
   let acpLogPath: string
@@ -132,6 +133,15 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
             FAKE_ACP_CANCEL_FINAL_TOOL: '1',
           },
         },
+        claude: {
+          command: process.execPath,
+          args: [FAKE_ACP_AGENT],
+          env: {
+            FAKE_ACP_LABEL: 'claude',
+            FAKE_ACP_MODEL: 'fake-beta',
+            FAKE_ACP_LOG: acpLogPath,
+          },
+        },
       },
     })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
@@ -139,22 +149,22 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await mkdir(projectRoot, { recursive: true })
     const workspace = await scaffold.ctx.workspaceRegistry.create(projectRoot, 'Paper project')
     workspaceId = workspace.id
-    await scaffold.ctx.paperaiWorkbench.list({ workspaceId })
+    await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    await scaffold.ctx.paperaiWorkbench.setProjectTemplate({ workspaceId, packId: null })
     const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
       workspaceId,
       sessionId: SessionId('paperai-browser-import'),
       fileName: 'proposal.docx',
       contentBase64: fixtureDocxBase64(),
-      role: 'proposal',
       name: 'Browser conflict proposal',
     }).catch(reportDocumentSetupFailure)
     if (imported.status !== 'imported') {
       throw new Error(`PaperAI browser fixture import unavailable: ${imported.capability}: ${imported.detail}`)
     }
-    const resources = await scaffold.ctx.paperaiWorkbench.list({ workspaceId })
-    const documentResource = resources.resources.find(resource => resource.category === 'document')
-    if (documentResource === undefined) throw new Error('PaperAI browser fixture has no document resource')
-    resourceId = documentResource.id
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const documentRow = overview.documents[0]
+    if (documentRow === undefined) throw new Error('PaperAI browser fixture has no tracked document')
+    resourceId = documentRow.id
 
     // The first OfficeCLI save normalizes the compact fixture into the same
     // representation used by later edits. Run that save through the shipped
@@ -190,7 +200,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const open = page.getByRole('button', { name: '打开 Browser conflict proposal.docx' })
     await open.waitFor({ timeout: 15_000 })
     await open.click()
-    await page.getByRole('tab', { name: '编辑' }).waitFor({ timeout: 30_000 })
+    await page.getByRole('document', { name: '文档预览' }).waitFor({ timeout: 30_000 })
   }, 180_000)
 
   afterAll(async () => {
@@ -225,6 +235,34 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(AGENT_PRESETS_EXPECTED, await menu.ariaSnapshot(), MODE)
     await page.keyboard.press('Escape')
   }, 60_000)
+
+  it('keeps model selection usable across Claude and Codex round trips', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-provider-round-trip'))
+    const model = page.locator('button[aria-label^="选择模型"]').first()
+    let current = 'Codex'
+    for (const [provider, wanted] of [
+      ['Claude', 'Fake Alpha'],
+      ['Codex', 'Fake Beta'],
+      ['Claude', 'Fake Alpha'],
+      ['Codex', 'Fake Alpha'],
+    ] as const) {
+      await page.getByRole('button', { name: current, exact: true }).first().click()
+      await page.getByRole('menuitem', { name: new RegExp(`^${provider}`) }).click()
+      const providerChip = page.getByRole('button', { name: provider, exact: true }).first()
+      await providerChip.waitFor({ timeout: 15_000 })
+      await expect.poll(() => providerChip.isEnabled(), { timeout: 15_000 }).toBe(true)
+      await expect.poll(() => model.isEnabled(), { timeout: 10_000 }).toBe(true)
+      await model.click()
+      await page.getByRole('menuitem', { name: /^模型/ }).click()
+      await page.getByRole('menuitemradio', { name: new RegExp(wanted) }).click()
+      await expect.poll(() => model.getAttribute('aria-label'), { timeout: 10_000 }).toContain(wanted)
+      await expect.poll(() => page.getByRole('menu').count(), { timeout: 10_000 }).toBe(0)
+      current = provider
+    }
+    await model.click()
+    await compareOrRefreshGolden(MODEL_MENU_EXPECTED, await page.getByRole('menu', { name: '模型与推理等级' }).ariaSnapshot(), MODE)
+    await model.click()
+  }, 90_000)
 
   it('snapshots the default permission and a real picker switch', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-permissions'))
@@ -413,56 +451,50 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     }
   }, 60_000)
 
-  it('compares and merges a same-node external change from the latest revision', async () => {
+  it('keeps a block draft across an unrelated external version and drops it when the block itself changed', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-conflict'))
-    await page.getByRole('tab', { name: '编辑' }).click()
-    const editor = page.locator('textarea[aria-label^="编辑节点："]')
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx' }).click()
+    await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 10_000 })
+    const preview = page.getByRole('document', { name: '文档预览' })
+    await preview.locator('[data-paperai-block]', { hasText: 'Initial browser paragraph — normalized' }).first().click()
+    const editor = page.getByRole('textbox', { name: '编辑段落' })
     await editor.waitFor({ timeout: 10_000 })
     await editor.fill('浏览器中的本地草稿')
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx' }).click()
+    await page.getByRole('alert').filter({ hasText: '请先保存或取消正在编辑的段落。' }).waitFor({ timeout: 10_000 })
+    expect(await editor.inputValue()).toBe('浏览器中的本地草稿')
 
     const externalSessionId = SessionId('paperai-browser-external-writer')
     const before = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
-    const selected = before.selectedNode
-    if (selected === null) throw new Error('PaperAI browser fixture has no editable selected node')
-    const external = await scaffold.ctx.paperaiWorkbench.commit({
+    const target = before.document.nodes.find(node => node.editable && node.text === 'Initial browser paragraph — normalized')
+    const other = before.document.nodes.find(node => node.editable && node.text === 'Second paragraph')
+    if (target === undefined || other === undefined) throw new Error('PaperAI browser fixture lost its paragraphs')
+
+    // A version on another block: the banner offers the refresh and the draft survives it.
+    await scaffold.ctx.paperaiWorkbench.commit({
       sessionId: externalSessionId,
       documentId: before.document.documentId,
       baseRevision: before.document.revision,
       baseCommitId: before.document.headCommitId,
       mutations: [{
         type: 'replace-text',
-        nodeId: selected.nodeId,
-        baseText: selected.text,
-        nextText: 'Initial browser paragraph — 外部会话写入的最新文本',
+        nodeId: other.nodeId,
+        baseText: other.text,
+        nextText: 'Second paragraph — unrelated external update',
       }],
     })
-    expect(external.selectedNode?.nodeId).toBe(selected.nodeId)
+    const banner = page.getByRole('status').filter({ hasText: '发现文档新版本' })
+    await banner.waitFor({ timeout: 10_000 })
+    await compareOrRefreshGolden(EXTERNAL_UPDATE_EXPECTED, await banner.ariaSnapshot(), MODE)
+    await banner.getByRole('button', { name: '刷新' }).click()
+    await expect.poll(() => banner.count(), { timeout: 30_000 }).toBe(0)
+    await preview.getByText('Second paragraph — unrelated external update').waitFor({ timeout: 10_000 })
+    expect(await editor.inputValue()).toBe('浏览器中的本地草稿')
+    const snapshot = await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(BLOCK_EDITOR_EXPECTED, snapshot, MODE)
 
-    const review = page.getByRole('button', { name: '查看并解决' })
-    await review.waitFor({ timeout: 10_000 })
-    await review.click()
-    await page.getByRole('textbox', { name: '外部最新文本' }).waitFor({ timeout: 30_000 })
-    const conflictHeading = page.getByText('当前节点也有外部修改', { exact: true })
-    await expect.poll(() => conflictHeading.evaluate(element => document.activeElement === element)).toBe(true)
-    expect(await page.getByRole('textbox', { name: '本地草稿' }).inputValue()).toBe('浏览器中的本地草稿')
-    expect(await page.getByRole('textbox', { name: '外部最新文本' }).inputValue())
-      .toBe('Initial browser paragraph — 外部会话写入的最新文本')
-
-    await editor.fill('浏览器合并中的草稿')
-    const latest = await scaffold.ctx.paperaiWorkbench.open({
-      workspaceId,
-      sessionId: externalSessionId,
-      resourceId,
-    })
-    const other = latest.document.nodes.find(node => node.editable && node.nodeId !== selected.nodeId)
-    if (other === undefined) throw new Error('PaperAI browser fixture has no second editable node')
-    const otherBuffer = await scaffold.ctx.paperaiWorkbench.readNode({
-      sessionId: externalSessionId,
-      documentId: latest.document.documentId,
-      nodeId: other.nodeId,
-      revision: latest.document.revision,
-      headCommitId: latest.document.headCommitId,
-    })
+    // A version on the edited block itself: the draft cannot survive, and the writer is told.
+    const latest = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
     await scaffold.ctx.paperaiWorkbench.commit({
       sessionId: externalSessionId,
       documentId: latest.document.documentId,
@@ -470,33 +502,27 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       baseCommitId: latest.document.headCommitId,
       mutations: [{
         type: 'replace-text',
-        nodeId: other.nodeId,
-        baseText: otherBuffer.text,
-        nextText: `${otherBuffer.text} — unrelated external update`,
+        nodeId: target.nodeId,
+        baseText: target.text,
+        nextText: 'Initial browser paragraph — 外部会话写入的最新文本',
       }],
     })
-    await review.waitFor({ timeout: 10_000 })
-    await review.click()
-    await expect.poll(() => editor.isEnabled(), { timeout: 30_000 }).toBe(true)
-    expect(await page.getByRole('textbox', { name: '本地草稿' }).inputValue()).toBe('浏览器中的本地草稿')
-    expect(await page.getByRole('textbox', { name: '外部最新文本' }).inputValue())
-      .toBe('Initial browser paragraph — 外部会话写入的最新文本')
-    expect(await editor.inputValue()).toBe('浏览器合并中的草稿')
-    const snapshot = await captureStableAria(page, '[data-paperai-node-editor]', scaffold.workspaceCwd)
-    await compareOrRefreshGolden(CONFLICT_EXPECTED, snapshot, MODE)
+    await banner.waitFor({ timeout: 10_000 })
+    await banner.getByRole('button', { name: '刷新' }).click()
+    await page.getByRole('alert').filter({ hasText: '这一段已被其他会话修改，本地草稿已放弃。' }).waitFor({ timeout: 30_000 })
+    await expect.poll(() => editor.count(), { timeout: 10_000 }).toBe(0)
+    await preview.getByText('Initial browser paragraph — 外部会话写入的最新文本').waitFor({ timeout: 10_000 })
+    expect(await page.locator('body').innerText()).not.toContain('local draft dropped')
 
+    // Editing the refreshed block saves one version on top of the external one.
+    await preview.locator('[data-paperai-block]', { hasText: '外部会话写入的最新文本' }).first().click()
+    await editor.waitFor({ timeout: 10_000 })
     await editor.fill('浏览器合并后的最终文本')
-    await page.getByRole('button', { name: '使用合并内容' }).click()
-    await expect.poll(() => editor.evaluate(element => document.activeElement === element)).toBe(true)
-    const commit = page.getByRole('button', { name: '提交并创建版本' })
-    await commit.click()
-    await page.getByRole('heading', { name: '浏览器合并后的最终文本' }).waitFor({ timeout: 30_000 })
-    const committed = await scaffold.ctx.paperaiWorkbench.open({
-      workspaceId,
-      sessionId: externalSessionId,
-      resourceId,
-    })
-    expect(committed.selectedNode?.text).toBe('浏览器合并后的最终文本')
+    await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存' }).click()
+    await preview.getByText('浏览器合并后的最终文本').waitFor({ timeout: 30_000 })
+    await expect.poll(() => editor.count(), { timeout: 10_000 }).toBe(0)
+    const committed = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
+    expect(committed.document.nodes.find(node => node.nodeId === target.nodeId)?.text).toBe('浏览器合并后的最终文本')
   }, 120_000)
 
   it('keeps its snapshot inventory closed', async () => {
@@ -504,9 +530,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
+      'block-editor.expected.md',
       'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
-      'external-conflict.expected.md',
+      'external-update.expected.md',
       'model-failure.expected.md',
       'model-menu.expected.md',
       'permission-default.expected.md',

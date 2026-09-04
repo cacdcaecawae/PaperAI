@@ -38,6 +38,4 @@ PaperAI needs its own release family before it publishes product packages. Addin
 
 ## Consequences
 
-The workflow regression test pins complete history, on-demand file downloads, and disabled credential persistence together. A fresh checkout must resolve the merge revision, read the exact base's files, and compute its diff before product checks run.
-
 PaperAI pull requests report product-relevant CI on runners the repository can allocate, instead of failures, indefinite queues, or exhaustive foundation checks owned upstream. Deliberate DSH synchronization and release preparation must still verify the upstream matrix before adopting a new baseline. The repository no longer receives routine version-update pull requests, so maintainers must schedule explicit PaperAI dependency upgrades; security advisories can still produce focused updates. DSH and vendored-framework publication remain verified in their owning repository, while PaperAI publication stays unavailable until a product-specific release family is designed and tested.

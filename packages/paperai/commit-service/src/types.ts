@@ -8,6 +8,7 @@ import type {
   DocumentMutation,
   DocumentNode,
   DocumentRecord,
+  DocumentRole,
   GateMode,
   GateReport,
   TemplateContractId,
@@ -37,10 +38,15 @@ export interface PaperDocumentIndexPeer {
 
 /** Template checks consumed by the commit service without owning template state. */
 export interface PaperTemplateCommitPeer {
-  /** Reject missing, draft, cross-project, role-incompatible, or evidence-only bindings. */
+  /**
+   * Reject missing, draft, cross-project, role-incompatible, or evidence-only
+   * bindings. `role` names the document type the same commit is switching to,
+   * so a type change and a binding can travel together.
+   */
   validateAssociation(input: {
     readonly documentId: DocumentId
     readonly templateId: TemplateContractId
+    readonly role?: DocumentRole
   }): DocumentRecord
   /** Run a real gate over an unpublished DOCX candidate. */
   checkCandidate(input: {

@@ -199,6 +199,8 @@ export interface LaunchOptions {
    * ordering.
    */
   extraOverlayPath?: string
+  /** Keep the shipped host-dependent chooser for native OS scenarios; other tests pin browse. */
+  directoryPicker?: 'auto' | 'browse'
   /**
    * Replay fixture (session.jsonl) served by the inserted dsh-llm-replay row
    * in replay/refresh modes; ignored in record mode (the real adapter
@@ -487,13 +489,15 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // the interaction from the RUNNING host (display, SSH launch, bind). The
     // lane's goldens are interaction-specific (workspace-management drives
     // the in-app browse dialog), so pin -browse deterministically on every
-    // host: patch `name` is an assertion, not an override, hence the
-    // disable+insert pair.
-    { id: 'directory-picker', disabled: true },
-    { insert: [
-      { id: 'directory-picker-browse', name: '@deepseek-ai/dsh-host-directory-picker-browse' },
-      { id: 'ui-directory-picker-browse', name: '@deepseek-ai/dsh-client-ui-directory-picker-browse' },
-    ] },
+    // host except native OS scenarios: patch `name` is an assertion, not an
+    // override, hence the disable+insert pair.
+    ...options.directoryPicker === 'auto' ? [] : [
+      { id: 'directory-picker', disabled: true },
+      { insert: [
+        { id: 'directory-picker-browse', name: '@deepseek-ai/dsh-host-directory-picker-browse' },
+        { id: 'ui-directory-picker-browse', name: '@deepseek-ai/dsh-client-ui-directory-picker-browse' },
+      ] },
+    ],
     ...options.agentPresets === undefined
       ? []
       // Never the derived harness-home root: a developer's own presets must not

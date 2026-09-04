@@ -132,16 +132,18 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
   const paperAIGraph = pluginIds.some(id => id.startsWith('@paperai/'))
 
   // Product branding is an ordinary plugin-graph outcome. A PaperAI graph
-  // must render its wordmark and document mark; official DSH artifacts retain
-  // their shipped lockup; an unbranded local build must render the revisioned
-  // shell fallback. Each branch is selected from plugin/build metadata rather
-  // than assuming one product profile for every built-artifact run.
+  // must render its traced mark and "PaperAI" wordmark outlines in the brand
+  // row; official DSH artifacts retain their shipped lockup; an unbranded
+  // local build must render the revisioned shell fallback. Each branch is
+  // selected from plugin/build metadata rather than assuming one product
+  // profile for every built-artifact run.
   if (paperAIGraph) {
     expect(pluginIds).toContain('@paperai/ui-brand')
     expect(styleOwners).toContain('@paperai/ui-brand')
-    const productName = screen.getByText('paperai')
-    screen.getByText('论文工作台')
-    expect(productName.closest('button')?.querySelector('svg[viewBox="0 0 24 24"]')).not.toBeNull()
+    const wordmark = document.querySelector('svg[data-brand-name="PaperAI"]')
+    expect(wordmark).not.toBeNull()
+    expect(wordmark?.closest('button')?.querySelector('svg[viewBox="429 335 400 644"]')).not.toBeNull()
+    expect(screen.queryByText('论文工作台')).toBeNull()
     expect(screen.queryByText('DSH Local Build')).toBeNull()
   } else if (clientBuildValue('DSH_CLIENT_BUILD_PROFILE') === 'official') {
     expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()

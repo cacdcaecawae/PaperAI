@@ -1,43 +1,40 @@
 # Context Brief
 
-Last updated: 2026-08-29
+Last updated: 2026-09-03
 
 ## Current stage
 
-The functional PaperAI v1 vertical product is released. `main` starts from a tree-identical root snapshot of pinned DeepSeek Harness commit `b150a551`; the PaperAI profile, Host/domain layer, HIT template pack, OfficeCLI adapter, ACP drivers, authenticated MCP bridge, export service, and DSH-native workbench are implemented. Real browser workflows cover project creation, legacy Word import, preview/edit/history, template gate, draft/formal export behavior, native Codex models, constrained-width layouts, Windows-native shell interactions, settings persistence, and HMR/artifact integrity.
+The PaperAI UI overhaul is implemented with focused local validation on `feat/paperai-ui-overhaul`. The branch still contains the inherited uncommitted implementation and the completion fixes from this handoff. The August release evidence belongs to that earlier baseline; see [progress.md](progress.md) for its history.
 
-## Confirmed architecture
+The current UI has a project start page, a shared template library, a document-only sidebar contribution, and editing inside the Word preview. Template formats are chosen by document type. DSH continues to own the conversation, settings, permissions, layout, and Agent engines.
 
-- Keep the complete DSH product foundation, including its built-in Harness/Agent Loop.
-- Add PaperAI as Cordis Host/client plugins and a dedicated product profile.
-- Keep DSH, Codex, and Claude as peer top-level Agent presets; ACP backs Codex and Claude.
-- Reuse existing DSH Settings for API keys, Base URL, providers, model lists, permissions, and theme.
-- Extend only `ui-layout`, `ui-workspace`, `ui-conversation`, and `ui-agent-preset`; replace official brand through existing slots.
-- Migrate the existing Word/template/commit/gate/export domain, OfficeCLI integration, HIT assets, tests, and PaperAI MCP knowledge; do not port the old custom shell, Host, REST client, or duplicate Agent gateway.
-- One revocable PaperAI MCP descriptor is issued per Codex/Claude ACP session; model changes update commit provenance and Agent disposal revokes access.
-- Codex/Claude preset routes fail loudly when unavailable. Blank idle sessions may replace their real factory driver with persistence-backed rollback; a preset label can never silently retain another Agent driver.
-- Template sources are evidence-only documents excluded from the user Working-document list. Template binding is accepted only through a validated Document Commit.
-- New PaperAI sessions default to local Codex ACP. Without a stored user or deployment override, they inherit DSH `workspace-write` plus `ask`; restored sessions keep and display their actual Agent/permission/model state.
-- Optional DSH onboarding is controlled through a live client service so PaperAI can omit the DeepSeek key prompt without forking or removing the Models settings UI.
-- Commit publication uses a durable recovery journal, and a failed root commit compensates its uncommitted derived import without deleting the browser upload, institutional source, committed document, or template evidence.
-- Settings path writes retry one freshly read revision conflict, so a concurrent namespace update cannot silently drop a later user preference.
+The Windows folder-picker follow-up adds a hidden owner so the native dialog does not create a separate Node.js taskbar button. Native window, built-worker, and assembled Web cancellation checks pass; desktop screenshot acceptance remains unverified. See the [picker review](review/2026-09-03-windows-picker.md).
 
-## Safety and recovery
+The document and ACP follow-up aligns new Word imports with `documents/source` and `documents/working`, reserves names retained by missing-file records, clarifies create-or-open behavior, and reactivates resident Sessions after Claude/Codex replacement. The switching regression passes in the assembled browser. The user's existing project and settings were inspected read-only. The owning bilingual Agent Notes and translation records are present; see the [documents and ACP review](review/2026-09-03-project-documents-and-acp.md).
 
-- Legacy archive commit: `c908361ecdc9dc9d1517d7382e5c7eb8f0c1aa48`.
+The broader `workspace-management.e2e.ts` suite has 9 failures beginning with its deletion helper expecting list controls after navigation into workspace details. The first failure also reproduces with the original unconditional browse composition. Adding folders and renaming workspaces pass. This older suite needs separate navigation/fixture work; the branch does not have an all-green browser suite.
+
+## Completed in this handoff
+
+- Preserve unsaved block text when reselecting the block, attempting another document action, or reconnecting; surface a localized save/cancel message.
+- Refresh loaded project lists when another Session or Agent creates a document.
+- Retain the selected template id after its set is deleted and show the missing-template state; retry failed initial project reads.
+- Complete the real-browser scenarios and their portable ARIA fixtures, regenerate the affected catalogs, remove unused test exports, and repair stale rescope-check assumptions.
+- Synchronize the affected bilingual READMEs, generated references, and the owning UI Agent Note.
+
+## Verification
+
+The final focused workbench run passed 7 files and 92 tests. Browser replay passed 3 files and 15 tests, including built boot. The production build and contract lint passed; documentation synchronization passed all 28 gates. All 13 hygiene leaves passed across the aggregate run and focused reruns of its two repaired failures. The rescope classifier and preset tests passed 2 files and 6 tests. Exact commands and limits are recorded in [review/2026-09-03-ui-takeover.md](review/2026-09-03-ui-takeover.md).
+
+## Next work
+
+Continue from this branch and the [UI decision](../.agents/notes/implemented/feature/2026-09-03-paperai-ui-overhaul.md), using [CONTEXT.md](../CONTEXT.md) for product terms. Exact visual matching of the overhaul against its intended design is not part of the acceptance evidence. A real school project is the next useful acceptance check; this handoff's browser scenarios use controlled ACP responses. Existing Web services need a restart to load the Windows picker change.
+
+## Historical recovery pointers
+
+These pointers come from the earlier replatform record, not a fresh recovery test:
+
+- Legacy commit: `c908361ecdc9dc9d1517d7382e5c7eb8f0c1aa48`.
 - Legacy branch: `legacy-standalone-local`.
-- Verified bundle: `F:\Papel-agent-legacy-20260828.bundle`.
-- Source ZIP: `F:\Papel-agent-legacy-20260828.zip`.
-- The previous remote history remains recoverable through the legacy branch, bundle, and ZIP; the rebuilt DSH-based history is now published to `origin/main`.
-
-## Release evidence
-
-- Production build: passed; 204 client artifacts recorded.
-- Web built: 84 files passed; 285 tests passed, 13 skipped.
-- Full workspace: 883 files passed, 4 skipped; 14,344 tests passed, 61 skipped.
-- Independent E2E: 28 files/112 tests passed; 33 files/92 tests skipped by design.
-- Static aggregate: 37 passed, 0 failed, 0 skipped; contract lint, notices, and diff checks passed.
-
-## Current next step
-
-Use PaperAI v1 with real school projects, collect workflow and UI friction, and prioritize the next iteration without reopening the completed architecture reset.
+- Bundle: `F:\Papel-agent-legacy-20260828.bundle`.
+- Source archive: `F:\Papel-agent-legacy-20260828.zip`.

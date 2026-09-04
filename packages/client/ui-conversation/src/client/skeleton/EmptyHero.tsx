@@ -10,7 +10,7 @@ import {
   FishLogo, IconChevronDownOutline14, IconFolderClose16, IconFolderOpen16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConversationSlotProps } from '../contract/slots.ts'
+import type { ConversationSlotProps, HeroContentOwnerProps } from '../contract/slots.ts'
 import css from './HeroShell.module.css'
 
 /** The owner's locale seat type, passed to hero chrome as a plain prop. */
@@ -98,36 +98,51 @@ export function HeroGlow({ className }: { className?: string | undefined }) {
   )
 }
 
+/**
+ * The DSH headline: mark, title, preview badge. A component rather than an
+ * element so the mark seat renders only when no product occupies the headline.
+ */
+function DefaultHeadline({ t, renderSlot }: Pick<HeroShellProps, 't' | 'renderSlot'>) {
+  return (
+    <div className={css.headline}>
+      {/* figma 34:10412: fish 34×25 leading the headline, gap 10. */}
+      <span className={css.fishHitbox}>
+        {renderSlot('conversation.hero.brand.mark', { size: 34, className: css.fish }, {
+          fallback: <FishLogo size={34} className={css.fish} />,
+        })}
+      </span>
+      <span className={css.headlineText}>{t('hero.headline')}</span>
+      <span className={css.previewBadge}>{t('hero.preview')}</span>
+    </div>
+  )
+}
+
 /** Hero chrome props. The workspace row rides the InputBar accessory hole, not here. */
 export interface HeroShellProps {
   /** The owner's locale seat, passed down as a plain prop. */
   t: HeroTranslate
-  /** Authorized renderer for the hero brand-mark slot. */
+  /** Authorized renderer for the hero brand-mark and headline slots. */
   renderSlot: ConversationSlotProps['renderSlot']
+  /** Owner share handed to a product's headline occupant. */
+  content: HeroContentOwnerProps
   /** Overlay content after the stack (modals). */
   children?: ReactNode
 }
 
 /**
  * Render the hero chrome (headline only; no glow, no composer, no workspace
- * row — the glow is the owner's {@link HeroGlow}).
+ * row — the glow is the owner's {@link HeroGlow}). The headline block is a
+ * slot: without an occupant it is the DSH mark, title, and preview badge.
  * @param props - see {@link HeroShellProps}.
  * @returns the centered hero element tree.
  */
-export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
+export function HeroShell({ t, renderSlot, content, children }: HeroShellProps) {
   return (
     <div className={css.root}>
       <div className={css.stack}>
-        <div className={css.headline}>
-          {/* figma 34:10412: fish 34×25 leading the headline, gap 10. */}
-          <span className={css.fishHitbox}>
-            {renderSlot('conversation.hero.brand.mark', { size: 34, className: css.fish }, {
-              fallback: <FishLogo size={34} className={css.fish} />,
-            })}
-          </span>
-          <span className={css.headlineText}>{t('hero.headline')}</span>
-          <span className={css.previewBadge}>{t('hero.preview')}</span>
-        </div>
+        {renderSlot('conversation.hero.content', content, {
+          fallback: <DefaultHeadline t={t} renderSlot={renderSlot} />,
+        })}
         <div className={css.body}>
           {/* The resident composer (ConversationRoot's root-owned scrollport;
               the workspace row rides the stack above the card) is CSS-centered

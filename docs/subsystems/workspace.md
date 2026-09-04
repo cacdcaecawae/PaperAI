@@ -251,18 +251,69 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 
 ```ts cordis-catalog
 /**
- * Lazily initialize and list the selected Workspace's PaperAI resources.
- * @param request - Workspace whose project resources should be listed.
- * @param signal - optional cancellation signal for project and filesystem discovery.
- * @returns the flattened document, template, and non-empty filesystem resources.
+ * Lazily initialize the selected Workspace's project and describe it: the
+ * template set it writes against and its tracked documents.
+ * @param request - Workspace whose project should be described.
+ * @param signal - optional cancellation signal for project initialization.
+ * @returns the project name, template decision, and document rows.
  * @throws when the Workspace or its PaperAI project cannot be resolved.
  */
-@Remote('list') async list(request: PaperAIListResourcesRequest, signal?: AbortSignal): Promise<PaperAIResourceList>
+@Remote('overview') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>
 
 /**
- * Import one browser-selected `.doc` or `.docx` and establish its root version.
- * A rejected root submission is followed by non-cancellable import rollback before this method settles.
- * @param request - Workspace, Session, upload bytes, document role, and optional display name.
+ * Record the template set the project writes against, or the explicit
+ * choice to write without one.
+ * @param request - Workspace and template set id, or `null` for none.
+ * @returns the refreshed overview.
+ * @throws when the Workspace is unknown or the set is not in the library.
+ */
+@Remote('setProjectTemplate') async setProjectTemplate(request: PaperAISetProjectTemplateRequest): Promise<PaperAIProjectOverview>
+
+/**
+ * List every template set the user can choose from.
+ * @returns built-in sets, then custom sets in creation order (empty ones included).
+ */
+@Remote('listTemplateLibrary') listTemplateLibrary(): Promise<PaperAITemplateLibrary>
+
+/**
+ * Create an empty custom template set.
+ * @param request - display name and optional description.
+ * @returns the refreshed library.
+ * @throws when the name is blank or already used.
+ */
+@Remote('createTemplateSet') async createTemplateSet(request: PaperAICreateTemplateSetRequest): Promise<PaperAITemplateLibrary>
+
+/**
+ * Remove a custom template set. Projects that chose it fall back to
+ * "no template" on their next overview; installed formats keep working.
+ * @param request - custom set id.
+ * @returns the refreshed library.
+ * @throws when the set is unknown or built-in.
+ */
+@Remote('deleteTemplateSet') async deleteTemplateSet(request: PaperAIDeleteTemplateSetRequest): Promise<PaperAITemplateLibrary>
+
+/**
+ * Add or replace the Word format for one document type in a custom set.
+ * @param request - set, document type, usage, optional name, and the upload.
+ * @param signal - optional cancellation signal for staging and normalization.
+ * @returns the refreshed library.
+ * @throws when the set is unknown, the upload is invalid, or normalization fails.
+ */
+@Remote('addTemplateFormat') async addTemplateFormat( request: PaperAIAddTemplateFormatRequest, signal?: AbortSignal, ): Promise<PaperAITemplateLibrary>
+
+/**
+ * Remove the format for one document type from a custom set.
+ * @param request - custom set id and document type.
+ * @returns the refreshed library.
+ * @throws when the set or format is unknown.
+ */
+@Remote('removeTemplateFormat') async removeTemplateFormat(request: PaperAIRemoveTemplateFormatRequest): Promise<PaperAITemplateLibrary>
+
+/**
+ * Import one browser-selected `.doc` or `.docx` as a free-writing document
+ * and establish its root version. A rejected root submission is followed
+ * by non-cancellable import rollback before this method settles.
+ * @param request - Workspace, Session, upload bytes, and optional display name.
  * @param signal - optional cancellation signal for import, indexing, commit, and preview work.
  * @returns the opened imported document and root commit, or an explicit native-engine downgrade.
  * @throws when upload, project, import, or commit work fails; an AggregateError includes any rollback failure.
@@ -270,61 +321,58 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 @Remote('importDocument') async importDocument( request: PaperAIImportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>
 
 /**
- * Start one Working document from a built-in template pack member and bind
- * that member's contract in the root commit. A form template is imported as
- * the document itself; a formatting reference governs the uploaded
- * manuscript instead. Built-in members ship reviewed requirements, so the
- * contract is confirmed here without a separate review step.
- * @param request - Workspace, Session, pack member, optional manuscript upload, role, and display name.
+ * Start one document of a given type from the project's template set and
+ * bind that format in the root commit. A form template is imported as the
+ * document itself; a formatting reference governs the uploaded manuscript
+ * instead. Library formats ship reviewed requirements, so the contract is
+ * confirmed here without a separate review step.
+ * @param request - Workspace, Session, document type, optional manuscript upload, and display name.
  * @param signal - optional cancellation signal for installation, import, commit, and preview work.
  * @returns the opened document and root commit, or an explicit native-engine downgrade.
- * @throws when the member is unknown, a formatting reference has no upload, the role does not apply,
- * or import or commit work fails; an AggregateError includes any rollback failure.
+ * @throws when the project has no template set or no format for the type, a formatting reference
+ * has no upload, or import or commit work fails; an AggregateError includes any rollback failure.
  */
 @Remote('createFromTemplate') async createFromTemplate( request: PaperAICreateFromTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>
 
 /**
- * List registered institutional packs and this project's compiled contracts.
- * @param request - Workspace whose template catalog should be projected.
- * @returns built-in pack choices and the project's installed contracts.
- * @throws when the Workspace or its PaperAI project cannot be resolved.
+ * Bind the project template's format for a document type through the
+ * document commit path, changing the document's type in the same commit
+ * when it differs.
+ * @param request - document projection, Session provenance, and the document type to apply.
+ * @param signal - optional cancellation signal for installation, commit, and refreshed projection work.
+ * @returns the refreshed document projection and the new binding commit identity.
+ * @throws when the projection is stale, the project has no template set or format for the type,
+ * or the same format is already bound.
  */
-@Remote('listTemplates') async listTemplates(request: PaperAIListTemplatesRequest): Promise<PaperAITemplateCatalog>
+@Remote('applyTemplate') async applyTemplate( request: PaperAIApplyTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>
 
 /**
- * Install selected built-in pack members as reviewable draft contracts.
- * @param request - Workspace, pack identity, and optional member selection.
- * @param signal - optional cancellation signal for asset import and template compilation.
- * @returns the refreshed template catalog after installation.
- * @throws when the Workspace, pack, or member is unknown, or template compilation fails.
- */
-@Remote('installTemplatePack') async installTemplatePack( request: PaperAIInstallTemplatePackRequest, signal?: AbortSignal, ): Promise<PaperAITemplateCatalog>
-
-/**
- * Upload a custom Word template without mutating the selected source.
- * @param request - Workspace, upload bytes, display name, document roles, and template usage.
- * @param signal - optional cancellation signal for staging, normalization, and compilation.
- * @returns the refreshed template catalog containing the reviewable draft.
- * @throws when the upload or template metadata is invalid, or normalization or compilation fails.
- */
-@Remote('uploadTemplate') async uploadTemplate( request: PaperAIUploadTemplateRequest, signal?: AbortSignal, ): Promise<PaperAITemplateCatalog>
-
-/**
- * Confirm parsed template requirements before a document may use them.
- * @param request - Workspace and installed template identity selected by the user.
- * @returns the refreshed template catalog containing the confirmed contract.
- * @throws when the Workspace is missing or the template does not belong to its project.
- */
-@Remote('confirmTemplate') async confirmTemplate(request: PaperAIConfirmTemplateRequest): Promise<PaperAITemplateCatalog>
-
-/**
- * Associate a confirmed compatible template through the document commit path.
- * @param request - document projection, Session provenance, and template identity to associate.
+ * Drop the bound format through the document commit path; the document
+ * keeps its type and writes freely from then on.
+ * @param request - document projection and Session provenance.
  * @param signal - optional cancellation signal for commit and refreshed projection work.
- * @returns the refreshed document projection and the new association commit identity.
- * @throws when the projection is stale or the template is missing, foreign, unconfirmed, incompatible, or already associated.
+ * @returns the refreshed document projection and the new commit identity.
+ * @throws when the projection is stale or no format is bound.
  */
-@Remote('associateTemplate') async associateTemplate( request: PaperAIAssociateTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>
+@Remote('detachTemplate') async detachTemplate( request: PaperAIDetachTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>
+
+/**
+ * Guess a document's type from its title, then its opening paragraphs.
+ * @param request - document to inspect.
+ * @returns the guessed type and what it was based on; the current type when nothing matches.
+ * @throws when the document is unknown.
+ */
+@Remote('suggestDocumentType') suggestDocumentType(request: PaperAISuggestDocumentTypeRequest): Promise<PaperAIDocumentTypeSuggestion>
+
+/**
+ * Diff one version against its parent at paragraph level, reading both
+ * immutable snapshots through the document engine.
+ * @param request - document and version to explain.
+ * @param signal - optional cancellation signal for engine reads.
+ * @returns paragraph changes in document order; a root version lists every paragraph as added.
+ * @throws when the version does not belong to the document.
+ */
+@Remote('diffVersion') async diffVersion(request: PaperAIDiffVersionRequest, signal?: AbortSignal): Promise<PaperAIVersionDiff>
 
 /**
  * Export a draft or gated delivery DOCX into the project's output tree.
@@ -354,7 +402,7 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 @Remote('readNode') readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer>
 
 /**
- * Apply selected-node mutations and create one immediate human commit.
+ * Apply block text mutations and create one immediate human commit.
  * @param request - observed document projection, Session provenance, and node text replacements.
  * @param signal - optional cancellation signal for mutation, commit, indexing, and preview work.
  * @returns the refreshed document projection and the new content commit identity.
@@ -596,6 +644,16 @@ get(id: ProjectId): ProjectRecord | undefined
 list(): ProjectRecord[]
 
 /**
+ * Record the template set a project writes against. `null` records the
+ * explicit choice to write without a template; either way the project counts
+ * as decided, so the first-open prompt does not return.
+ * @param id - PaperAI project id.
+ * @param packId - template set id, or `null` for no template.
+ * @returns the updated record.
+ */
+setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord>
+
+/**
  * Resolve a project by an existing directory spelling.
  * @param rootPath - Existing directory path.
  * @returns the unique record for its canonical path, or `undefined`.
@@ -794,10 +852,47 @@ Host service owning institutional and uploaded template lifecycle.
 registerPack(manifest: TemplatePackManifest): () => void
 
 /**
- * List registered packs without exposing Host asset paths.
- * @returns deterministic display-name order with asset-free member summaries.
+ * List every installable template set without exposing Host asset paths:
+ * built-in packs in display-name order, then the user's custom sets that
+ * hold at least one format, in creation order.
+ * @returns asset-free pack summaries.
  */
 listPacks(): TemplatePackSummary[]
+
+/**
+ * List the user's custom template sets, including sets that hold no format yet.
+ * @returns fresh library records in creation order.
+ */
+listLibraryPacks(): TemplateLibraryPack[]
+
+/**
+ * Create an empty custom template set.
+ * @param input - display name and optional description.
+ * @returns the created set.
+ */
+createLibraryPack(input: { readonly name: string; readonly description?: string }): Promise<TemplateLibraryPack>
+
+/**
+ * Remove a custom template set; contracts already installed from it stay valid.
+ * @param packId - custom set id.
+ */
+deleteLibraryPack(packId: string): Promise<void>
+
+/**
+ * Add or replace the Word format for one document type in a custom set.
+ * @param input - set, document type, usage, optional name, and the upload bytes.
+ * @param signal - optional cancellation signal for staging and normalization.
+ * @returns the updated set.
+ */
+addLibraryFormat(input: AddLibraryFormatInput, signal?: AbortSignal): Promise<TemplateLibraryPack>
+
+/**
+ * Remove the format for one document type from a custom set.
+ * @param packId - custom set id.
+ * @param role - document type whose format is removed.
+ * @returns the updated set.
+ */
+removeLibraryFormat(packId: string, role: TemplateLibraryPack['formats'][number]['id']): Promise<TemplateLibraryPack>
 
 /**
  * Return one installed draft or confirmed contract.

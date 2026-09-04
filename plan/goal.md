@@ -1,16 +1,20 @@
 # Goal
 
-Last updated: 2026-08-28
+Last updated: 2026-09-03
 
 Build PaperAI v1 as a polished local academic-document workbench on the complete pinned DeepSeek Harness foundation.
 
 Success means a user can choose a project directory, import institutional DOC/DOCX files, work manually or through DSH/Codex/Claude, inspect every recoverable document change, enforce a confirmed Word template contract, and export a compliant DOCX from one DSH-native interface.
 
+## Current objective
+
+Complete the inherited UI overhaul on `feat/paperai-ui-overhaul`, repair gaps in editing and template workflows, verify the assembled application, and leave a current handoff. This is local continuation of the existing implementation.
+
 ## Product invariants
 
 - The full DSH Host, Harness/Loop, session, permissions, settings, credentials, models, and client plugin system are the platform.
 - DSH, local Codex, and local Claude are peer top-level Agents; Codex and Claude use ACP.
-- The Working DOCX is the only authoritative editable body; HTML is preview and Tiptap is a selected-section buffer.
+- The Working DOCX is the only authoritative editable body; HTML is a preview and the browser editor is a plain-text buffer for one block.
 - OfficeCLI is the v1 Word engine.
 - Imported sources and templates stay immutable; all edits target derived working copies.
 - Every completed human or Agent edit creates a recoverable Document Commit with provenance.
@@ -22,5 +26,5 @@ Success means a user can choose a project directory, import institutional DOC/DO
 - Functional breadth and coherent product experience precede distribution/security hardening.
 - Prefer pinned MIT, Apache-2.0, or BSD dependencies and existing DSH/Open Source capabilities.
 - Verify services, Loader composition, browser workflows, constrained-width layout, and real Word fixtures.
-- Preserve the legacy implementation through its archive branch/bundle while replacing `main`.
-- Use Git and local `gh`; push the completed reset to `cacdcaecawae/PaperAI` with `--force-with-lease`.
+- Preserve the legacy recovery pointers recorded in [context-brief.md](context-brief.md).
+- The August 28 history reset and publication are completed historical work; see [progress.md](progress.md). The current objective is completing the existing development branch.

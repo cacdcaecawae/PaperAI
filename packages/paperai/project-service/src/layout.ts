@@ -36,7 +36,7 @@ export const PAPERAI_CONTEXT_TEMPLATE = `# PaperAI 项目上下文
 
 - \`documents/source/\` 保存导入原件，不直接修改。
 - \`documents/working/\` 保存当前可编辑的 Working DOCX。
-- \`documents/history/\` 保存可恢复的文档版本。
+- \`.paperai/\` 保存版本快照与内部数据，勿手动修改。
 - \`templates/\` 保存学校模板和自定义模板；\`exports/\` 只保存导出结果。
 - 后续 Agent 开始工作前先阅读本文件，并记录关键进展、决定和下一步。
 
@@ -49,7 +49,6 @@ export const PAPERAI_CONTEXT_TEMPLATE = `# PaperAI 项目上下文
 export const PAPERAI_PROJECT_DIRECTORIES = [
   'documents/source',
   'documents/working',
-  'documents/history',
   'templates',
   'references',
   'figures',

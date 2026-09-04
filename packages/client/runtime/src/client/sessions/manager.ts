@@ -803,7 +803,7 @@ export class SessionManager {
           ...(frame.cwd !== undefined ? { cwd: frame.cwd } : {}),
           ...(frame.agentPreset !== undefined ? { agentPreset: frame.agentPreset } : {}),
         })
-        this.sessions.get(frame.sessionId)?.handleBlank(frame.blank)
+        this.sessions.get(frame.sessionId)?.handleAdded(frame.blank)
         if (frame.origin === 'subagent' && frame.parentSessionId !== undefined) {
           this.markCatalogParentExpandable(frame.parentSessionId)
         }
@@ -834,7 +834,12 @@ export class SessionManager {
         // no relative order. Clearing here makes a detached Activation's rows
         // disappear whichever arrives first.
         this.jobsBySession.delete(frame.sessionId)
-        if (!durableSubagent) this.projectionStores.delete(frame.sessionId)
+        if (!durableSubagent) {
+          // Resident Sessions and their consumers retain this store's faces.
+          // Clear values without disconnecting them from replacement frames.
+          if (this.sessions.has(frame.sessionId)) this.projectionStores.get(frame.sessionId)?.clear()
+          else this.projectionStores.delete(frame.sessionId)
+        }
         // A pull already in flight was requested before this removal and can
         // carry the pre-removal parentAvailable:true, which would resurrect
         // the writable editor this invalidation just closed. Replay false over

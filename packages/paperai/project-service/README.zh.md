@@ -15,7 +15,6 @@ CLAUDE.md
 documents/
   source/
   working/
-  history/
 templates/
 references/
 figures/
@@ -28,7 +27,7 @@ exports/
   delivery/
 ```
 
-`documents/source/` 保存不可变的导入原件，`documents/working/` 保存权威 Working DOCX，`documents/history/` 保存可恢复快照。`PAPERAI.md` 为后续 Agent 提供精简的当前目标、进展、工作约定和下一步。服务以独占创建方式生成该文件；文件已存在时绝不覆盖，同名路径若不是普通文件则初始化失败且不会替换该路径。
+`documents/source/` 保存不可变的导入原件，`documents/working/` 保存权威 Working DOCX。版本快照与临时文件位于 `.paperai/` 下，由[提交服务](../commit-service/README.zh.md)管理。`PAPERAI.md` 为后续 Agent 提供精简的当前目标、进展、工作约定和下一步。服务以独占创建方式生成该文件；文件已存在时绝不覆盖，同名路径若不是普通文件则初始化失败且不会替换该路径。
 
 ## 写作规程
 
@@ -38,7 +37,7 @@ exports/
 
 ```ts
 import type { ProjectRecord } from '@paperai/domain'
-import type { ProjectGitStatus } from '@paperai/project-service'
+import type { ProjectGitStatus, WritingCharterSyncResult } from '@paperai/project-service'
 
 interface CreatePaperProjectInput {
   rootPath: string
@@ -49,11 +48,14 @@ interface CreatePaperProjectResult {
   project: ProjectRecord
   projectCreated: boolean
   contextFile: 'created' | 'preserved'
+  charter: WritingCharterSyncResult
   git: ProjectGitStatus
 }
 ```
 
 `create(input)` 串行执行初始化。同一规范路径重复调用时，会保留项目 id、名称、创建时间、上下文文件和全部用户文件。路径已有 DSH Workspace 时直接复用；项目记录关联的 Workspace 被重建时，只修复关联，不改变项目身份。
+
+`setTemplateChoice(id, packId)` 记录项目写作所依据的模板——某个模板 id，或以 `null` 明确选择不用模板。两种写法都会写入 `templateDecidedAt`，因此浏览器首次打开时的模板询问不会再次出现；`templatePackId` 相应写入或移除，`ProjectRecord` 的其他字段保持不变。该调用与初始化共用同一串行队列，项目不存在时失败。
 
 文件系统、Workspace 或 Repository 的致命失败只会删除本次创建且内容未变的文件和空目录。Repository 发布失败时，本次新注册的 Workspace 也会删除。服务从不递归删除已有内容；回滚本身失败时，会同时报告初始错误和清理错误。
 

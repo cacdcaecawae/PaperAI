@@ -10,7 +10,11 @@ Windows 目录选择器的主层此前是围绕 WinForms `FolderBrowserDialog` s
 
 ## 决策
 
-`packages/host/directory-picker-native` 现在经 koffi——它已是仓库其他 `win32.ts` 代码的工作区依赖——在进程内打开 `IFileOpenDialog`（`FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR`），作为 win32 主层。COM 会话运行在 spawn 出的子进程中，模态 `Show` 永不阻塞宿主事件循环；子进程在阻塞前上报其原生线程 id，驱动层通过向该线程的窗口反复投递 `WM_CLOSE`（`EnumThreadWindows`）来处理中止请求，关闭等待预算耗尽后强制终止子进程。对话框是子进程的第一个窗口，Windows 会自动激活它，无需手动前台调用。子进程线程启用宿主接受的最佳线程 DPI 感知（`SetThreadDpiAwarenessContext`，按 per-monitor-v2 → per-monitor → system-aware 级联并检查返回值），严格优于脚本的系统 DPI 上限；DPI 保持为纯外观的 best-effort——不接受其中任何一种的宿主仍得到现代对话框，而不会降级。模块切分让覆盖率在任何主机上都诚实：`win32-dialog-logic.ts`（纯时序）与 `win32-dialog.ts`（driver）可在任何平台使用 fake 进行测试；`win32-dialog-bindings.ts` 对 mock 的 `koffi` COM 世界测试（`dsh-session-persistence-jsonl` 的技法）；POSIX 主机运行真实的 spawn 管道，并验证其因 koffi 加载失败而拒绝；win32 主机运行真实的打开对话框并通过中止将其关闭的冒烟测试。先于本层存在的 PowerShell 链已被删除（见[链删除](../simplification/2026-08-04-drop-windows-powershell-picker-fallback.zh.md)）：该层无回退。
+`packages/host/directory-picker-native` 在 spawn 出的子进程内通过 koffi 打开 `IFileOpenDialog`（`FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR`）。模态 `Show` 在子进程主线程运行，宿主事件循环继续处理 RPC。这是 Windows 唯一的原生层级，COM 失败直接上报（见 [PowerShell 链删除](../simplification/2026-08-04-drop-windows-powershell-picker-fallback.zh.md)）。
+
+对话框使用一个隐藏的顶层工具窗口作为所属窗口，遵循 [Windows 任务栏窗口归属规则](https://learn.microsoft.com/en-us/windows/win32/shell/taskbar#managing-taskbar-buttons)，避免出现独立的 Node.js 任务栏按钮。Web 宿主没有浏览器窗口句柄，其他前台应用也不能确定选择请求的窗口归属。`Show` 返回或抛出异常时，子进程销毁隐藏的所属窗口。中止时只向已上报原生线程中的可见窗口投递 `WM_CLOSE`（`EnumThreadWindows` 与 `IsWindowVisible`），等模态调用退出后再销毁所属窗口。若中止与窗口创建发生竞态，驱动层会重试；关闭等待预算耗尽后强制终止子进程。
+
+子进程线程在创建窗口前通过 `SetThreadDpiAwarenessContext` 依次尝试 per-monitor-v2、per-monitor、system-aware DPI 感知，并检查每次返回值。DPI 为尽力启用的外观功能：宿主拒绝全部上下文时仍使用现代对话框。
 
 ## 考虑过的替代方案
 
@@ -22,6 +26,6 @@ Windows 目录选择器的主层此前是围绕 WinForms `FolderBrowserDialog` s
 ## 后果
 
 - 每台 Windows 机器都得到带其所支持的最佳 DPI 感知（1703+ 为 per-monitor-v2）的现代对话框，无论是否安装 PowerShell。
-- 真实对话框的渲染与完成选择的流程仍需在 Windows 上手动检查（自动关闭冒烟测试证明打开／中止／收尾）。
+- 源码与构建后子进程测试在 Windows 上检查真实窗口的归属、任务栏显示条件、取消和清理。无密钥 Web 快照通过 `host.pickDirectory` 调用发布的选择器，记录原生窗口状态和取消响应。渲染与交互式选择仍需桌面检查。
 - 所用 COM vtable 槽位与 GUID 是冻结的 Windows ABI（Vista 起）；koffi 签名错误可能引发原生访问冲突，但被限制在对话框子进程内——宿主 Node 进程存活，失败原样上报（无回退层；见[链删除](../simplification/2026-08-04-drop-windows-powershell-picker-fallback.zh.md)）。mocked-koffi 的 ABI 固定测试与真实 win32 冒烟测试正是为了在交付前捕获这类错误。
 - 打包二进制路径——打包后的可执行文件以对话框入口形式自我 spawn——不受任何自动化测试覆盖：源码侧与普通 node 下构建出的 `lib/worker.cjs` 已被覆盖，打包 spawn 推迟到 Windows CI 路线图。

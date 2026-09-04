@@ -22,6 +22,7 @@ import type {
   DocumentNode,
   DocumentOperation,
   DocumentRecord,
+  DocumentRole,
   ProjectRecord,
   TemplateContractId,
 } from '@paperai/domain'
@@ -102,6 +103,8 @@ interface CompiledMutations {
   readonly currentNodes: readonly DocumentNode[]
   readonly templateChanged: boolean
   readonly templateId: TemplateContractId | undefined
+  /** Document type the commit publishes; equals the stored role unless a mutation changed it. */
+  readonly role: DocumentRole
 }
 
 interface PublishCandidateRequest {
@@ -116,6 +119,7 @@ interface PublishCandidateRequest {
   readonly currentNodes: readonly DocumentNode[]
   readonly templateChanged: boolean
   readonly templateId: TemplateContractId | undefined
+  readonly role: DocumentRole
   readonly signal: AbortSignal | undefined
 }
 
@@ -342,6 +346,7 @@ export class PaperCommitService extends Service {
         currentNodes: compiled.currentNodes,
         templateChanged: compiled.templateChanged,
         templateId: compiled.templateId,
+        role: compiled.role,
         signal: request.signal,
       })
     })
@@ -394,6 +399,7 @@ export class PaperCommitService extends Service {
         currentNodes,
         templateChanged: document.templateId !== target.gate.templateId,
         templateId: target.gate.templateId,
+        role: document.role,
         signal: request.signal,
       })
     ))
@@ -440,6 +446,7 @@ export class PaperCommitService extends Service {
     const operations: DocumentOperation[] = []
     let templateChanged = false
     let templateId = document.templateId
+    let role = document.role
 
     const requireNode = (nodeId: DocumentNode['id']): DocumentNode => {
       const node = nodes.get(nodeId)
@@ -519,6 +526,7 @@ export class PaperCommitService extends Service {
           this.dependencies.paperTemplates.validateAssociation({
             documentId: document.id,
             templateId: mutation.templateId,
+            role,
           })
           operations.push({
             type: mutation.type,
@@ -528,6 +536,33 @@ export class PaperCommitService extends Service {
           templateChanged = true
           templateId = mutation.templateId
           break
+        case 'unbind-template':
+          if (templateId === undefined) {
+            throw new PaperCommitError('INVALID_REQUEST', `document '${document.id}' has no template to unbind`)
+          }
+          operations.push({ type: mutation.type, before: templateId, after: null })
+          templateChanged = true
+          templateId = undefined
+          break
+        case 'set-document-type': {
+          if (mutation.documentType === role) {
+            throw new PaperCommitError(
+              'INVALID_REQUEST',
+              `document '${document.id}' already has type '${role}'`,
+            )
+          }
+          // A bound format applies to one type; changing the type without
+          // rebinding in the same commit would leave a mismatched binding.
+          const rebinds = mutations.some(candidate => candidate.type === 'bind-template')
+          if (templateId !== undefined && !rebinds) {
+            operations.push({ type: 'unbind-template', before: templateId, after: null })
+            templateChanged = true
+            templateId = undefined
+          }
+          operations.push({ type: mutation.type, before: role, after: mutation.documentType })
+          role = mutation.documentType
+          break
+        }
         case 'milestone': {
           const label = mutation.label.trim()
           if (label.length === 0) {
@@ -555,6 +590,7 @@ export class PaperCommitService extends Service {
       currentNodes,
       templateChanged,
       templateId,
+      role,
     }
   }
 
@@ -678,6 +714,7 @@ export class PaperCommitService extends Service {
     )
     const documentAfter: DocumentRecord = {
       ...documentBefore,
+      role: request.role,
       headCommitId: commit.id,
       nodeCount: nextNodes.length,
       updatedAt: commit.createdAt,

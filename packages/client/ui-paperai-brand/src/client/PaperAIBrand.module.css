@@ -1,60 +1,12 @@
-.mark {
+/* Mark and wordmark are outlines painted in the surrounding text color, the
+   same contract as the DSH whale and wordmark they replace. */
+
+.mark,
+.wordmark {
   display: block;
   flex: none;
 }
 
-.page {
-  fill: currentcolor;
-}
-
-/* The dog-ear sits in the cut corner at reduced opacity, so the folded flap
-   reads as the same sheet rather than a notch punched out of it. */
-.fold {
-  fill: currentcolor;
-  opacity: 0.38;
-}
-
-.rule,
-.accentRule {
-  fill: none;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-}
-
-.rule {
-  stroke: var(--dsw-alias-bg-base);
-}
-
-.accentRule {
-  stroke: var(--dsw-alias-state-business-primary);
-}
-
-/* Name and descriptor are separated by space alone: size and colour already
-   rank them, so a rule between two words is redundant chrome. */
 .wordmark {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: baseline;
-  gap: 7px;
-  overflow: hidden;
   color: var(--dsw-alias-label-primary);
-  font-family: inherit;
-  white-space: nowrap;
-}
-
-.productName {
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 24px;
-  letter-spacing: -0.02em;
-}
-
-.descriptor {
-  overflow: hidden;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 16px;
-  text-overflow: ellipsis;
 }

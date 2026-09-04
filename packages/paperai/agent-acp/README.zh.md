@@ -14,6 +14,8 @@ ACP 客户端文件回调使用已挂载的 DSH 文件系统，而不是直接�
 
 每个 ACP 会话还独占一份经过身份验证的 PaperAI MCP 描述符。描述符会在 ACP `session/new` 或 `session/load` 时传入，随 Provider 模型切换同步提交来源，携带会话的工作区根目录与其沙箱模式的实时视图（MCP 工具因此只能停留在该会话自己的 PaperAI 项目内，并在 `read-only` 下拒绝修改），并在 Agent handle 释放时撤销。因此 Codex 与 Claude 会和人工工作台共用文档提交、模板门禁、历史、回退与导出服务；MCP 服务缺失会明确导致启动失败，不会静默退化成只改文件系统。
 
+模型名称和可用范围来自运行中的适配器返回的 ACP 会话选项。固定版本的 Claude 适配器默认启动其内置 Claude Code，可与终端安装的版本不同。若要使用指定的本机 Claude Code，在启动 PaperAI 前将 `CLAUDE_CODE_EXECUTABLE` 设为其可执行文件的绝对路径，或通过本插件配置的 `claude.env` 设置该变量。`claude.command` 应继续指向 ACP 适配器；Claude Code 可执行文件本身不能替代适配器。修改启动环境后需重启 PaperAI。适配器应用 Claude 设置和提供方公布的模型可用范围；PaperAI 不维护静态的 Claude 模型列表。
+
 ## 模型体验
 
 ### Codex 与 Claude ACP 会话

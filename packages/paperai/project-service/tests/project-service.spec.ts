@@ -80,6 +80,28 @@ describe('PaperProjectService', () => {
     await expect(service.findByPath(root)).resolves.toEqual(first.project)
   })
 
+  it('records the template choice, including the explicit choice of none, without touching identity', async () => {
+    const root = await temporaryRoot('template-choice')
+    const harness = await projectHarness()
+    const { service } = await harness.load()
+    const { project } = await service.create({ rootPath: root, name: '硕士论文' })
+    expect(project.templatePackId).toBeUndefined()
+    expect(project.templateDecidedAt).toBeUndefined()
+
+    const chosen = await service.setTemplateChoice(project.id, 'hit-master-thesis')
+    expect(chosen).toMatchObject({ id: project.id, name: '硕士论文', templatePackId: 'hit-master-thesis' })
+    expect(chosen.templateDecidedAt).toBeDefined()
+    expect(service.get(project.id)).toEqual(chosen)
+
+    const none = await service.setTemplateChoice(project.id, null)
+    expect(none.templatePackId).toBeUndefined()
+    expect(none.templateDecidedAt).toBeDefined()
+    expect(service.get(project.id)?.templatePackId).toBeUndefined()
+
+    await expect(service.setTemplateChoice(project.id, '  ')).rejects.toThrow('must not be blank')
+    await expect(service.setTemplateChoice(ProjectId('missing'), null)).rejects.toThrow('not found')
+  })
+
   it('creates the complete layout, default name, context, and a safely initialized Git repository', async () => {
     const parent = await temporaryRoot('create')
     const root = join(parent, 'new-thesis')

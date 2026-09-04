@@ -57,6 +57,8 @@ Session instances share the scope's lifecycle; liveness eligibility = host-liste
 - Reopening = lazily rebuilding the instance + `open()` pulling history (the host session log is the durable truth).
 - Remaining TODO: approval/question frames never enter history and cannot be recovered across a prune (the manager-level pendingBuffers cover only the never-instantiated window).
 
+A frozen staged Session becomes interactive again when the Host publishes a replacement under the same id. A list baseline alone cannot clear its removal flag; the [replacement decision](../bug-fix/2026-09-03-session-replacement-reactivation.md) records the ordering requirement.
+
 ### The blank bit: the empty session's visible projection, conversion, and reuse
 
 A session "materialized but with no first prompt" is governed by the summary-derived bit `blank` (a derived column, not a header field; SessionHeader stays immutable):

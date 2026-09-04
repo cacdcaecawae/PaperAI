@@ -3432,7 +3432,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/template-service/src/index.ts:80`](../packages/paperai/template-service/src/index.ts)
+来源：[`packages/paperai/template-service/src/index.ts:90`](../packages/paperai/template-service/src/index.ts)
 
 <a id="paperaitool-document"></a>
 
@@ -3452,13 +3452,13 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/tool-document/src/index.ts:47`](../packages/paperai/tool-document/src/index.ts)
+来源：[`packages/paperai/tool-document/src/index.ts:48`](../packages/paperai/tool-document/src/index.ts)
 
 <a id="paperaiworkbench-service"></a>
 
 ## `@paperai/workbench-service`
 
-需要：`workspaceRegistry` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
+需要：`workspaceRegistry` · `documentEngine` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
 
 ```ts config-catalog
 /** Workbench upload policy. */
@@ -3468,7 +3468,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/workbench-service/src/index.ts:326`](../packages/paperai/workbench-service/src/index.ts)
+来源：[`packages/paperai/workbench-service/src/index.ts:276`](../packages/paperai/workbench-service/src/index.ts)
 
 ## 无配置的可加载插件
 

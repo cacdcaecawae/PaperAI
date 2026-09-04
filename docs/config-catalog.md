@@ -3430,7 +3430,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/template-service/src/index.ts:80`](../packages/paperai/template-service/src/index.ts)
+Source: [`packages/paperai/template-service/src/index.ts:90`](../packages/paperai/template-service/src/index.ts)
 
 <a id="paperaitool-document"></a>
 
@@ -3450,13 +3450,13 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/tool-document/src/index.ts:47`](../packages/paperai/tool-document/src/index.ts)
+Source: [`packages/paperai/tool-document/src/index.ts:48`](../packages/paperai/tool-document/src/index.ts)
 
 <a id="paperaiworkbench-service"></a>
 
 ## `@paperai/workbench-service`
 
-Requires: `workspaceRegistry` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
+Requires: `workspaceRegistry` · `documentEngine` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
 
 ```ts config-catalog
 /** Workbench upload policy. */
@@ -3466,7 +3466,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/workbench-service/src/index.ts:326`](../packages/paperai/workbench-service/src/index.ts)
+Source: [`packages/paperai/workbench-service/src/index.ts:276`](../packages/paperai/workbench-service/src/index.ts)
 
 ## Loadable plugins with no config
 

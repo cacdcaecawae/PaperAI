@@ -15,6 +15,8 @@ The service requires `paperRepository`, `documentEngine`, and `paperDocuments`.
 
 `submit()` requires a non-blank message and at least one mutation. `baseCommitId` must equal the current head; omission is valid only before the first commit. `revert()` requires the caller's current head and a different target reachable from that head.
 
+Compiled mutations cover `replace-text`, `insert-node`, `delete-node`, `bind-template`, `unbind-template`, `set-document-type`, and `milestone`. `bind-template` runs `paperTemplates.validateAssociation()` with the document type the same commit switches to; `unbind-template` fails on a document with no bound template; `set-document-type` fails when the type is unchanged and, unless the same commit binds another template, records an `unbind-template` operation first because a bound format applies to one type. The published `DocumentRecord` carries the resulting type and template binding.
+
 ## Publication and Recovery
 
 Each document has one in-process FIFO. The service copies the Working DOCX to a private project-local candidate, compiles supported domain mutations to Office-path mutations, asks `documentEngine` to save and validate that candidate, and asks `paperDocuments` to rebuild its semantic index without publishing it.
@@ -41,7 +43,7 @@ DOCX snapshots are project-local content-addressed objects under `.paperai/objec
 
 A rolled-back publication can leave an unreachable commit or snapshot object, including the original Working image retained for first-commit rollback. `listHistory()` exposes only the parent chain reachable from the current document head. `getCommit()` deliberately permits direct recovery inspection when an object id is known.
 
-`revert()` verifies the target snapshot path and SHA-256, validates and reindexes a private copy, restores the target commit's template binding, then creates a new commit whose parent is the current head. The restored bytes may reuse the target's content-addressed snapshot while actor and operation provenance remain unique to the revert commit.
+`revert()` verifies the target snapshot path and SHA-256, validates and reindexes a private copy, restores the target commit's template binding while keeping the document's current type, then creates a new commit whose parent is the current head. The restored bytes may reuse the target's content-addressed snapshot while actor and operation provenance remain unique to the revert commit.
 
 ## Provenance and Failures
 

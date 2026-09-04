@@ -57,6 +57,8 @@ Session 实例与 scope 同生命周期，存活资格 = host listed（一个判
 - 重开 = lazy 重建实例 + `open()` 拉 history（host 会话日志是持久真相）。
 - 遗留 TODO：approval/question 帧不进 history，跨 prune 不可恢复（manager 级 pendingBuffers 只覆盖「从未实例化」窗口）。
 
+Host 以同一 id 发布替代实例时，已展示且冻结的 Session 恢复交互。列表基线本身不能清除其移除标记；顺序要求见[替代实例决策](../bug-fix/2026-09-03-session-replacement-reactivation.zh.md)。
+
 ### blank 位：空会话的可见投影、转正与复用
 
 「实体化但无首条提示词」的会话经 summary 派生位 `blank` 治理（派生列而非 header 字段，SessionHeader 保持不可变）：

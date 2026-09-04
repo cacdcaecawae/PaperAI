@@ -15,6 +15,7 @@
     { "path": "../../../packages/workspace/workspace" },
     { "path": "../../../vendor/cordis" },
     { "path": "../commit-service" },
+    { "path": "../document-engine" },
     { "path": "../document-service" },
     { "path": "../domain" },
     { "path": "../export-service" },

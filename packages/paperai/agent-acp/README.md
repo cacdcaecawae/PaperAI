@@ -14,6 +14,8 @@ ACP client file callbacks use the mounted DSH filesystem instead of Node filesys
 
 Every ACP session also owns one authenticated PaperAI MCP descriptor. The descriptor is supplied during ACP `session/new` or `session/load`, follows provider model changes for commit provenance, carries the session's workspace root and a live view of its sandbox mode so the MCP tools stay inside the session's own PaperAI project and refuse mutations under `read-only`, and is revoked with the Agent handle. Codex and Claude therefore use the same document commit, template gate, history, revert, and export services as the human workbench; a missing MCP service is a startup failure, never a silent fallback to filesystem-only editing.
 
+Model names and availability come from the running adapter's ACP session options. The pinned Claude adapter starts its bundled Claude Code executable by default, whose version may differ from the terminal installation. To use a specific installed Claude Code, set `CLAUDE_CODE_EXECUTABLE` to its absolute executable path before starting PaperAI, or set that variable through `claude.env` in this plugin's configuration. Keep `claude.command` pointed at an ACP adapter; the Claude Code executable itself does not replace that adapter. Restart PaperAI after changing its launch environment. The adapter applies Claude settings and the provider's advertised model availability; PaperAI owns no static Claude model list.
+
 ## Model Experience
 
 ### Codex and Claude ACP sessions

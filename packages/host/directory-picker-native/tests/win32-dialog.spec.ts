@@ -7,9 +7,12 @@
  */
 
 import { EventEmitter } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { pickWin32Directory, type Win32DialogInternals, type Win32DialogWorkerLike } from '../src/win32-dialog.ts'
+import { DIALOG_TITLE, pickWin32Directory, type Win32DialogInternals, type Win32DialogWorkerLike } from '../src/win32-dialog.ts'
+import { spawnDialogWorker } from '../src/win32-dialog-host.ts'
 import type { Win32DialogWorkerMessage } from '../src/win32-dialog-worker.ts'
+import { loadWindowProbe } from './window-probe.ts'
 
 class FakeWorker extends EventEmitter implements Win32DialogWorkerLike {
   kill = vi.fn(() => true)
@@ -151,13 +154,35 @@ describe('pickWin32Directory', () => {
     await expect(pickWin32Directory(live())).rejects.toThrow('win32 folder dialog failed')
   }, 30_000)
 
-  // win32 hosts run the true COM smoke instead: a real dialog opens briefly
-  // and the abort service closes it (the same lever a disconnecting client pulls).
-  it.skipIf(process.platform !== 'win32')('opens and abort-closes a real dialog', async () => {
+  it.skipIf(process.platform !== 'win32')('opens without a taskbar button and releases both windows on abort', async () => {
+    const probe = await loadWindowProbe()
     const controller = new AbortController()
-    setTimeout(() => {
+    let child: ChildProcess | undefined
+    const picked = pickWin32Directory(controller.signal, {
+      spawnWorker: (data) => {
+        child = spawnDialogWorker(data)
+        return child
+      },
+    }).then(path => ({ path }), (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    let dialog: ReturnType<typeof probe.dialogs>[number] | undefined
+    try {
+      await vi.waitFor(() => {
+        if (child?.pid === undefined) throw new Error('Dialog child has not spawned')
+        const dialogs = probe.dialogs(new Set([child.pid]), DIALOG_TITLE)
+        expect(dialogs).toHaveLength(1)
+        dialog = dialogs[0]
+      }, { timeout: 10_000 })
+      expect(probe.presentation(dialog!)).toEqual({ visible: true, hiddenOwner: true, taskbarEligible: false })
+    } finally {
       controller.abort()
-    }, 400)
-    await expect(pickWin32Directory(controller.signal)).rejects.toThrow('native directory picker aborted')
+      await picked
+      try {
+        await vi.waitFor(() => { expect(child?.exitCode).toBe(0) }, { timeout: 5000 })
+      } finally {
+        if (child?.exitCode === null) child.kill()
+      }
+    }
+    expect(await picked).toEqual({ error: 'native directory picker aborted' })
+    expect(probe.remaining(dialog!)).toEqual({ dialog: false, owner: false })
   }, 30_000)
 })

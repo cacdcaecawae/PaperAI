@@ -1,12 +1,16 @@
-.tree {
+/* The document list follows the sidebar's own section and row vocabulary:
+   the "sessions" heading (12/18 secondary, 34px band) and the 32px session
+   row (14/20, radius 8, hover fill). Nothing here draws a border or a shadow. */
+
+.section {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 2px 0 6px;
+  padding: 2px 0 0;
   color: var(--dsw-alias-label-primary);
 }
 
-.sectionTitle {
+.heading {
   display: flex;
   min-width: 0;
   min-height: 34px;
@@ -16,7 +20,7 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.sectionTitle h3 {
+.heading h3 {
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -27,7 +31,7 @@
   white-space: nowrap;
 }
 
-.sectionTitleIcon {
+.headingIcon {
   display: inline-grid;
   width: 16px;
   height: 18px;
@@ -36,170 +40,83 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* The start flow is a foldable block above the tree: template members read
-   as rows of the same rank as documents, headed by their pack name. */
-.start {
+.count {
+  margin-left: auto;
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 0 0 4px;
 }
 
-.startHeading {
+.row {
   box-sizing: border-box;
   display: flex;
   width: 100%;
+  height: 32px;
   min-width: 0;
-  min-height: 26px;
   align-items: center;
-  gap: 6px;
   border: 0;
   border-radius: 8px;
-  padding: 4px 8px 2px;
+  padding: 0 8px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 18px;
   text-align: left;
+  user-select: none;
+  transition: background 120ms var(--ds-ease-in-out);
 }
 
-.startHeading:hover {
-  color: var(--dsw-alias-label-primary);
-}
-
-.startHeading:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
-}
-
-.startChevron {
-  display: grid;
-  flex: none;
-  place-items: center;
-}
-
-.pack {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.packName {
-  min-width: 0;
-  overflow: hidden;
-  padding: 4px 8px 0;
-  color: var(--dsw-alias-label-quaternary);
-  font-size: 11px;
-  line-height: 16px;
-  letter-spacing: 0.02em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.startRow {
-  min-height: 30px;
-}
-
-.resourceAction:disabled {
-  color: var(--dsw-alias-label-dimmed);
-  cursor: not-allowed;
-}
-
-.resourceAction:disabled:hover {
-  background: transparent;
-}
-
-/* The verb names what the row does to the reader's document: create it, or
-   format the one they upload. It takes the brand accent so the start rows
-   read as actions, not as another list of files. */
-.startVerb {
-  flex: none;
-  margin-left: auto;
-  color: var(--dsw-alias-state-business-primary);
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.resourceAction:disabled .startVerb {
-  color: var(--dsw-alias-label-dimmed);
-}
-
-/* Role and import read as one "import as this role" unit: adjacent and
-   left-grouped, both weightless, so neither outranks the document rows the
-   panel exists to show. */
-.importBar {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 2px;
-  padding: 0 4px 4px;
-}
-
-.roleSelect,
-.importAction {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 8px;
-  padding: 4px 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.roleSelect > span,
-.importAction > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.roleSelect:hover:not(:disabled),
-.importAction:hover:not(:disabled) {
+.row:hover,
+.selected {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
-.roleSelect:disabled,
-.importAction:disabled {
-  color: var(--dsw-alias-label-dimmed);
-  cursor: not-allowed;
-}
-
-.roleSelect,
-.importAction,
-.resourceAction {
-  transition:
-    background 120ms var(--ds-ease-in-out),
-    color 120ms var(--ds-ease-in-out);
-}
-
-.roleSelect:focus-visible,
-.importAction:focus-visible {
+.row:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
+}
+
+.slot {
+  display: inline-flex;
+  width: 16px;
+  height: 20px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.title {
+  min-width: 0;
+  flex: 1;
+  margin: 0 6px 0 4px;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .message,
-.inlineError {
+.empty {
   margin: 0;
-  padding: 6px 8px;
+  padding: 4px 8px 8px;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 18px;
-}
-
-.inlineError {
-  color: var(--dsw-alias-state-error-primary);
 }
 
 .failure {
@@ -219,115 +136,8 @@
   overflow-wrap: anywhere;
 }
 
-.group + .group {
-  margin-top: 2px;
-}
-
-.groupHeading,
-.resourceRow {
-  box-sizing: border-box;
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-}
-
-/* A category label must not read at the same rank as the rows beneath it:
-   it steps down on size, weight, and color together. */
-.groupHeading {
-  gap: 6px;
-  min-height: 26px;
-  padding: 4px 8px 2px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 18px;
-}
-
-.groupIcon,
-.resourceIcon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.count {
-  margin-left: auto;
-  color: var(--dsw-alias-label-dimmed);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 400;
-}
-
-/* Wrapping copy makes centre alignment float the glyph against the middle of
-   the block; align to the first line instead. Matches the sessions empty row. */
-.projectEmpty {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 4px 8px 8px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.resourceRow {
-  gap: 6px;
-  min-height: 32px;
-  border: 0;
-  border-radius: 8px;
-  padding: 4px 8px 4px var(--paperai-resource-indent, 8px);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 14px;
-  line-height: 20px;
-  text-align: left;
-}
-
-.resourceAction {
-  cursor: pointer;
-}
-
-.resourceAction:hover,
-.resourceAction[data-selected='true'] {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.resourceAction:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
-}
-
-.resourceName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resourceStatus {
-  display: inline-grid;
-  flex: none;
-  margin-left: auto;
-  place-items: center;
-}
-
-.visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .roleSelect,
-  .resourceAction {
+  .row {
     transition: none;
   }
 }

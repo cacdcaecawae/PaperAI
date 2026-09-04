@@ -46,6 +46,9 @@
     },
     {
       "path": "../../paperai/workbench-service"
+    },
+    {
+      "path": "../ui-settings"
     }
   ]
 }
