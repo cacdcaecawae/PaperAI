@@ -4,6 +4,48 @@ import { DiagnosticsController } from '../src/client/diagnostics-controller.ts'
 import { COMMIT_1, DOCUMENT_ID, successfulRemote, WORKSPACE_ID } from './fixtures.client.ts'
 
 describe('diagnostic observations', () => {
+  it('preserves findings across rejected scans and transport failures, then permits retry', async () => {
+    const remote = successfulRemote()
+    const controller = new DiagnosticsController(remote)
+    await controller.inspect(WORKSPACE_ID)
+    const report = controller.store.getSnapshot().projects[WORKSPACE_ID]!.report
+    remote.inspectProject = vi.fn().mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'scan refused', details: {} } })
+      .mockRejectedValueOnce(new Error('disconnected'))
+    await controller.inspect(WORKSPACE_ID)
+    expect(controller.store.getSnapshot().projects[WORKSPACE_ID]).toMatchObject({ busy: false, report, error: 'scan refused' })
+    await controller.inspect(WORKSPACE_ID)
+    expect(controller.store.getSnapshot().projects[WORKSPACE_ID]).toMatchObject({ busy: false, report, error: 'Error: disconnected' })
+    remote.inspectProject = successfulRemote().inspectProject
+    await controller.inspect(WORKSPACE_ID)
+    expect(controller.store.getSnapshot().projects[WORKSPACE_ID]!.error).toBeNull()
+  })
+
+  it('clears probe activity after protocol and transport failures and ignores failures after disposal', async () => {
+    const remote = successfulRemote()
+    const controller = new DiagnosticsController(remote)
+    remote.agentDiagnostics = vi.fn().mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'read refused', details: {} } })
+      .mockRejectedValueOnce(new Error('read disconnected'))
+    await controller.loadAgents()
+    expect(controller.store.getSnapshot().agentError).toBe('read refused')
+    await controller.loadAgents()
+    expect(controller.store.getSnapshot().agentError).toBe('Error: read disconnected')
+    remote.probeAgent = vi.fn().mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'probe refused', details: {} } })
+      .mockRejectedValueOnce(new Error('probe disconnected'))
+    await controller.probe('codex', true)
+    expect(controller.store.getSnapshot()).toMatchObject({ agentError: 'probe refused', probing: [] })
+    await controller.probe('codex', true)
+    expect(controller.store.getSnapshot()).toMatchObject({ agentError: 'Error: probe disconnected', probing: [] })
+    const delayed = Promise.withResolvers<Awaited<ReturnType<typeof remote.probeAgent>>>()
+    remote.probeAgent = vi.fn(() => delayed.promise)
+    const pending = controller.probe('claude', true)
+    controller.dispose()
+    const snapshot = controller.store.getSnapshot()
+    delayed.reject(new Error('late transport failure'))
+    await pending
+    await controller.inspect(WORKSPACE_ID)
+    expect(controller.store.getSnapshot()).toBe(snapshot)
+  })
+
   it('deduplicates a provider probe and ignores stale roster reads', async () => {
     const remote = successfulRemote()
     const pending = Promise.withResolvers<Awaited<ReturnType<typeof remote.probeAgent>>>()

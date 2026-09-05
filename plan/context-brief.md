@@ -20,6 +20,8 @@ PaperAI uses the full DSH/Cordis platform. Projects and documents occupy the lef
 
 The [current review](review/2026-09-05-agentero-adoption.md) separates focused service tests, real assembled browser replay, and static/build gates. Earlier release-wide counts in [progress.md](progress.md) describe their dated revisions, not the current tree. Browser scenarios use controlled ACP adapters and real isolated DOCX projects; no real-provider response-time claim follows from them. Agentero was reviewed at commit `7c5efcd1fbab0c5bd14969acdaa437912beb4b93`, without running its desktop application.
 
+Delivery is [PR #25](https://github.com/cacdcaecawae/PaperAI/pull/25). Its focused CI selection includes all changed module owners. The OfficeCLI provider uses the pinned binary's update-check opt-out; the review records local coverage and Linux document evidence. Inspect the checks for the latest pushed revision before merging.
+
 The user authorized a pull request, not a merge. Do not change personal Agent settings, write to the user's existing projects, or republish main while completing that delivery. Real school-document acceptance and distribution hardening remain later work.
 
 ## Historical recovery pointers

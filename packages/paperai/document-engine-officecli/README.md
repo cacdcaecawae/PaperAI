@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 OfficeCLI Service Provider for `ctx.documentEngine`. It resolves the pinned `@officecli/officecli` launcher (or an explicit command), runs every process through DSH `ctx.subprocess`, bounds execution time and captured output, suppresses OfficeCLI auto-update, and closes resident document handles after each lease. Close cleanup uses an independent signal and a separate short deadline, so caller cancellation cannot skip it.
 
+Every invocation sets `OFFICECLI_SKIP_UPDATE=1`, the pinned binary's update-check opt-out. This keeps document operations independent of background binary replacement and installed-skill refresh.
+
 All reads and writes for the same file path share a FIFO lease. A mutation batch applies every Office-path operation, saves once, and releases the OfficeCLI document handle before returning. Failures retain stdout/stderr through `OfficeCliError` without exposing a general command runner to domain consumers.
 
 `normalizeLegacyDocument()` adds the optional structural normalizer consumed by `@paperai/document-service`. On Windows it starts the configured PowerShell executable directly through `ctx.subprocess` and runs the packaged Word COM program without a command shell. Microsoft Word opens the source `.doc` read-only and writes a separate DOCX; the source is never saved or replaced. Non-Windows hosts, a disabled or unresolved PowerShell command, and unavailable Word COM return an explicit degraded result.

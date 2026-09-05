@@ -1735,6 +1735,29 @@ describe('ACP update transcript projection', { concurrent: false }, () => {
 })
 
 describe('ACP Agent settings and secret handling', { concurrent: false }, () => {
+  it('discovers and probes both configured adapters without creating an Agent or granting project access', async () => {
+    const harness = await mountHarness({
+      settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: { probeTimeoutMs: 5000, failureCooldownMs: 60_000 } },
+    })
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()).toMatchObject([
+      { provider: 'codex', status: 'discovered', models: [] },
+      { provider: 'claude', status: 'discovered', models: [] },
+    ])
+    expect(await readLog(harness.logPath)).toEqual([])
+    for (const provider of ['codex', 'claude'] as const) {
+      expect(await harness.ctx.paperAiAcpAgents.probe(provider, false)).toMatchObject({ provider, status: 'ready' })
+    }
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().every(provider => provider.status === 'ready')).toBe(true)
+    expect(harness.mcp.leases).toEqual([])
+    expect(harness.approvalRequests()).toBe(0)
+    const events = await readLog(harness.logPath)
+    expect(events.filter(event => event.event === 'new-session')).toEqual([
+      expect.objectContaining({ label: 'codex', mcpServers: [] }),
+      expect.objectContaining({ label: 'claude', mcpServers: [] }),
+    ])
+    expect(events.some(event => event.event === 'prompt')).toBe(false)
+  })
+
   const codexDefinition: AcpProviderDefinition = {
     id: 'codex',
     name: 'Codex',

@@ -53,6 +53,18 @@ The workspace-management fixture now enters project details to open its seeded S
 - `pnpm run lint:contracts-ready` passed. `pnpm exec vitest run scripts/ci-workflow.spec.ts` passed all 18 tests. `pnpm run doc-sync` passed all 28 gates. The pre-push hook owns the final incremental typecheck.
 - `pnpm --silent run change-scope --base origin/main` inspected the complete inherited and current diff against the fetched live base. `git diff --check` passed.
 
+## PR validation follow-up
+
+[PR #25](https://github.com/cacdcaecawae/PaperAI/pull/25) includes the five adaptations and the inherited UI work. The first remote run passed the focused Windows lane and exposed two remaining checks: the CI test list omitted several changed modules, and Linux OfficeCLI entered its background updater during document validation.
+
+The expanded CI selection passed 179 files / 2,274 tests, with two platform-specific skips, using the existing per-file thresholds of 85% statements/functions/lines and 65% branches. Aggregate changed-source coverage was 93.88% statements, 82.83% branches, 96.30% functions and 95.78% lines. No affected source was excluded and no threshold changed. Tests additionally exercise exact shadow-tree selection, explicit diagnostics/recovery controls, remote failures, and denied ACP file and permission requests.
+
+`pnpm run test:paperai:ci --coverage.enabled --coverage.changed=origin/main --coverage.thresholds.perFile=true --coverage.thresholds.statements=85 --coverage.thresholds.branches=65 --coverage.thresholds.functions=85 --coverage.thresholds.lines=85 --coverage.reporter=text --coverage.reporter=json --maxWorkers=2 --testTimeout=30000`
+
+The OfficeCLI provider passes the pinned binary's documented `OFFICECLI_SKIP_UPDATE=1` opt-out. Its 35 focused tests passed with 100% coverage of the changed provider module. A SHA-256-verified OfficeCLI 1.0.145 Linux binary passed actual DOCX validation, mutation, save, close, text read and HTML preview in Ubuntu with the corrected environment. This isolated smoke establishes the corrected invocation; the complete hosted Linux browser run remains the CI signal.
+
+After the OfficeCLI change, the production build, contract lint and all 28 documentation gates passed again. The built PaperAI permissions/document replay passed all 16 scenarios with unchanged goldens, including real external edits and reviewed working-file recovery.
+
 ## Limits
 
 Browser replay uses controlled ACP responses with real Host composition, isolated project directories, and actual DOCX operations. It establishes lifecycle and UI behavior, not production model quality or provider response time. No live school project or personal Agent configuration was modified. Agent startup still launches its native CLI; no end-to-end switching speedup is asserted. Unsaved drafts last for the browser lifetime. Recovery reconstructs verified committed working bytes and refuses changed heads, existing files, unsafe ancestors and invalid snapshots; it cannot recreate missing originals or absent snapshots.

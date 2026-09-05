@@ -350,6 +350,38 @@ describe('TemplateLibraryView', () => {
 })
 
 describe('DocumentWorkbench', () => {
+  it('quotes an exact shadow-tree selection and preserves its scroll without starting a block edit', () => {
+    const snapshot = documentSnapshot()
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot, scrollTop: 120 }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const host = view.container.querySelector<HTMLElement>('[role="document"]')!
+    const shadow = host.shadowRoot!
+    const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
+    const range = document.createRange()
+    range.setStart(paragraph.firstChild!, 2)
+    range.setEnd(paragraph.firstChild!, 12)
+    // jsdom does not expose ShadowRoot.getSelection; its Range still resolves real shadow nodes.
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+    }) })
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+    expect(screen.getByRole('region', { name: '选中的文字' }).textContent).toContain('search bac')
+    const ask = screen.getByRole('button', { name: '交给 Agent' })
+    expect(fireEvent.mouseDown(ask)).toBe(false)
+    fireEvent.click(ask)
+    expect(b.quoteSelection).toHaveBeenCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' })
+    expect(b.selectBlock).not.toHaveBeenCalled()
+    expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
+    fireEvent.click(paragraph)
+    fireEvent.click(screen.getByRole('button', { name: '取消选区' }))
+    expect(b.quoteSelection).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
+    expect(host.scrollTop).toBe(120)
+    host.scrollTop = 320
+    fireEvent.scroll(host)
+    expect(b.setScroll).toHaveBeenCalledWith(320)
+  })
+
   it('renders in a blank current Session and closes through the generic host owner', () => {
     const b = workbenchProps(workbenchState({}))
     render(<DocumentWorkbench {...b.props} />)
@@ -517,6 +549,9 @@ describe('DocumentWorkbench', () => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).queryByText('当前：不用模板')).toBeNull()
     expect(within(dialog).getByRole('button', { name: '不用模板，自由写' })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: '不用模板，自由写' }))
+    expect(missing.setProjectTemplate).toHaveBeenCalledWith(WORKSPACE_ID, null)
+    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
   })
 
   it('explains that the current draft must be saved or cancelled before navigation', () => {

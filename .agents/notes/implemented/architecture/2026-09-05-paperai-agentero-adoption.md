@@ -42,6 +42,8 @@ Pending choice and actual readiness are separate states. Retained previews consu
 
 Focused tests cover competing selections, submission holds, probe timeout and cooldown, frozen references, preview eviction, stale reads, and recovery refusal. Assembled keyless browser snapshots cover pending initialization, Word selection, draft conflicts, and separate scan/review/recovery gestures alongside model and permission flows. Package documentation owns configuration details and limitations.
 
+The PaperAI CI selection includes the owning runtime, locale, Agent-preset, layout, conversation, and native-picker tests as well as product tests. Changed-source coverage applies to every affected module at the existing thresholds. The [OfficeCLI provider](../../../../packages/paperai/document-engine-officecli/README.md) suppresses the pinned binary's background updater during real document validation and mutation.
+
 ## Alternatives considered
 
 A shared live ACP process pool would couple Session permissions and authenticated MCP descriptors across projects; conversation handles therefore keep separate processes. Replacing DSH with Tauri and Zustand would discard existing plugin lifetimes and generated APIs without reducing native adapter startup. Automatic repair during scanning would hide file mutations from the user; inspection and explicit recovery remain separate operations.

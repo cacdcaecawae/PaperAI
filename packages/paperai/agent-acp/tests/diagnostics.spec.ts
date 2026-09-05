@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,10 +30,41 @@ async function setup() {
     args: [fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url))],
     env: { FAKE_ACP_LABEL: 'codex', FAKE_ACP_LOG: log },
   }
-  return { diagnostics, provider, log }
+  return { diagnostics, provider, log, root }
 }
 
 describe('independent ACP diagnostics', () => {
+  it('denies ACP file and permission requests while consuming unsolicited readiness updates', async () => {
+    const { diagnostics, provider, log, root } = await setup()
+    const path = join(root, 'protected.txt')
+    await writeFile(path, 'original bytes')
+    const result = await diagnostics.probe({
+      ...provider, id: 'claude', name: 'Claude',
+      env: { ...provider.env, FAKE_ACP_LABEL: 'claude', FAKE_ACP_DIAGNOSTIC_PATH: path },
+    }, { probeTimeoutMs: 5000, failureCooldownMs: 60_000 }, true)
+    expect(result).toMatchObject({ status: 'ready', models: [{ id: 'fake-alpha' }, { id: 'fake-beta' }] })
+    const events = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string })
+    expect(events.filter(event => event.event === 'diagnostic-file-denied')).toEqual([
+      expect.objectContaining({ operation: 'read', message: 'RequestError: Internal error' }),
+      expect.objectContaining({ operation: 'write', message: 'RequestError: Internal error' }),
+    ])
+    expect(events.find(event => event.event === 'diagnostic-permission')).toMatchObject({ outcome: { outcome: 'cancelled' } })
+    expect(events.some(event => event.event === 'diagnostic-file-allowed' || event.event === 'prompt')).toBe(false)
+    expect(await readFile(path, 'utf8')).toBe('original bytes')
+  })
+
+  it('reports an unavailable installation without a prompt and caches its failed probe', async () => {
+    const { diagnostics } = await setup()
+    const missing: AcpProviderDefinition = {
+      id: 'codex', name: 'Codex', packageName: '@paperai/missing-test-adapter', binName: 'missing-test-adapter',
+    }
+    expect(diagnostics.read(missing)).toMatchObject({ status: 'error', error: 'unavailable', checkedAt: null })
+    const result = await diagnostics.probe(missing, { probeTimeoutMs: 5000, failureCooldownMs: 60_000 }, false)
+    expect(result).toMatchObject({ status: 'error', error: 'unavailable', models: [] })
+    expect(result.retryAt).toBeGreaterThan(Date.now())
+    expect(diagnostics.read(missing)).toBe(result)
+  })
+
   it('shares concurrent prompt-free probes and retains only matching model metadata', async () => {
     const { diagnostics, provider, log } = await setup()
     expect(diagnostics.read(provider).status).toBe('discovered')

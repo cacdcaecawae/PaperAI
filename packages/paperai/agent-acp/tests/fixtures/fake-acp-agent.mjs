@@ -154,6 +154,29 @@ function makeAgent(connection) {
       }
       currentMode = params.modeId
       log('set-mode', { sessionId: params.sessionId, modeId: params.modeId })
+      const diagnosticPath = process.env.FAKE_ACP_DIAGNOSTIC_PATH
+      if (diagnosticPath !== undefined) {
+        for (const operation of ['read', 'write']) {
+          try {
+            if (operation === 'read') await connection.readTextFile({ sessionId: params.sessionId, path: diagnosticPath })
+            else await connection.writeTextFile({ sessionId: params.sessionId, path: diagnosticPath, content: 'probe mutation' })
+            log('diagnostic-file-allowed', { operation })
+          } catch (error) {
+            log('diagnostic-file-denied', { operation, message: String(error) })
+          }
+        }
+        const response = await connection.requestPermission({
+          sessionId: params.sessionId,
+          toolCall: { toolCallId: 'diagnostic-edit', title: 'Diagnostic file request', kind: 'edit' },
+          options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+        })
+        log('diagnostic-permission', { outcome: response.outcome })
+        for (const update of [
+          { sessionUpdate: 'current_mode_update', currentModeId: currentMode },
+          { sessionUpdate: 'config_option_update', configOptions: modelOptions() },
+          { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'diagnostic unsolicited message' } },
+        ]) await connection.sessionUpdate({ sessionId: params.sessionId, update })
+      }
       if (process.env.FAKE_ACP_DELAY_MODE_UPDATE === params.modeId) {
         const updateDelayMs = Number(process.env.FAKE_ACP_MODE_UPDATE_DELAY_MS ?? 0)
         setTimeout(() => {

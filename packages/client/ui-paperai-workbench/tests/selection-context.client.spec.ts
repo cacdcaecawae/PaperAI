@@ -14,5 +14,11 @@ describe('Word selection context', () => {
     const context = JSON.parse(text.split('[Word selection]\n')[1]!.split('\n')[0]!) as Record<string, unknown>
     expect(context).toMatchObject({ version: COMMIT_1, blocks: [NODE_PARAGRAPH], text: 'Selected\n文字 "quoted"' })
     expect(context.path).not.toBe(document.path)
+    const source = selectionSource()
+    expect(source.codec!.clipboardText(reference.ref)).toBe(reference.clipboardText)
+    expect(source.onPick({} as never)).toBeUndefined()
+    await expect(source.candidates({} as never, {
+      query: 'paragraph', position: 'inline', signal: new AbortController().signal,
+    })).resolves.toEqual([])
   })
 })
