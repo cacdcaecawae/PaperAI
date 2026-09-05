@@ -31,8 +31,9 @@ export interface Win32FolderDialog {
    */
   setTitle(title: string): number
   /**
-   * `IModalWindow::Show` with no owner window; blocks the calling thread
-   * until the user selects or dismisses.
+   * `IModalWindow::Show` with a hidden owner, so the dialog has no standalone
+   * taskbar button. Blocks until selection or dismissal and releases the
+   * owner on every return or failure.
    * @returns the call's HRESULT (`HRESULT_CANCELLED` on dismissal).
    */
   show(): number

@@ -71,6 +71,14 @@ export interface ISessions {
    * @param agentPreset - the preset id the host confirmed.
    */
   noteAgentPreset(sessionId: SessionId, agentPreset: string): void
+
+  /**
+   * Retain the session row and browser binding during a caller-owned Host replacement.
+   * Does not change selection or make a removed Session writable. Release in finally.
+   * @param sessionId - listed session being replaced.
+   * @returns Idempotent release; the final release exposes an unresolved removal.
+   */
+  retainBinding(sessionId: SessionId): () => void
   /** Clear the current selection into the no-session view state. */
   clear(): void
   /**

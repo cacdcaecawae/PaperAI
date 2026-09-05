@@ -58,6 +58,10 @@ export class ModelDirectoryResolver extends Service {
     }
     ctx.remote.$on('llm/adapters-updated', refresh)
     ctx.remote.$on('settings/document-updated', refresh)
+    ctx.remote.$on('agent-preset/selected', (sessionId) => {
+      const directory = this.live.directories.get(sessionId)
+      if (directory !== undefined) void directory.load().catch(() => { /* surfaced by the directory store */ })
+    })
   }
 
   /**

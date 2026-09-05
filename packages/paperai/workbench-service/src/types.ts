@@ -6,7 +6,23 @@ import type {} from '@deepseek-ai/cordis'
 type SessionId = Branded<'SessionId'>
 type WorkspaceId = Branded<'WorkspaceId'>
 
-/** Opaque id for one row in the PaperAI project tree. */
+export type { ProjectIntegrityReport as PaperAIProjectIntegrityReport, WorkingRecoveryPlan as PaperAIWorkingRecoveryPlan } from '@paperai/commit-service/doctor-types'
+
+/** Project and exact recovery plan observed by a prior read-only scan. */
+export interface PaperAIRecoverWorkingRequest {
+  readonly workspaceId: WorkspaceId
+  readonly plan: import('@paperai/commit-service/doctor-types').WorkingRecoveryPlan
+}
+
+export type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
+
+/** An explicit prompt-free diagnostic request for one configured peer Agent. */
+export interface PaperAIProbeAgentRequest {
+  readonly provider: 'codex' | 'claude'
+  readonly force: boolean
+}
+
+/** Opaque id for one openable document row in the PaperAI project sidebar. */
 export type PaperAIResourceId = Branded<'PaperAI.ResourceId'>
 /** Opaque identity of an authoritative Working DOCX. */
 export type PaperAIDocumentId = Branded<'PaperAI.DocumentId'>
@@ -37,29 +53,100 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Domain and real filesystem groups rendered below an expanded DSH Workspace. */
-export type PaperAIResourceCategory = 'document' | 'template' | 'image' | 'experiment' | 'code'
-/** Filesystem-like presentation kind for one projected resource. */
-export type PaperAIResourceKind = 'file' | 'folder'
-/** Optional Working state projected beside one resource row. */
-export type PaperAIResourceStatus = 'clean' | 'modified' | 'pending' | 'blocked'
+/** A document's place in the thesis process; it decides which format of a template set applies. */
+export type PaperAIDocumentType = 'manuscript' | 'proposal' | 'midterm' | 'final' | 'other'
 
-/** One flat Host-projected project resource. */
-export interface PaperAIResourceRow {
-  readonly id: PaperAIResourceId
-  readonly category: PaperAIResourceCategory
-  readonly kind: PaperAIResourceKind
+/** How a Word format contributes to generated academic content. */
+export type PaperAITemplateUsage = 'form-template' | 'format-reference'
+
+/** Where a template set comes from. */
+export type PaperAITemplateSetKind = 'built-in' | 'custom'
+
+/** One Word format inside a template set, applying to one document type. */
+export interface PaperAIFormatChoice {
+  readonly memberId: string
+  readonly documentType: PaperAIDocumentType
   readonly name: string
-  readonly path: string
-  readonly depth: number
-  readonly openable: boolean
-  readonly status?: PaperAIResourceStatus
+  readonly usage: PaperAITemplateUsage
+  readonly sourceVersion: string
+  readonly originalFileName: string
 }
 
-/** Host result for one Workspace resource listing. */
-export interface PaperAIResourceList {
+/** One template set: a school's (or the user's) formats, one per document type. */
+export interface PaperAITemplateSetChoice {
+  readonly packId: string
+  readonly kind: PaperAITemplateSetKind
+  readonly name: string
+  readonly description: string
+  readonly formats: readonly PaperAIFormatChoice[]
+}
+
+/** One tracked Word document listed in the project sidebar. */
+export interface PaperAIDocumentRow {
+  readonly id: PaperAIResourceId
+  readonly documentId: PaperAIDocumentId
+  readonly name: string
+  readonly fileName: string
+  readonly documentType: PaperAIDocumentType
+  /** Display name of the bound format, or `null` while the document writes freely. */
+  readonly templateName: string | null
+  readonly updatedAt: string
+}
+
+/** Everything the sidebar and the project start page show for one project. */
+export interface PaperAIProjectOverview {
   readonly workspaceId: WorkspaceId
-  readonly resources: readonly PaperAIResourceRow[]
+  readonly projectName: string
+  /** Whether the user has decided the project's template set (including "none"). */
+  readonly templateDecided: boolean
+  /** Chosen set id, retained if that set is deleted; `null` for none or undecided. */
+  readonly templatePackId: string | null
+  /** The chosen template set, or `null` while undecided, chosen as none, or no longer available. */
+  readonly template: PaperAITemplateSetChoice | null
+  readonly documents: readonly PaperAIDocumentRow[]
+}
+
+/** Every template set the user can choose from: built-in packs and custom sets, empty ones included. */
+export interface PaperAITemplateLibrary {
+  readonly sets: readonly PaperAITemplateSetChoice[]
+}
+
+/** Request for one Workspace's project overview. */
+export interface PaperAIOverviewRequest {
+  readonly workspaceId: WorkspaceId
+}
+
+/** Record the project's template set; `null` chooses to write without a template. */
+export interface PaperAISetProjectTemplateRequest {
+  readonly workspaceId: WorkspaceId
+  readonly packId: string | null
+}
+
+/** Create an empty custom template set. */
+export interface PaperAICreateTemplateSetRequest {
+  readonly name: string
+  readonly description?: string
+}
+
+/** Remove a custom template set from the library. */
+export interface PaperAIDeleteTemplateSetRequest {
+  readonly packId: string
+}
+
+/** Add or replace the format for one document type in a custom set. */
+export interface PaperAIAddTemplateFormatRequest {
+  readonly packId: string
+  readonly documentType: PaperAIDocumentType
+  readonly usage: PaperAITemplateUsage
+  readonly name?: string
+  readonly fileName: string
+  readonly contentBase64: string
+}
+
+/** Remove the format for one document type from a custom set. */
+export interface PaperAIRemoveTemplateFormatRequest {
+  readonly packId: string
+  readonly documentType: PaperAIDocumentType
 }
 
 /** Semantic kind projected from the authoritative Working DOCX node index. */
@@ -71,13 +158,15 @@ export type PaperAIDocumentNodeKind =
   | 'field'
   | 'unknown'
 
-/** One outline row; only Host-marked editable nodes can request an edit buffer. */
+/** One block of the document; only Host-marked editable nodes can request an edit buffer. */
 export interface PaperAIDocumentNodeSummary {
   readonly nodeId: PaperAIDocumentNodeId
   readonly kind: PaperAIDocumentNodeKind
   readonly label: string
   readonly depth: number
   readonly editable: boolean
+  /** Current plain text, the block editor's starting value. */
+  readonly text: string
 }
 
 /** Temporary plain-text content for exactly one selected semantic node. */
@@ -100,7 +189,7 @@ export interface PaperAIReplaceTextMutation {
   readonly nextText: string
 }
 
-/** Only node-addressed text mutations are admitted by the v1 workbench. */
+/** Only node-addressed text mutations are admitted by the browser workbench. */
 export type PaperAIDocumentMutation = PaperAIReplaceTextMutation
 
 /** Human, Agent, or system provenance attached to one durable version. */
@@ -123,16 +212,31 @@ export interface PaperAIDocumentVersion {
   readonly restorable: boolean
 }
 
-/** Source and display metadata for the template linked to one document. */
+/** Gate severity displayed beside one template requirement. */
+export type PaperAIGateSeverity = 'error' | 'warning' | 'info'
+
+/** One requirement the bound format imposes on the document. */
+export interface PaperAITemplateRequirement {
+  readonly ruleId: string
+  readonly kind: string
+  readonly label: string
+  readonly description: string
+  readonly severity: PaperAIGateSeverity
+  readonly enabled: boolean
+}
+
+/** The format bound to one document, with the template set it came from. */
 export interface PaperAITemplateSummary {
   readonly templateId: string
   readonly name: string
-  readonly source: 'built-in' | 'uploaded'
-  readonly version?: string
+  readonly kind: PaperAITemplateSetKind
+  readonly packId?: string
+  readonly packName?: string
+  readonly memberId?: string
+  readonly sourceVersion?: string
+  readonly usage: PaperAITemplateUsage
+  readonly requirements: readonly PaperAITemplateRequirement[]
 }
-
-/** Gate severity displayed beside one template requirement. */
-export type PaperAIGateSeverity = 'error' | 'warning' | 'info'
 
 /** One requirement result from the latest template-gate run. */
 export interface PaperAIGateFinding {
@@ -158,7 +262,7 @@ export interface PaperAIDocumentSnapshot {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
   readonly title: string
-  readonly role: PaperAIDocumentRole
+  readonly documentType: PaperAIDocumentType
   readonly path: string
   readonly revision: PaperAIDocumentRevision
   readonly headCommitId: PaperAIDocumentCommitId | null
@@ -167,6 +271,8 @@ export interface PaperAIDocumentSnapshot {
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly versions: readonly PaperAIDocumentVersion[]
   readonly template: PaperAITemplateSummary | null
+  /** The project's template set has a format for this document type. */
+  readonly projectFormatAvailable: boolean
   readonly gate: PaperAITemplateGateReport
 }
 
@@ -189,12 +295,7 @@ export interface PaperAIValidateResult {
   readonly gate: PaperAITemplateGateReport
 }
 
-/** Request for one Workspace's project resources. */
-export interface PaperAIListResourcesRequest {
-  readonly workspaceId: WorkspaceId
-}
-
-/** Request to open one project resource in a DSH Session. */
+/** Request to open one project document in a DSH Session. */
 export interface PaperAIOpenDocumentRequest {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
@@ -236,16 +337,18 @@ export interface PaperAIRestoreDocumentRequest {
   readonly targetCommitId: PaperAIDocumentCommitId
 }
 
-/** Academic document role selected during Word import. */
-export type PaperAIDocumentRole = 'manuscript' | 'proposal' | 'midterm' | 'final' | 'other'
+/** Browser Word upload that Host stages before immutable document import. */
+export interface PaperAIWordUpload {
+  readonly fileName: string
+  readonly contentBase64: string
+}
 
-/** Browser upload that Host stages before immutable document import. */
+/** Import a Word file as a free-writing document: no template, type decided later. */
 export interface PaperAIImportDocumentRequest {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
   readonly fileName: string
   readonly contentBase64: string
-  readonly role: PaperAIDocumentRole
   readonly name?: string
 }
 
@@ -262,120 +365,70 @@ export type PaperAIImportDocumentResult =
     readonly detail: string
   }
 
-/** Browser Word upload carried by a template-first document start. */
-export interface PaperAIWordUpload {
-  readonly fileName: string
-  readonly contentBase64: string
-}
-
 /**
- * Start one Working document from a built-in template pack member. A form
+ * Start one document of a given type from the project's template set. A form
  * template becomes the document itself; a formatting reference requires the
- * manuscript `upload` it should govern. The member's contract is bound in the
- * root commit either way.
+ * manuscript `upload` it should govern. The format is bound in the root commit.
  */
 export interface PaperAICreateFromTemplateRequest {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
-  readonly packId: string
-  readonly memberId: string
+  readonly documentType: PaperAIDocumentType
   readonly upload?: PaperAIWordUpload
-  /** Defaults to the member's first applicable role; must be one the member applies to. */
-  readonly role?: PaperAIDocumentRole
-  /** Defaults to the member's display name. */
+  /** Defaults to the format's display name. */
   readonly name?: string
 }
 
-/** How a Word template contributes to generated academic content. */
-export type PaperAITemplateUsage = 'form-template' | 'format-reference'
-
-/** One selectable member of a built-in institutional template pack. */
-export interface PaperAITemplatePackMemberChoice {
-  readonly memberId: string
-  readonly name: string
-  readonly description: string
-  readonly appliesToRoles: readonly PaperAIDocumentRole[]
-  readonly usage: PaperAITemplateUsage
-  readonly originalFileName: string
-}
-
-/** One registered institutional template pack. */
-export interface PaperAITemplatePackChoice {
-  readonly packId: string
-  readonly name: string
-  readonly description: string
-  readonly version: string
-  readonly members: readonly PaperAITemplatePackMemberChoice[]
-}
-
-/** One installed, reviewable template contract. */
-export interface PaperAITemplateContractChoice {
-  readonly templateId: string
-  readonly name: string
-  readonly status: 'draft' | 'confirmed'
-  readonly source: 'built-in' | 'uploaded'
-  readonly appliesToRoles: readonly PaperAIDocumentRole[]
-  readonly usage: PaperAITemplateUsage
-  readonly ruleCount: number
-  readonly slotCount: number
-  readonly originPackId?: string
-  readonly originMemberId?: string
-  readonly requirements: readonly PaperAITemplateRequirementChoice[]
-}
-
-/** Reviewable requirement extracted from one Word template contract. */
-export interface PaperAITemplateRequirementChoice {
-  readonly ruleId: string
-  readonly kind: string
-  readonly label: string
-  readonly description: string
-  readonly severity: PaperAIGateSeverity
-  readonly confidence: number
-  readonly enabled: boolean
-}
-
-/** Complete template choices for one PaperAI project. */
-export interface PaperAITemplateCatalog {
-  readonly workspaceId: WorkspaceId
-  readonly packs: readonly PaperAITemplatePackChoice[]
-  readonly contracts: readonly PaperAITemplateContractChoice[]
-}
-
-/** Request the built-in and installed template choices for a Workspace. */
-export interface PaperAIListTemplatesRequest {
-  readonly workspaceId: WorkspaceId
-}
-
-/** Install one or more members from a built-in pack as reviewable drafts. */
-export interface PaperAIInstallTemplatePackRequest {
-  readonly workspaceId: WorkspaceId
-  readonly packId: string
-  readonly memberIds?: readonly string[]
-}
-
-/** Upload a custom Word template as a reviewable draft contract. */
-export interface PaperAIUploadTemplateRequest {
-  readonly workspaceId: WorkspaceId
-  readonly fileName: string
-  readonly contentBase64: string
-  readonly name: string
-  readonly appliesToRoles: readonly PaperAIDocumentRole[]
-  readonly usage: PaperAITemplateUsage
-}
-
-/** Confirm the parsed rules of one installed or uploaded contract. */
-export interface PaperAIConfirmTemplateRequest {
-  readonly workspaceId: WorkspaceId
-  readonly templateId: string
-}
-
-/** Attach one confirmed, role-compatible contract through a document commit. */
-export interface PaperAIAssociateTemplateRequest {
+/** Bind the project template's format for a document type through a commit. */
+export interface PaperAIApplyTemplateRequest {
   readonly sessionId: SessionId
   readonly documentId: PaperAIDocumentId
   readonly baseRevision: PaperAIDocumentRevision
   readonly baseCommitId: PaperAIDocumentCommitId | null
-  readonly templateId: string
+  readonly documentType: PaperAIDocumentType
+}
+
+/** Drop the bound format through a commit; the document keeps its type. */
+export interface PaperAIDetachTemplateRequest {
+  readonly sessionId: SessionId
+  readonly documentId: PaperAIDocumentId
+  readonly baseRevision: PaperAIDocumentRevision
+  readonly baseCommitId: PaperAIDocumentCommitId | null
+}
+
+/** Ask the Host to guess a document's type from its title and opening text. */
+export interface PaperAISuggestDocumentTypeRequest {
+  readonly documentId: PaperAIDocumentId
+}
+
+/** The Host's guess and what it was based on. */
+export interface PaperAIDocumentTypeSuggestion {
+  readonly documentId: PaperAIDocumentId
+  readonly documentType: PaperAIDocumentType
+  readonly basis: 'title' | 'content' | 'current'
+}
+
+/** Request the text changes one version introduced over its parent. */
+export interface PaperAIDiffVersionRequest {
+  readonly documentId: PaperAIDocumentId
+  readonly commitId: PaperAIDocumentCommitId
+}
+
+/** One paragraph-level change between two versions. */
+export interface PaperAIVersionChange {
+  readonly kind: 'added' | 'removed' | 'changed'
+  readonly before?: string
+  readonly after?: string
+}
+
+/** Paragraph-level diff of one version against its parent. */
+export interface PaperAIVersionDiff {
+  readonly documentId: PaperAIDocumentId
+  readonly commitId: PaperAIDocumentCommitId
+  readonly parentCommitId: PaperAIDocumentCommitId | null
+  readonly changes: readonly PaperAIVersionChange[]
+  /** Paragraphs that did not change; lets the reader judge the scale of an edit. */
+  readonly unchangedCount: number
 }
 
 /** User-facing export mode: draft remains available, delivery runs the gate. */

@@ -4,6 +4,8 @@
 
 `ctx.documentEngine` 的 OfficeCLI Service Provider。它解析固定版本 `@officecli/officecli` launcher（或显式命令），通过 DSH `ctx.subprocess` 运行所有进程，限制执行时间和捕获输出，关闭 OfficeCLI 自动更新，并在每个 lease 后关闭常驻文档句柄。关闭清理使用独立 signal 和单独的短超时，因此调用方取消操作也不会跳过清理。
 
+每次调用均设置固定版本二进制识别的更新检查禁用选项 `OFFICECLI_SKIP_UPDATE=1`，使文档操作独立于后台二进制替换和已安装技能的刷新。
+
 同一路径文件的全部读写共用 FIFO lease。一个修改批次应用全部 Office path 操作，只保存一次，并在返回前释放 OfficeCLI 文档句柄。失败通过 `OfficeCliError` 保留 stdout/stderr，同时不向领域消费方暴露通用命令 runner。
 
 `normalizeLegacyDocument()` 提供 `@paperai/document-service` 按结构检测的可选旧版文档规范化能力。在 Windows 上，它通过 `ctx.subprocess` 直接启动配置的 PowerShell 可执行文件，并运行包内 Word COM 程序，不经过命令 shell。Microsoft Word 以只读方式打开源 `.doc`，再写入独立 DOCX；源文件不会被保存或替换。非 Windows 主机、禁用或无法解析的 PowerShell 命令以及不可用的 Word COM 都返回明确的 degraded 结果。

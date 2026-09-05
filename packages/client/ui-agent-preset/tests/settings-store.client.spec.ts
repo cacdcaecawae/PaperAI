@@ -420,7 +420,7 @@ describe('the new-session chip controller', () => {
       .toMatchObject({ current: 'standard', busy: false, error: 'socket closed' })
   })
 
-  it('ignores a pick while a switch is in flight', async () => {
+  it('applies the latest pick after the current switch settles', async () => {
     const writes: Recorded[] = []
     const controller = chip(ROSTER, { id: 's1', blank: true, agentPreset: 'standard' }, { writes })
     await controller.load()
@@ -429,7 +429,8 @@ describe('the new-session chip controller', () => {
     await controller.select('standard')
     await first
 
-    expect(writes).toEqual([{ ns: 'select', patch: 'minimal' }])
+    expect(writes).toEqual([{ ns: 'select', patch: 'minimal' }, { ns: 'select', patch: 'standard' }])
+    expect(controller.store.getSnapshot().current).toBe('standard')
   })
 
   it('keeps a staged pick across a roster refresh', async () => {

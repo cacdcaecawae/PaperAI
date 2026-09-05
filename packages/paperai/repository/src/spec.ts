@@ -100,9 +100,11 @@ export const projectRecordSchema: z.ZodType<ProjectRecord> = z.object({
   workspaceId: z.string(),
   name: z.string(),
   rootPath: z.string(),
+  templatePackId: z.string().optional(),
+  templateDecidedAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
-})
+}) as z.ZodType<ProjectRecord>
 
 /** Runtime validator for document records. */
 // Zod's optional-property output permits an explicitly present `undefined`,
@@ -153,7 +155,10 @@ export const documentCommitSchema = z.object({
   documentSha256: z.string(),
   gate,
   operations: z.array(z.object({
-    type: z.enum(['replace-text', 'insert-node', 'delete-node', 'set-style', 'set-fact', 'bind-template', 'revert', 'milestone']),
+    type: z.enum([
+      'replace-text', 'insert-node', 'delete-node', 'set-style', 'set-fact',
+      'bind-template', 'unbind-template', 'set-document-type', 'revert', 'milestone',
+    ]),
     nodeId: nodeId.optional(),
     officePath: z.string().optional(),
     before: z.unknown(),

@@ -101,6 +101,7 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', upstream: ['cordis'] },
   // The preset-roster loop names the `cordis` preset id, not a package.
   { file: 'apps/cli/tests/windows-shell.spec.ts', upstream: ['cordis'] },
+  { file: 'apps/cli/tests/profile-preset-roots.spec.ts', upstream: ['cordis'] },
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
   { file: 'scripts/gen-module-graph.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-doc-graphs.ts', upstream: ['cordis'] },
@@ -158,6 +159,7 @@ const POSTCONDITIONS: readonly PostCondition[] = [
   { file: 'pnpm-workspace.yaml', text: 'cordis@4.0.0-rc.7', count: 0 },
   // The preset ids in this table are product data, not package names.
   { file: 'packages/client/ui-agent-preset/tests/locales.client.spec.ts', text: '[\'cordis\', \'presetCordisName\'', count: 1 },
+  { file: 'apps/cli/tests/profile-preset-roots.spec.ts', text: '[\'standard\', \'code\', \'minimal\', \'cordis\']', count: 1 },
   // The preset id the shipped composition documents to its own model.
   { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', text: 'The `cordis` agent preset', count: 1 },
   { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', text: 'corrupting the `cordis` preset', count: 1 },
@@ -202,15 +204,17 @@ const EXACT_EDITS: readonly ExactEdit[] = [
     file: 'knip.json',
     find: `      "ignoreDependencies": [
         "@cordisjs/plugin-logger-console",
-        "@deepseek-ai/.+"
+        "@deepseek-ai/.+",
+        "@paperai/bundle-web"
       ]
     },
-    "packages/util/home": {`,
+    "packages/paperai/agent-acp": {`,
     replace: `      "ignoreDependencies": [
-        "@deepseek-ai/.+"
+        "@deepseek-ai/.+",
+        "@paperai/bundle-web"
       ]
     },
-    "packages/util/home": {`,
+    "packages/paperai/agent-acp": {`,
     expect: 1,
   },
   {
@@ -348,7 +352,7 @@ const VENDORED_LIBRARY = /^@deepseek-ai\\/(cosmokit|schemastery)(\\/|$)/
     id: 'vendoring-cookbook-name-invariant-zh',
     file: 'docs/cookbook/adding-a-vendored-package.zh.md',
     find: '保留上游的 `name`/`version`/`exports`/`type`',
-    replace: '改写 `name` 的 scope（[映射](../rescope.md)），保留上游的 `version`/`exports`/`type`',
+    replace: '改写 `name` 的 scope（[映射](../rescope.zh.md)），保留上游的 `version`/`exports`/`type`',
     expect: 1,
   },
   {
@@ -628,7 +632,7 @@ function main(): void {
   const all = patterns(reverse)
   const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
     .split('\0')
-    .filter(file => file !== '' && !excluded(file))
+    .filter(file => file !== '' && !excluded(file) && existsSync(resolve(root, file)))
 
   const counts = new Map<string, { files: number; lines: number }>()
   const failures: string[] = []

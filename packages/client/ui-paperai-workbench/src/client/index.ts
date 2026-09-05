@@ -1,32 +1,45 @@
-/** DSH-native PaperAI Workspace tree and document details workbench plugin. */
+/** DSH-native PaperAI plugin: sidebar documents, project start page, template library, and document view. */
 
 import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Config as LayoutConfig } from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-models/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import paperAIWorkbenchRemote from '@paperai/workbench-service/remote'
 import { PaperAIWorkbenchController } from './controller.ts'
+import { resolvePreviewBudget, type Config } from '../config.ts'
+import { selectionSource, wordSelectionReference } from './selection-context.ts'
+import { DiagnosticsController } from './diagnostics-controller.ts'
+import { AgentDiagnostics } from './AgentDiagnostics.tsx'
+import { WordSelectionMessage } from './WordSelectionMessage.tsx'
+
+export type { Config } from '../config.ts'
 import { DocumentWorkbench } from './DocumentWorkbench.tsx'
 import { en, zh, type PaperAIWorkbenchKey } from './locales.ts'
 import type {
-  PaperAIDocumentWorkbenchInjected, PaperAIWorkspaceContentInjected,
+  PaperAIDocumentWorkbenchInjected, PaperAILibraryInjected, PaperAIStartPageInjected,
+  PaperAIWorkspaceContentInjected,
 } from './slots.ts'
+import { StartPage } from './StartPage.tsx'
+import { TemplatesSection } from './TemplateLibrary.tsx'
 import { WorkspaceContent } from './WorkspaceContent.tsx'
 import type { PaperAIActionResult, PaperAIWorkbenchRemote } from './types.ts'
 
 export type {
-  PaperAIDocumentWorkbenchInjected, PaperAIDocumentWorkbenchProps,
-  PaperAIWorkspaceContentInjected, PaperAIWorkspaceContentProps,
+  PaperAIDocumentWorkbenchInjected, PaperAIDocumentWorkbenchProps, PaperAILibraryInjected,
+  PaperAIStartMarkOwnerProps, PaperAIStartPageInjected, PaperAIStartPageProps,
+  PaperAITemplatesSectionProps, PaperAIWorkspaceContentInjected, PaperAIWorkspaceContentProps,
 } from './slots.ts'
 export type * from './types.ts'
 export type { PaperAIWorkbenchKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** PaperAI project resources and document-workbench copy. */
+    /** PaperAI documents, start page, template library, and document-view copy. */
     'paperai.workbench': PaperAIWorkbenchKey
   }
 }
@@ -35,21 +48,25 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const NS = 'paperai.workbench'
 /** Additive details-view id selected through `ctx.conversationDetails`. */
 export const PAPERAI_DETAILS_VIEW_ID = 'paperai'
+/** Settings section id of the template library page. */
+export const PAPERAI_TEMPLATES_SECTION_ID = 'paperai-templates'
 
-/** PaperAI's wide document-workbench profile over the unchanged DSH defaults. */
+/** PaperAI's wide document-view profile over the unchanged DSH defaults. */
 export const PAPERAI_LAYOUT_CONFIG: Readonly<LayoutConfig> = Object.freeze({
-  centerMin: 560,
-  detailsMin: 420,
+  centerMin: 360,
+  detailsMin: 480,
   detailsDefault: 760,
   detailsMax: 1280,
   detailsVisibility: 'current-session',
   detailsNarrowMode: 'focus',
+  detailsPosition: 'start',
 })
 
 /** Required DSH services, including the generated Remote contribution mount. */
 export const inject = [
   'slots', 'locale', 'sessions', 'workspaces', 'conversationDetails', 'layout',
   'modelsOnboarding', 'remote',
+  'conversation', 'inputTriggers',
 ]
 
 /**
@@ -63,8 +80,9 @@ async function settleDetailsSelection(ctx: ClientContext, sessionId: SessionId):
   ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
 }
 
-/** Register the generated Remote, flat Workspace content, and document details entries. */
-export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
+/** Register the generated Remote and the four PaperAI entries. */
+export async function apply(ctx: ClientContext, config: Config = {}): Promise<() => Promise<void>> {
+  const previewBudget = resolvePreviewBudget(config)
   const disposeRemote = await ctx.remote.$mount(paperAIWorkbenchRemote)
   // `$mount()` publishes the generated namespace as the dynamic Cordis
   // service `remote.paperaiWorkbench`. This plugin cannot list that service in
@@ -77,9 +95,15 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     await disposeRemote()
     throw new Error('PaperAI Workbench Remote namespace did not start')
   }
-  const controller = new PaperAIWorkbenchController(remote)
+  const controller = new PaperAIWorkbenchController(remote, previewBudget)
+  const diagnostics = new DiagnosticsController(remote)
 
   try {
+    ctx.effect(() => ctx.inputTriggers.registerSource(selectionSource()), 'paperai-ui-workbench: Word selection codec')
+    ctx.slots.inject('conversation.message.userText', () => ctx.slots.register({
+      name: 'conversation.message.userText', locale: NS,
+      select: ({ text }) => text.includes('[Word selection]\n') ? text : null,
+    }, WordSelectionMessage))
     ctx.effect(
       () => ctx.layout.configure(PAPERAI_LAYOUT_CONFIG),
       'paperai-ui-workbench: document layout profile',
@@ -92,15 +116,23 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       'paperai-ui-workbench: local Agent onboarding profile',
     )
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'paperai-ui-workbench: dictionaries')
+    ctx.slots.inject('conversation.hero.agentPreset.status', () => ctx.slots.register({
+      name: 'conversation.hero.agentPreset.status', locale: NS,
+      inject: () => ({
+        hooks: { diagnostics: diagnostics.store },
+        loadAgents: () => diagnostics.loadAgents(),
+        probe: (provider: 'codex' | 'claude', force: boolean) => diagnostics.probe(provider, force),
+      }),
+    }, AgentDiagnostics))
+    const t = ctx.locale.bind(NS)
     // A DSH Workspace is the shell-level account, while a PaperAI project is
     // the product-level account that also owns the standard folders,
     // PAPERAI.md, and Git repository.  Initialize every observed Workspace as
     // soon as it enters the DSH ledger so the directory picker really means
-    // "create/open a PaperAI project"; the expanded resource tree remains a
-    // pure view and no longer controls whether initialization happens.
+    // "create/open a PaperAI project".
     const initializeWorkspaces = (): void => {
       for (const workspace of ctx.workspaces.list.getSnapshot().items) {
-        void controller.ensureResources(workspace.workspaceId)
+        void controller.ensureProject(workspace.workspaceId)
       }
     }
     ctx.effect(
@@ -116,6 +148,14 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       'paperai-ui-workbench: durable document heads',
     )
 
+    const documentSession = async (workspaceId: WorkspaceId): Promise<SessionId> => {
+      const current = ctx.sessions.list.getSnapshot().current
+      const workspace = ctx.workspaces.list.getSnapshot().items.find(item => item.workspaceId === workspaceId)
+      return current !== undefined && workspace?.sessionIds.includes(current) === true
+        ? current
+        : await ctx.workspaces.connectWorkspace(workspaceId)
+    }
+
     // Import and template start share one gesture: connect the Workspace,
     // show its Session, open the document view, then establish the document.
     const startDocument = async (
@@ -123,7 +163,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       establish: (sessionId: SessionId) => Promise<PaperAIActionResult>,
     ): Promise<PaperAIActionResult> => {
       try {
-        const sessionId = await ctx.workspaces.connectWorkspace(workspaceId)
+        const sessionId = await documentSession(workspaceId)
         ctx.sessions.open(sessionId)
         ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
         const result = await establish(sessionId)
@@ -135,13 +175,26 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       }
     }
 
+    const libraryInjected: PaperAILibraryInjected = {
+      hooks: { library: controller.libraryStore() },
+      loadLibrary: force => controller.loadLibrary(force),
+      createTemplateSet: input => controller.createTemplateSet(input),
+      deleteTemplateSet: packId => controller.deleteTemplateSet(packId),
+      addTemplateFormat: input => controller.addTemplateFormat(input),
+      removeTemplateFormat: (packId, documentType) => controller.removeTemplateFormat(packId, documentType),
+    }
+
     const workspaceInjected: PaperAIWorkspaceContentInjected = {
-      hooks: { resources: controller.resourceDirectoryStore() },
-      ensureResources: workspaceId => controller.ensureResources(workspaceId),
-      refreshResources: workspaceId => controller.loadResources(workspaceId),
-      openResource: async (workspaceId, resourceId) => {
+      hooks: { projects: controller.projectDirectoryStore(), diagnostics: diagnostics.store },
+      inspectProject: async (workspaceId, plan) => {
+        await diagnostics.inspect(workspaceId, plan)
+        if (plan !== undefined) controller.refreshLoaded()
+      },
+      ensureProject: workspaceId => controller.ensureProject(workspaceId),
+      refreshProject: workspaceId => controller.loadProject(workspaceId),
+      openDocument: async (workspaceId, resourceId) => {
         try {
-          const sessionId = await ctx.workspaces.connectWorkspace(workspaceId)
+          const sessionId = await documentSession(workspaceId)
           ctx.sessions.open(sessionId)
           await settleDetailsSelection(ctx, sessionId)
           await controller.openDocument(workspaceId, sessionId, resourceId)
@@ -155,15 +208,21 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           controller.failWorkspace(workspaceId, error)
         }
       },
-      importDocument: (workspaceId, input) => startDocument(
-        workspaceId,
-        sessionId => controller.importDocument(workspaceId, sessionId, input),
-      ),
+    }
+
+    const startPageInjected: PaperAIStartPageInjected = {
+      ...libraryInjected,
+      hooks: { library: controller.libraryStore(), projects: controller.projectDirectoryStore() },
+      ensureProject: workspaceId => controller.ensureProject(workspaceId),
+      setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
       createFromTemplate: (workspaceId, input) => startDocument(
         workspaceId,
         sessionId => controller.createFromTemplate(workspaceId, sessionId, input),
       ),
-      loadTemplateChoices: workspaceId => controller.templateChoices(workspaceId),
+      importDocument: (workspaceId, input) => startDocument(
+        workspaceId,
+        sessionId => controller.importDocument(workspaceId, sessionId, input),
+      ),
     }
 
     ctx.slots.inject('sidebar.workspaces.content', () => ctx.slots.register({
@@ -174,39 +233,73 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       inject: () => workspaceInjected,
     }, WorkspaceContent))
 
+    ctx.slots.inject('conversation.hero.content', () => ctx.slots.register({
+      name: 'conversation.hero.content',
+      locale: NS,
+      children: { 'paperai.start.mark': { kind: 'single', scope: 'root' } },
+      inject: () => startPageInjected,
+    }, StartPage))
+
+    ctx.slots.inject('settings.section', () => ctx.slots.register({
+      name: 'settings.section',
+      id: PAPERAI_TEMPLATES_SECTION_ID,
+      order: 12,
+      label: () => t('library.title'),
+      locale: NS,
+      inject: () => libraryInjected,
+    }, TemplatesSection))
+
     ctx.slots.inject('conversation.details.view', () => ctx.slots.register({
       name: 'conversation.details.view',
       id: PAPERAI_DETAILS_VIEW_ID,
       order: 10,
       locale: NS,
       inject: (sessionId: SessionId): PaperAIDocumentWorkbenchInjected => ({
-        hooks: { workbench: controller.workbenchStore(sessionId) },
-        selectTab: (tab) => { controller.selectTab(sessionId, tab) },
+        ...libraryInjected,
+        hooks: {
+          library: controller.libraryStore(),
+          workbench: controller.workbenchStore(sessionId),
+          projects: controller.projectDirectoryStore(),
+        },
         retryOpen: () => controller.retryOpen(sessionId),
-        selectNode: nodeId => controller.selectNode(sessionId, nodeId),
+        setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
+        quoteSelection: (document, excerpt) => {
+          const scope = ctx.sessions.scope(sessionId)
+          if (scope === undefined) return
+          const input = ctx.conversation.input.for(scope)
+          const state = input.state.getSnapshot()
+          const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
+            start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
+          })
+          if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
+          if (accepted) ctx.layout.revealConversation()
+        },
+        showPanel: (panel) => { controller.showPanel(sessionId, panel) },
+        selectBlock: nodeId => controller.selectBlock(sessionId, nodeId),
         updateDraft: (value) => { controller.updateDraft(sessionId, value) },
-        discardDraft: () => { controller.discardDraft(sessionId) },
-        commitSelected: () => controller.commitSelected(sessionId),
+        cancelEdit: () => { controller.cancelEdit(sessionId) },
+        commitEdit: () => controller.commitEdit(sessionId),
         validate: () => controller.validate(sessionId),
-        loadTemplates: () => controller.loadTemplates(sessionId),
-        installTemplate: (packId, memberId) => controller.installTemplate(sessionId, packId, memberId),
-        uploadTemplate: input => controller.uploadTemplate(sessionId, input),
-        confirmTemplate: templateId => controller.confirmTemplate(sessionId, templateId),
-        associateTemplate: templateId => controller.associateTemplate(sessionId, templateId),
+        suggestType: () => controller.suggestType(sessionId),
+        applyTemplate: documentType => controller.applyTemplate(sessionId, documentType),
+        detachTemplate: () => controller.detachTemplate(sessionId),
+        setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
+        showDiff: commitId => controller.showDiff(sessionId, commitId),
+        restore: commitId => controller.restore(sessionId, commitId),
         exportDocument: mode => controller.exportDocument(sessionId, mode),
         reloadExternal: () => controller.reloadExternal(sessionId),
-        resolveExternalConflict: (resolution) => { controller.resolveExternalConflict(sessionId, resolution) },
-        restore: commitId => controller.restore(sessionId, commitId),
         setDetailsFocus: (active) => { ctx.layout.setDetailsFocus(active) },
       }),
     }, DocumentWorkbench))
   } catch (error) {
+    diagnostics.dispose()
     controller.dispose()
     await disposeRemote()
     throw error
   }
 
   return async () => {
+    diagnostics.dispose()
     controller.dispose()
     await disposeRemote()
   }

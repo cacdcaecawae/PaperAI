@@ -1,43 +1,32 @@
 # Context Brief
 
-Last updated: 2026-08-29
+Last updated: 2026-09-05
 
-## Current stage
+## Current delivery
 
-The functional PaperAI v1 vertical product is released. `main` starts from a tree-identical root snapshot of pinned DeepSeek Harness commit `b150a551`; the PaperAI profile, Host/domain layer, HIT template pack, OfficeCLI adapter, ACP drivers, authenticated MCP bridge, export service, and DSH-native workbench are implemented. Real browser workflows cover project creation, legacy Word import, preview/edit/history, template gate, draft/formal export behavior, native Codex models, constrained-width layouts, Windows-native shell interactions, settings persistence, and HMR/artifact integrity.
+The five accepted Agentero adaptations are implemented on `codex/paperai-agentero-workbench`. The inherited UI overhaul was rebased onto PaperAI main `22f08a884a` as `c4c980aad8`; the current PR includes that preserved implementation and the September 5 changes. The [task packet](task-packets/2026-09-05-agentero-adoption.md) owns acceptance, and the [review](review/2026-09-05-agentero-adoption.md) records current evidence and limitations.
 
-## Confirmed architecture
+PaperAI uses the full DSH/Cordis platform. Projects and documents occupy the left column, Word the center, and Agent the right. Word remains authoritative DOCX through OfficeCLI; browser previews and unsaved drafts remain temporary views. Template sets, document types, and formats follow [CONTEXT.md](../CONTEXT.md) and the [template-model decision](../.agents/notes/implemented/architecture/2026-09-03-paperai-template-model.md).
 
-- Keep the complete DSH product foundation, including its built-in Harness/Agent Loop.
-- Add PaperAI as Cordis Host/client plugins and a dedicated product profile.
-- Keep DSH, Codex, and Claude as peer top-level Agent presets; ACP backs Codex and Claude.
-- Reuse existing DSH Settings for API keys, Base URL, providers, model lists, permissions, and theme.
-- Extend only `ui-layout`, `ui-workspace`, `ui-conversation`, and `ui-agent-preset`; replace official brand through existing slots.
-- Migrate the existing Word/template/commit/gate/export domain, OfficeCLI integration, HIT assets, tests, and PaperAI MCP knowledge; do not port the old custom shell, Host, REST client, or duplicate Agent gateway.
-- One revocable PaperAI MCP descriptor is issued per Codex/Claude ACP session; model changes update commit provenance and Agent disposal revokes access.
-- Codex/Claude preset routes fail loudly when unavailable. Blank idle sessions may replace their real factory driver with persistence-backed rollback; a preset label can never silently retain another Agent driver.
-- Template sources are evidence-only documents excluded from the user Working-document list. Template binding is accepted only through a validated Document Commit.
-- New PaperAI sessions default to local Codex ACP. Without a stored user or deployment override, they inherit DSH `workspace-write` plus `ask`; restored sessions keep and display their actual Agent/permission/model state.
-- Optional DSH onboarding is controlled through a live client service so PaperAI can omit the DeepSeek key prompt without forking or removing the Models settings UI.
-- Commit publication uses a durable recovery journal, and a failed root commit compensates its uncommitted derived import without deleting the browser upload, institutional source, committed document, or template evidence.
-- Settings path writes retry one freshly read revision conflict, so a concurrent namespace update cannot silently drop a later user preference.
+## Implemented behavior
 
-## Safety and recovery
+- Agent selection immediately displays pending intent and keeps the composer editable. Session binding survives Host replacement, model operations wait for replacement, and sends remain blocked until readiness. Consecutive picks settle to the latest intent without changing another project's Session.
+- Word selections create removable references with exact text, document, path, revision, head, and block identities. The same frozen content reaches the model and session log; the user sees a quotation with optional source disclosure.
+- Recent previews have a configurable retention budget, including the active document. Scroll positions and lightweight drafts survive document navigation. Conflicting external block edits retain the draft and disable stale saving.
+- Independent ACP diagnostics inspect cached metadata or run an explicit prompt-free probe with bounded time, cooldown, and teardown. Historical models never authorize current model selection.
+- Project Doctor scans registered artifacts without writing. A reviewed missing-file repair verifies the current head and snapshot and publishes without overwriting an existing file or adding a content version.
 
-- Legacy archive commit: `c908361ecdc9dc9d1517d7382e5c7eb8f0c1aa48`.
+## Validation and remaining limits
+
+The [current review](review/2026-09-05-agentero-adoption.md) separates focused service tests, real assembled browser replay, and static/build gates. Earlier release-wide counts in [progress.md](progress.md) describe their dated revisions, not the current tree. Browser scenarios use controlled ACP adapters and real isolated DOCX projects; no real-provider response-time claim follows from them. Agentero was reviewed at commit `7c5efcd1fbab0c5bd14969acdaa437912beb4b93`, without running its desktop application.
+
+Delivery is [PR #25](https://github.com/cacdcaecawae/PaperAI/pull/25). Its focused CI selection includes all changed module owners. The OfficeCLI provider uses the pinned binary's update-check opt-out; the review records local coverage and Linux document evidence. Inspect the checks for the latest pushed revision before merging.
+
+The user authorized a pull request, not a merge. Do not change personal Agent settings, write to the user's existing projects, or republish main while completing that delivery. Real school-document acceptance and distribution hardening remain later work.
+
+## Historical recovery pointers
+
+- Legacy commit: `c908361ecdc9dc9d1517d7382e5c7eb8f0c1aa48`.
 - Legacy branch: `legacy-standalone-local`.
-- Verified bundle: `F:\Papel-agent-legacy-20260828.bundle`.
-- Source ZIP: `F:\Papel-agent-legacy-20260828.zip`.
-- The previous remote history remains recoverable through the legacy branch, bundle, and ZIP; the rebuilt DSH-based history is now published to `origin/main`.
-
-## Release evidence
-
-- Production build: passed; 204 client artifacts recorded.
-- Web built: 84 files passed; 285 tests passed, 13 skipped.
-- Full workspace: 883 files passed, 4 skipped; 14,344 tests passed, 61 skipped.
-- Independent E2E: 28 files/112 tests passed; 33 files/92 tests skipped by design.
-- Static aggregate: 37 passed, 0 failed, 0 skipped; contract lint, notices, and diff checks passed.
-
-## Current next step
-
-Use PaperAI v1 with real school projects, collect workflow and UI friction, and prioritize the next iteration without reopening the completed architecture reset.
+- Bundle: `F:\Papel-agent-legacy-20260828.bundle`.
+- Source archive: `F:\Papel-agent-legacy-20260828.zip`.

@@ -35,6 +35,59 @@ describe('instances', () => {
     expect(session.getSnapshot().running).toBe(true) // list preceded instantiation
   })
 
+  it('reactivates a resident session only when the host adds its replacement', async () => {
+    const api = new FakeApiClient()
+    const manager = new SessionManager(api, fakeRemote())
+    const session = manager.get(S1)
+    manager.handleHostEnvelope({ rpcId: 'added' as never, payload: { type: 'host/session-added', sessionId: S1, blank: true } })
+    expect(session.getSnapshot()).toMatchObject({ removed: false, blank: true })
+
+    manager.handleHostEnvelope({ rpcId: 'removed' as never, payload: { type: 'host/session-removed', sessionId: S1 } })
+    expect(session.getSnapshot().removed).toBe(true)
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1, { blank: true })] as never[] }))
+    await manager.refreshList()
+    expect(session.getSnapshot().removed).toBe(true)
+
+    manager.handleHostEnvelope({ rpcId: 'replacement' as never, payload: { type: 'host/session-added', sessionId: S1, blank: false } })
+    expect(manager.get(S1)).toBe(session)
+    expect(session.getSnapshot()).toMatchObject({ removed: false, blank: false })
+    manager.handleHostEnvelope({ rpcId: 'removed-again' as never, payload: { type: 'host/session-removed', sessionId: S1 } })
+    expect(session.getSnapshot().removed).toBe(true)
+  })
+
+  it('keeps resident projection observers connected across host replacement', async () => {
+    const manager = new SessionManager(new FakeApiClient(), fakeRemote())
+    const session = manager.get(S1)
+    const title = session.projections.faceOf('title')
+    const changed = vi.fn()
+    const stop = title.subscribe(changed)
+    const publishTitle = (value: string, seq: number): void => {
+      manager.handleMuxEnvelope({
+        rpcId: `title-${String(seq)}` as never,
+        payload: { type: 'session/projection', sessionId: S1, key: 'title', value, seq } as never,
+      })
+    }
+    manager.handleHostEnvelope({ rpcId: 'added' as never, payload: { type: 'host/session-added', sessionId: S1, blank: false } })
+    publishTitle('Old title', 20)
+    await Promise.resolve()
+    expect(title.getSnapshot()).toBe('Old title')
+
+    manager.handleHostEnvelope({ rpcId: 'removed' as never, payload: { type: 'host/session-removed', sessionId: S1 } })
+    expect(title.getSnapshot()).toBeUndefined()
+    await Promise.resolve()
+    changed.mockClear()
+
+    manager.handleHostEnvelope({ rpcId: 'replacement' as never, payload: { type: 'host/session-added', sessionId: S1, blank: false } })
+    publishTitle('Replacement title', 1)
+    await Promise.resolve()
+    expect(manager.get(S1)).toBe(session)
+    expect(session.projections.faceOf('title')).toBe(title)
+    expect(title.getSnapshot()).toBe('Replacement title')
+    expect(manager.getListSnapshot().items[0]?.title).toBe('Replacement title')
+    expect(changed).toHaveBeenCalledOnce()
+    stop()
+  })
+
   it('replays buffered approval frames on instantiation and drops ordinary frames for uninstantiated sessions', () => {
     const api = new FakeApiClient()
     const manager = new SessionManager(api, fakeRemote())

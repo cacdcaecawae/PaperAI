@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-03-paperai-document-path-ownership.md
+2026-09-03-paperai-document-path-ownership.md: 3859151b8ca9bb17c3a7a681c353a3ed1af31f69
+2026-09-03-paperai-document-path-ownership.zh.md: 7e2ef8ff4232dfab431c7fd7c8194f9d84143fc5

@@ -197,7 +197,7 @@ describe('paperai-tool-document', () => {
     const commitSchema = ctx.tools.schemas().find(schema => schema.name === 'paperai_commit_document')
     const mutations = (commitSchema?.parameters as { properties: Record<string, { items?: { oneOf?: unknown[] } }> })
       .properties.mutations
-    expect(mutations?.items?.oneOf).toHaveLength(5)
+    expect(mutations?.items?.oneOf).toHaveLength(7)
   })
 
   it('reads bounded pages, strips styles unless requested, and reports the next offset', async () => {

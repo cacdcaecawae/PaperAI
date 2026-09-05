@@ -40,7 +40,7 @@ import { canonicalHeader, type Session, type SessionId, type TurnEndReason, type
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import {
-  AcpRuntime, AcpSelectionError, type AcpProviderDefinition, type AcpRuntimeOptions, type AcpSelection,
+  AcpRuntime, AcpSelectionError, type AcpProviderDefinition, type AcpRuntimeOptions, type AcpSelection, type AcpSessionStart,
 } from './runtime.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -427,8 +427,9 @@ export class AcpAgent implements Agent {
   /**
    * Connect the provider-owned session before this Agent is published.
    * @param signal Cancels provider process startup and ACP initialization.
+   * @returns the initialized provider session and its advertised model metadata.
    */
-  async start(signal: AbortSignal): Promise<void> {
+  async start(signal: AbortSignal): Promise<AcpSessionStart> {
     this.lifecycleSignal = signal
     const previousExternalSessionId = this.previousExternalSessionId()
     const { runtime, lifetimeSignal } = this.createRuntime(signal)
@@ -447,6 +448,7 @@ export class AcpAgent implements Agent {
         resumed: started.resumed,
       }
     }
+    return started
   }
 
   /**

@@ -162,6 +162,7 @@ function sessionsDouble(state: {
 }) {
   const listeners = new Set<() => void>()
   return {
+    retainBinding: () => () => {},
     list: {
       getSnapshot: () => state,
       subscribe: (fn: () => void) => {
@@ -312,7 +313,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     const conversation = declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
     ctx.provide('workspaces', workspacesDouble() as never)
     const fiber = ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'workspaces'], apply })
@@ -334,7 +335,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     const conversation = declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
     ctx.provide('workspaces', workspacesDouble() as never)
 
@@ -371,7 +372,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots, moveDefault } = await bench()
     declareRoot(slots)
     const conversation = declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
     ctx.provide('workspaces', workspacesDouble() as never)
     await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'workspaces'], apply }).await()
@@ -403,7 +404,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     const state = {
       current: 's1',
       byId: { s1: { id: 's1', blank: true, agentPreset: 'standard' } },
@@ -421,7 +422,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({
       current: 's1',
       byId: { s1: { id: 's1', blank: true, agentPreset: 'minimal' } },
@@ -441,7 +442,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     const conversation = declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
     ctx.provide('workspaces', workspacesDouble() as never)
     await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'workspaces'], apply }).await()
@@ -471,7 +472,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots, calls } = await bench()
     declareRoot(slots)
     declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     const state: {
       current?: string
       byId: Record<string, { id: string; blank: boolean; agentPreset?: string }>
@@ -500,7 +501,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots, calls } = await bench()
     declareRoot(slots)
     declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     const sessions = sessionsDouble({
       current: 's1',
       byId: { s1: { id: 's1', blank: true } },
@@ -523,7 +524,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots, calls } = await bench()
     declareRoot(slots)
     declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     const state = {
       current: 's1',
       byId: { s1: { id: 's1', blank: true, agentPreset: 'standard' } },
@@ -551,7 +552,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
     ctx.provide('workspaces', workspacesDouble() as never)
     await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'workspaces'], apply }).await()
@@ -572,7 +573,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     const conversation = declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     ctx.provide('sessions', sessionsDouble({ byId: {} }) as never)
     const workspaces = workspacesDouble()
     ctx.provide('workspaces', workspaces as never)
@@ -605,7 +606,7 @@ describe('ui-agent-preset apply', () => {
     const { ctx, slots, calls } = await bench()
     declareRoot(slots)
     const conversation = declareConversation(slots)
-    ctx.provide('conversation', {} as never)
+    ctx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
     const state: {
       current?: string
       byId: Record<string, { id: string; blank: boolean; agentPreset?: string }>

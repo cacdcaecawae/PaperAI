@@ -176,6 +176,14 @@ export class ProjectionValueStore {
     }
   }
 
+  /** Clear values and sequence watermarks while preserving subscribed faces. */
+  clear(): void {
+    for (const key of this.rows.keys()) {
+      this.rows.delete(key)
+      this.changed(key)
+    }
+  }
+
   private changed(key: string): void {
     this.valuesCache = undefined
     this.channels.get(key)?.notifier.markDirty()

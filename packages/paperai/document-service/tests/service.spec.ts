@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
@@ -178,7 +178,7 @@ describe('PaperDocumentService', () => {
   it('imports a Chinese-path DOCX as independent immutable and Working copies', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-28T03:04:05.000Z'))
-    const { ctx, uploadRoot, projectId, repo, engine } = await fixture()
+    const { ctx, projectRoot, uploadRoot, projectId, repo, engine } = await fixture()
     const source = join(uploadRoot, '硕士学位论文开题报告.docx')
     const bytes = Buffer.from('fake-docx-中文', 'utf8')
     await writeFile(source, bytes)
@@ -191,6 +191,8 @@ describe('PaperDocumentService', () => {
     imported(result)
     expect(result.document).toMatchObject({
       name: '硕士学位论文开题报告',
+      workingPath: join(projectRoot, 'documents', 'working', '硕士学位论文开题报告.docx'),
+      immutableSourcePath: join(projectRoot, 'documents', 'source', '硕士学位论文开题报告.docx'),
       role: 'proposal',
       nodeCount: 2,
       createdAt: '2026-08-28T03:04:05.000Z',
@@ -232,6 +234,25 @@ describe('PaperDocumentService', () => {
     await expect(ctx.paperDocuments.verifyImmutableSource(result.document.id))
       .rejects.toMatchObject({ code: 'SOURCE_INTEGRITY_INVALID' } satisfies Partial<PaperDocumentError>)
     await expect(readFile(result.document.workingPath, 'utf8')).resolves.toBe('edited-working-copy')
+  })
+
+  it('keeps a tracked document name reserved when both of its files are missing', async () => {
+    const { ctx, projectId, uploadRoot } = await fixture()
+    const source = join(uploadRoot, '开题报告.docx')
+    await writeFile(source, 'proposal')
+    const first = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'proposal' })
+    imported(first)
+    await chmod(first.document.immutableSourcePath, 0o600)
+    await unlink(first.document.immutableSourcePath)
+    await unlink(first.document.workingPath)
+
+    const second = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'proposal' })
+    imported(second)
+    expect(second.document.name).toBe('开题报告 (2)')
+    expect(second.document.workingPath).not.toBe(first.document.workingPath)
+    expect(ctx.paperDocuments.readDocument(first.document.id)?.document).toEqual(first.document)
+    await expect(access(first.document.workingPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(second.document.workingPath, 'utf8')).toBe('proposal')
   })
 
   it('rolls back an uncommitted import without deleting its uploaded source', async () => {
@@ -381,8 +402,8 @@ describe('PaperDocumentService', () => {
       role: 'other',
     })).resolves.toMatchObject({ status: 'degraded', detail: 'converter unavailable' })
     expect(first.repo.documents.size).toBe(0)
-    expect(await readdir(join(first.projectRoot, '.paperai', 'documents', 'v1', 'sources'))).toEqual([])
-    expect(await readdir(join(first.projectRoot, '.paperai', 'documents', 'v1', 'working'))).toEqual([])
+    expect(await readdir(join(first.projectRoot, 'documents', 'source'))).toEqual([])
+    expect(await readdir(join(first.projectRoot, 'documents', 'working'))).toEqual([])
 
     const second = await fixture()
     const broken = join(second.uploadRoot, '损坏.doc')
@@ -497,7 +518,7 @@ describe('PaperDocumentService', () => {
     await expect(ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'other' }))
       .rejects.toMatchObject({ code: 'DOCUMENT_INDEX_INVALID' })
     expect(repo.documents.size).toBe(0)
-    expect(await readdir(join(projectRoot, '.paperai', 'documents', 'v1', 'sources'))).toEqual([])
+    expect(await readdir(join(projectRoot, 'documents', 'source'))).toEqual([])
   })
 
   it('rolls back published files and indexed nodes when repository publication fails', async () => {
@@ -511,8 +532,8 @@ describe('PaperDocumentService', () => {
       .rejects.toThrow('repository unavailable')
     expect(repo.documents.size).toBe(0)
     expect(repo.nodes.size).toBe(0)
-    expect(await readdir(join(projectRoot, '.paperai', 'documents', 'v1', 'sources'))).toEqual([])
-    expect(await readdir(join(projectRoot, '.paperai', 'documents', 'v1', 'working'))).toEqual([])
+    expect(await readdir(join(projectRoot, 'documents', 'source'))).toEqual([])
+    expect(await readdir(join(projectRoot, 'documents', 'working'))).toEqual([])
 
     repo.failNodeDelete = true
     await expect(ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'manuscript' }))

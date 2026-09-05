@@ -14,7 +14,7 @@ export type ConversationRootProps = ConversationSlotProps
 
 export function ConversationRoot({
   sessionId, useSession, useSessions, useWorkspaces, useInput, useComposerBlock,
-  renderSlot, renderSlotChain, selectWorkspace, t,
+  renderSlot, renderSlotChain, selectWorkspace, t, compact = false,
 }: ConversationRootProps) {
   const openState = useSession(s => s.openState)
   const composerPhase = useSession(s => s.composerPhase)
@@ -134,7 +134,7 @@ export function ConversationRoot({
   // when both hold — picking a workspace is the earlier prerequisite.
   const blocked = !inert && composerBlock !== undefined
   const inputBar = renderSlot('conversation.composer.bar', {
-    variant: hero ? 'hero' : 'composer',
+    variant: hero && !compact ? 'hero' : 'composer',
     ...(inert
       ? {
         disabled: true,
@@ -157,16 +157,26 @@ export function ConversationRoot({
   })
 
   const composerBar = (
-    <div className={clsx(css.composerStack, hero && css.composerHero)}>
-      {hero && <HeroGlow className={css.heroGlow} />}
-      {hero && <HeroShell t={t} renderSlot={renderSlot} />}
+    <div className={clsx(css.composerStack, hero && !compact && css.composerHero)}>
+      {hero && !compact && <HeroGlow className={css.heroGlow} />}
+      {hero && !compact && (
+        <HeroShell
+          t={t}
+          renderSlot={renderSlot}
+          content={{
+            sessionId,
+            workspaceId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
+            openWorkspacePicker: () => { setPickerOpen(true) },
+          }}
+        />
+      )}
       {hero && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}
     </div>
   )
 
-  const phase = settling ? 'settling' : hero ? 'hero' : 'active'
+  const phase = settling ? 'settling' : hero && !compact ? 'hero' : 'active'
   const composer = renderSlotChain(
     'conversation.composer',
     { interactions: pending, session },

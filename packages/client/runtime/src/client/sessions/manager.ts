@@ -128,6 +128,7 @@ export class SessionManager {
    *  same store so history-baseline seeding and frames converge on one row set. */
   private readonly projectionStores = new Map<SessionId, ProjectionValueStore>()
   private summaries: SessionSummary[] = []
+  private readonly retainedBindings = new Map<SessionId, { summary: SessionSummary; leases: Set<symbol> }>()
   private listState: 'idle' | 'loading' | 'error' = 'idle'
   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
   private listPhase: SessionListPhase = 'pending'
@@ -177,6 +178,29 @@ export class SessionManager {
   }
 
   // ---- Selection ----
+
+  /**
+   * Retain a listed session's browser binding during an explicit Host replacement.
+   * Live summaries take precedence; removal still disables the underlying Session.
+   * @param sessionId - listed session whose replacement the caller owns.
+   * @returns Idempotent release; the last release exposes any unresolved removal.
+   */
+  retainBinding(sessionId: SessionId): () => void {
+    let retained = this.retainedBindings.get(sessionId)
+    if (retained === undefined) {
+      const summary = this.summaries.find(item => item.sessionId === sessionId)
+      if (summary === undefined) throw new Error(`sessions.retainBinding: unknown session ${sessionId}`)
+      retained = { summary, leases: new Set() }
+      this.retainedBindings.set(sessionId, retained)
+    }
+    const token = Symbol()
+    retained.leases.add(token)
+    return () => {
+      if (!retained.leases.delete(token) || retained.leases.size > 0) return
+      this.retainedBindings.delete(sessionId)
+      this.notifier.markDirty()
+    }
+  }
 
   /**
    * Select a listed Session or a retained catalog-addressed child.
@@ -619,6 +643,7 @@ export class SessionManager {
    */
   noteAgentPreset(sessionId: SessionId, agentPreset: string): void {
     this.recordMutation({ kind: 'upsert', summary: {
+      ...this.retainedBindings.get(sessionId)?.summary,
       sessionId, updatedAt: Date.now(), running: false, blank: true, agentPreset,
     } })
   }
@@ -803,7 +828,7 @@ export class SessionManager {
           ...(frame.cwd !== undefined ? { cwd: frame.cwd } : {}),
           ...(frame.agentPreset !== undefined ? { agentPreset: frame.agentPreset } : {}),
         })
-        this.sessions.get(frame.sessionId)?.handleBlank(frame.blank)
+        this.sessions.get(frame.sessionId)?.handleAdded(frame.blank)
         if (frame.origin === 'subagent' && frame.parentSessionId !== undefined) {
           this.markCatalogParentExpandable(frame.parentSessionId)
         }
@@ -834,7 +859,12 @@ export class SessionManager {
         // no relative order. Clearing here makes a detached Activation's rows
         // disappear whichever arrives first.
         this.jobsBySession.delete(frame.sessionId)
-        if (!durableSubagent) this.projectionStores.delete(frame.sessionId)
+        if (!durableSubagent) {
+          // Resident Sessions and their consumers retain this store's faces.
+          // Clear values without disconnecting them from replacement frames.
+          if (this.sessions.has(frame.sessionId)) this.projectionStores.get(frame.sessionId)?.clear()
+          else this.projectionStores.delete(frame.sessionId)
+        }
         // A pull already in flight was requested before this removal and can
         // carry the pre-removal parentAvailable:true, which would resurrect
         // the writable editor this invalidation just closed. Replay false over
@@ -1018,7 +1048,11 @@ export class SessionManager {
   }
 
   private buildListSnapshot(): SessionListSnapshot {
-    const merged: TitledSessionSummary[] = this.summaries.map((summary) => {
+    const summaries = [...this.summaries]
+    for (const [id, retained] of this.retainedBindings) {
+      if (!summaries.some(summary => summary.sessionId === id)) summaries.push(retained.summary)
+    }
+    const merged: TitledSessionSummary[] = summaries.map((summary) => {
       // List rows read the generic 'title' projection key (host-computed unit
       // value; there is no dedicated title frame).
       const projectionStore = this.projectionStores.get(summary.sessionId)

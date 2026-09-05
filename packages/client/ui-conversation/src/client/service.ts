@@ -129,6 +129,8 @@ export class ConversationController extends Service implements IConversation {
    */
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
+    const block = this.blocks.storeFor(session.sessionId).getSnapshot()
+    if (block !== undefined) throw new Error(block.reason)
     const result = await session.prompt([{ type: 'text', text }], 'queue')
     if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
   }
@@ -149,12 +151,16 @@ export class ConversationController extends Service implements IConversation {
     mode: InputSubmitMode,
     signal?: AbortSignal,
   ): Promise<SubmitOutcome> {
+    const block = this.blocks.storeFor(session.sessionId).getSnapshot()
+    if (block !== undefined) throw new Error(block.reason)
     const attachments = this.draftImages(imageIds)
     if (attachments.length !== imageIds.length) {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
     const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
     const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
+    const currentBlock = this.blocks.storeFor(session.sessionId).getSnapshot()
+    if (currentBlock !== undefined) throw new Error(currentBlock.reason)
     const result = await session.prompt(content, mode, signal)
     if (!result.ok) return { kind: 'error' }
     this.releaseDraftImages(attachments)

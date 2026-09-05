@@ -223,20 +223,12 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
     // current selection while it moves into Ungrouped.
     const groupRow = page.locator('[role="treeitem"]').filter({ hasText: workspace.title }).first()
     await groupRow.waitFor({ timeout: 10_000 })
-    // The header row is wrapped by its HoverCard anchor span, so the section
-    // is the nearest groupSection ancestor, not the immediate parent.
-    const groupSection = groupRow.locator('xpath=ancestor::*[contains(@class, "groupSection")][1]')
-    await expect.poll(async () => {
-      const count = await groupSection.locator('[role="treeitem"]').count()
-      if (count < 2 && await groupRow.getAttribute('aria-expanded') !== 'true') {
-        await groupRow.click()
-        await page.waitForTimeout(50)
-      }
-      return await groupSection.locator('[role="treeitem"]').count()
-    }, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
-    const seededRow = groupSection.locator('[role="treeitem"]').nth(1)
+    await groupRow.click()
+    const detail = page.getByRole('region', { name: 'Workspace details' })
+    const seededRow = detail.getByRole('treeitem').first()
     await seededRow.click()
     await expect.poll(() => seededRow.getAttribute('aria-selected'), { timeout: 10_000 }).toBe('true')
+    await page.getByRole('button', { name: 'Back to workspaces' }).click()
 
     await clickHoverAction(groupRow, `Workspace actions for ${workspace.title}`)
     await page.getByRole('menuitem', { name: 'Delete workspace' }).click()

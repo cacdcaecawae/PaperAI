@@ -1,9 +1,8 @@
 /** PaperAI DSH workbench Host Remote over authoritative domain services. */
 
 import { Buffer } from 'node:buffer'
-import type { Dirent, Stats } from 'node:fs'
 import { basename, extname, join, relative, sep } from 'node:path'
-import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -11,18 +10,23 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { Workspace } from '@deepseek-ai/dsh-workspace/types'
 import type {} from '@paperai/commit-service'
+import type {} from '@paperai/agent-acp'
+import type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
+import type { ProjectIntegrityReport as PaperAIProjectIntegrityReport } from '@paperai/commit-service/doctor-types'
+import type {} from '@paperai/document-engine'
 import type {} from '@paperai/document-service'
 import { PaperExportError, type ExportDocumentResult } from '@paperai/export-service'
 import {
   DocumentCommitId,
   DocumentId,
   DocumentNodeId,
-  TemplateContractId,
 } from '@paperai/domain'
 import type {
   DocumentCommit,
+  DocumentMutation,
   DocumentNode,
   DocumentRecord,
+  DocumentRole,
   GateFinding,
   GateReport,
   ProjectRecord,
@@ -35,11 +39,18 @@ import {
   TemplatePackId,
   TemplatePackMemberId,
 } from '@paperai/template-service'
+import type { TemplateLibraryPack, TemplatePackSummary } from '@paperai/template-service'
+import { diffParagraphs } from './diff.ts'
 import type {
-  PaperAIAssociateTemplateRequest,
+  PaperAIAddTemplateFormatRequest,
+  PaperAIProbeAgentRequest,
+  PaperAIApplyTemplateRequest,
   PaperAICommitDocumentRequest,
-  PaperAIConfirmTemplateRequest,
   PaperAICreateFromTemplateRequest,
+  PaperAICreateTemplateSetRequest,
+  PaperAIDeleteTemplateSetRequest,
+  PaperAIDetachTemplateRequest,
+  PaperAIDiffVersionRequest,
   PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult,
   PaperAIDocumentChangedEvent,
@@ -47,31 +58,35 @@ import type {
   PaperAIDocumentNodeSummary,
   PaperAIDocumentOpenResult,
   PaperAIDocumentRevision,
-  PaperAIDocumentRole,
+  PaperAIDocumentRow,
   PaperAIDocumentSnapshot,
+  PaperAIDocumentType,
+  PaperAIDocumentTypeSuggestion,
   PaperAIDocumentVersion,
-  PaperAIGateFinding,
   PaperAIExportDocumentRequest,
   PaperAIExportDocumentResult,
+  PaperAIFormatChoice,
+  PaperAIGateFinding,
   PaperAIImportDocumentRequest,
   PaperAIImportDocumentResult,
-  PaperAIInstallTemplatePackRequest,
-  PaperAIListResourcesRequest,
-  PaperAIListTemplatesRequest,
   PaperAIOpenDocumentRequest,
+  PaperAIOverviewRequest,
+  PaperAIProjectOverview,
+  PaperAIRecoverWorkingRequest,
   PaperAIReadNodeRequest,
+  PaperAIRemoveTemplateFormatRequest,
   PaperAIResourceId,
-  PaperAIResourceList,
-  PaperAIResourceRow,
   PaperAIRestoreDocumentRequest,
   PaperAISelectedNodeBuffer,
+  PaperAISetProjectTemplateRequest,
+  PaperAISuggestDocumentTypeRequest,
   PaperAITemplateGateReport,
-  PaperAITemplateCatalog,
-  PaperAITemplateContractChoice,
+  PaperAITemplateLibrary,
+  PaperAITemplateSetChoice,
   PaperAITemplateSummary,
-  PaperAIUploadTemplateRequest,
   PaperAIValidateDocumentRequest,
   PaperAIValidateResult,
+  PaperAIVersionDiff,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -83,16 +98,27 @@ declare module '@deepseek-ai/cordis' {
 }
 
 const RESOURCE_PREFIX = 'document:'
-const WORKSPACE_PATH_PREFIX = 'workspace-path:'
 const DEFAULT_MAX_UPLOAD_BYTES = 128 * 1024 * 1024
-const SAFE_UPLOAD_NAME = /^[^<>:"/\\|?*\u0000-\u001f\u007f]+$/u
-const FILESYSTEM_RESOURCE_ROOTS = Object.freeze([
-  { category: 'image', directory: 'figures' },
-  { category: 'experiment', directory: 'experiments' },
-  { category: 'code', directory: 'code' },
-] as const)
+/** Characters Windows and POSIX file systems reject in a file name, plus control characters. */
+const FORBIDDEN_NAME_CHARACTERS = new Set(['<', '>', ':', '"', '/', String.fromCharCode(92), '|', '?', '*'])
 
-type FilesystemResourceCategory = typeof FILESYSTEM_RESOURCE_ROOTS[number]['category']
+function isSafeFileName(name: string): boolean {
+  if (name.length === 0) return false
+  for (const character of name) {
+    const code = character.codePointAt(0) ?? 0
+    if (FORBIDDEN_NAME_CHARACTERS.has(character) || code <= 0x1f || code === 0x7f) return false
+  }
+  return true
+}
+/** Paragraphs inspected when guessing a document type from its opening text. */
+const TYPE_GUESS_PARAGRAPHS = 12
+/** Title or opening-text keywords that name a document type, most specific first. */
+const TYPE_KEYWORDS: readonly (readonly [RegExp, PaperAIDocumentType])[] = [
+  [/开题/u, 'proposal'],
+  [/中期/u, 'midterm'],
+  [/结题|答辩|验收/u, 'final'],
+  [/学位论文|毕业论文|论文/u, 'manuscript'],
+]
 
 type DurableDomainChange = {
   readonly domain: string
@@ -116,90 +142,6 @@ interface GateOperation {
 interface GateCacheSlot {
   readonly operation: GateOperation
   readonly cached?: CachedGateReport
-}
-
-function pathResourceId(
-  category: FilesystemResourceCategory,
-  path: string,
-): PaperAIResourceId {
-  return `${WORKSPACE_PATH_PREFIX}${category}:${path}` as PaperAIResourceId
-}
-
-function pathResourceRow(
-  category: FilesystemResourceCategory,
-  kind: PaperAIResourceRow['kind'],
-  name: string,
-  path: string,
-  depth: number,
-): PaperAIResourceRow {
-  return {
-    id: pathResourceId(category, path),
-    category,
-    kind,
-    name,
-    path,
-    depth,
-    openable: false,
-  }
-}
-
-function deterministicNameOrder(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0
-}
-
-function isMissingPath(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
-}
-
-async function projectResourceDirectory(
-  projectRoot: string,
-  category: FilesystemResourceCategory,
-  relativePath: string,
-  depth: number,
-): Promise<PaperAIResourceRow[]> {
-  const directoryPath = join(projectRoot, relativePath)
-  let metadata: Stats
-  try {
-    metadata = await lstat(directoryPath)
-  } catch (error) {
-    if (isMissingPath(error)) return []
-    throw error
-  }
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) return []
-  let entries: Dirent[]
-  try {
-    entries = await readdir(directoryPath, { withFileTypes: true })
-  } catch (error) {
-    if (isMissingPath(error)) return []
-    throw error
-  }
-  entries.sort((left, right) => deterministicNameOrder(left.name, right.name))
-  const descendants: PaperAIResourceRow[] = []
-  for (const entry of entries) {
-    const childPath = `${relativePath}/${entry.name}`
-    if (entry.isDirectory()) {
-      descendants.push(...await projectResourceDirectory(
-        projectRoot,
-        category,
-        childPath,
-        depth + 1,
-      ))
-    } else if (entry.isFile()) {
-      descendants.push(pathResourceRow(category, 'file', entry.name, childPath, depth + 1))
-    }
-  }
-  if (descendants.length === 0) return []
-  return [
-    pathResourceRow(category, 'folder', basename(relativePath), relativePath, depth),
-    ...descendants,
-  ]
-}
-
-async function projectFilesystemResources(project: ProjectRecord): Promise<PaperAIResourceRow[]> {
-  const groups = await Promise.all(FILESYSTEM_RESOURCE_ROOTS.map(root => (
-    projectResourceDirectory(project.rootPath, root.category, root.directory, 0)
-  )))
-  return groups.flat()
 }
 
 function committedDocumentChange(change: DurableDomainChange): PaperAIDocumentChangedEvent | undefined {
@@ -267,6 +209,7 @@ function nodeSummary(node: DocumentNode): PaperAIDocumentNodeSummary {
     label: compactLabel(node.text, `空${node.kind === 'table-cell' ? '单元格' : '段落'}`),
     depth: node.parentId === undefined ? 0 : 1,
     editable: node.kind !== 'table',
+    text: node.text,
   }
 }
 
@@ -288,37 +231,49 @@ function versionOf(commit: DocumentCommit, head: DocumentRecord['headCommitId'])
   }
 }
 
-function templateSummary(contract: TemplateContract | undefined): PaperAITemplateSummary | null {
-  if (contract === undefined) return null
+/** One member applies to one or more document types; each pairing is a format the start page can offer. */
+function formatChoices(member: TemplatePackSummary['members'][number]): PaperAIFormatChoice[] {
+  return member.appliesToRoles.map(role => ({
+    memberId: String(member.id),
+    documentType: role,
+    name: member.name,
+    usage: member.usage,
+    sourceVersion: member.sourceVersion,
+    originalFileName: member.originalFileName,
+  }))
+}
+
+function setChoice(pack: TemplatePackSummary): PaperAITemplateSetChoice {
   return {
-    templateId: String(contract.id),
-    name: contract.name,
-    source: contract.origin.kind === 'built-in' ? 'built-in' : 'uploaded',
-    ...(contract.origin.sourceVersion === undefined ? {} : { version: contract.origin.sourceVersion }),
+    packId: String(pack.id),
+    kind: pack.kind,
+    name: pack.name,
+    description: pack.description,
+    formats: pack.members.flatMap(formatChoices),
   }
 }
 
-function contractChoice(contract: TemplateContract): PaperAITemplateContractChoice {
+/** An empty custom set is not installable yet, but the library still lists it so the user can fill it. */
+function emptySetChoice(pack: TemplateLibraryPack): PaperAITemplateSetChoice {
   return {
-    templateId: String(contract.id),
-    name: contract.name,
-    status: contract.status,
-    source: contract.origin.kind === 'built-in' ? 'built-in' : 'uploaded',
-    appliesToRoles: [...contract.appliesToRoles],
-    usage: contract.usage,
-    ruleCount: contract.rules.length,
-    slotCount: contract.slots.length,
-    ...(contract.origin.packId === undefined ? {} : { originPackId: contract.origin.packId }),
-    ...(contract.origin.memberId === undefined ? {} : { originMemberId: contract.origin.memberId }),
-    requirements: contract.rules.map(rule => ({
-      ruleId: String(rule.id),
-      kind: rule.kind,
-      label: rule.label,
-      description: rule.description,
-      severity: rule.severity,
-      confidence: rule.confidence,
-      enabled: rule.enabled,
-    })),
+    packId: pack.id,
+    kind: 'custom',
+    name: pack.name,
+    description: pack.description,
+    formats: [],
+  }
+}
+
+/** The same empty set in pack-summary form, so a project may choose it before adding formats. */
+function emptyPackSummary(pack: TemplateLibraryPack): TemplatePackSummary {
+  return {
+    id: TemplatePackId(pack.id),
+    kind: 'custom',
+    name: pack.name,
+    description: pack.description,
+    version: 'custom',
+    sourceLabel: '用户添加',
+    members: [],
   }
 }
 
@@ -377,10 +332,30 @@ function projectGate(report: GateReport, contract: TemplateContract | undefined)
   }
 }
 
+/** Guess a document type from its title, then its opening paragraphs. */
+function guessDocumentType(
+  document: DocumentRecord,
+  nodes: readonly DocumentNode[],
+): PaperAIDocumentTypeSuggestion {
+  for (const [pattern, documentType] of TYPE_KEYWORDS) {
+    if (pattern.test(document.name)) return { documentId: document.id, documentType, basis: 'title' }
+  }
+  const opening = nodes
+    .map(node => node.text.trim())
+    .filter(text => text.length > 0)
+    .slice(0, TYPE_GUESS_PARAGRAPHS)
+    .join('\n')
+  for (const [pattern, documentType] of TYPE_KEYWORDS) {
+    if (pattern.test(opening)) return { documentId: document.id, documentType, basis: 'content' }
+  }
+  return { documentId: document.id, documentType: document.role, basis: 'current' }
+}
+
 /** Strict Remote that keeps the DSH client free of PaperAI Host dependencies. */
 export class PaperAiWorkbenchService extends TypertRemoteService {
   static inject = [
     'workspaceRegistry',
+    'documentEngine',
     'paperProjects',
     'paperDocuments',
     'paperCommits',
@@ -399,6 +374,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   private readonly gateCache = new Map<DocumentId, GateCacheSlot>()
   private readonly maxUploadBytes: number
+  private acp: Pick<Context['paperAiAcpAgents'], 'diagnosticStatus' | 'probe'> | undefined
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paperaiWorkbench')
@@ -406,6 +382,12 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     if (!Number.isSafeInteger(this.maxUploadBytes) || this.maxUploadBytes <= 0) {
       throw new Error('paperai-workbench: maxUploadBytes must be a positive safe integer')
     }
+    ctx.inject(['paperAiAcpAgents'], (scope) => {
+      scope.effect(() => {
+        this.acp = scope.paperAiAcpAgents
+        return () => { this.acp = undefined }
+      }, 'paperaiWorkbench: optional Agent diagnostics')
+    })
     ctx.on('domain/changed', (change) => {
       const event = committedDocumentChange(change)
       if (event === undefined) return
@@ -424,49 +406,164 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   /**
-   * Lazily initialize and list the selected Workspace's PaperAI resources.
-   * @param request - Workspace whose project resources should be listed.
-   * @param signal - optional cancellation signal for project and filesystem discovery.
-   * @returns the flattened document, template, and non-empty filesystem resources.
+   * Lazily initialize the selected Workspace's project and describe it: the
+   * template set it writes against and its tracked documents.
+   * @param request - Workspace whose project should be described.
+   * @param signal - optional cancellation signal for project initialization.
+   * @returns the project name, template decision, and document rows.
    * @throws when the Workspace or its PaperAI project cannot be resolved.
    */
-  @Remote('list')
-  async list(request: PaperAIListResourcesRequest, signal?: AbortSignal): Promise<PaperAIResourceList> {
+  @Remote('overview')
+  async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview> {
     signal?.throwIfAborted()
     const { project } = await this.projectForWorkspace(request.workspaceId)
-    const documents: PaperAIResourceRow[] = this.ctx.paperDocuments.listDocuments(project.id)
-      .map(document => ({
-        id: resourceId(document.id),
-        category: 'document',
-        kind: 'file',
-        name: `${document.name}.docx`,
-        path: relativeDisplayPath(project, document.workingPath),
-        depth: 0,
-        openable: true,
-        status: 'clean',
-      }))
-    const templates: PaperAIResourceRow[] = this.ctx.paperTemplates.listContracts(project.id)
-      .map(contract => ({
-        id: `template:${contract.id}` as PaperAIResourceId,
-        category: 'template',
-        kind: 'file',
-        name: contract.name,
-        path: `templates/${contract.name}`,
-        depth: 0,
-        openable: false,
-        status: contract.status === 'confirmed' ? 'clean' : 'pending',
-      }))
-    const filesystemResources = await projectFilesystemResources(project)
-    return {
-      workspaceId: request.workspaceId,
-      resources: [...documents, ...templates, ...filesystemResources],
-    }
+    return this.projectOverview(request.workspaceId, project)
   }
 
   /**
-   * Import one browser-selected `.doc` or `.docx` and establish its root version.
-   * A rejected root submission is followed by non-cancellable import rollback before this method settles.
-   * @param request - Workspace, Session, upload bytes, document role, and optional display name.
+   * Read configured Agent discovery and cached model previews without starting processes.
+   * @returns configured ACP peers, or an empty roster when the provider plugin is absent.
+   */
+  @Remote('agentDiagnostics')
+  agentDiagnostics(): readonly PaperAIAgentDiagnostic[] {
+    return this.acp?.diagnosticStatus() ?? []
+  }
+
+  /**
+   * Probe ACP initialization in an empty directory without a model prompt.
+   * @param request - selected provider and explicit cooldown bypass.
+   * @returns readiness and model metadata after the diagnostic process exits.
+   */
+  @Remote('probeAgent')
+  probeAgent(request: PaperAIProbeAgentRequest): Promise<PaperAIAgentDiagnostic> {
+    const agents = this.acp
+    if (agents === undefined) throw new Error('ACP Agent provider is not configured')
+    return agents.probe(request.provider, request.force)
+  }
+
+  /**
+   * Inspect the selected project's retained files and document ownership.
+   * @param request - registered Workspace to scan.
+   * @param signal - optional cancellation between artifact reads.
+   * @returns read-only issues and explicit recovery plans.
+   */
+  @Remote('inspectProject')
+  async inspectProject(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
+    const project = this.existingProject(request.workspaceId)
+    return this.ctx.paperCommits.inspectProject(project, signal)
+  }
+
+  /**
+   * Restore missing working bytes using an unchanged verified version.
+   * @param request - owning Workspace and scan-bound recovery plan.
+   * @param signal - optional cancellation before publication.
+   * @returns a fresh integrity report after recovery.
+   */
+  @Remote('recoverWorking')
+  async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
+    const project = this.existingProject(request.workspaceId)
+    const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.plan.documentId)))
+    if (document?.projectId !== project.id) throw new Error('recovery document does not belong to this project')
+    await this.ctx.paperCommits.recoverMissingWorking(request.plan, signal)
+    return this.ctx.paperCommits.inspectProject(project, signal)
+  }
+
+  /**
+   * Record the template set the project writes against, or the explicit
+   * choice to write without one.
+   * @param request - Workspace and template set id, or `null` for none.
+   * @returns the refreshed overview.
+   * @throws when the Workspace is unknown or the set is not in the library.
+   */
+  @Remote('setProjectTemplate')
+  async setProjectTemplate(request: PaperAISetProjectTemplateRequest): Promise<PaperAIProjectOverview> {
+    const { project } = await this.projectForWorkspace(request.workspaceId)
+    if (request.packId !== null && this.findSet(request.packId) === undefined) {
+      throw new Error(`paperai-workbench: template set '${request.packId}' is not in the library`)
+    }
+    const updated = await this.ctx.paperProjects.setTemplateChoice(project.id, request.packId)
+    return this.projectOverview(request.workspaceId, updated)
+  }
+
+  /**
+   * List every template set the user can choose from.
+   * @returns built-in sets, then custom sets in creation order (empty ones included).
+   */
+  @Remote('listTemplateLibrary')
+  listTemplateLibrary(): Promise<PaperAITemplateLibrary> {
+    return Promise.resolve(this.templateLibrary())
+  }
+
+  /**
+   * Create an empty custom template set.
+   * @param request - display name and optional description.
+   * @returns the refreshed library.
+   * @throws when the name is blank or already used.
+   */
+  @Remote('createTemplateSet')
+  async createTemplateSet(request: PaperAICreateTemplateSetRequest): Promise<PaperAITemplateLibrary> {
+    await this.ctx.paperTemplates.createLibraryPack({
+      name: request.name,
+      ...(request.description === undefined ? {} : { description: request.description }),
+    })
+    return this.templateLibrary()
+  }
+
+  /**
+   * Remove a custom template set. Projects that chose it fall back to
+   * "no template" on their next overview; installed formats keep working.
+   * @param request - custom set id.
+   * @returns the refreshed library.
+   * @throws when the set is unknown or built-in.
+   */
+  @Remote('deleteTemplateSet')
+  async deleteTemplateSet(request: PaperAIDeleteTemplateSetRequest): Promise<PaperAITemplateLibrary> {
+    await this.ctx.paperTemplates.deleteLibraryPack(request.packId)
+    return this.templateLibrary()
+  }
+
+  /**
+   * Add or replace the Word format for one document type in a custom set.
+   * @param request - set, document type, usage, optional name, and the upload.
+   * @param signal - optional cancellation signal for staging and normalization.
+   * @returns the refreshed library.
+   * @throws when the set is unknown, the upload is invalid, or normalization fails.
+   */
+  @Remote('addTemplateFormat')
+  async addTemplateFormat(
+    request: PaperAIAddTemplateFormatRequest,
+    signal?: AbortSignal,
+  ): Promise<PaperAITemplateLibrary> {
+    await this.ctx.paperTemplates.addLibraryFormat({
+      packId: request.packId,
+      role: request.documentType,
+      usage: request.usage,
+      ...(request.name === undefined ? {} : { name: request.name }),
+      upload: {
+        fileName: this.uploadFileName(request.fileName),
+        bytes: this.decodeUpload(request.contentBase64),
+      },
+    }, signal)
+    return this.templateLibrary()
+  }
+
+  /**
+   * Remove the format for one document type from a custom set.
+   * @param request - custom set id and document type.
+   * @returns the refreshed library.
+   * @throws when the set or format is unknown.
+   */
+  @Remote('removeTemplateFormat')
+  async removeTemplateFormat(request: PaperAIRemoveTemplateFormatRequest): Promise<PaperAITemplateLibrary> {
+    await this.ctx.paperTemplates.removeLibraryFormat(request.packId, request.documentType)
+    return this.templateLibrary()
+  }
+
+  /**
+   * Import one browser-selected `.doc` or `.docx` as a free-writing document
+   * and establish its root version. A rejected root submission is followed
+   * by non-cancellable import rollback before this method settles.
+   * @param request - Workspace, Session, upload bytes, and optional display name.
    * @param signal - optional cancellation signal for import, indexing, commit, and preview work.
    * @returns the opened imported document and root commit, or an explicit native-engine downgrade.
    * @throws when upload, project, import, or commit work fails; an AggregateError includes any rollback failure.
@@ -480,7 +577,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     return await this.withUploadedWord(project, request.fileName, request.contentBase64, sourcePath => (
       this.establishDocument(project, {
         sourcePath,
-        role: request.role,
+        role: 'other',
         ...(request.name === undefined ? {} : { name: request.name }),
       }, {
         sessionId: request.sessionId,
@@ -491,16 +588,16 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   /**
-   * Start one Working document from a built-in template pack member and bind
-   * that member's contract in the root commit. A form template is imported as
-   * the document itself; a formatting reference governs the uploaded
-   * manuscript instead. Built-in members ship reviewed requirements, so the
-   * contract is confirmed here without a separate review step.
-   * @param request - Workspace, Session, pack member, optional manuscript upload, role, and display name.
+   * Start one document of a given type from the project's template set and
+   * bind that format in the root commit. A form template is imported as the
+   * document itself; a formatting reference governs the uploaded manuscript
+   * instead. Library formats ship reviewed requirements, so the contract is
+   * confirmed here without a separate review step.
+   * @param request - Workspace, Session, document type, optional manuscript upload, and display name.
    * @param signal - optional cancellation signal for installation, import, commit, and preview work.
    * @returns the opened document and root commit, or an explicit native-engine downgrade.
-   * @throws when the member is unknown, a formatting reference has no upload, the role does not apply,
-   * or import or commit work fails; an AggregateError includes any rollback failure.
+   * @throws when the project has no template set or no format for the type, a formatting reference
+   * has no upload, or import or commit work fails; an AggregateError includes any rollback failure.
    */
   @Remote('createFromTemplate')
   async createFromTemplate(
@@ -508,41 +605,24 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     signal?: AbortSignal,
   ): Promise<PaperAIImportDocumentResult> {
     const { project } = await this.projectForWorkspace(request.workspaceId)
-    const [installed] = await this.ctx.paperTemplates.installPack({
-      projectId: project.id,
-      packId: TemplatePackId(request.packId),
-      memberIds: [TemplatePackMemberId(request.memberId)],
-    }, signal)
-    /* v8 ignore next 3 -- installPack rejects an unknown member instead of returning an empty list. */
-    if (installed === undefined) {
-      throw new Error(`paperai-workbench: pack '${request.packId}' has no member '${request.memberId}'`)
-    }
-    const contract = installed.status === 'confirmed'
-      ? installed
-      : await this.ctx.paperTemplates.confirm(installed.id)
-    const role = request.role ?? contract.appliesToRoles[0]
-    if (role === undefined) {
-      throw new Error(`paperai-workbench: template '${contract.name}' applies to no document role`)
-    }
-    if (!contract.appliesToRoles.includes(role)) {
-      throw new Error(`paperai-workbench: template '${contract.name}' does not apply to '${role}' documents`)
-    }
-    const name = request.name ?? contract.name
+    const { set, format } = this.requireProjectFormat(project, request.documentType)
+    const contract = await this.installFormat(project, set, format, signal)
+    const name = request.name ?? format.name
     const establish = (sourcePath: string): Promise<PaperAIImportDocumentResult> => (
-      this.establishDocument(project, { sourcePath, role, name }, {
+      this.establishDocument(project, { sourcePath, role: request.documentType, name }, {
         sessionId: request.sessionId,
         messagePrefix: '从模板新建',
-        milestone: `从模板新建 ${contract.name}`,
+        milestone: `从模板新建 ${format.name}`,
         templateId: contract.id,
       }, signal)
     )
-    // The member's usage decides the content source, never the caller: a form
+    // The format's usage decides the content source, never the caller: a form
     // template is the document, so no upload may replace it; a formatting
     // reference governs an upload, so one is required.
     if (contract.usage === 'form-template') {
       if (request.upload !== undefined) {
         throw new Error(
-          `paperai-workbench: template '${contract.name}' is a form template that becomes the document itself; it accepts no upload`,
+          `paperai-workbench: format '${format.name}' is a form template that becomes the document itself; it accepts no upload`,
         )
       }
       const source = this.ctx.paperRepository.getDocument(contract.sourceDocumentId)
@@ -553,134 +633,136 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
     if (request.upload === undefined) {
       throw new Error(
-        `paperai-workbench: template '${contract.name}' is a formatting reference; upload the manuscript it should format`,
+        `paperai-workbench: format '${format.name}' is a formatting reference; upload the manuscript it should format`,
       )
     }
     return await this.withUploadedWord(project, request.upload.fileName, request.upload.contentBase64, establish)
   }
 
   /**
-   * List registered institutional packs and this project's compiled contracts.
-   * @param request - Workspace whose template catalog should be projected.
-   * @returns built-in pack choices and the project's installed contracts.
-   * @throws when the Workspace or its PaperAI project cannot be resolved.
+   * Bind the project template's format for a document type through the
+   * document commit path, changing the document's type in the same commit
+   * when it differs.
+   * @param request - document projection, Session provenance, and the document type to apply.
+   * @param signal - optional cancellation signal for installation, commit, and refreshed projection work.
+   * @returns the refreshed document projection and the new binding commit identity.
+   * @throws when the projection is stale, the project has no template set or format for the type,
+   * or the same format is already bound.
    */
-  @Remote('listTemplates')
-  async listTemplates(request: PaperAIListTemplatesRequest): Promise<PaperAITemplateCatalog> {
-    const { project } = await this.projectForWorkspace(request.workspaceId)
-    return this.templateCatalog(request.workspaceId, project)
-  }
-
-  /**
-   * Install selected built-in pack members as reviewable draft contracts.
-   * @param request - Workspace, pack identity, and optional member selection.
-   * @param signal - optional cancellation signal for asset import and template compilation.
-   * @returns the refreshed template catalog after installation.
-   * @throws when the Workspace, pack, or member is unknown, or template compilation fails.
-   */
-  @Remote('installTemplatePack')
-  async installTemplatePack(
-    request: PaperAIInstallTemplatePackRequest,
-    signal?: AbortSignal,
-  ): Promise<PaperAITemplateCatalog> {
-    const { project } = await this.projectForWorkspace(request.workspaceId)
-    await this.ctx.paperTemplates.installPack({
-      projectId: project.id,
-      packId: TemplatePackId(request.packId),
-      ...(request.memberIds === undefined
-        ? {}
-        : { memberIds: request.memberIds.map(TemplatePackMemberId) }),
-    }, signal)
-    return this.templateCatalog(request.workspaceId, project)
-  }
-
-  /**
-   * Upload a custom Word template without mutating the selected source.
-   * @param request - Workspace, upload bytes, display name, document roles, and template usage.
-   * @param signal - optional cancellation signal for staging, normalization, and compilation.
-   * @returns the refreshed template catalog containing the reviewable draft.
-   * @throws when the upload or template metadata is invalid, or normalization or compilation fails.
-   */
-  @Remote('uploadTemplate')
-  async uploadTemplate(
-    request: PaperAIUploadTemplateRequest,
-    signal?: AbortSignal,
-  ): Promise<PaperAITemplateCatalog> {
-    const { project } = await this.projectForWorkspace(request.workspaceId)
-    await this.withUploadedWord(project, request.fileName, request.contentBase64, sourcePath => (
-      this.ctx.paperTemplates.upload({
-        projectId: project.id,
-        sourcePath,
-        name: request.name,
-        appliesToRoles: request.appliesToRoles,
-        usage: request.usage,
-      }, signal)
-    ))
-    return this.templateCatalog(request.workspaceId, project)
-  }
-
-  /**
-   * Confirm parsed template requirements before a document may use them.
-   * @param request - Workspace and installed template identity selected by the user.
-   * @returns the refreshed template catalog containing the confirmed contract.
-   * @throws when the Workspace is missing or the template does not belong to its project.
-   */
-  @Remote('confirmTemplate')
-  async confirmTemplate(request: PaperAIConfirmTemplateRequest): Promise<PaperAITemplateCatalog> {
-    const { project } = await this.projectForWorkspace(request.workspaceId)
-    const id = TemplateContractId(request.templateId)
-    const contract = this.ctx.paperTemplates.getContract(id)
-    if (contract === undefined || contract.projectId !== project.id) {
-      throw new Error(`paperai-workbench: template '${request.templateId}' does not belong to this Workspace`)
-    }
-    await this.ctx.paperTemplates.confirm(id)
-    return this.templateCatalog(request.workspaceId, project)
-  }
-
-  /**
-   * Associate a confirmed compatible template through the document commit path.
-   * @param request - document projection, Session provenance, and template identity to associate.
-   * @param signal - optional cancellation signal for commit and refreshed projection work.
-   * @returns the refreshed document projection and the new association commit identity.
-   * @throws when the projection is stale or the template is missing, foreign, unconfirmed, incompatible, or already associated.
-   */
-  @Remote('associateTemplate')
-  async associateTemplate(
-    request: PaperAIAssociateTemplateRequest,
+  @Remote('applyTemplate')
+  async applyTemplate(
+    request: PaperAIApplyTemplateRequest,
     signal?: AbortSignal,
   ): Promise<PaperAIDocumentCommitResult> {
     const id = DocumentId(String(request.documentId))
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
-    const templateId = TemplateContractId(request.templateId)
-    const contract = this.ctx.paperTemplates.getContract(templateId)
-    if (contract === undefined || contract.projectId !== before.document.projectId) {
-      throw new Error(`paperai-workbench: template '${templateId}' does not belong to this document's project`)
+    const project = this.requireProject(before.document.projectId)
+    const { set, format } = this.requireProjectFormat(project, request.documentType)
+    const contract = await this.installFormat(project, set, format, signal)
+    if (before.document.templateId === contract.id && before.document.role === request.documentType) {
+      throw new Error(`paperai-workbench: format '${format.name}' is already bound`)
     }
-    if (contract.status !== 'confirmed') {
-      throw new Error(`paperai-workbench: template '${templateId}' must be confirmed before association`)
-    }
-    if (!contract.appliesToRoles.includes(before.document.role)) {
-      throw new Error(`paperai-workbench: template '${templateId}' does not apply to '${before.document.role}' documents`)
-    }
-    if (before.document.templateId === templateId) {
-      throw new Error(`paperai-workbench: template '${templateId}' is already associated`)
+    const mutations: DocumentMutation[] = [
+      ...(before.document.role === request.documentType
+        ? []
+        : [{ type: 'set-document-type' as const, documentType: request.documentType }]),
+      { type: 'bind-template', templateId: contract.id },
+    ]
+    const commit = await this.ctx.paperCommits.submit({
+      documentId: id,
+      ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
+      message: `套用模板：${set.name} · ${format.name}`,
+      actor: {
+        kind: 'human', name: '用户', client: 'paperai', sessionId: String(request.sessionId),
+      },
+      mutations,
+      ...(signal === undefined ? {} : { signal }),
+    })
+    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+  }
+
+  /**
+   * Drop the bound format through the document commit path; the document
+   * keeps its type and writes freely from then on.
+   * @param request - document projection and Session provenance.
+   * @param signal - optional cancellation signal for commit and refreshed projection work.
+   * @returns the refreshed document projection and the new commit identity.
+   * @throws when the projection is stale or no format is bound.
+   */
+  @Remote('detachTemplate')
+  async detachTemplate(
+    request: PaperAIDetachTemplateRequest,
+    signal?: AbortSignal,
+  ): Promise<PaperAIDocumentCommitResult> {
+    const id = DocumentId(String(request.documentId))
+    const before = this.requireDocument(id)
+    this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
+    if (before.document.templateId === undefined) {
+      throw new Error(`paperai-workbench: document '${id}' has no bound format`)
     }
     const commit = await this.ctx.paperCommits.submit({
       documentId: id,
       ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
-      message: `关联模板：${contract.name}`,
+      message: '解除模板绑定',
       actor: {
         kind: 'human', name: '用户', client: 'paperai', sessionId: String(request.sessionId),
       },
-      mutations: [{ type: 'bind-template', templateId }],
+      mutations: [{ type: 'unbind-template' }],
       ...(signal === undefined ? {} : { signal }),
     })
-    const after = this.requireDocument(id)
-    this.fenceGateMutation(after.document, request.baseRevision)
-    const project = this.requireProject(after.document.projectId)
-    const opened = await this.projectOpen(project, after.document, after.nodes, request.sessionId, signal)
-    return { ...opened, createdCommitId: commit.id }
+    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+  }
+
+  /**
+   * Guess a document's type from its title, then its opening paragraphs.
+   * @param request - document to inspect.
+   * @returns the guessed type and what it was based on; the current type when nothing matches.
+   * @throws when the document is unknown.
+   */
+  @Remote('suggestDocumentType')
+  suggestDocumentType(request: PaperAISuggestDocumentTypeRequest): Promise<PaperAIDocumentTypeSuggestion> {
+    return Promise.resolve().then(() => {
+      const snapshot = this.requireDocument(DocumentId(String(request.documentId)))
+      return guessDocumentType(snapshot.document, snapshot.nodes)
+    })
+  }
+
+  /**
+   * Diff one version against its parent at paragraph level, reading both
+   * immutable snapshots through the document engine.
+   * @param request - document and version to explain.
+   * @param signal - optional cancellation signal for engine reads.
+   * @returns paragraph changes in document order; a root version lists every paragraph as added.
+   * @throws when the version does not belong to the document.
+   */
+  @Remote('diffVersion')
+  async diffVersion(request: PaperAIDiffVersionRequest, signal?: AbortSignal): Promise<PaperAIVersionDiff> {
+    const documentId = DocumentId(String(request.documentId))
+    this.requireDocument(documentId)
+    const commit = this.ctx.paperRepository.getCommit(DocumentCommitId(String(request.commitId)))
+    if (commit === undefined || String(commit.documentId) !== String(documentId)) {
+      throw new Error(`paperai-workbench: version '${request.commitId}' does not belong to document '${documentId}'`)
+    }
+    const parent = commit.parentId === undefined
+      ? undefined
+      : this.ctx.paperRepository.getCommit(commit.parentId)
+    if (commit.parentId !== undefined && parent === undefined) {
+      throw new Error(`paperai-workbench: version '${commit.id}' references missing parent '${commit.parentId}'`)
+    }
+    const [before, after] = await Promise.all([
+      parent === undefined ? Promise.resolve([]) : this.ctx.documentEngine.readTextNodes(parent.snapshotPath, signal),
+      this.ctx.documentEngine.readTextNodes(commit.snapshotPath, signal),
+    ])
+    const paragraphs = (nodes: readonly { text: string }[]): string[] => nodes.map(node => node.text)
+    const diff = diffParagraphs(paragraphs(before), paragraphs(after))
+    return {
+      documentId,
+      commitId: commit.id,
+      parentCommitId: parent?.id ?? null,
+      changes: diff.changes,
+      unchangedCount: diff.unchangedCount,
+    }
   }
 
   /**
@@ -730,9 +812,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       }
       const current = this.requireDocument(id)
       this.assertProjection(current.document, request.baseRevision, request.baseCommitId)
-      const contract = current.document.templateId === undefined
-        ? undefined
-        : this.ctx.paperTemplates.getContract(current.document.templateId)
+      const contract = this.contractOf(current.document)
       const gate: PaperAITemplateGateReport = {
         ...projectGate(error.report, contract),
         status: 'failed',
@@ -748,10 +828,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       }
     }
     const after = this.requireDocument(id)
-    const contract = after.document.templateId === undefined
-      ? undefined
-      : this.ctx.paperTemplates.getContract(after.document.templateId)
-    const gate = projectGate(exported.report, contract)
+    const gate = projectGate(exported.report, this.contractOf(after.document))
     // The report covers the exported immutable commit, not a newer head published while file output completed.
     if (after.document.headCommitId === exported.commit.id) {
       this.rememberGate(after.document, gateOperation, gate)
@@ -803,7 +880,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   /**
-   * Apply selected-node mutations and create one immediate human commit.
+   * Apply block text mutations and create one immediate human commit.
    * @param request - observed document projection, Session provenance, and node text replacements.
    * @param signal - optional cancellation signal for mutation, commit, indexing, and preview work.
    * @returns the refreshed document projection and the new content commit identity.
@@ -839,18 +916,9 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       })),
       ...(signal === undefined ? {} : { signal }),
     })
-    const after = this.requireDocument(id)
-    this.fenceGateMutation(after.document, request.baseRevision)
-    const project = this.requireProject(after.document.projectId)
-    const opened = await this.projectOpen(
-      project,
-      after.document,
-      after.nodes,
-      request.sessionId,
-      signal,
-      DocumentNodeId(String(firstMutation.nodeId)),
+    return await this.commitResult(
+      id, request.baseRevision, request.sessionId, commit, signal, DocumentNodeId(String(firstMutation.nodeId)),
     )
-    return { ...opened, createdCommitId: commit.id }
   }
 
   /**
@@ -870,10 +938,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     this.assertProjection(snapshot.document, request.revision, request.headCommitId)
     const gateOperation = this.beginGate(snapshot.document)
     const report = await this.ctx.paperTemplates.check({ documentId: id, mode: 'continuous' }, signal)
-    const contract = snapshot.document.templateId === undefined
-      ? undefined
-      : this.ctx.paperTemplates.getContract(snapshot.document.templateId)
-    const gate = projectGate(report, contract)
+    const gate = projectGate(report, this.contractOf(snapshot.document))
     this.rememberGate(snapshot.document, gateOperation, gate)
     return {
       documentId: snapshot.document.id,
@@ -912,11 +977,17 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       },
       ...(signal === undefined ? {} : { signal }),
     })
-    const after = this.requireDocument(id)
-    this.fenceGateMutation(after.document, request.baseRevision)
-    const project = this.requireProject(after.document.projectId)
-    const opened = await this.projectOpen(project, after.document, after.nodes, request.sessionId, signal)
-    return { ...opened, createdCommitId: commit.id }
+    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+  }
+
+  /** Diagnostic reads must not initialize a missing project or repair its context files. */
+  private existingProject(workspaceId: WorkspaceId): ProjectRecord {
+    const workspace = this.ctx.workspaceRegistry.get(workspaceId)
+    if (workspace === undefined) throw new Error(`paperai-workbench: Workspace '${workspaceId}' does not exist`)
+    const project = this.ctx.paperRepository.listProjects().find(candidate => candidate.workspaceId === workspaceId)
+    if (project === undefined) throw new Error('paperai-workbench: project is not initialized')
+    if (relative(workspace.path, project.rootPath) !== '') throw new Error('paperai-workbench: project root does not match the Workspace')
+    return project
   }
 
   private async projectForWorkspace(workspaceId: WorkspaceId): Promise<{ workspace: Workspace; project: ProjectRecord }> {
@@ -929,25 +1000,82 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     return { workspace, project: initialized.project }
   }
 
-  private templateCatalog(workspaceId: WorkspaceId, project: ProjectRecord): PaperAITemplateCatalog {
+  private projectOverview(workspaceId: WorkspaceId, project: ProjectRecord): PaperAIProjectOverview {
+    const template = project.templatePackId === undefined ? undefined : this.findSet(project.templatePackId)
+    const documents: PaperAIDocumentRow[] = this.ctx.paperDocuments.listDocuments(project.id)
+      .map((document): PaperAIDocumentRow => ({
+        id: resourceId(document.id),
+        documentId: document.id,
+        name: document.name,
+        fileName: basename(document.workingPath),
+        documentType: document.role,
+        templateName: this.contractOf(document)?.name ?? null,
+        updatedAt: document.updatedAt,
+      }))
     return {
       workspaceId,
-      packs: this.ctx.paperTemplates.listPacks().map(pack => ({
-        packId: String(pack.id),
-        name: pack.name,
-        description: pack.description,
-        version: pack.version,
-        members: pack.members.map(member => ({
-          memberId: String(member.id),
-          name: member.name,
-          description: member.description,
-          appliesToRoles: [...member.appliesToRoles],
-          usage: member.usage,
-          originalFileName: member.originalFileName,
-        })),
-      })),
-      contracts: this.ctx.paperTemplates.listContracts(project.id).map(contractChoice),
+      projectName: project.name,
+      templateDecided: project.templateDecidedAt !== undefined,
+      templatePackId: project.templatePackId ?? null,
+      template: template === undefined ? null : setChoice(template),
+      documents,
     }
+  }
+
+  private templateLibrary(): PaperAITemplateLibrary {
+    const installable = this.ctx.paperTemplates.listPacks().map(setChoice)
+    const listed = new Set(installable.map(set => set.packId))
+    const empty = this.ctx.paperTemplates.listLibraryPacks()
+      .filter(pack => !listed.has(pack.id))
+      .map(emptySetChoice)
+    return { sets: [...installable, ...empty] }
+  }
+
+  /** A set by id: installable packs first, then custom sets that hold no format yet. */
+  private findSet(packId: string): TemplatePackSummary | undefined {
+    const installable = this.ctx.paperTemplates.listPacks().find(pack => String(pack.id) === packId)
+    if (installable !== undefined) return installable
+    const empty = this.ctx.paperTemplates.listLibraryPacks().find(pack => pack.id === packId)
+    return empty === undefined ? undefined : emptyPackSummary(empty)
+  }
+
+  private requireProjectFormat(
+    project: ProjectRecord,
+    documentType: PaperAIDocumentType,
+  ): { set: TemplatePackSummary; format: TemplatePackSummary['members'][number] } {
+    if (project.templatePackId === undefined) {
+      throw new Error(`paperai-workbench: project '${project.id}' has no template set`)
+    }
+    const set = this.findSet(project.templatePackId)
+    if (set === undefined) {
+      throw new Error(`paperai-workbench: template set '${project.templatePackId}' is no longer in the library`)
+    }
+    const format = set.members.find(member => member.appliesToRoles.includes(documentType))
+    if (format === undefined) {
+      throw new Error(`paperai-workbench: template set '${set.name}' has no format for '${documentType}' documents`)
+    }
+    return { set, format }
+  }
+
+  /** Install one format's contract for the project and confirm it; repeat installs reuse the contract. */
+  private async installFormat(
+    project: ProjectRecord,
+    set: TemplatePackSummary,
+    format: TemplatePackSummary['members'][number],
+    signal?: AbortSignal,
+  ): Promise<TemplateContract> {
+    const [installed] = await this.ctx.paperTemplates.installPack({
+      projectId: project.id,
+      packId: TemplatePackId(String(set.id)),
+      memberIds: [TemplatePackMemberId(String(format.id))],
+    }, signal)
+    /* v8 ignore next 3 -- installPack rejects an unknown member instead of returning an empty list. */
+    if (installed === undefined) {
+      throw new Error(`paperai-workbench: template set '${set.name}' has no format '${format.name}'`)
+    }
+    return installed.status === 'confirmed'
+      ? installed
+      : await this.ctx.paperTemplates.confirm(installed.id)
   }
 
   /**
@@ -956,13 +1084,13 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   private async establishDocument(
     project: ProjectRecord,
-    source: { readonly sourcePath: string; readonly role: PaperAIDocumentRole; readonly name?: string },
+    source: { readonly sourcePath: string; readonly role: DocumentRole; readonly name?: string },
     root: {
       readonly sessionId: SessionId
       /** Commit message verb; the published document name follows it. */
       readonly messagePrefix: string
       readonly milestone: string
-      readonly templateId?: TemplateContractId
+      readonly templateId?: TemplateContract['id']
     },
     signal?: AbortSignal,
   ): Promise<PaperAIImportDocumentResult> {
@@ -1014,6 +1142,22 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
   }
 
+  /** Project the document after a commit, fencing stale gate claims from the pre-commit revision. */
+  private async commitResult(
+    id: DocumentId,
+    baseRevision: PaperAIDocumentRevision,
+    sessionId: SessionId,
+    commit: DocumentCommit,
+    signal?: AbortSignal,
+    selectedNodeId?: DocumentNode['id'],
+  ): Promise<PaperAIDocumentCommitResult> {
+    const after = this.requireDocument(id)
+    this.fenceGateMutation(after.document, baseRevision)
+    const project = this.requireProject(after.document.projectId)
+    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal, selectedNodeId)
+    return { ...opened, createdCommitId: commit.id }
+  }
+
   private async withUploadedWord<T>(
     project: ProjectRecord,
     fileName: string,
@@ -1038,7 +1182,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const name = value.normalize('NFC')
     const extension = extname(name).toLocaleLowerCase('en-US')
     if (basename(name) !== name
-      || !SAFE_UPLOAD_NAME.test(name)
+      || !isSafeFileName(name)
       || (extension !== '.doc' && extension !== '.docx')) {
       throw new Error(`paperai-workbench: upload '${value}' must be a safe .doc or .docx file name`)
     }
@@ -1048,7 +1192,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   private exportFileName(value: string): string {
     const name = value.normalize('NFC')
     if (basename(name) !== name
-      || !SAFE_UPLOAD_NAME.test(name)
+      || !isSafeFileName(name)
       || extname(name).toLocaleLowerCase('en-US') !== '.docx') {
       throw new Error(`paperai-workbench: export '${value}' must be a safe .docx file name`)
     }
@@ -1079,6 +1223,12 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const project = this.ctx.paperProjects.get(projectId)
     if (project === undefined) throw new Error(`paperai-workbench: project '${projectId}' does not exist`)
     return project
+  }
+
+  private contractOf(document: DocumentRecord): TemplateContract | undefined {
+    return document.templateId === undefined
+      ? undefined
+      : this.ctx.paperTemplates.getContract(document.templateId)
   }
 
   private assertProjection(
@@ -1112,6 +1262,29 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
   }
 
+  private templateSummary(contract: TemplateContract | undefined): PaperAITemplateSummary | null {
+    if (contract === undefined) return null
+    const pack = contract.origin.packId === undefined ? undefined : this.findSet(contract.origin.packId)
+    return {
+      templateId: String(contract.id),
+      name: contract.name,
+      kind: pack?.kind ?? (contract.origin.kind === 'built-in' ? 'built-in' : 'custom'),
+      ...(contract.origin.packId === undefined ? {} : { packId: contract.origin.packId }),
+      ...(pack === undefined ? {} : { packName: pack.name }),
+      ...(contract.origin.memberId === undefined ? {} : { memberId: contract.origin.memberId }),
+      ...(contract.origin.sourceVersion === undefined ? {} : { sourceVersion: contract.origin.sourceVersion }),
+      usage: contract.usage,
+      requirements: contract.rules.map(rule => ({
+        ruleId: String(rule.id),
+        kind: rule.kind,
+        label: rule.label,
+        description: rule.description,
+        severity: rule.severity,
+        enabled: rule.enabled,
+      })),
+    }
+  }
+
   private async projectOpen(
     project: ProjectRecord,
     document: DocumentRecord,
@@ -1123,23 +1296,24 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   ): Promise<PaperAIDocumentOpenResult> {
     const previewHtml = await this.previewFor(document.id, signal, preview)
     const history = this.ctx.paperCommits.listHistory(document.id)
-    const contract = document.templateId === undefined
-      ? undefined
-      : this.ctx.paperTemplates.getContract(document.templateId)
+    const contract = this.contractOf(document)
+    const projectSet = project.templatePackId === undefined ? undefined : this.findSet(project.templatePackId)
     const snapshot: PaperAIDocumentSnapshot = {
       documentId: document.id,
       resourceId: resourceId(document.id),
       workspaceId: WorkspaceId(project.workspaceId),
       sessionId,
       title: document.name,
-      role: document.role,
+      documentType: document.role,
       path: relativeDisplayPath(project, document.workingPath),
       revision: revisionOf(document),
       headCommitId: headOf(document),
       previewHtml,
       nodes: nodes.map(nodeSummary),
       versions: history.map(commit => versionOf(commit, document.headCommitId)),
-      template: templateSummary(contract),
+      template: this.templateSummary(contract),
+      projectFormatAvailable: projectSet !== undefined
+        && projectSet.members.some(member => member.appliesToRoles.includes(document.role)),
       gate: this.gateFor(document) ?? { status: 'not-run', findings: [] },
     }
     const selected = selectedNodeId === undefined

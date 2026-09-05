@@ -19,7 +19,9 @@ beforeEach(() => { localStorage.clear() })
 describe('createLayoutStore', () => {
   it('initializes the sidebar at its default width, details closed, wide viewport assumed', () => {
     const { store } = createLayoutStore().create()
-    expect(store.getSnapshot()).toEqual({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, detailsFocus: false })
+    expect(store.getSnapshot()).toEqual({
+      sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, detailsFocus: false, conversationFocus: false,
+    })
   })
 
   it('each create() is an independent instance (factory is not a singleton)', () => {
@@ -55,7 +57,9 @@ describe('createLayoutStore', () => {
     actions.setSidebar(400)
     actions.setNarrow(true)
     actions.toggleSidebar()
-    expect(store.getSnapshot()).toEqual({ sidebar: 400, details: 0, narrow: true, narrowExpanded: true, detailsFocus: false })
+    expect(store.getSnapshot()).toEqual({
+      sidebar: 400, details: 0, narrow: true, narrowExpanded: true, detailsFocus: false, conversationFocus: false,
+    })
     actions.toggleSidebar()
     expect(store.getSnapshot().narrowExpanded).toBe(false)
     expect(store.getSnapshot().sidebar).toBe(400)
@@ -110,6 +114,7 @@ describe('createLayoutStore', () => {
       narrow: false,
       narrowExpanded: false,
       detailsFocus: false,
+      conversationFocus: false,
     })
   })
 
@@ -120,5 +125,16 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot()).toMatchObject({ detailsFocus: true })
     actions.closeDetails()
     expect(store.getSnapshot()).toMatchObject({ details: 0, detailsFocus: false })
+  })
+
+  it('reveals the conversation without forgetting document width and lets reopening select the document', () => {
+    const { store, actions } = createLayoutStore().create()
+    actions.openDetails()
+    actions.setDetails(500)
+    actions.setDetailsFocus(true)
+    actions.revealConversation()
+    expect(store.getSnapshot()).toMatchObject({ details: 500, detailsFocus: false, conversationFocus: true })
+    actions.openDetails()
+    expect(store.getSnapshot()).toMatchObject({ details: 500, conversationFocus: false })
   })
 })

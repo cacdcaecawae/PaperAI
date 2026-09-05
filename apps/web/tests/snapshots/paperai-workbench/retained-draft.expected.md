@@ -1,0 +1,4 @@
+- textbox "编辑段落": 切换文档保留的草稿
+- text: 编辑段落
+- button "取消"
+- button "保存"

@@ -90,6 +90,15 @@ const bindTemplateMutation = z.object({
   templateId: wordId.describe('Confirmed compatible template contract id.'),
 })
 
+const unbindTemplateMutation = z.object({
+  type: z.literal('unbind-template'),
+})
+
+const setDocumentTypeMutation = z.object({
+  type: z.literal('set-document-type'),
+  documentType: documentRole.describe('Document type: proposal, midterm, manuscript, final, or other. Changing it drops a bound format unless the same commit binds another.'),
+})
+
 const milestoneMutation = z.object({
   type: z.literal('milestone'),
   label: z.string().trim().min(1).describe('Version milestone label.'),
@@ -100,6 +109,8 @@ const documentMutation = z.union([
   insertNodeMutation,
   deleteNodeMutation,
   bindTemplateMutation,
+  unbindTemplateMutation,
+  setDocumentTypeMutation,
   milestoneMutation,
 ])
 
@@ -175,6 +186,12 @@ function validateTemplateBindings(
   )
   if (bindings.length === 0) return
   const document = requireDocument(dependencies, documentId).document
+  // A type change in the same commit decides which formats apply.
+  const typeChange = [...mutations].reverse().find(
+    (mutation): mutation is Extract<DocumentMutation, { type: 'set-document-type' }> =>
+      mutation.type === 'set-document-type',
+  )
+  const role = typeChange?.documentType ?? document.role
   for (const binding of bindings) {
     const contract = dependencies.templates.getContract(binding.templateId)
     if (contract === undefined) {
@@ -190,13 +207,13 @@ function validateTemplateBindings(
         { templateId: contract.id, status: contract.status },
       )
     }
-    if (!contract.appliesToRoles.includes(document.role)) {
+    if (!contract.appliesToRoles.includes(role)) {
       throw new ToolFailure(
         'TEMPLATE_ROLE_INCOMPATIBLE',
-        `PaperAI template '${contract.id}' does not apply to document role '${document.role}'`,
+        `PaperAI template '${contract.id}' does not apply to document role '${role}'`,
         {
           templateId: contract.id,
-          documentRole: document.role,
+          documentRole: role,
           appliesToRoles: contract.appliesToRoles,
         },
       )
@@ -242,6 +259,10 @@ function toMutation(input: z.infer<typeof documentMutation>): DocumentMutation {
         type: input.type,
         templateId: TemplateContractId(input.templateId),
       }
+    case 'unbind-template':
+      return { type: input.type }
+    case 'set-document-type':
+      return { type: input.type, documentType: input.documentType }
     case 'milestone':
       return { type: input.type, label: input.label }
   }

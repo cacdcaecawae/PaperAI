@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Recoverable document version service for PaperAI. `PaperCommitService` owns `ctx.paperCommits` and is the only supported path for human or Agent changes to an authoritative Working DOCX. A successful `submit()` or `revert()` has already applied the change and advanced the document head; no separate user confirmation is required.
 
+`inspectProject(project)` reads registered originals, working files, heads, ownership, and retained snapshots without changing files. It returns issues and separate `WorkingRecoveryPlan` candidates. `recoverMissingWorking(plan)` serializes with document commits, rechecks the current head and fresh scan, verifies snapshot bytes and contained non-symlink destination ancestors, then atomically creates the absent working file without overwriting an existing destination. A stale plan rejects. Recovery materializes the existing committed head and preserves history; it creates no content commit. Missing originals, corrupt snapshots, duplicate ownership, and external edits remain diagnostic issues rather than automatic repairs. Transport-only report and plan types are published at `/doctor-types`.
+
 ## Service: `PaperCommitService` (`ctx.paperCommits`)
 
 The service requires `paperRepository`, `documentEngine`, and `paperDocuments`.
@@ -14,6 +16,8 @@ The service requires `paperRepository`, `documentEngine`, and `paperDocuments`.
 - `listHistory(documentId)` follows `headCommitId` and `parentId` from newest to oldest, excluding unreachable recovery objects.
 
 `submit()` requires a non-blank message and at least one mutation. `baseCommitId` must equal the current head; omission is valid only before the first commit. `revert()` requires the caller's current head and a different target reachable from that head.
+
+Compiled mutations cover `replace-text`, `insert-node`, `delete-node`, `bind-template`, `unbind-template`, `set-document-type`, and `milestone`. `bind-template` runs `paperTemplates.validateAssociation()` with the document type the same commit switches to; `unbind-template` fails on a document with no bound template; `set-document-type` fails when the type is unchanged and, unless the same commit binds another template, records an `unbind-template` operation first because a bound format applies to one type. The published `DocumentRecord` carries the resulting type and template binding.
 
 ## Publication and Recovery
 
@@ -41,7 +45,7 @@ DOCX snapshots are project-local content-addressed objects under `.paperai/objec
 
 A rolled-back publication can leave an unreachable commit or snapshot object, including the original Working image retained for first-commit rollback. `listHistory()` exposes only the parent chain reachable from the current document head. `getCommit()` deliberately permits direct recovery inspection when an object id is known.
 
-`revert()` verifies the target snapshot path and SHA-256, validates and reindexes a private copy, restores the target commit's template binding, then creates a new commit whose parent is the current head. The restored bytes may reuse the target's content-addressed snapshot while actor and operation provenance remain unique to the revert commit.
+`revert()` verifies the target snapshot path and SHA-256, validates and reindexes a private copy, restores the target commit's template binding while keeping the document's current type, then creates a new commit whose parent is the current head. The restored bytes may reuse the target's content-addressed snapshot while actor and operation provenance remain unique to the revert commit.
 
 ## Provenance and Failures
 

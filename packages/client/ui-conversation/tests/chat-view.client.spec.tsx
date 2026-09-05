@@ -279,6 +279,7 @@ function makeHarness(init?: Partial<ConversationSnapshot>) {
     useStore: bindSnapshotSelector(chat),
     actions: chat.actions,
     renderSlot,
+    renderSlotChain: (_key, _owner, opts) => opts?.fallback ?? null,
     SessionProvider: SessionProviderStub,
     openDetails,
     openFile,

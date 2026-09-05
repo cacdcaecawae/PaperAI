@@ -254,6 +254,7 @@
 }
 
 .root[data-phase='active'] .composerSeat {
+  margin-top: auto;
   position: sticky;
   bottom: 0;
   /* Above markdown CodeBlock sticky banners (z-index 6) so the footer never

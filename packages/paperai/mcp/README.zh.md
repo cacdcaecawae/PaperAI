@@ -60,7 +60,7 @@ try {
 | `paperai_commit_document` | 修改 | `paperCommits.submit()` |
 | `paperai_revert_document` | 修改 | `paperCommits.revert()` |
 
-提交 schema 只暴露当前提交服务已经实现的修改：替换文字、插入段落、删除节点、绑定模板和记录里程碑。提交 `bind-template` 前，handler 要求 contract 存在、已经确认，并且 `appliesToRoles` 包含目标文档角色；draft 或角色不兼容的 contract 不会进入 `paperCommits.submit()`。修改成功后返回完整 `DocumentCommit`、其中记录的 `provenance`，以及对存储的 continuous 门禁报告的 `gateSummary` 摘要：按严重度计数、最严重的发现排在前面，并给出一条可执行的下一步；未关联模板时给出明确的自由模式提示。乐观 head 冲突和节点文字冲突会在 MCP 错误结果中保留领域错误码。
+提交 schema 只暴露当前提交服务已经实现的修改：替换文字、插入段落、删除节点、绑定模板、解除模板、设置文档类型和记录里程碑。提交 `bind-template` 前，handler 要求 contract 存在、已经确认，并且 `appliesToRoles` 包含目标文档类型——同一提交中 `set-document-type` 要切换到的类型，否则为已存储的类型；draft 或类型不兼容的 contract 不会进入 `paperCommits.submit()`。只设置新类型而不重新绑定会解除已绑定的格式，因此 Agent 在改变文档类型时，若应当套用格式，就在同一提交中绑定匹配的格式。修改成功后返回完整 `DocumentCommit`、其中记录的 `provenance`，以及对存储的 continuous 门禁报告的 `gateSummary` 摘要：按严重度计数、最严重的发现排在前面，并给出一条可执行的下一步；未关联模板时给出明确的自由模式提示。乐观 head 冲突和节点文字冲突会在 MCP 错误结果中保留领域错误码。
 
 `registerExportAdapter(adapter)` 会按条件增加 `paperai_export_document`。适配器接收已检查的文档、目标路径、模式和 descriptor 绑定的 actor，并且必须返回属于同一文档和 actor 的 commit；否则 MCP 调用返回 `INVALID_EXPORT_PROVENANCE`。正式交付检查失败时不会调用适配器。调用方通过 Cordis effect 注册适配器并持有 disposer。
 

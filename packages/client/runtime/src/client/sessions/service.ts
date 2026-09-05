@@ -412,6 +412,10 @@ export class SessionRuntime implements ISessions {
     this.manager.noteAgentPreset(sessionId, agentPreset)
   }
 
+  retainBinding(sessionId: SessionId): () => void {
+    return this.manager.retainBinding(sessionId)
+  }
+
   /**
    * Clear the current selection so the layout shows the no-session empty
    * state (new-session affordance and the workspace preselection flow).

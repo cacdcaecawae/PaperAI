@@ -1,0 +1,8 @@
+- region "项目体检":
+  - paragraph: 检查原件、工作文件与版本快照。扫描不会修改文件。
+  - button "重新扫描"
+  - list:
+    - listitem:
+      - strong: 工作文件丢失
+      - text: {{cwd}}/paper-project/documents/working/Browser conflict proposal.docx
+  - button "查看恢复方案 · Browser conflict proposal.docx"

@@ -1,0 +1,4 @@
+- region "选中的文字":
+  - text: 浏览器合并后的最终文本
+  - button "交给 Agent"
+  - button "取消选区"

@@ -122,6 +122,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
     /** Optional renderer for one consecutive group of durable message images. */
     'conversation.message.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
+    /** Product-owned projection of logged user text; declining entries preserve the ordinary bubble. */
+    'conversation.message.userText': { kind: 'chain'; scope: 'session'; owner: { readonly text: string } }
     /**
      * The chat view's per-command row hole: keyed dispatch on the command
      * name (`command/run.name`; a run-less cross-window node has none and
@@ -187,6 +189,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * package's `conversation` entry; the shell supplies a fish fallback.
      */
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
+    /**
+     * The whole blank-session headline block above the workspace row and the
+     * composer. Declared by this package's `conversation` entry with the DSH
+     * headline (mark, title, preview badge) as fallback; a product occupies it
+     * with its own start surface. Root scope: the occupant reads the blank
+     * session's workspace from the owner share rather than from a session.
+     */
+    'conversation.hero.content': { kind: 'single'; scope: 'root'; owner: HeroContentOwnerProps }
     /**
      * The agent-preset chip beside the workspace picker on the new-session
      * screen. Root scope: no session exists yet, so the choice is staged for
@@ -429,6 +439,8 @@ export interface ChatNodeOwnerProps {
   forkAt: (seq: number) => void
   /** Render a historical image group through the attachment slot. */
   renderMessageImages: RenderMessageImages
+  /** Delegate the chat view's authorized text chain without changing logged or copied text. */
+  renderUserText: PropsRenderSlots<'conversation.message.userText'>['renderSlotChain']
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
 }
 
@@ -532,7 +544,7 @@ export interface ComposerBarOwnerProps {
    * clears by choosing a model, so locking that seat too would leave the
    * composer telling them to do the one thing it prevents.
    */
-  blocked?: { readonly reason: string }
+  blocked?: { readonly reason: string; readonly allowDraft?: boolean }
   /**
    * Inert no-workspace state: the bar locks message actions while preserving
    * its normal DOM so the Workspace pick transitions in place.
@@ -638,6 +650,19 @@ export interface HeroBrandMarkOwnerProps {
 }
 
 /**
+ * Owner share of the blank-session headline seat: the facts a start surface
+ * needs to address the session it is about to start.
+ */
+export interface HeroContentOwnerProps {
+  /** The blank session, once one exists; undefined on a cold start with no session. */
+  sessionId: SessionId | undefined
+  /** Workspace the blank session belongs to, once the workspace list resolved it. */
+  workspaceId: WorkspaceId | undefined
+  /** Open the workspace picker menu (the same menu the workspace chip opens). */
+  openWorkspacePicker: () => void
+}
+
+/**
  * Full conversation-slot component props: runtime & child-render (view ring
  * + composer chain/bar + input-region + hero picker slots) & store & injected
  * shares & the locale seat.
@@ -650,6 +675,7 @@ export type ConversationSlotProps =
     | 'conversation.input.dock' | 'conversation.composer.dock'
     | 'conversation.input.left' | 'conversation.input.right'
     | 'conversation.hero.brand.mark'
+    | 'conversation.hero.content'
     | 'conversation.hero.workspace'
     | 'conversation.hero.agentPreset'
   >
@@ -793,7 +819,7 @@ export interface ChatViewInjected {
 /** Full chat-view component props: runtime & its Tool/command/tail render shares & store & injected & locale seat. */
 export type ChatViewSlotProps =
   PropsRuntime<'conversation.view'>
-  & PropsRenderSlots<'conversation.chat.node' | 'conversation.message.images'>
+  & PropsRenderSlots<'conversation.chat.node' | 'conversation.message.images' | 'conversation.message.userText'>
   & PropsStore<ChatStore> & ChatViewInjected & PropsLocale<'conversation'>
 
 /** Full props of the attachment plugin's composer entry. */

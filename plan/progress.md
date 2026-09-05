@@ -49,3 +49,41 @@
 - Rebuilt the shallow upstream boundary as a self-contained root commit whose tree is byte-identical to DeepSeek Harness `b150a551`, preserving the pinned baseline without importing unrelated upstream history.
 - Published the complete PaperAI v1 implementation to `cacdcaecawae/PaperAI` `main` with `--force-with-lease`; Git and GitHub API hashes were independently verified.
 - Kept the pre-replatform implementation recoverable in the local legacy branch, verified Git bundle, and source ZIP, plus a local pre-root-rewrite branch for the tested shallow-history commit.
+
+## 2026-09-03 — UI overhaul completion and handoff
+
+- Took over the existing uncommitted implementation on `feat/paperai-ui-overhaul`: start page, template settings/dialog, Word preview block editing, brand/locale seams, and Host template operations.
+- Fixed draft loss on repeated selection, incompatible document actions, and reconnect; retained newer external notifications. Added localized recovery messages and initial project-read retry.
+- Refreshed cached project lists after external document commits, and carried the selected template id separately so deleted template sets display as missing.
+- Completed the assembled navigation and editing fixtures, including custom Word-format upload, template selection/deletion, external-version refresh, and final saved text.
+- Updated affected bilingual READMEs and the UI Agent Note, regenerated client/Cordis/config/tool catalogs, removed unused fixture exports, and repaired stale rescope anchors, preset-id exclusions, and scans of deleted tracked files.
+- Final focused workbench tests passed 7 files/92 tests; assembled browser replay and built boot passed 3 files/15 tests; rescope/preset regressions passed 2 files/6 tests.
+- Production build, contract lint, all 28 documentation gates, and all hygiene leaves passed across the initial run and focused reruns of its two failures. The earlier 44-file/322-test baseline and precise command evidence are in [the review](review/2026-09-03-ui-takeover.md).
+- Replaced the stale current-stage and publication instructions with this branch's handoff, while preserving the historical release and recovery records.
+
+## 2026-09-03 — Windows folder picker taskbar behavior
+
+- Compared the reported Node.js taskbar item with the native Windows implementation and the pinned upstream. The user's original DSH comparison runs on macOS through `npx @deepseek-ai/dsh web`.
+- Added a hidden owner to the Windows native picker and restricted abort messages to visible dialog-thread windows. Selection, cancellation, and failure release the owner.
+- Added real source and built-worker window checks plus an assembled Web HTTP cancellation snapshot. Updated the owning bilingual Agent Note and package README.
+- The native package passed 50 tests with 100% coverage of the changed bindings; the Windows built-worker and assembled Web snapshot passed. Build, full contract lint, all 28 documentation checks, client-package checks, and knip passed.
+- Win32 APIs confirmed window ownership and cleanup. Desktop screenshot and interactive-selection acceptance remain unverified; no running Web service was restarted. Details are in the [picker review](review/2026-09-03-windows-picker.md).
+- An additional full workspace-management browser run passed 3 tests and failed 9, starting when the deletion helper looks for list controls after the UI enters workspace details. A control run with the original unconditional browse composition reproduced that first failure while folder creation and workspace renaming passed; the scaffold was restored byte-for-byte. The broader suite remains a separate known validation gap.
+
+## 2026-09-03 — Project documents and ACP switching
+
+- Inspected the user's project read-only: its three document rows were created separately, two proposal records shared a path, and older files and edited snapshots were missing. Reopening the same canonical directory retained its existing template decision.
+- Aligned new imports with the documented `documents/source` and `documents/working` directories. Reserved tracked names even when files are missing, and clarified the start action as create-or-open. Existing project records and files were preserved.
+- Fixed two peer-driver replacement defects: the resident Session's removal flag did not clear, and replacing its projection store disconnected permission observers. Repeated Claude/Codex switches now retain working model and permission controls.
+- Confirmed that model choices come from ACP. The default Claude adapter's bundled CLI reported 2.1.232, while the terminal CLI reported 2.1.258. Documented the existing `CLAUDE_CODE_EXECUTABLE` override; no personal settings or live service were changed.
+- The document-service suite passed 30 tests; the final runtime suite passed 126 tests, and project initialization also passed. Navigation passed 5 browser scenarios, and the final ACP/document suite passed all 11. Final build, contract lint, exported JSDoc, documentation budgets, and whitespace checks passed.
+- Documentation synchronization initially passed 26 of 28 gates; the model-experience formatting failure was fixed separately. The required bilingual Agent Notes and translation records are now present. Exact evidence is recorded in the [follow-up review](review/2026-09-03-project-documents-and-acp.md).
+
+## 2026-09-05 — Agentero architecture adoption
+
+- Implemented all five accepted adaptations: responsive ACP selection, frozen Word context, document-centered layout and bounded retained previews, independent Agent diagnostics, and read-only Project Doctor with explicit guarded recovery.
+- Preserved the inherited UI overhaul and main's current CI checkout configuration. ACP replacement now retains the browser Session binding and serializes model operations after the new adapter is ready.
+- Added durable quotation presentation, narrow-to-wide layout geometry checks, conflict-draft retention, and real assembled scan/review/restore acceptance. Repaired the old workspace-management fixture for project-detail navigation; all 12 tests pass without changing its goldens.
+- Final client regressions passed 42 files / 604 tests. Built browser replay passed 3 files / 22 tests, with the separate workspace-management lane bringing browser acceptance to 34 tests. Service and lifecycle evidence is recorded separately to avoid counting overlapping runs twice.
+- Updated the bilingual adoption ADR, affected READMEs and catalogs, and current project handoff. The [review](review/2026-09-05-agentero-adoption.md) owns source comparison, exact final commands, publication checks and limits.
+- Created [PR #25](https://github.com/cacdcaecawae/PaperAI/pull/25). Expanded its CI selection to include all changed module owners; 179 files / 2,274 tests and the existing changed-source coverage thresholds passed locally. Corrected the OfficeCLI background-update opt-out found by hosted Linux validation; provider tests and an actual Linux DOCX smoke passed. Remote checks apply to each pushed revision.

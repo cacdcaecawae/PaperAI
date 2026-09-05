@@ -451,6 +451,8 @@ export interface Config {
 ```ts config-catalog
 /** Deployment-controlled layout options. Omitted fields preserve DSH layout behavior. */
 export interface Config {
+  /** Place the details surface before or after the conversation. */
+  detailsPosition?: 'start' | 'end'
   /** Center-column floor in integer CSS pixels. */
   centerMin?: number
   /** Details-column drag floor in integer CSS pixels. */
@@ -3287,6 +3289,10 @@ export interface Config {
 ```ts config-catalog
 /** PaperAI ACP Agent plugin configuration. */
 export interface Config {
+  /** Maximum duration of an independent prompt-free ACP diagnostic. */
+  readonly probeTimeoutMs?: number
+  /** Failed automatic diagnostics wait this long before another process can start. */
+  readonly failureCooldownMs?: number
   /** Local Codex ACP launch overrides. */
   readonly codex?: AcpProviderConfig
   /** Local Claude ACP launch overrides. */
@@ -3308,7 +3314,7 @@ export interface AcpProviderConfig {
 }
 ```
 
-来源：[`packages/paperai/agent-acp/src/index.ts:49`](../packages/paperai/agent-acp/src/index.ts)
+来源：[`packages/paperai/agent-acp/src/index.ts:51`](../packages/paperai/agent-acp/src/index.ts)
 
 <a id="paperaidocument-engine-officecli"></a>
 
@@ -3432,7 +3438,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/template-service/src/index.ts:80`](../packages/paperai/template-service/src/index.ts)
+来源：[`packages/paperai/template-service/src/index.ts:90`](../packages/paperai/template-service/src/index.ts)
 
 <a id="paperaitool-document"></a>
 
@@ -3452,13 +3458,27 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/tool-document/src/index.ts:47`](../packages/paperai/tool-document/src/index.ts)
+来源：[`packages/paperai/tool-document/src/index.ts:48`](../packages/paperai/tool-document/src/index.ts)
+
+<a id="paperaiui-workbench"></a>
+
+## `@paperai/ui-workbench`
+
+```ts config-catalog
+/** PaperAI browser workspace configuration. */
+export interface Config {
+  /** Maximum number of mounted document previews, including the active document. */
+  readonly retainedPreviews?: number
+}
+```
+
+来源： [`packages/client/ui-paperai-workbench/src/config.ts:4`](../packages/client/ui-paperai-workbench/src/config.ts)
 
 <a id="paperaiworkbench-service"></a>
 
 ## `@paperai/workbench-service`
 
-需要：`workspaceRegistry` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
+需要：`workspaceRegistry` · `documentEngine` · `paperProjects` · `paperDocuments` · `paperCommits` · `paperTemplates` · `paperExports` · `paperRepository`
 
 ```ts config-catalog
 /** Workbench upload policy. */
@@ -3468,7 +3488,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/workbench-service/src/index.ts:326`](../packages/paperai/workbench-service/src/index.ts)
+来源：[`packages/paperai/workbench-service/src/index.ts:281`](../packages/paperai/workbench-service/src/index.ts)
 
 ## 无配置的可加载插件
 
@@ -3547,7 +3567,6 @@ export interface Config {
 - `@paperai/repository` — 需要 `storageDomain`（[`packages/paperai/repository/src/index.ts`](../packages/paperai/repository/src/index.ts)）
 - `@paperai/template-pack-hit` — 需要 `paperTemplates`（[`packages/paperai/template-pack-hit/src/index.ts`](../packages/paperai/template-pack-hit/src/index.ts)）
 - `@paperai/ui-brand`（[`packages/client/ui-paperai-brand/src/index.ts`](../packages/client/ui-paperai-brand/src/index.ts)）
-- `@paperai/ui-workbench`（[`packages/client/ui-paperai-workbench/src/index.ts`](../packages/client/ui-paperai-workbench/src/index.ts)）
 
 ## Seam 包（不可直接加载）
 

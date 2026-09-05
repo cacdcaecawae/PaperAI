@@ -1,0 +1,4 @@
+- textbox "编辑段落": 浏览器中的本地草稿
+- text: 编辑段落
+- button "取消"
+- button "保存"

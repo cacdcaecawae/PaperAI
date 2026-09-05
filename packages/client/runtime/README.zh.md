@@ -18,6 +18,10 @@
 
 ## Workspace 与 Session 列表
 
+`ctx.sessions.retainBinding(id)` 在调用方负责的 Host 替换期间保留列表行和浏览器作用域。返回的幂等释放函数结束这份租约；实时列表行优先，最后一份租约释放后会显露未完成的移除，用户后续导航仍然有效。保留绑定维持草稿和工作区关联，但不会使已移除的 Session 可写。
+
+Host 替换 Agent 时，Session 实例保留身份。`host/session-removed` 禁用交互，并清除投影值和序号水位，同时保留常驻 store 及其被订阅的读取接口；之后收到同一 id 的 `host/session-added` 时，常驻实例恢复可用。列表基线可能早于替换操作，因此不能单凭它清除移除标记。空会话切换 Agent 驱动后，输入框和模型选择器可以继续使用，权限等投影更新也能继续传递到已展示的 Session。
+
 Workspace 和 Session 列表各自具有单调的 `pending` → `ready` 基线阶段，也有各自的刷新活动／错误状态。列表请求期间到达的增量插入或更新／移除／顺序帧与一元变更回显会在其响应之上回放。每次成功的 Workspace 基线都会重新建立 Host 持久 Workspace 顺序，因此重连会接纳该客户端离线期间提交的变更。`WorkspaceRuntime.insertBefore` 会立即安装乐观顺序；只有最新一元回声可以替换它，更新的 Host 顺序帧优先于旧回声，而最新请求被拒时会恢复最近一次由 Host 确认的顺序，不会恢复更早且尚未提交的拖拽。已移除的 Workspace id 会保留进程本地删除标记，避免延迟到达的 changed 帧将其复活。Workspace 新近程度只在两条基线都 ready 后派生，且绝不改变 Workspace 列表顺序。
 
 `SessionSummary.pendingInteraction` 将阻塞 Session 的实时用户操作分类为 `approval`、`plan-review` 或 `question`。`SessionManager` 依据稳定的请求标识跟踪可应答请求的 requested/resolved mux 帧，即使 `Session` 对象尚未实例化也不例外；实例化前的缓冲会保留每个仍有效的请求，替换回放产生的重复项，并移除已解决的请求，因此打开 Session 时，列表状态始终有一个对应的可应答 `PendingWait`。审批与问题并发时，第一个 pending 问题具有更高的呈现优先级，以匹配 composer 路由；只有满足 plan-review composer 二元呈现约束的请求才会保留独立的 `plan-review` 状态。该状态的作用域限定在连接代次内：断连时清除，mux 打开时的回放只恢复仍处于 pending 的请求。

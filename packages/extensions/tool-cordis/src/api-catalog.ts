@@ -1162,6 +1162,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the provider definition with current command, credential, and endpoint overrides applied.',
       },
       {
+        signature: 'diagnosticStatus(): readonly AcpDiagnostic[]',
+        description: 'Read installation and cached catalogs without spawning any adapter.',
+        parameters: [],
+        returns: 'metadata for both configured providers, independent from live model selection.',
+      },
+      {
+        signature: 'probe(provider: \'codex\' | \'claude\', force: boolean): Promise<AcpDiagnostic>',
+        description: 'Run a prompt-free probe with shared failure cooldown and process teardown.',
+        parameters: [{ name: 'provider', description: 'installed peer Agent to inspect.' }, { name: 'force', description: 'explicit retry bypassing failure cooldown.' }],
+        returns: 'observed ACP metadata, including a cached model preview.',
+      },
+      {
         signature: 'async publish( ownerCtx: Context, provider: AcpProviderDefinition, preparation: SessionPreparation, options: CreateAgentOptions | ResumeAgentOptions, ): Promise<AgentHandle>',
         description: 'Complete setup, atomically publish the DSH lifecycle, and return its owner capability.',
         parameters: [{ name: 'ownerCtx', description: 'active Context whose lifetime owns the published Agent and Session.' }, { name: 'provider', description: 'configured ACP provider definition to launch.' }, { name: 'preparation', description: 'exclusive prepared Session consumed and disposed by this call.' }, { name: 'options', description: 'create or resume options, including cancellation, model selection, and setup.' }],
@@ -1176,60 +1188,118 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Strict Remote that keeps the DSH client free of PaperAI Host dependencies.',
     methods: [
       {
-        signature: '@Remote(\'list\') async list(request: PaperAIListResourcesRequest, signal?: AbortSignal): Promise<PaperAIResourceList>',
-        description: 'Lazily initialize and list the selected Workspace\'s PaperAI resources.',
-        parameters: [{ name: 'request', description: 'Workspace whose project resources should be listed.' }, { name: 'signal', description: 'optional cancellation signal for project and filesystem discovery.' }],
-        returns: 'the flattened document, template, and non-empty filesystem resources.',
+        signature: '@Remote(\'overview\') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>',
+        description: 'Lazily initialize the selected Workspace\'s project and describe it: the template set it writes against and its tracked documents.',
+        parameters: [{ name: 'request', description: 'Workspace whose project should be described.' }, { name: 'signal', description: 'optional cancellation signal for project initialization.' }],
+        returns: 'the project name, template decision, and document rows.',
         throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
       },
       {
+        signature: '@Remote(\'agentDiagnostics\') agentDiagnostics(): readonly PaperAIAgentDiagnostic[]',
+        description: 'Read configured Agent discovery and cached model previews without starting processes.',
+        parameters: [],
+        returns: 'configured ACP peers, or an empty roster when the provider plugin is absent.',
+      },
+      {
+        signature: '@Remote(\'probeAgent\') probeAgent(request: PaperAIProbeAgentRequest): Promise<PaperAIAgentDiagnostic>',
+        description: 'Probe ACP initialization in an empty directory without a model prompt.',
+        parameters: [{ name: 'request', description: 'selected provider and explicit cooldown bypass.' }],
+        returns: 'readiness and model metadata after the diagnostic process exits.',
+      },
+      {
+        signature: '@Remote(\'inspectProject\') async inspectProject(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>',
+        description: 'Inspect the selected project\'s retained files and document ownership.',
+        parameters: [{ name: 'request', description: 'registered Workspace to scan.' }, { name: 'signal', description: 'optional cancellation between artifact reads.' }],
+        returns: 'read-only issues and explicit recovery plans.',
+      },
+      {
+        signature: '@Remote(\'recoverWorking\') async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>',
+        description: 'Restore missing working bytes using an unchanged verified version.',
+        parameters: [{ name: 'request', description: 'owning Workspace and scan-bound recovery plan.' }, { name: 'signal', description: 'optional cancellation before publication.' }],
+        returns: 'a fresh integrity report after recovery.',
+      },
+      {
+        signature: '@Remote(\'setProjectTemplate\') async setProjectTemplate(request: PaperAISetProjectTemplateRequest): Promise<PaperAIProjectOverview>',
+        description: 'Record the template set the project writes against, or the explicit choice to write without one.',
+        parameters: [{ name: 'request', description: 'Workspace and template set id, or `null` for none.' }],
+        returns: 'the refreshed overview.',
+        throws: ['when the Workspace is unknown or the set is not in the library.'],
+      },
+      {
+        signature: '@Remote(\'listTemplateLibrary\') listTemplateLibrary(): Promise<PaperAITemplateLibrary>',
+        description: 'List every template set the user can choose from.',
+        parameters: [],
+        returns: 'built-in sets, then custom sets in creation order (empty ones included).',
+      },
+      {
+        signature: '@Remote(\'createTemplateSet\') async createTemplateSet(request: PaperAICreateTemplateSetRequest): Promise<PaperAITemplateLibrary>',
+        description: 'Create an empty custom template set.',
+        parameters: [{ name: 'request', description: 'display name and optional description.' }],
+        returns: 'the refreshed library.',
+        throws: ['when the name is blank or already used.'],
+      },
+      {
+        signature: '@Remote(\'deleteTemplateSet\') async deleteTemplateSet(request: PaperAIDeleteTemplateSetRequest): Promise<PaperAITemplateLibrary>',
+        description: 'Remove a custom template set. Projects that chose it fall back to "no template" on their next overview; installed formats keep working.',
+        parameters: [{ name: 'request', description: 'custom set id.' }],
+        returns: 'the refreshed library.',
+        throws: ['when the set is unknown or built-in.'],
+      },
+      {
+        signature: '@Remote(\'addTemplateFormat\') async addTemplateFormat( request: PaperAIAddTemplateFormatRequest, signal?: AbortSignal, ): Promise<PaperAITemplateLibrary>',
+        description: 'Add or replace the Word format for one document type in a custom set.',
+        parameters: [{ name: 'request', description: 'set, document type, usage, optional name, and the upload.' }, { name: 'signal', description: 'optional cancellation signal for staging and normalization.' }],
+        returns: 'the refreshed library.',
+        throws: ['when the set is unknown, the upload is invalid, or normalization fails.'],
+      },
+      {
+        signature: '@Remote(\'removeTemplateFormat\') async removeTemplateFormat(request: PaperAIRemoveTemplateFormatRequest): Promise<PaperAITemplateLibrary>',
+        description: 'Remove the format for one document type from a custom set.',
+        parameters: [{ name: 'request', description: 'custom set id and document type.' }],
+        returns: 'the refreshed library.',
+        throws: ['when the set or format is unknown.'],
+      },
+      {
         signature: '@Remote(\'importDocument\') async importDocument( request: PaperAIImportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>',
-        description: 'Import one browser-selected `.doc` or `.docx` and establish its root version. A rejected root submission is followed by non-cancellable import rollback before this method settles.',
-        parameters: [{ name: 'request', description: 'Workspace, Session, upload bytes, document role, and optional display name.' }, { name: 'signal', description: 'optional cancellation signal for import, indexing, commit, and preview work.' }],
+        description: 'Import one browser-selected `.doc` or `.docx` as a free-writing document and establish its root version. A rejected root submission is followed by non-cancellable import rollback before this method settles.',
+        parameters: [{ name: 'request', description: 'Workspace, Session, upload bytes, and optional display name.' }, { name: 'signal', description: 'optional cancellation signal for import, indexing, commit, and preview work.' }],
         returns: 'the opened imported document and root commit, or an explicit native-engine downgrade.',
         throws: ['when upload, project, import, or commit work fails; an AggregateError includes any rollback failure.'],
       },
       {
         signature: '@Remote(\'createFromTemplate\') async createFromTemplate( request: PaperAICreateFromTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIImportDocumentResult>',
-        description: 'Start one Working document from a built-in template pack member and bind that member\'s contract in the root commit. A form template is imported as the document itself; a formatting reference governs the uploaded manuscript instead. Built-in members ship reviewed requirements, so the contract is confirmed here without a separate review step.',
-        parameters: [{ name: 'request', description: 'Workspace, Session, pack member, optional manuscript upload, role, and display name.' }, { name: 'signal', description: 'optional cancellation signal for installation, import, commit, and preview work.' }],
+        description: 'Start one document of a given type from the project\'s template set and bind that format in the root commit. A form template is imported as the document itself; a formatting reference governs the uploaded manuscript instead. Library formats ship reviewed requirements, so the contract is confirmed here without a separate review step.',
+        parameters: [{ name: 'request', description: 'Workspace, Session, document type, optional manuscript upload, and display name.' }, { name: 'signal', description: 'optional cancellation signal for installation, import, commit, and preview work.' }],
         returns: 'the opened document and root commit, or an explicit native-engine downgrade.',
-        throws: ['when the member is unknown, a formatting reference has no upload, the role does not apply, or import or commit work fails; an AggregateError includes any rollback failure.'],
+        throws: ['when the project has no template set or no format for the type, a formatting reference has no upload, or import or commit work fails; an AggregateError includes any rollback failure.'],
       },
       {
-        signature: '@Remote(\'listTemplates\') async listTemplates(request: PaperAIListTemplatesRequest): Promise<PaperAITemplateCatalog>',
-        description: 'List registered institutional packs and this project\'s compiled contracts.',
-        parameters: [{ name: 'request', description: 'Workspace whose template catalog should be projected.' }],
-        returns: 'built-in pack choices and the project\'s installed contracts.',
-        throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
+        signature: '@Remote(\'applyTemplate\') async applyTemplate( request: PaperAIApplyTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
+        description: 'Bind the project template\'s format for a document type through the document commit path, changing the document\'s type in the same commit when it differs.',
+        parameters: [{ name: 'request', description: 'document projection, Session provenance, and the document type to apply.' }, { name: 'signal', description: 'optional cancellation signal for installation, commit, and refreshed projection work.' }],
+        returns: 'the refreshed document projection and the new binding commit identity.',
+        throws: ['when the projection is stale, the project has no template set or format for the type, or the same format is already bound.'],
       },
       {
-        signature: '@Remote(\'installTemplatePack\') async installTemplatePack( request: PaperAIInstallTemplatePackRequest, signal?: AbortSignal, ): Promise<PaperAITemplateCatalog>',
-        description: 'Install selected built-in pack members as reviewable draft contracts.',
-        parameters: [{ name: 'request', description: 'Workspace, pack identity, and optional member selection.' }, { name: 'signal', description: 'optional cancellation signal for asset import and template compilation.' }],
-        returns: 'the refreshed template catalog after installation.',
-        throws: ['when the Workspace, pack, or member is unknown, or template compilation fails.'],
+        signature: '@Remote(\'detachTemplate\') async detachTemplate( request: PaperAIDetachTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
+        description: 'Drop the bound format through the document commit path; the document keeps its type and writes freely from then on.',
+        parameters: [{ name: 'request', description: 'document projection and Session provenance.' }, { name: 'signal', description: 'optional cancellation signal for commit and refreshed projection work.' }],
+        returns: 'the refreshed document projection and the new commit identity.',
+        throws: ['when the projection is stale or no format is bound.'],
       },
       {
-        signature: '@Remote(\'uploadTemplate\') async uploadTemplate( request: PaperAIUploadTemplateRequest, signal?: AbortSignal, ): Promise<PaperAITemplateCatalog>',
-        description: 'Upload a custom Word template without mutating the selected source.',
-        parameters: [{ name: 'request', description: 'Workspace, upload bytes, display name, document roles, and template usage.' }, { name: 'signal', description: 'optional cancellation signal for staging, normalization, and compilation.' }],
-        returns: 'the refreshed template catalog containing the reviewable draft.',
-        throws: ['when the upload or template metadata is invalid, or normalization or compilation fails.'],
+        signature: '@Remote(\'suggestDocumentType\') suggestDocumentType(request: PaperAISuggestDocumentTypeRequest): Promise<PaperAIDocumentTypeSuggestion>',
+        description: 'Guess a document\'s type from its title, then its opening paragraphs.',
+        parameters: [{ name: 'request', description: 'document to inspect.' }],
+        returns: 'the guessed type and what it was based on; the current type when nothing matches.',
+        throws: ['when the document is unknown.'],
       },
       {
-        signature: '@Remote(\'confirmTemplate\') async confirmTemplate(request: PaperAIConfirmTemplateRequest): Promise<PaperAITemplateCatalog>',
-        description: 'Confirm parsed template requirements before a document may use them.',
-        parameters: [{ name: 'request', description: 'Workspace and installed template identity selected by the user.' }],
-        returns: 'the refreshed template catalog containing the confirmed contract.',
-        throws: ['when the Workspace is missing or the template does not belong to its project.'],
-      },
-      {
-        signature: '@Remote(\'associateTemplate\') async associateTemplate( request: PaperAIAssociateTemplateRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
-        description: 'Associate a confirmed compatible template through the document commit path.',
-        parameters: [{ name: 'request', description: 'document projection, Session provenance, and template identity to associate.' }, { name: 'signal', description: 'optional cancellation signal for commit and refreshed projection work.' }],
-        returns: 'the refreshed document projection and the new association commit identity.',
-        throws: ['when the projection is stale or the template is missing, foreign, unconfirmed, incompatible, or already associated.'],
+        signature: '@Remote(\'diffVersion\') async diffVersion(request: PaperAIDiffVersionRequest, signal?: AbortSignal): Promise<PaperAIVersionDiff>',
+        description: 'Diff one version against its parent at paragraph level, reading both immutable snapshots through the document engine.',
+        parameters: [{ name: 'request', description: 'document and version to explain.' }, { name: 'signal', description: 'optional cancellation signal for engine reads.' }],
+        returns: 'paragraph changes in document order; a root version lists every paragraph as added.',
+        throws: ['when the version does not belong to the document.'],
       },
       {
         signature: '@Remote(\'exportDocument\') async exportDocument( request: PaperAIExportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIExportDocumentResult>',
@@ -1254,7 +1324,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'commit\') async commit( request: PaperAICommitDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
-        description: 'Apply selected-node mutations and create one immediate human commit.',
+        description: 'Apply block text mutations and create one immediate human commit.',
         parameters: [{ name: 'request', description: 'observed document projection, Session provenance, and node text replacements.' }, { name: 'signal', description: 'optional cancellation signal for mutation, commit, indexing, and preview work.' }],
         returns: 'the refreshed document projection and the new content commit identity.',
         throws: ['when no mutation is supplied, the projection is stale, or mutation or commit work fails.'],
@@ -1303,6 +1373,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the user-visible history from the current head toward the root. Unreachable objects retained after failed publication are excluded.',
         parameters: [{ name: 'documentId', description: 'document whose reachable history is requested.' }],
         returns: 'newest-first isolated commit records.',
+      },
+      {
+        signature: 'inspectProject(project: ProjectRecord, signal?: AbortSignal): Promise<ProjectIntegrityReport>',
+        description: 'Scan a registered project\'s artifacts without changing files or records.',
+        parameters: [{ name: 'project', description: 'registered project.' }, { name: 'signal', description: 'optional cancellation.' }],
+        returns: 'current integrity issues and explicit recovery plans.',
+      },
+      {
+        signature: 'recoverMissingWorking(plan: WorkingRecoveryPlan, signal?: AbortSignal): Promise<void>',
+        description: 'Materialize missing working bytes from an unchanged verified head; existing files are never overwritten.',
+        parameters: [{ name: 'plan', description: 'exact recovery candidate returned by the integrity scan.' }, { name: 'signal', description: 'cancellation before the atomic file publication.' }],
+        returns: 'after the existing version\'s bytes are restored; no content or version history is changed.',
       },
     ],
   },
@@ -1427,6 +1509,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List durable projects in repository order.',
         parameters: [],
         returns: 'a fresh record array.',
+      },
+      {
+        signature: 'setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord>',
+        description: 'Record the template set a project writes against. `null` records the explicit choice to write without a template; either way the project counts as decided, so the first-open prompt does not return.',
+        parameters: [{ name: 'id', description: 'PaperAI project id.' }, { name: 'packId', description: 'template set id, or `null` for no template.' }],
+        returns: 'the updated record.',
       },
       {
         signature: 'async findByPath(rootPath: string): Promise<ProjectRecord | undefined>',
@@ -1594,9 +1682,38 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'listPacks(): TemplatePackSummary[]',
-        description: 'List registered packs without exposing Host asset paths.',
+        description: 'List every installable template set without exposing Host asset paths: built-in packs in display-name order, then the user\'s custom sets that hold at least one format, in creation order.',
         parameters: [],
-        returns: 'deterministic display-name order with asset-free member summaries.',
+        returns: 'asset-free pack summaries.',
+      },
+      {
+        signature: 'listLibraryPacks(): TemplateLibraryPack[]',
+        description: 'List the user\'s custom template sets, including sets that hold no format yet.',
+        parameters: [],
+        returns: 'fresh library records in creation order.',
+      },
+      {
+        signature: 'createLibraryPack(input: { readonly name: string; readonly description?: string }): Promise<TemplateLibraryPack>',
+        description: 'Create an empty custom template set.',
+        parameters: [{ name: 'input', description: 'display name and optional description.' }],
+        returns: 'the created set.',
+      },
+      {
+        signature: 'deleteLibraryPack(packId: string): Promise<void>',
+        description: 'Remove a custom template set; contracts already installed from it stay valid.',
+        parameters: [{ name: 'packId', description: 'custom set id.' }],
+      },
+      {
+        signature: 'addLibraryFormat(input: AddLibraryFormatInput, signal?: AbortSignal): Promise<TemplateLibraryPack>',
+        description: 'Add or replace the Word format for one document type in a custom set.',
+        parameters: [{ name: 'input', description: 'set, document type, usage, optional name, and the upload bytes.' }, { name: 'signal', description: 'optional cancellation signal for staging and normalization.' }],
+        returns: 'the updated set.',
+      },
+      {
+        signature: 'removeLibraryFormat(packId: string, role: TemplateLibraryPack[\'formats\'][number][\'id\']): Promise<TemplateLibraryPack>',
+        description: 'Remove the format for one document type from a custom set.',
+        parameters: [{ name: 'packId', description: 'custom set id.' }, { name: 'role', description: 'document type whose format is removed.' }],
+        returns: 'the updated set.',
       },
       {
         signature: 'getContract(templateId: TemplateContractId): TemplateContract | undefined',
@@ -3430,6 +3547,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AcpDiagnostic',
+    declaration: 'export interface AcpDiagnostic {\n    readonly provider: \'codex\' | \'claude\';\n    readonly executable: string | null;\n    readonly adapterVersion: string | null;\n    readonly agentVersion: string | null;\n    readonly status: \'discovered\' | \'ready\' | \'error\';\n    readonly models: readonly {\n        readonly id: string;\n        readonly name: string;\n    }[];\n    readonly checkedAt: number | null;\n    readonly retryAt: number | null;\n    readonly elapsedMs: number | null;\n    readonly error: \'unavailable\' | \'timeout\' | \'authentication\' | \'protocol\' | null;\n}',
+  },
+  {
     name: 'AcpProviderDefinition',
     declaration: 'export interface AcpProviderDefinition {\n    readonly id: \'codex\' | \'claude\';\n    readonly name: string;\n    readonly packageName: string;\n    readonly binName: string;\n    readonly command?: string;\n    readonly args?: readonly string[];\n    readonly env?: Readonly<Record<string, string>>;\n}',
   },
@@ -3440,6 +3561,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
+  },
+  {
+    name: 'AddLibraryFormatInput',
+    declaration: 'export interface AddLibraryFormatInput {\n    readonly packId: string;\n    readonly role: DocumentRole;\n    readonly usage: TemplateUsage;\n    readonly name?: string;\n    readonly upload: {\n        readonly fileName: string;\n        readonly bytes: Uint8Array;\n    };\n}',
   },
   {
     name: 'Agent',
@@ -3567,7 +3692,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AssociateTemplateInput',
-    declaration: 'export interface AssociateTemplateInput {\n    readonly documentId: import(\'@paperai/domain\').DocumentId;\n    readonly templateId: TemplateContractId;\n}',
+    declaration: 'export interface AssociateTemplateInput {\n    readonly documentId: import(\'@paperai/domain\').DocumentId;\n    readonly templateId: TemplateContractId;\n    readonly role?: DocumentRole;\n}',
   },
   {
     name: 'AttachmentId',
@@ -3939,7 +4064,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DocumentMutation',
-    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
+    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'unbind-template\';\n} | {\n    type: \'set-document-type\';\n    documentType: DocumentRole;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
   },
   {
     name: 'DocumentNode',
@@ -4566,20 +4691,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
-    name: 'PaperAIAssociateTemplateRequest',
-    declaration: 'export interface PaperAIAssociateTemplateRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly templateId: string;\n}',
+    name: 'PaperAIAddTemplateFormatRequest',
+    declaration: 'export interface PaperAIAddTemplateFormatRequest {\n    readonly packId: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly usage: PaperAITemplateUsage;\n    readonly name?: string;\n    readonly fileName: string;\n    readonly contentBase64: string;\n}',
+  },
+  {
+    name: 'PaperAIApplyTemplateRequest',
+    declaration: 'export interface PaperAIApplyTemplateRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly documentType: PaperAIDocumentType;\n}',
   },
   {
     name: 'PaperAICommitDocumentRequest',
     declaration: 'export interface PaperAICommitDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly mutations: readonly PaperAIDocumentMutation[];\n}',
   },
   {
-    name: 'PaperAIConfirmTemplateRequest',
-    declaration: 'export interface PaperAIConfirmTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly templateId: string;\n}',
+    name: 'PaperAICreateFromTemplateRequest',
+    declaration: 'export interface PaperAICreateFromTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly documentType: PaperAIDocumentType;\n    readonly upload?: PaperAIWordUpload;\n    readonly name?: string;\n}',
   },
   {
-    name: 'PaperAICreateFromTemplateRequest',
-    declaration: 'export interface PaperAICreateFromTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly packId: string;\n    readonly memberId: string;\n    readonly upload?: PaperAIWordUpload;\n    readonly role?: PaperAIDocumentRole;\n    readonly name?: string;\n}',
+    name: 'PaperAICreateTemplateSetRequest',
+    declaration: 'export interface PaperAICreateTemplateSetRequest {\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
+    name: 'PaperAIDeleteTemplateSetRequest',
+    declaration: 'export interface PaperAIDeleteTemplateSetRequest {\n    readonly packId: string;\n}',
+  },
+  {
+    name: 'PaperAIDetachTemplateRequest',
+    declaration: 'export interface PaperAIDetachTemplateRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n}',
+  },
+  {
+    name: 'PaperAIDiffVersionRequest',
+    declaration: 'export interface PaperAIDiffVersionRequest {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n}',
   },
   {
     name: 'PaperAIDocumentChangedEvent',
@@ -4611,7 +4752,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIDocumentNodeSummary',
-    declaration: 'export interface PaperAIDocumentNodeSummary {\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly kind: PaperAIDocumentNodeKind;\n    readonly label: string;\n    readonly depth: number;\n    readonly editable: boolean;\n}',
+    declaration: 'export interface PaperAIDocumentNodeSummary {\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly kind: PaperAIDocumentNodeKind;\n    readonly label: string;\n    readonly depth: number;\n    readonly editable: boolean;\n    readonly text: string;\n}',
   },
   {
     name: 'PaperAIDocumentOpenResult',
@@ -4622,12 +4763,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PaperAIDocumentRevision = Branded<\'PaperAI.DocumentRevision\'>;',
   },
   {
-    name: 'PaperAIDocumentRole',
-    declaration: 'export type PaperAIDocumentRole = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
+    name: 'PaperAIDocumentRow',
+    declaration: 'export interface PaperAIDocumentRow {\n    readonly id: PaperAIResourceId;\n    readonly documentId: PaperAIDocumentId;\n    readonly name: string;\n    readonly fileName: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly templateName: string | null;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'PaperAIDocumentSnapshot',
-    declaration: 'export interface PaperAIDocumentSnapshot {\n    readonly documentId: PaperAIDocumentId;\n    readonly resourceId: PaperAIResourceId;\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly title: string;\n    readonly role: PaperAIDocumentRole;\n    readonly path: string;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly previewHtml: string;\n    readonly nodes: readonly PaperAIDocumentNodeSummary[];\n    readonly versions: readonly PaperAIDocumentVersion[];\n    readonly template: PaperAITemplateSummary | null;\n    readonly gate: PaperAITemplateGateReport;\n}',
+    declaration: 'export interface PaperAIDocumentSnapshot {\n    readonly documentId: PaperAIDocumentId;\n    readonly resourceId: PaperAIResourceId;\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly title: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly path: string;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly previewHtml: string;\n    readonly nodes: readonly PaperAIDocumentNodeSummary[];\n    readonly versions: readonly PaperAIDocumentVersion[];\n    readonly template: PaperAITemplateSummary | null;\n    readonly projectFormatAvailable: boolean;\n    readonly gate: PaperAITemplateGateReport;\n}',
+  },
+  {
+    name: 'PaperAIDocumentType',
+    declaration: 'export type PaperAIDocumentType = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
+  },
+  {
+    name: 'PaperAIDocumentTypeSuggestion',
+    declaration: 'export interface PaperAIDocumentTypeSuggestion {\n    readonly documentId: PaperAIDocumentId;\n    readonly documentType: PaperAIDocumentType;\n    readonly basis: \'title\' | \'content\' | \'current\';\n}',
   },
   {
     name: 'PaperAIDocumentVersion',
@@ -4654,6 +4803,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIExportSuccessResult extends PaperAIDocumentCommitResult {\n    readonly status: \'success\';\n    readonly outputPath: string;\n    readonly fileName: string;\n    readonly gate: PaperAITemplateGateReport;\n}',
   },
   {
+    name: 'PaperAIFormatChoice',
+    declaration: 'export interface PaperAIFormatChoice {\n    readonly memberId: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly name: string;\n    readonly usage: PaperAITemplateUsage;\n    readonly sourceVersion: string;\n    readonly originalFileName: string;\n}',
+  },
+  {
     name: 'PaperAIGateFinding',
     declaration: 'export interface PaperAIGateFinding {\n    readonly id: PaperAIGateFindingId;\n    readonly severity: PaperAIGateSeverity;\n    readonly title: string;\n    readonly message: string;\n    readonly location?: string;\n    readonly passed: boolean;\n}',
   },
@@ -4667,59 +4820,47 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIImportDocumentRequest',
-    declaration: 'export interface PaperAIImportDocumentRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly fileName: string;\n    readonly contentBase64: string;\n    readonly role: PaperAIDocumentRole;\n    readonly name?: string;\n}',
+    declaration: 'export interface PaperAIImportDocumentRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly fileName: string;\n    readonly contentBase64: string;\n    readonly name?: string;\n}',
   },
   {
     name: 'PaperAIImportDocumentResult',
     declaration: 'export type PaperAIImportDocumentResult = {\n    readonly status: \'imported\';\n    readonly opened: PaperAIDocumentOpenResult;\n    readonly createdCommitId: PaperAIDocumentCommitId;\n} | {\n    readonly status: \'degraded\';\n    readonly capability: \'document-engine\' | \'legacy-doc-normalization\';\n    readonly detail: string;\n};',
   },
   {
-    name: 'PaperAIInstallTemplatePackRequest',
-    declaration: 'export interface PaperAIInstallTemplatePackRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly packId: string;\n    readonly memberIds?: readonly string[];\n}',
-  },
-  {
-    name: 'PaperAIListResourcesRequest',
-    declaration: 'export interface PaperAIListResourcesRequest {\n    readonly workspaceId: WorkspaceId;\n}',
-  },
-  {
-    name: 'PaperAIListTemplatesRequest',
-    declaration: 'export interface PaperAIListTemplatesRequest {\n    readonly workspaceId: WorkspaceId;\n}',
-  },
-  {
     name: 'PaperAIOpenDocumentRequest',
     declaration: 'export interface PaperAIOpenDocumentRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly resourceId: PaperAIResourceId;\n}',
+  },
+  {
+    name: 'PaperAIOverviewRequest',
+    declaration: 'export interface PaperAIOverviewRequest {\n    readonly workspaceId: WorkspaceId;\n}',
+  },
+  {
+    name: 'PaperAIProbeAgentRequest',
+    declaration: 'export interface PaperAIProbeAgentRequest {\n    readonly provider: \'codex\' | \'claude\';\n    readonly force: boolean;\n}',
+  },
+  {
+    name: 'PaperAIProjectOverview',
+    declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
   },
   {
     name: 'PaperAIReadNodeRequest',
     declaration: 'export interface PaperAIReadNodeRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n}',
   },
   {
+    name: 'PaperAIRecoverWorkingRequest',
+    declaration: 'export interface PaperAIRecoverWorkingRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly plan: import(\'@paperai/commit-service/doctor-types\').WorkingRecoveryPlan;\n}',
+  },
+  {
+    name: 'PaperAIRemoveTemplateFormatRequest',
+    declaration: 'export interface PaperAIRemoveTemplateFormatRequest {\n    readonly packId: string;\n    readonly documentType: PaperAIDocumentType;\n}',
+  },
+  {
     name: 'PaperAIReplaceTextMutation',
     declaration: 'export interface PaperAIReplaceTextMutation {\n    readonly type: \'replace-text\';\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly baseText: string;\n    readonly nextText: string;\n}',
   },
   {
-    name: 'PaperAIResourceCategory',
-    declaration: 'export type PaperAIResourceCategory = \'document\' | \'template\' | \'image\' | \'experiment\' | \'code\';',
-  },
-  {
     name: 'PaperAIResourceId',
     declaration: 'export type PaperAIResourceId = Branded<\'PaperAI.ResourceId\'>;',
-  },
-  {
-    name: 'PaperAIResourceKind',
-    declaration: 'export type PaperAIResourceKind = \'file\' | \'folder\';',
-  },
-  {
-    name: 'PaperAIResourceList',
-    declaration: 'export interface PaperAIResourceList {\n    readonly workspaceId: WorkspaceId;\n    readonly resources: readonly PaperAIResourceRow[];\n}',
-  },
-  {
-    name: 'PaperAIResourceRow',
-    declaration: 'export interface PaperAIResourceRow {\n    readonly id: PaperAIResourceId;\n    readonly category: PaperAIResourceCategory;\n    readonly kind: PaperAIResourceKind;\n    readonly name: string;\n    readonly path: string;\n    readonly depth: number;\n    readonly openable: boolean;\n    readonly status?: PaperAIResourceStatus;\n}',
-  },
-  {
-    name: 'PaperAIResourceStatus',
-    declaration: 'export type PaperAIResourceStatus = \'clean\' | \'modified\' | \'pending\' | \'blocked\';',
   },
   {
     name: 'PaperAIRestoreDocumentRequest',
@@ -4730,40 +4871,40 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAISelectedNodeBuffer {\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly label: string;\n    readonly kind: PaperAIDocumentNodeKind;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly format: \'text\';\n    readonly text: string;\n}',
   },
   {
-    name: 'PaperAITemplateCatalog',
-    declaration: 'export interface PaperAITemplateCatalog {\n    readonly workspaceId: WorkspaceId;\n    readonly packs: readonly PaperAITemplatePackChoice[];\n    readonly contracts: readonly PaperAITemplateContractChoice[];\n}',
+    name: 'PaperAISetProjectTemplateRequest',
+    declaration: 'export interface PaperAISetProjectTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly packId: string | null;\n}',
   },
   {
-    name: 'PaperAITemplateContractChoice',
-    declaration: 'export interface PaperAITemplateContractChoice {\n    readonly templateId: string;\n    readonly name: string;\n    readonly status: \'draft\' | \'confirmed\';\n    readonly source: \'built-in\' | \'uploaded\';\n    readonly appliesToRoles: readonly PaperAIDocumentRole[];\n    readonly usage: PaperAITemplateUsage;\n    readonly ruleCount: number;\n    readonly slotCount: number;\n    readonly originPackId?: string;\n    readonly originMemberId?: string;\n    readonly requirements: readonly PaperAITemplateRequirementChoice[];\n}',
+    name: 'PaperAISuggestDocumentTypeRequest',
+    declaration: 'export interface PaperAISuggestDocumentTypeRequest {\n    readonly documentId: PaperAIDocumentId;\n}',
   },
   {
     name: 'PaperAITemplateGateReport',
     declaration: 'export interface PaperAITemplateGateReport {\n    readonly status: \'not-run\' | \'passed\' | \'failed\';\n    readonly checkedAt?: string;\n    readonly findings: readonly PaperAIGateFinding[];\n}',
   },
   {
-    name: 'PaperAITemplatePackChoice',
-    declaration: 'export interface PaperAITemplatePackChoice {\n    readonly packId: string;\n    readonly name: string;\n    readonly description: string;\n    readonly version: string;\n    readonly members: readonly PaperAITemplatePackMemberChoice[];\n}',
+    name: 'PaperAITemplateLibrary',
+    declaration: 'export interface PaperAITemplateLibrary {\n    readonly sets: readonly PaperAITemplateSetChoice[];\n}',
   },
   {
-    name: 'PaperAITemplatePackMemberChoice',
-    declaration: 'export interface PaperAITemplatePackMemberChoice {\n    readonly memberId: string;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly PaperAIDocumentRole[];\n    readonly usage: PaperAITemplateUsage;\n    readonly originalFileName: string;\n}',
+    name: 'PaperAITemplateRequirement',
+    declaration: 'export interface PaperAITemplateRequirement {\n    readonly ruleId: string;\n    readonly kind: string;\n    readonly label: string;\n    readonly description: string;\n    readonly severity: PaperAIGateSeverity;\n    readonly enabled: boolean;\n}',
   },
   {
-    name: 'PaperAITemplateRequirementChoice',
-    declaration: 'export interface PaperAITemplateRequirementChoice {\n    readonly ruleId: string;\n    readonly kind: string;\n    readonly label: string;\n    readonly description: string;\n    readonly severity: PaperAIGateSeverity;\n    readonly confidence: number;\n    readonly enabled: boolean;\n}',
+    name: 'PaperAITemplateSetChoice',
+    declaration: 'export interface PaperAITemplateSetChoice {\n    readonly packId: string;\n    readonly kind: PaperAITemplateSetKind;\n    readonly name: string;\n    readonly description: string;\n    readonly formats: readonly PaperAIFormatChoice[];\n}',
+  },
+  {
+    name: 'PaperAITemplateSetKind',
+    declaration: 'export type PaperAITemplateSetKind = \'built-in\' | \'custom\';',
   },
   {
     name: 'PaperAITemplateSummary',
-    declaration: 'export interface PaperAITemplateSummary {\n    readonly templateId: string;\n    readonly name: string;\n    readonly source: \'built-in\' | \'uploaded\';\n    readonly version?: string;\n}',
+    declaration: 'export interface PaperAITemplateSummary {\n    readonly templateId: string;\n    readonly name: string;\n    readonly kind: PaperAITemplateSetKind;\n    readonly packId?: string;\n    readonly packName?: string;\n    readonly memberId?: string;\n    readonly sourceVersion?: string;\n    readonly usage: PaperAITemplateUsage;\n    readonly requirements: readonly PaperAITemplateRequirement[];\n}',
   },
   {
     name: 'PaperAITemplateUsage',
     declaration: 'export type PaperAITemplateUsage = \'form-template\' | \'format-reference\';',
-  },
-  {
-    name: 'PaperAIUploadTemplateRequest',
-    declaration: 'export interface PaperAIUploadTemplateRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly fileName: string;\n    readonly contentBase64: string;\n    readonly name: string;\n    readonly appliesToRoles: readonly PaperAIDocumentRole[];\n    readonly usage: PaperAITemplateUsage;\n}',
   },
   {
     name: 'PaperAIValidateDocumentRequest',
@@ -4776,6 +4917,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PaperAIVersionActor',
     declaration: 'export interface PaperAIVersionActor {\n    readonly kind: \'human\' | \'agent\' | \'system\';\n    readonly name: string;\n    readonly client?: string;\n    readonly provider?: string;\n    readonly model?: string;\n}',
+  },
+  {
+    name: 'PaperAIVersionChange',
+    declaration: 'export interface PaperAIVersionChange {\n    readonly kind: \'added\' | \'removed\' | \'changed\';\n    readonly before?: string;\n    readonly after?: string;\n}',
+  },
+  {
+    name: 'PaperAIVersionDiff',
+    declaration: 'export interface PaperAIVersionDiff {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly parentCommitId: PaperAIDocumentCommitId | null;\n    readonly changes: readonly PaperAIVersionChange[];\n    readonly unchangedCount: number;\n}',
   },
   {
     name: 'PaperAIWordUpload',
@@ -4874,6 +5023,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ProjectId = Branded<\'PaperAI.ProjectId\'>;',
   },
   {
+    name: 'ProjectIntegrityIssue',
+    declaration: 'export interface ProjectIntegrityIssue {\n    readonly documentId: DocumentId;\n    readonly code: \'missing-source\' | \'source-changed\' | \'missing-working\' | \'working-changed\' | \'invalid-head\' | \'invalid-snapshot\' | \'duplicate-path\' | \'unsafe-path\' | \'unreadable-file\';\n    readonly path: string;\n    readonly detail: string;\n}',
+  },
+  {
+    name: 'ProjectIntegrityReport',
+    declaration: 'export interface ProjectIntegrityReport {\n    readonly checkedAt: string;\n    readonly documents: number;\n    readonly issues: readonly ProjectIntegrityIssue[];\n    readonly repairs: readonly WorkingRecoveryPlan[];\n}',
+  },
+  {
     name: 'ProjectionChangeListener',
     declaration: 'export type ProjectionChangeListener = (session: Session, key: Extract<keyof SessionProjectionMap, string>, value: unknown, seq: number) => void;',
   },
@@ -4895,7 +5052,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ProjectRecord',
-    declaration: 'export interface ProjectRecord {\n    id: ProjectId;\n    workspaceId: string;\n    name: string;\n    rootPath: string;\n    createdAt: string;\n    updatedAt: string;\n}',
+    declaration: 'export interface ProjectRecord {\n    id: ProjectId;\n    workspaceId: string;\n    name: string;\n    rootPath: string;\n    templatePackId?: string;\n    templateDecidedAt?: string;\n    createdAt: string;\n    updatedAt: string;\n}',
   },
   {
     name: 'PromptAssembly',
@@ -5702,8 +5859,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TemplateEvidence {\n    documentId: DocumentId;\n    nodeId?: DocumentNodeId;\n    officePath?: string;\n    excerpt: string;\n    source: \'document\' | \'style\' | \'page-setup\' | \'user\';\n}',
   },
   {
+    name: 'TemplateLibraryAsset',
+    declaration: 'export interface TemplateLibraryAsset {\n    readonly path: string;\n    readonly sha256: string;\n    readonly size: number;\n}',
+  },
+  {
+    name: 'TemplateLibraryFormat',
+    declaration: 'export interface TemplateLibraryFormat {\n    readonly id: DocumentRole;\n    readonly name: string;\n    readonly usage: TemplateUsage;\n    readonly originalFileName: string;\n    readonly source: TemplateLibraryAsset;\n    readonly normalized: TemplateLibraryAsset;\n    readonly addedAt: string;\n}',
+  },
+  {
+    name: 'TemplateLibraryPack',
+    declaration: 'export interface TemplateLibraryPack {\n    readonly id: string;\n    readonly name: string;\n    readonly description: string;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly formats: readonly TemplateLibraryFormat[];\n}',
+  },
+  {
     name: 'TemplateOrigin',
     declaration: 'export interface TemplateOrigin {\n    kind: \'upload\' | \'built-in\';\n    label: string;\n    originalFileName: string;\n    packId?: string;\n    memberId?: string;\n    sourceVersion?: string;\n    normalizedSha256?: string;\n}',
+  },
+  {
+    name: 'TemplatePackKind',
+    declaration: 'export type TemplatePackKind = \'built-in\' | \'custom\';',
   },
   {
     name: 'TemplatePackManifest',
@@ -5727,7 +5900,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TemplatePackSummary',
-    declaration: 'export interface TemplatePackSummary {\n    readonly id: TemplatePackId;\n    readonly name: string;\n    readonly description: string;\n    readonly version: string;\n    readonly sourceLabel: string;\n    readonly members: readonly TemplatePackMemberSummary[];\n}',
+    declaration: 'export interface TemplatePackSummary {\n    readonly id: TemplatePackId;\n    readonly kind: TemplatePackKind;\n    readonly name: string;\n    readonly description: string;\n    readonly version: string;\n    readonly sourceLabel: string;\n    readonly members: readonly TemplatePackMemberSummary[];\n}',
   },
   {
     name: 'TemplateRule',
@@ -6160,6 +6333,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkingRecoveryPlan',
+    declaration: 'export interface WorkingRecoveryPlan {\n    readonly documentId: DocumentId;\n    readonly headCommitId: DocumentCommitId;\n    readonly sha256: string;\n    readonly workingPath: string;\n}',
   },
   {
     name: 'WritingCharterSyncResult',

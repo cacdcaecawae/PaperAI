@@ -24,10 +24,16 @@
       "path": "../ui-sidebar"
     },
     {
-      "path": "../ui-theme"
+      "path": "../ui-slots"
     },
     {
-      "path": "../ui-slots"
+      "path": "../locale"
+    },
+    {
+      "path": "../ui-workspace"
+    },
+    {
+      "path": "../ui-paperai-workbench"
     }
   ]
 }
