@@ -49,6 +49,12 @@
     },
     {
       "path": "../ui-settings"
+    },
+    {
+      "path": "../ui-input-trigger"
+    },
+    {
+      "path": "../ui-agent-preset"
     }
   ]
 }

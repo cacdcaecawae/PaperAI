@@ -6,6 +6,22 @@ import type {} from '@deepseek-ai/cordis'
 type SessionId = Branded<'SessionId'>
 type WorkspaceId = Branded<'WorkspaceId'>
 
+export type { ProjectIntegrityReport as PaperAIProjectIntegrityReport, WorkingRecoveryPlan as PaperAIWorkingRecoveryPlan } from '@paperai/commit-service/doctor-types'
+
+/** Project and exact recovery plan observed by a prior read-only scan. */
+export interface PaperAIRecoverWorkingRequest {
+  readonly workspaceId: WorkspaceId
+  readonly plan: import('@paperai/commit-service/doctor-types').WorkingRecoveryPlan
+}
+
+export type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
+
+/** An explicit prompt-free diagnostic request for one configured peer Agent. */
+export interface PaperAIProbeAgentRequest {
+  readonly provider: 'codex' | 'claude'
+  readonly force: boolean
+}
+
 /** Opaque id for one openable document row in the PaperAI project sidebar. */
 export type PaperAIResourceId = Branded<'PaperAI.ResourceId'>
 /** Opaque identity of an authoritative Working DOCX. */

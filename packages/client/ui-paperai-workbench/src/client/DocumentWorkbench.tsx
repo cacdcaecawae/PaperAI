@@ -21,7 +21,7 @@ const EXPORT_MODES: readonly PaperAIExportMode[] = ['draft-export', 'delivery-ex
 /** Actionable controller failures have specific guidance; other failures offer a retry. */
 function actionErrorKey(error: string): PaperAIWorkbenchKey {
   if (error.startsWith('delivery blocked')) return 'export.blocked'
-  if (error.startsWith('block changed externally')) return 'block.dropped'
+  if (error.startsWith('block changed externally')) return 'block.conflicted'
   if (error === 'save or cancel the current block first') return 'block.busy'
   return 'workbench.actionError'
 }
@@ -117,7 +117,7 @@ function Toolbar({ document, state, panel, showPanel, exportDocument, focusActiv
 
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
-  closeDetails, setDraft, useWorkbench, useProjects, useLibrary,
+  closeDetails, setDraft, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
   retryOpen, showPanel, selectBlock, updateDraft, cancelEdit, commitEdit, validate, suggestType,
   applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal,
   setDetailsFocus, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
@@ -212,15 +212,20 @@ export function DocumentWorkbench({
             </Button>
           </div>
         )}
-        {state.phase === 'ready' && document !== null && (
-          document.previewHtml === ''
-            ? <p className={css.centerMessage}>{t('preview.unavailable')}</p>
+        {[...state.retained, ...(state.phase === 'ready' && document !== null ? [state] : [])].map(view => (
+          view.document === null ? null : view.document.previewHtml === ''
+            ? <p key={view.document.documentId} hidden={view !== state} className={css.centerMessage}>{t('preview.unavailable')}</p>
             : (
               <DocumentPreview
-                html={document.previewHtml}
-                nodes={document.nodes}
+                key={view.document.documentId}
+                html={view.document.previewHtml}
+                nodes={view.document.nodes}
+                active={view === state}
+                scrollTop={view.scrollTop}
+                onScroll={setScroll}
+                onQuote={(excerpt) => { if (view.document !== null) quoteSelection(view.document, excerpt) }}
                 title={t('preview.title')}
-                editing={state.edit}
+                editing={view.edit}
                 saving={state.action === 'committing'}
                 onSelectBlock={(nodeId) => {
                   if (nodeId === null) {
@@ -236,7 +241,7 @@ export function DocumentWorkbench({
                 t={t}
               />
             )
-        )}
+        ))}
         {state.phase === 'ready' && document !== null && state.panel === 'template' && (
           <TemplatePanel
             document={document}

@@ -74,6 +74,7 @@ function renderSeat(
     owner: AgentPresetBrandMarkOwnerProps,
     options?: { entryKey?: string; fallback?: ReactNode },
   ): ReactNode => {
+    if (name === 'conversation.hero.agentPreset.status') return null
     if (name !== 'conversation.hero.agentPreset.mark') throw new Error(`unexpected slot ${name}`)
     const renderer = options?.entryKey === undefined ? undefined : brands[options.entryKey]
     return renderer === undefined ? (options?.fallback ?? null) : renderer(owner)
@@ -289,10 +290,11 @@ describe('the new-session chip', () => {
     expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('disables the trigger while a switch is in flight', () => {
+  it('keeps the selector available while a switch is in flight', () => {
     renderSeat({ busy: true })
 
-    expect(screen.getByRole('button')).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button')).toHaveProperty('disabled', false)
+    expect(screen.getByRole('button').getAttribute('aria-busy')).toBe('true')
   })
 
   it('shows a refused switch on the trigger', () => {

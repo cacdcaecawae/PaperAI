@@ -122,6 +122,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
     /** Optional renderer for one consecutive group of durable message images. */
     'conversation.message.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
+    /** Product-owned projection of logged user text; declining entries preserve the ordinary bubble. */
+    'conversation.message.userText': { kind: 'chain'; scope: 'session'; owner: { readonly text: string } }
     /**
      * The chat view's per-command row hole: keyed dispatch on the command
      * name (`command/run.name`; a run-less cross-window node has none and
@@ -437,6 +439,8 @@ export interface ChatNodeOwnerProps {
   forkAt: (seq: number) => void
   /** Render a historical image group through the attachment slot. */
   renderMessageImages: RenderMessageImages
+  /** Delegate the chat view's authorized text chain without changing logged or copied text. */
+  renderUserText: PropsRenderSlots<'conversation.message.userText'>['renderSlotChain']
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
 }
 
@@ -540,7 +544,7 @@ export interface ComposerBarOwnerProps {
    * clears by choosing a model, so locking that seat too would leave the
    * composer telling them to do the one thing it prevents.
    */
-  blocked?: { readonly reason: string }
+  blocked?: { readonly reason: string; readonly allowDraft?: boolean }
   /**
    * Inert no-workspace state: the bar locks message actions while preserving
    * its normal DOM so the Workspace pick transitions in place.
@@ -815,7 +819,7 @@ export interface ChatViewInjected {
 /** Full chat-view component props: runtime & its Tool/command/tail render shares & store & injected & locale seat. */
 export type ChatViewSlotProps =
   PropsRuntime<'conversation.view'>
-  & PropsRenderSlots<'conversation.chat.node' | 'conversation.message.images'>
+  & PropsRenderSlots<'conversation.chat.node' | 'conversation.message.images' | 'conversation.message.userText'>
   & PropsStore<ChatStore> & ChatViewInjected & PropsLocale<'conversation'>
 
 /** Full props of the attachment plugin's composer entry. */

@@ -15,6 +15,10 @@ export type * from '@paperai/workbench-service/types'
 export type PaperAIWorkbenchRemote = Pick<
   TypertClientRemote['paperaiWorkbench'],
   | 'overview'
+  | 'agentDiagnostics'
+  | 'probeAgent'
+  | 'inspectProject'
+  | 'recoverWorking'
   | 'setProjectTemplate'
   | 'listTemplateLibrary'
   | 'createTemplateSet'
@@ -101,6 +105,8 @@ export interface PaperAIBlockEdit {
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
   readonly draft: string
+  /** The current document changed this block; retain the draft for copying or discarding. */
+  readonly conflicted?: boolean
 }
 
 /** One version's diff loaded into the versions panel. */
@@ -122,6 +128,10 @@ export type PaperAIExternalDocumentHead = Pick<PaperAIDocumentSnapshot, 'documen
 
 /** Complete browser state for one Session's PaperAI document view. */
 export interface PaperAIWorkbenchState {
+  /** Inactive document views retained in recency order; drafts survive their eviction separately. */
+  retained: readonly PaperAIRetainedView[]
+  /** Last scroll offset of this document preview. */
+  scrollTop: number
   phase: PaperAIWorkbenchPhase
   document: PaperAIDocumentSnapshot | null
   edit: PaperAIBlockEdit | null
@@ -135,6 +145,9 @@ export interface PaperAIWorkbenchState {
   error: string | null
   actionError: string | null
 }
+
+/** One inactive document view, without a recursively retained cache. */
+export type PaperAIRetainedView = Omit<PaperAIWorkbenchState, 'retained'>
 
 /** Stable React-free source for one Session workbench. */
 export type PaperAIWorkbenchStore = SnapshotStore<PaperAIWorkbenchState>

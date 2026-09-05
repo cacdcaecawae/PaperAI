@@ -21,6 +21,8 @@ export type DetailsNarrowMode = 'close' | 'focus'
 
 /** Deployment-controlled layout options. Omitted fields preserve DSH layout behavior. */
 export interface Config {
+  /** Place the details surface before or after the conversation. */
+  detailsPosition?: 'start' | 'end'
   /** Center-column floor in integer CSS pixels. */
   centerMin?: number
   /** Details-column drag floor in integer CSS pixels. */
@@ -49,6 +51,8 @@ export interface LayoutGeometry {
 
 /** Fully resolved layout options. */
 export interface ResolvedLayoutConfig extends LayoutGeometry {
+  /** Position of the details surface relative to the conversation. */
+  readonly detailsPosition: 'start' | 'end'
   /** Session eligibility for retaining an open details column. */
   readonly detailsVisibility: DetailsVisibility
   /** Narrow-layout behavior for an open details column. */
@@ -110,6 +114,10 @@ export function resolveLayoutConfig(config?: Config): Readonly<ResolvedLayoutCon
     throw new TypeError('ui-layout: config must be an object')
   }
   const source = (input ?? {}) as Record<string, unknown>
+  const detailsPosition = source.detailsPosition ?? 'end'
+  if (detailsPosition !== 'start' && detailsPosition !== 'end') {
+    throw new TypeError('ui-layout: detailsPosition must be "start" or "end"')
+  }
   const centerMin = positiveInteger(source, 'centerMin', CENTER_MIN)
   const detailsMin = positiveInteger(source, 'detailsMin', DETAILS_MIN)
   const detailsDefault = positiveInteger(source, 'detailsDefault', DETAILS_DEFAULT)
@@ -125,6 +133,7 @@ export function resolveLayoutConfig(config?: Config): Readonly<ResolvedLayoutCon
     )
   }
   return Object.freeze({
+    detailsPosition,
     centerMin,
     detailsMin,
     detailsDefault,

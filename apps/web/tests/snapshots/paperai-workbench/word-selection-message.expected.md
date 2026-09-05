@@ -1,0 +1,3 @@
+- text: Browser conflict proposal
+- blockquote: 浏览器合并后的最终文本
+- group: 查看引用来源

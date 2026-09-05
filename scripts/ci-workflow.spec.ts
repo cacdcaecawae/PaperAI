@@ -116,6 +116,12 @@ describe('CI workflow', () => {
     expect(code['runs-on']).toBe('ubuntu-24.04')
     expect(ui['runs-on']).toBe('ubuntu-24.04')
     expect(paperaiWindows['runs-on']).toBe('windows-2025')
+    const codeCheckout = code.steps.filter(isRecord).find(
+      step => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
+    )
+    expect(codeCheckout).toMatchObject({
+      with: { 'fetch-depth': 0, filter: 'blob:none', 'persist-credentials': false },
+    })
     const codeCommands = commandText(code.steps)
     expect(codeCommands).toContain('pnpm run check:ci:static')
     expect(codeCommands).toContain('pnpm run typecheck:contracts-ready')

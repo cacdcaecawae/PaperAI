@@ -4,13 +4,14 @@ import {
   createSnapshotStore, type SessionId, type WorkspaceId,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import { resolvePreviewBudget } from '../config.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
   PaperAIDocumentType, PaperAIExportMode, PaperAIExternalDocumentHead, PaperAIImportDocumentResult, PaperAILibraryAction,
   PaperAILibraryState, PaperAILibraryStore, PaperAIProjectAction, PaperAIProjectDirectoryState,
   PaperAIProjectDirectoryStore, PaperAIProjectOverview, PaperAIProjectState, PaperAIProjectStore,
-  PaperAIResourceId, PaperAITemplateLibrary, PaperAITemplateStartInput, PaperAIWorkbenchAction,
+  PaperAIResourceId, PaperAIRetainedView, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput, PaperAIWorkbenchAction,
   PaperAIWorkbenchPanel, PaperAIWorkbenchRemote, PaperAIWorkbenchState, PaperAIWorkbenchStore,
 } from './types.ts'
 
@@ -23,6 +24,8 @@ const LIBRARY_INITIAL: PaperAILibraryState = Object.freeze({
 })
 
 const WORKBENCH_INITIAL: PaperAIWorkbenchState = Object.freeze({
+  retained: [],
+  scrollTop: 0,
   phase: 'idle',
   document: null,
   edit: null,
@@ -74,6 +77,12 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
   return state.edit !== null && state.edit.draft !== state.edit.baseText
 }
 
+/** Preserve an evicted or externally changed draft without applying it to a different block. */
+function restoreEdit(document: PaperAIDocumentSnapshot, edit: PaperAIBlockEdit): PaperAIBlockEdit {
+  const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
+  return { ...edit, conflicted: node === undefined || !node.editable || node.text !== edit.baseText }
+}
+
 /** Commit identity is shared by live notifications and reconnect reads. */
 function sameDocumentChange(
   left: PaperAIExternalDocumentHead | null,
@@ -102,6 +111,8 @@ export class PaperAIWorkbenchController {
     store: createSnapshotStore(LIBRARY_INITIAL), generation: 0, abort: null,
   }
   private readonly workbenches = new Map<SessionId, RequestEntry<PaperAIWorkbenchStore>>()
+  private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, PaperAIBlockEdit>>()
+  private readonly positions = new Map<SessionId, Map<PaperAIResourceId, number>>()
   private readonly targets = new Map<SessionId, {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
@@ -110,8 +121,9 @@ export class PaperAIWorkbenchController {
 
   /**
    * @param remote - generated Host Remote namespace mounted by the owning UI plugin.
+   * @param previewBudget - validated limit including the active preview.
    */
-  constructor(private readonly remote: PaperAIWorkbenchRemote) {}
+  constructor(private readonly remote: PaperAIWorkbenchRemote, private readonly previewBudget = resolvePreviewBudget()) {}
 
   /**
    * Return the stable project source for one Workspace.
@@ -325,12 +337,14 @@ export class PaperAIWorkbenchController {
    * @param workspaceId - Workspace owning the document.
    * @param sessionId - blank or existing Session displaying the details column.
    * @param resourceId - document row selected by the user.
+   * @param force - read the Host even when a retained preview is available.
    * @returns after the current read settles.
    */
   async openDocument(
     workspaceId: WorkspaceId,
     sessionId: SessionId,
     resourceId: PaperAIResourceId,
+    force = false,
   ): Promise<void> {
     this.assertLive()
     const entry = this.workbenchEntry(sessionId)
@@ -339,14 +353,17 @@ export class PaperAIWorkbenchController {
       entry.store.update((draft) => { draft.actionError = 'wait for the current document action before opening another document' })
       return
     }
-    if (hasUnsavedEdit(state)) {
-      entry.store.update((draft) => { draft.actionError = 'save or cancel the current block first' })
-      return
-    }
+    if (!force && state.phase === 'ready' && state.document?.resourceId === resourceId) return
+    const retained = this.retain(sessionId, state, resourceId)
+    const cached = force ? undefined : state.retained.find(view => view.document?.resourceId === resourceId)
     this.targets.set(sessionId, { workspaceId, resourceId })
     this.projectEntry(workspaceId).store.update((state) => { state.selected = resourceId })
     const request = this.begin(entry)
-    entry.store.set({ ...WORKBENCH_INITIAL, phase: 'loading', panel: state.panel })
+    if (cached !== undefined) {
+      entry.store.set({ ...cached, retained })
+      return
+    }
+    entry.store.set({ ...WORKBENCH_INITIAL, retained, phase: 'loading' })
     const result = await callRemote(() => this.remote.open({ workspaceId, sessionId, resourceId }, request.signal))
     if (!this.isCurrent(entry, request)) return
     if (!result.ok) {
@@ -366,6 +383,11 @@ export class PaperAIWorkbenchController {
       return
     }
     this.publishOpenResult(entry.store, result.value)
+    const edit = this.drafts.get(sessionId)?.get(resourceId)
+    entry.store.update((draft) => {
+      draft.scrollTop = this.positions.get(sessionId)?.get(resourceId) ?? 0
+      if (edit !== undefined) draft.edit = restoreEdit(result.value.document, edit)
+    })
   }
 
   /**
@@ -378,7 +400,36 @@ export class PaperAIWorkbenchController {
     const target = this.targets.get(sessionId)
     return target === undefined
       ? Promise.resolve()
-      : this.openDocument(target.workspaceId, sessionId, target.resourceId)
+      : this.openDocument(target.workspaceId, sessionId, target.resourceId, true)
+  }
+
+  /**
+   * Remember the active preview's scroll position without loading another document.
+   * @param sessionId - owning Session.
+   * @param scrollTop - DOM scroll offset.
+   */
+  setScroll(sessionId: SessionId, scrollTop: number): void {
+    if (this.disposed) return
+    this.workbenchEntry(sessionId).store.update((state) => { state.scrollTop = scrollTop })
+  }
+
+  private retain(sessionId: SessionId, state: PaperAIWorkbenchState, opening: PaperAIResourceId): PaperAIRetainedView[] {
+    const retained = state.retained.filter(view => view.document?.resourceId !== opening)
+    if (state.document !== null && state.phase === 'ready') {
+      const resource = state.document.resourceId
+      const drafts = this.drafts.get(sessionId) ?? new Map<PaperAIResourceId, PaperAIBlockEdit>()
+      if (hasUnsavedEdit(state) && state.edit !== null) drafts.set(resource, state.edit)
+      else drafts.delete(resource)
+      this.drafts.set(sessionId, drafts)
+      const positions = this.positions.get(sessionId) ?? new Map<PaperAIResourceId, number>()
+      positions.set(resource, state.scrollTop)
+      this.positions.set(sessionId, positions)
+      if (resource !== opening) {
+        const { retained: _retained, ...view } = state
+        retained.push(view)
+      }
+    }
+    return this.previewBudget === 1 ? [] : retained.slice(1 - this.previewBudget)
   }
 
   /**
@@ -460,6 +511,7 @@ export class PaperAIWorkbenchController {
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
     if (state.edit === null) return { ok: false, error: 'no block is being edited' }
+    if (state.edit.conflicted === true) return { ok: false, error: 'block changed externally; local draft retained' }
     if (state.edit.draft === state.edit.baseText) return { ok: false, error: 'block has no changes' }
     const document = state.document
     const edit = state.edit
@@ -688,6 +740,9 @@ export class PaperAIWorkbenchController {
       if (state.phase !== 'cold' && state.action === null) void this.loadProject(workspaceId)
     }
     for (const [sessionId, entry] of this.workbenches) {
+      entry.store.update((draft) => {
+        draft.retained = draft.retained.filter(view => view.document?.documentId !== change.documentId)
+      })
       const state = entry.store.getSnapshot()
       if (state.document?.documentId !== change.documentId
         || state.document.headCommitId === change.headCommitId) continue
@@ -700,7 +755,7 @@ export class PaperAIWorkbenchController {
 
   /**
    * Load a pending durable head. A block draft survives when its block still
-   * reads as it did; otherwise the draft is dropped and the user is told.
+   * reads as it did; otherwise it remains available for copying or discarding.
    * @param sessionId - Session whose pending external head should replace the local projection.
    * @returns the settled local action result after the refreshed document is published.
    */
@@ -735,13 +790,8 @@ export class PaperAIWorkbenchController {
     }
     this.publishOpenResult(entry.store, result.value, pending)
     if (edit !== null && edit.draft !== edit.baseText) {
-      const node = result.value.document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
       entry.store.update((draft) => {
-        if (node !== undefined && node.editable && node.text === edit.baseText) {
-          draft.edit = edit
-        } else {
-          draft.actionError = 'block changed externally; local draft dropped'
-        }
+        draft.edit = restoreEdit(result.value.document, edit)
       })
     }
     return OK
@@ -755,6 +805,7 @@ export class PaperAIWorkbenchController {
     }
     if (this.library.store.getSnapshot().phase !== 'cold') void this.loadLibrary(true)
     for (const [sessionId, entry] of this.workbenches) {
+      entry.store.update((state) => { state.retained = [] })
       if (!this.targets.has(sessionId)) continue
       if (hasUnsavedEdit(entry.store.getSnapshot())) void this.refreshEditedDocument(sessionId)
       else void this.retryOpen(sessionId)
@@ -806,6 +857,8 @@ export class PaperAIWorkbenchController {
     this.projectMirrors.clear()
     this.workbenches.clear()
     this.targets.clear()
+    this.drafts.clear()
+    this.positions.clear()
   }
 
   /**
@@ -1018,6 +1071,8 @@ export class PaperAIWorkbenchController {
     const sameDocument = previous.document?.documentId === result.document.documentId
     store.set({
       phase: 'ready',
+      retained: previous.retained,
+      scrollTop: sameDocument ? previous.scrollTop : 0,
       document: result.document,
       edit: null,
       action: null,

@@ -1,0 +1,7 @@
+.message { white-space: pre-wrap; overflow-wrap: anywhere; }
+.citation { margin: 8px 0; }
+.citation blockquote { margin: 0; padding: 4px 12px; border-left: 2px solid var(--dsw-alias-border-l3); }
+.citation details { margin-top: 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.citation summary { cursor: pointer; }
+.citation pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.path { display: block; margin-top: 8px; }

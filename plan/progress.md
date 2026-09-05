@@ -78,3 +78,11 @@
 - Confirmed that model choices come from ACP. The default Claude adapter's bundled CLI reported 2.1.232, while the terminal CLI reported 2.1.258. Documented the existing `CLAUDE_CODE_EXECUTABLE` override; no personal settings or live service were changed.
 - The document-service suite passed 30 tests; the final runtime suite passed 126 tests, and project initialization also passed. Navigation passed 5 browser scenarios, and the final ACP/document suite passed all 11. Final build, contract lint, exported JSDoc, documentation budgets, and whitespace checks passed.
 - Documentation synchronization initially passed 26 of 28 gates; the model-experience formatting failure was fixed separately. The required bilingual Agent Notes and translation records are now present. Exact evidence is recorded in the [follow-up review](review/2026-09-03-project-documents-and-acp.md).
+
+## 2026-09-05 — Agentero architecture adoption
+
+- Implemented all five accepted adaptations: responsive ACP selection, frozen Word context, document-centered layout and bounded retained previews, independent Agent diagnostics, and read-only Project Doctor with explicit guarded recovery.
+- Preserved the inherited UI overhaul and main's current CI checkout configuration. ACP replacement now retains the browser Session binding and serializes model operations after the new adapter is ready.
+- Added durable quotation presentation, narrow-to-wide layout geometry checks, conflict-draft retention, and real assembled scan/review/restore acceptance. Repaired the old workspace-management fixture for project-detail navigation; all 12 tests pass without changing its goldens.
+- Final client regressions passed 42 files / 604 tests. Built browser replay passed 3 files / 22 tests, with the separate workspace-management lane bringing browser acceptance to 34 tests. Service and lifecycle evidence is recorded separately to avoid counting overlapping runs twice.
+- Updated the bilingual adoption ADR, affected READMEs and catalogs, and current project handoff. The [review](review/2026-09-05-agentero-adoption.md) owns source comparison, exact final commands, publication checks and limits.

@@ -10,6 +10,9 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { Workspace } from '@deepseek-ai/dsh-workspace/types'
 import type {} from '@paperai/commit-service'
+import type {} from '@paperai/agent-acp'
+import type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
+import type { ProjectIntegrityReport as PaperAIProjectIntegrityReport } from '@paperai/commit-service/doctor-types'
 import type {} from '@paperai/document-engine'
 import type {} from '@paperai/document-service'
 import { PaperExportError, type ExportDocumentResult } from '@paperai/export-service'
@@ -40,6 +43,7 @@ import type { TemplateLibraryPack, TemplatePackSummary } from '@paperai/template
 import { diffParagraphs } from './diff.ts'
 import type {
   PaperAIAddTemplateFormatRequest,
+  PaperAIProbeAgentRequest,
   PaperAIApplyTemplateRequest,
   PaperAICommitDocumentRequest,
   PaperAICreateFromTemplateRequest,
@@ -68,6 +72,7 @@ import type {
   PaperAIOpenDocumentRequest,
   PaperAIOverviewRequest,
   PaperAIProjectOverview,
+  PaperAIRecoverWorkingRequest,
   PaperAIReadNodeRequest,
   PaperAIRemoveTemplateFormatRequest,
   PaperAIResourceId,
@@ -369,6 +374,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   private readonly gateCache = new Map<DocumentId, GateCacheSlot>()
   private readonly maxUploadBytes: number
+  private acp: Pick<Context['paperAiAcpAgents'], 'diagnosticStatus' | 'probe'> | undefined
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paperaiWorkbench')
@@ -376,6 +382,12 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     if (!Number.isSafeInteger(this.maxUploadBytes) || this.maxUploadBytes <= 0) {
       throw new Error('paperai-workbench: maxUploadBytes must be a positive safe integer')
     }
+    ctx.inject(['paperAiAcpAgents'], (scope) => {
+      scope.effect(() => {
+        this.acp = scope.paperAiAcpAgents
+        return () => { this.acp = undefined }
+      }, 'paperaiWorkbench: optional Agent diagnostics')
+    })
     ctx.on('domain/changed', (change) => {
       const event = committedDocumentChange(change)
       if (event === undefined) return
@@ -406,6 +418,54 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     signal?.throwIfAborted()
     const { project } = await this.projectForWorkspace(request.workspaceId)
     return this.projectOverview(request.workspaceId, project)
+  }
+
+  /**
+   * Read configured Agent discovery and cached model previews without starting processes.
+   * @returns configured ACP peers, or an empty roster when the provider plugin is absent.
+   */
+  @Remote('agentDiagnostics')
+  agentDiagnostics(): readonly PaperAIAgentDiagnostic[] {
+    return this.acp?.diagnosticStatus() ?? []
+  }
+
+  /**
+   * Probe ACP initialization in an empty directory without a model prompt.
+   * @param request - selected provider and explicit cooldown bypass.
+   * @returns readiness and model metadata after the diagnostic process exits.
+   */
+  @Remote('probeAgent')
+  probeAgent(request: PaperAIProbeAgentRequest): Promise<PaperAIAgentDiagnostic> {
+    const agents = this.acp
+    if (agents === undefined) throw new Error('ACP Agent provider is not configured')
+    return agents.probe(request.provider, request.force)
+  }
+
+  /**
+   * Inspect the selected project's retained files and document ownership.
+   * @param request - registered Workspace to scan.
+   * @param signal - optional cancellation between artifact reads.
+   * @returns read-only issues and explicit recovery plans.
+   */
+  @Remote('inspectProject')
+  async inspectProject(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
+    const project = this.existingProject(request.workspaceId)
+    return this.ctx.paperCommits.inspectProject(project, signal)
+  }
+
+  /**
+   * Restore missing working bytes using an unchanged verified version.
+   * @param request - owning Workspace and scan-bound recovery plan.
+   * @param signal - optional cancellation before publication.
+   * @returns a fresh integrity report after recovery.
+   */
+  @Remote('recoverWorking')
+  async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
+    const project = this.existingProject(request.workspaceId)
+    const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.plan.documentId)))
+    if (document?.projectId !== project.id) throw new Error('recovery document does not belong to this project')
+    await this.ctx.paperCommits.recoverMissingWorking(request.plan, signal)
+    return this.ctx.paperCommits.inspectProject(project, signal)
   }
 
   /**
@@ -918,6 +978,16 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       ...(signal === undefined ? {} : { signal }),
     })
     return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+  }
+
+  /** Diagnostic reads must not initialize a missing project or repair its context files. */
+  private existingProject(workspaceId: WorkspaceId): ProjectRecord {
+    const workspace = this.ctx.workspaceRegistry.get(workspaceId)
+    if (workspace === undefined) throw new Error(`paperai-workbench: Workspace '${workspaceId}' does not exist`)
+    const project = this.ctx.paperRepository.listProjects().find(candidate => candidate.workspaceId === workspaceId)
+    if (project === undefined) throw new Error('paperai-workbench: project is not initialized')
+    if (relative(workspace.path, project.rootPath) !== '') throw new Error('paperai-workbench: project root does not match the Workspace')
+    return project
   }
 
   private async projectForWorkspace(workspaceId: WorkspaceId): Promise<{ workspace: Workspace; project: ProjectRecord }> {

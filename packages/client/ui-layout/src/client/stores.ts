@@ -28,6 +28,8 @@ type LayoutState = {
   narrowExpanded: boolean
   /** Explicit focus demand: an open details panel takes the whole content area regardless of viewport width. */
   detailsFocus: boolean
+  /** Prefer the conversation when both content panels cannot fit. */
+  conversationFocus: boolean
 }
 
 /**
@@ -42,6 +44,7 @@ type LayoutActions = {
   openDetails: (draft: LayoutState, activeGeometry?: LayoutGeometry) => void
   closeDetails: (draft: LayoutState) => void
   setDetailsFocus: (draft: LayoutState, active: boolean) => void
+  revealConversation: (draft: LayoutState) => void
 }
 
 /**
@@ -60,7 +63,7 @@ export function createLayoutStore(
 ): EngineStoreHandle<LayoutState, LayoutActions>  {
   const handle = defineStore({
     init: (): LayoutState => ({
-      sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, detailsFocus: false,
+      sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, detailsFocus: false, conversationFocus: false,
     }),
     actions: {
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
@@ -81,14 +84,23 @@ export function createLayoutStore(
         d.narrowExpanded = false
       },
       openDetails: (d, activeGeometry: LayoutGeometry = geometry) => {
+        d.conversationFocus = false
         if (d.details === 0) d.details = activeGeometry.detailsDefault
       },
       // Closing also drops the focus demand: a later reopen starts split.
       closeDetails: (d) => {
         d.details = 0
         d.detailsFocus = false
+        d.conversationFocus = false
       },
-      setDetailsFocus: (d, active: boolean) => { d.detailsFocus = active },
+      setDetailsFocus: (d, active: boolean) => {
+        d.detailsFocus = active
+        if (active) d.conversationFocus = false
+      },
+      revealConversation: (d) => {
+        d.detailsFocus = false
+        d.conversationFocus = true
+      },
     },
   })
   return handle

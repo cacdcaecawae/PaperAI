@@ -51,7 +51,11 @@ export interface PaperAILibraryInjected {
 
 /** Operations and sources injected into the sidebar document list. */
 export interface PaperAIWorkspaceContentInjected {
+  /** Read project integrity, or apply an explicit recovery plan and read it again. */
+  inspectProject: (workspaceId: WorkspaceId, plan?: import('./types.ts').PaperAIWorkingRecoveryPlan) => Promise<void>
   hooks: {
+    /** Independent diagnostics, scoped by the sidebar's project id. */
+    diagnostics: HostObservable<import('./diagnostics-controller.ts').DiagnosticsState>
     /** All project projections; the component selects its owner-supplied Workspace id. */
     projects: HostObservable<PaperAIProjectDirectoryState>
   }
@@ -103,6 +107,10 @@ export type PaperAITemplatesSectionProps =
 
 /** Operations and sources injected into the document view. */
 export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected {
+  /** Add a frozen Word excerpt to the Session's composer. */
+  quoteSelection: (document: import('./types.ts').PaperAIDocumentSnapshot, excerpt: import('./selection-context.ts').WordExcerpt) => void
+  /** Remember the active document's scroll offset. */
+  setScroll: (scrollTop: number) => void
   hooks: PaperAILibraryInjected['hooks'] & {
     /** Complete per-session workbench state. */
     workbench: HostObservable<PaperAIWorkbenchState>

@@ -102,8 +102,12 @@ function makeAgent(connection) {
       }
     },
 
-    newSession(params) {
+    async newSession(params) {
       log('new-session', { cwd: params.cwd, mcpServers: params.mcpServers })
+      const startupGate = process.env.FAKE_ACP_STARTUP_GATE_FILE
+      while (startupGate !== undefined && existsSync(startupGate)) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
       const failOnceFile = process.env.FAKE_ACP_FAIL_ONCE_FILE
       if (failOnceFile !== undefined && !existsSync(failOnceFile)) {
         writeFileSync(failOnceFile, 'failed once', 'utf8')

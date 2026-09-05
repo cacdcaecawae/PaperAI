@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 The agent-preset surfaces: a General-settings row choosing which [preset](../../preset/agent-presets/README.md) new sessions are composed from, a chip on the new-session screen choosing the next session's, a read-only label in the session header, and a settings section that manages the roster — copy, delete, default, and the way into a preset's own files.
 
+While a blank Session's Agent is initializing, the chip stays selectable and shows the pending choice immediately. One request runs at a time; subsequent picks collapse to the latest intent for that Session. Failure restores the last successful route. A scoped composer hold permits drafting while preventing submission until replacement settles. `conversation.hero.agentPreset.status` is an optional root-scoped single child slot receiving `presetId` and `connecting`, so a product can expose cached diagnostics independently of the live model selector.
+
 ## Why it is a new-session preference
 
 A session's preset is fixed when the session is created — the host refuses to adopt an existing session under a different one, because that session's history was produced under the first preset's tools. So this row cannot be a live switch, and it says so: changing it applies to sessions started afterwards while running sessions keep the composition they began with.

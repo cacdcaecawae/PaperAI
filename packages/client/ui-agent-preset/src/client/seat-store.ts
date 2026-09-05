@@ -61,6 +61,9 @@ export class AgentPresetSeatController {
 
   /** Set while a pick is waiting for a session; cleared once applied. */
   private staged: string | undefined
+  private targetSession: SessionId | undefined
+  private applying: Promise<void> | undefined
+  private disposed = false
 
   constructor(
     private readonly api: Pick<IApiClient, 'agentPresets'>,
@@ -72,6 +75,7 @@ export class AgentPresetSeatController {
      * refresh. Optional: a harness that renders no list omits it.
      */
     private readonly onApplied?: (sessionId: string, agentPreset: string) => void,
+    private readonly holdSubmission?: (sessionId: SessionId) => () => void,
   ) {}
 
   private set(patch: Partial<AgentPresetSeatState>): void {
@@ -83,8 +87,10 @@ export class AgentPresetSeatController {
    * @returns once the snapshot reflects the host.
    */
   async load(): Promise<void> {
+    if (this.isDisposed()) return
     try {
       const response = await this.api.agentPresets.list({})
+      if (this.isDisposed()) return
       if (!response.result.ok) {
         this.set({ error: response.result.error.message })
         return
@@ -99,11 +105,12 @@ export class AgentPresetSeatController {
         // an applied stage was consumed — the chip mounts (and loads) only
         // once the flow's session is current, so the reply can arrive after
         // apply() already composed it.
-        current: this.staged ?? this.currentSession()?.agentPreset ?? this.fallback,
+        current: this.staged ?? (this.store.getSnapshot().busy
+          ? this.store.getSnapshot().current : this.currentSession()?.agentPreset ?? this.fallback),
         error: null,
       })
     } catch (error) {
-      this.set({ error: messageOf(error) })
+      if (!this.isDisposed()) this.set({ error: messageOf(error) })
     }
   }
 
@@ -114,8 +121,8 @@ export class AgentPresetSeatController {
    * @returns once the stage settled, and the apply too when one happened.
    */
   async select(id: string): Promise<void> {
-    if (this.store.getSnapshot().busy) return
     this.stage(id)
+    this.targetSession = this.currentSession()?.id
     await this.apply()
   }
 
@@ -131,7 +138,9 @@ export class AgentPresetSeatController {
    * chip should announce itself on the session it lands on.
    */
   stage(id: string, introduce = false): void {
+    if (this.isDisposed()) return
     this.staged = id
+    this.targetSession = undefined
     this.set({ current: id, error: null, introduce })
   }
 
@@ -160,30 +169,68 @@ export class AgentPresetSeatController {
    * changing, because the session may appear either before or after the pick.
    * @returns once the switch settled, or immediately when there is nothing to do.
    */
-  async apply(): Promise<void> {
-    const staged = this.staged
-    const session = this.currentSession()
-    if (staged === undefined || session === undefined) return
-    // A started session's history was produced under its own composition; the
-    // host refuses the swap, so the stage is no longer meaningful.
-    if (!session.blank || session.agentPreset === staged) {
-      this.staged = undefined
-      return
-    }
-    this.set({ busy: true, error: null })
-    try {
-      const response = await this.api.agentPresets.select({ sessionId: session.id, agentPreset: staged })
-      this.staged = undefined
-      if (!response.result.ok) {
-        this.set({ busy: false, error: response.result.error.message, current: this.fallback })
+  apply(): Promise<void> {
+    if (this.applying !== undefined) return this.applying
+    // Install the single-flight guard before publishing state to synchronous observers.
+    const pending = Promise.withResolvers<void>()
+    this.applying = pending.promise
+    void this.drain().then(() => {
+      this.applying = undefined
+      pending.resolve()
+    }, (error: unknown) => {
+      this.applying = undefined
+      pending.reject(error)
+    })
+    return pending.promise
+  }
+
+  /** Stop accepting intent when the contributing plugin is removed. */
+  dispose(): void {
+    this.disposed = true
+    this.staged = undefined
+  }
+
+  private async drain(): Promise<void> {
+    let applied: { id: SessionId; agentPreset: string } | undefined
+    while (!this.isDisposed() && this.staged !== undefined) {
+      const session = this.currentSession()
+      if (session === undefined) return
+      const staged = this.staged
+      if (!session.blank || (this.targetSession !== undefined && this.targetSession !== session.id)) {
+        this.staged = undefined
+        this.syncCurrentSession()
         return
       }
-      // Consumed: the next new session opens on the deployment default again.
-      this.set({ busy: false, current: response.result.value.agentPreset })
-      this.onApplied?.(session.id, response.result.value.agentPreset)
-    } catch (error) {
       this.staged = undefined
-      this.set({ busy: false, error: messageOf(error), current: this.fallback })
+      const previous = applied?.id === session.id ? applied.agentPreset : session.agentPreset
+      if (previous === staged) continue
+      const release = this.holdSubmission?.(session.id)
+      this.set({ busy: true, error: null })
+      let accepted = previous ?? this.fallback
+      let failure: string | null = null
+      try {
+        const response = await this.api.agentPresets.select({ sessionId: session.id, agentPreset: staged })
+        if (response.result.ok) {
+          accepted = response.result.value.agentPreset
+          applied = { id: session.id, agentPreset: accepted }
+          if (!this.isDisposed()) this.onApplied?.(session.id, accepted)
+        } else failure = response.result.error.message
+      } catch (error) {
+        failure = messageOf(error)
+      } finally {
+        release?.()
+      }
+      if (this.isDisposed()) return
+      const current = this.currentSession()
+      const latest = this.pendingSelection()
+      this.set({
+        busy: false,
+        current: latest ?? (current?.id === session.id ? accepted : current?.agentPreset ?? this.fallback),
+        error: latest === undefined && current?.id === session.id ? failure : null,
+      })
     }
   }
+
+  private pendingSelection(): string | undefined { return this.staged }
+  private isDisposed(): boolean { return this.disposed }
 }

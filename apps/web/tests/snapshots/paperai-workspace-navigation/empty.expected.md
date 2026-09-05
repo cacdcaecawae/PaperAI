@@ -6,6 +6,7 @@
   - region "文档":
     - heading "文档" [level=3]
     - status: 还没有文档。在中间的起始页新建或导入。
+    - button "项目体检"
   - heading "会话" [level=3]
   - button "在“Empty project”中新建会话":
     - img

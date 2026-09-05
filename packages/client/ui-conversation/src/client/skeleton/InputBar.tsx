@@ -165,20 +165,19 @@ export function InputBar({
   // inert no-workspace state, the machine faces absent (no session), or a
   // parent-offline continuable child. An owner block also disables input;
   // adjudicating and submitting render read-only so the draft stays visible.
-  const disabled = removed || inert || !live || blocked !== undefined || parentOffline
-  const locked = disabled
-  // The model seat is the ONE control a block leaves live: every block this
-  // contract has is cleared by choosing a model, so locking it too would leave
-  // the composer asking for the only thing it prevents. The other reasons to
-  // be disabled do lock it — there is no session to choose a model for.
-  const modelSeatLocked = removed || inert || !live
+  const unavailable = (removed && blocked?.allowDraft !== true) || inert || !live || parentOffline
+  const disabled = unavailable || blocked !== undefined
+  const locked = unavailable || (blocked !== undefined && blocked.allowDraft !== true)
+  // Ordinary route blocks keep model selection usable; an initializing Agent
+  // permits drafting but cannot accept model changes until replacement settles.
+  const modelSeatLocked = removed || inert || !live || blocked?.allowDraft === true
   const machineBusy = input?.phase === 'adjudicating' || input?.phase === 'submitting'
   // The no-workspace textarea remains the resident DOM node but acts as the
   // existing picker trigger. Message controls stay locked until a Session
   // exists; the trigger itself is read-only rather than disabled so pointer
   // and keyboard users can reach the recovery action.
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
-  const textareaDisabled = removed || (locked && !workspaceTrigger)
+  const textareaDisabled = locked && !workspaceTrigger
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
     && input.queue.some(row => row.placement === 'queued')
 
@@ -257,6 +256,10 @@ export function InputBar({
   useEffect(() => {
     const el = inputRef.current
     if (locked || el === null) return
+    // A model refresh can unlock drafting while its menu owns keyboard focus.
+    const focused = document.activeElement
+    if (focused !== el && focused instanceof HTMLElement
+      && el.closest('[data-composer-card]')?.contains(focused)) return
     el.focus({ preventScroll: true })
     revealSelectionFocus(el)
   }, [locked, sessionId])
@@ -417,7 +420,7 @@ export function InputBar({
     }
     e.preventDefault()
     if (e.repeat) return // held-down Enter must not machine-gun sends
-    if (locked || machineBusy) return
+    if (disabled || machineBusy) return
     const accelerated = e.ctrlKey || e.metaKey
     // Empty-draft accelerated Enter acts on the queue instead of the (empty)
     // draft: the machine rejects empty drafts, so the gesture steers every

@@ -6,6 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { link, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { EngineMutation } from '@paperai/document-engine'
@@ -38,6 +40,8 @@ import {
   storeSnapshot,
 } from './files.ts'
 import type { CommitFilePaths, FileImage } from './files.ts'
+import { inspectProject, verifyProjectPath, type ProjectIntegrityReport, type WorkingRecoveryPlan } from './doctor.ts'
+export type { ProjectIntegrityReport, ProjectIntegrityIssue, WorkingRecoveryPlan } from './doctor.ts'
 import {
   DocumentHeadConflictError,
   DocumentValidationError,
@@ -252,6 +256,47 @@ export class PaperCommitService extends Service {
    */
   listHistory(documentId: DocumentId): DocumentCommitHistory {
     return this.reachableHistory(this.requireDocument(documentId)).map(cloneCommit)
+  }
+
+  /**
+   * Scan a registered project's artifacts without changing files or records.
+   * @param project - registered project.
+   * @param signal - optional cancellation.
+   * @returns current integrity issues and explicit recovery plans.
+   */
+  inspectProject(project: ProjectRecord, signal?: AbortSignal): Promise<ProjectIntegrityReport> {
+    return inspectProject(this.dependencies.paperRepository, project, signal)
+  }
+
+  /**
+   * Materialize missing working bytes from an unchanged verified head; existing files are never overwritten.
+   * @param plan - exact recovery candidate returned by the integrity scan.
+   * @param signal - cancellation before the atomic file publication.
+   * @returns after the existing version's bytes are restored; no content or version history is changed.
+   */
+  recoverMissingWorking(plan: WorkingRecoveryPlan, signal?: AbortSignal): Promise<void> {
+    return this.enqueue(plan.documentId, signal, async () => {
+      const document = this.requireDocument(plan.documentId)
+      this.assertHead(document, plan.headCommitId)
+      const project = this.requireProject(document)
+      const report = await inspectProject(this.dependencies.paperRepository, project, signal)
+      const current = report.repairs.find(candidate => candidate.documentId === plan.documentId)
+      if (current === undefined || current.sha256 !== plan.sha256 || current.workingPath !== plan.workingPath) {
+        throw new PaperCommitError('WORKING_COPY_CHANGED', 'recovery plan is stale; scan the project again')
+      }
+      const head = this.dependencies.paperRepository.getCommit(plan.headCommitId)
+      if (head === undefined) throw new PaperCommitError('COMMIT_NOT_FOUND', 'recovery head is missing')
+      const paths = resolveCommitFilePaths(project.rootPath, document.workingPath)
+      const snapshot = await readSnapshot(paths, head.snapshotPath, plan.sha256)
+      await this.withCandidate(paths, snapshot.bytes, async (candidatePath) => {
+        await verifyProjectPath(project.rootPath, paths.workingPath)
+        await mkdir(dirname(paths.workingPath), { recursive: true })
+        await verifyProjectPath(project.rootPath, paths.workingPath)
+        signal?.throwIfAborted()
+        this.assertHead(this.requireDocument(document.id), plan.headCommitId)
+        await link(candidatePath, paths.workingPath)
+      })
+    })
   }
 
   private get dependencies(): CommitContext {

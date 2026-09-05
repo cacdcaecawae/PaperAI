@@ -10,9 +10,14 @@ import { createPortal } from 'react-dom'
 import type { PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary } from './types.ts'
 import type { PaperAIWorkbenchKey } from './locales.ts'
 import css from './DocumentWorkbench.module.css'
+import type { WordExcerpt } from './selection-context.ts'
 
 /** Props of the in-place block editor and the preview around it. */
 export interface DocumentPreviewProps {
+  readonly active?: boolean
+  readonly scrollTop?: number
+  readonly onScroll?: (scrollTop: number) => void
+  readonly onQuote?: (excerpt: WordExcerpt) => void
   readonly html: string
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly title: string
@@ -120,16 +125,17 @@ function BlockEditor({ editing, saving, onDraft, onSave, onCancel, t }: Pick<
         aria-label={t('block.editing')}
         value={editing.draft}
         disabled={saving}
-        onChange={(event) => { onDraft(event.currentTarget.value) }}
+        onInput={(event) => { onDraft(event.currentTarget.value) }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') onCancel()
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && dirty && !saving) onSave()
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && dirty && !saving && editing.conflicted !== true) onSave()
         }}
       />
+      {editing.conflicted === true && <p role="alert">{t('block.conflicted')}</p>}
       <div className="paperai-editor-actions">
         <span className="paperai-editor-label">{t('block.editing')}</span>
         <button type="button" disabled={saving} onClick={onCancel}>{t('block.cancel')}</button>
-        <button type="button" data-primary="" disabled={saving || !dirty} onClick={onSave}>
+        <button type="button" data-primary="" disabled={saving || !dirty || editing.conflicted === true} onClick={onSave}>
           {saving ? t('block.saving') : t('block.save')}
         </button>
       </div>
@@ -140,12 +146,14 @@ function BlockEditor({ editing, saving, onDraft, onSave, onCancel, t }: Pick<
 /** Render the preview with block-level editing. */
 export function DocumentPreview({
   html, nodes, title, editing, saving, onSelectBlock, onDraft, onSave, onCancel, t,
+  active = true, scrollTop = 0, onScroll, onQuote,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
   const [editorHost, setEditorHost] = useState<HTMLElement | null>(null)
   const select = useRef(onSelectBlock)
   select.current = onSelectBlock
+  const [excerpt, setExcerpt] = useState<WordExcerpt | null>(null)
 
   // Rebuild the shadow tree whenever the Host sends new HTML or nodes.
   useLayoutEffect(() => {
@@ -163,13 +171,35 @@ export function DocumentPreview({
     mapping.current = mapBlocks(blocks, nodes)
     shadow.replaceChildren(style, container)
     setEditorHost(null)
+    setExcerpt(null)
   }, [html, nodes])
+
+  useLayoutEffect(() => {
+    if (active && host.current !== null) host.current.scrollTop = scrollTop
+  }, [active, html, scrollTop])
 
   // One delegated click on the shadow tree resolves the block under the pointer.
   useEffect(() => {
     const shadow = host.current?.shadowRoot
     if (shadow === null || shadow === undefined) return
+    const captureSelection = (): boolean => {
+      const selection = (shadow as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()
+        ?? window.getSelection()
+      if (selection !== null && !selection.isCollapsed && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0)
+        const nodeIds = [...mapping.current.entries()]
+          .filter(([block]) => range.intersectsNode(block))
+          .map(([, nodeId]) => nodeId)
+        const text = selection.toString()
+        if (nodeIds.length > 0 && text.trim() !== '') {
+          setExcerpt({ nodeIds, text })
+          return true
+        }
+      }
+      return false
+    }
     const onClick = (event: Event): void => {
+      if (captureSelection()) return
       const target = event.composedPath().find((node): node is HTMLElement => (
         node instanceof HTMLElement && node.dataset.paperaiBlock !== undefined
       ))
@@ -179,7 +209,11 @@ export function DocumentPreview({
       select.current(mapping.current.get(target) ?? null)
     }
     shadow.addEventListener('click', onClick)
-    return () => { shadow.removeEventListener('click', onClick) }
+    shadow.addEventListener('keyup', captureSelection)
+    return () => {
+      shadow.removeEventListener('click', onClick)
+      shadow.removeEventListener('keyup', captureSelection)
+    }
   }, [])
 
   // Put the editor in the edited block's place and restore the block afterwards.
@@ -206,12 +240,26 @@ export function DocumentPreview({
   }, [editingNodeId, html, nodes])
 
   return (
-    <>
-      <div ref={host} className={css.preview} role="document" aria-label={title} />
-      {editorHost !== null && editing !== null && createPortal(
+    <div className={css.previewSeat} hidden={!active} aria-hidden={!active || undefined}>
+      {active && excerpt !== null && onQuote !== undefined && (
+        <div className={css.notice} role="region" aria-label={t('selection.title')}>
+          <span title={excerpt.text}>{excerpt.text}</span>
+          <button className={css.chip} type="button" onMouseDown={(event) => { event.preventDefault() }} onClick={() => {
+            onQuote(excerpt)
+            setExcerpt(null)
+          }}>{t('selection.ask')}</button>
+          <button className={css.chip} type="button" onClick={() => { setExcerpt(null) }}>{t('selection.dismiss')}</button>
+        </div>
+      )}
+      <div ref={host} className={css.preview} role="document" aria-label={title}
+        onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop) }} />
+      {active && editorHost === null && editing?.conflicted === true && (
+        <BlockEditor editing={editing} saving={saving} onDraft={onDraft} onSave={onSave} onCancel={onCancel} t={t} />
+      )}
+      {active && editorHost !== null && editing !== null && createPortal(
         <BlockEditor editing={editing} saving={saving} onDraft={onDraft} onSave={onSave} onCancel={onCancel} t={t} />,
         editorHost,
       )}
-    </>
+    </div>
   )
 }

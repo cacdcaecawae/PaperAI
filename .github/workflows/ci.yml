@@ -471,6 +471,8 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # Keep ancestry for changed-source checks; fetch file contents on demand.
+          filter: blob:none
           persist-credentials: false
 
       - uses: pnpm/action-setup@v4

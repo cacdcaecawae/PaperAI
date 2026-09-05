@@ -1,4 +1,9 @@
 /** Loader seat for the browser-only PaperAI workbench plugin. */
 
-/** Host plugin body; PaperAI document RPCs are supplied by a separate provider. */
-export function apply(): void {}
+import type { Context } from '@deepseek-ai/cordis'
+import { resolvePreviewBudget, type Config } from './config.ts'
+
+export type { Config } from './config.ts'
+
+/** Validate browser resource limits before the Loader publishes the client configuration. */
+export function apply(_ctx: Context, config: Config = {}): void { resolvePreviewBudget(config) }

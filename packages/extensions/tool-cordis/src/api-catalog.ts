@@ -1162,6 +1162,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the provider definition with current command, credential, and endpoint overrides applied.',
       },
       {
+        signature: 'diagnosticStatus(): readonly AcpDiagnostic[]',
+        description: 'Read installation and cached catalogs without spawning any adapter.',
+        parameters: [],
+        returns: 'metadata for both configured providers, independent from live model selection.',
+      },
+      {
+        signature: 'probe(provider: \'codex\' | \'claude\', force: boolean): Promise<AcpDiagnostic>',
+        description: 'Run a prompt-free probe with shared failure cooldown and process teardown.',
+        parameters: [{ name: 'provider', description: 'installed peer Agent to inspect.' }, { name: 'force', description: 'explicit retry bypassing failure cooldown.' }],
+        returns: 'observed ACP metadata, including a cached model preview.',
+      },
+      {
         signature: 'async publish( ownerCtx: Context, provider: AcpProviderDefinition, preparation: SessionPreparation, options: CreateAgentOptions | ResumeAgentOptions, ): Promise<AgentHandle>',
         description: 'Complete setup, atomically publish the DSH lifecycle, and return its owner capability.',
         parameters: [{ name: 'ownerCtx', description: 'active Context whose lifetime owns the published Agent and Session.' }, { name: 'provider', description: 'configured ACP provider definition to launch.' }, { name: 'preparation', description: 'exclusive prepared Session consumed and disposed by this call.' }, { name: 'options', description: 'create or resume options, including cancellation, model selection, and setup.' }],
@@ -1181,6 +1193,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'Workspace whose project should be described.' }, { name: 'signal', description: 'optional cancellation signal for project initialization.' }],
         returns: 'the project name, template decision, and document rows.',
         throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
+      },
+      {
+        signature: '@Remote(\'agentDiagnostics\') agentDiagnostics(): readonly PaperAIAgentDiagnostic[]',
+        description: 'Read configured Agent discovery and cached model previews without starting processes.',
+        parameters: [],
+        returns: 'configured ACP peers, or an empty roster when the provider plugin is absent.',
+      },
+      {
+        signature: '@Remote(\'probeAgent\') probeAgent(request: PaperAIProbeAgentRequest): Promise<PaperAIAgentDiagnostic>',
+        description: 'Probe ACP initialization in an empty directory without a model prompt.',
+        parameters: [{ name: 'request', description: 'selected provider and explicit cooldown bypass.' }],
+        returns: 'readiness and model metadata after the diagnostic process exits.',
+      },
+      {
+        signature: '@Remote(\'inspectProject\') async inspectProject(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>',
+        description: 'Inspect the selected project\'s retained files and document ownership.',
+        parameters: [{ name: 'request', description: 'registered Workspace to scan.' }, { name: 'signal', description: 'optional cancellation between artifact reads.' }],
+        returns: 'read-only issues and explicit recovery plans.',
+      },
+      {
+        signature: '@Remote(\'recoverWorking\') async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>',
+        description: 'Restore missing working bytes using an unchanged verified version.',
+        parameters: [{ name: 'request', description: 'owning Workspace and scan-bound recovery plan.' }, { name: 'signal', description: 'optional cancellation before publication.' }],
+        returns: 'a fresh integrity report after recovery.',
       },
       {
         signature: '@Remote(\'setProjectTemplate\') async setProjectTemplate(request: PaperAISetProjectTemplateRequest): Promise<PaperAIProjectOverview>',
@@ -1337,6 +1373,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the user-visible history from the current head toward the root. Unreachable objects retained after failed publication are excluded.',
         parameters: [{ name: 'documentId', description: 'document whose reachable history is requested.' }],
         returns: 'newest-first isolated commit records.',
+      },
+      {
+        signature: 'inspectProject(project: ProjectRecord, signal?: AbortSignal): Promise<ProjectIntegrityReport>',
+        description: 'Scan a registered project\'s artifacts without changing files or records.',
+        parameters: [{ name: 'project', description: 'registered project.' }, { name: 'signal', description: 'optional cancellation.' }],
+        returns: 'current integrity issues and explicit recovery plans.',
+      },
+      {
+        signature: 'recoverMissingWorking(plan: WorkingRecoveryPlan, signal?: AbortSignal): Promise<void>',
+        description: 'Materialize missing working bytes from an unchanged verified head; existing files are never overwritten.',
+        parameters: [{ name: 'plan', description: 'exact recovery candidate returned by the integrity scan.' }, { name: 'signal', description: 'cancellation before the atomic file publication.' }],
+        returns: 'after the existing version\'s bytes are restored; no content or version history is changed.',
       },
     ],
   },
@@ -3499,6 +3547,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AcpDiagnostic',
+    declaration: 'export interface AcpDiagnostic {\n    readonly provider: \'codex\' | \'claude\';\n    readonly executable: string | null;\n    readonly adapterVersion: string | null;\n    readonly agentVersion: string | null;\n    readonly status: \'discovered\' | \'ready\' | \'error\';\n    readonly models: readonly {\n        readonly id: string;\n        readonly name: string;\n    }[];\n    readonly checkedAt: number | null;\n    readonly retryAt: number | null;\n    readonly elapsedMs: number | null;\n    readonly error: \'unavailable\' | \'timeout\' | \'authentication\' | \'protocol\' | null;\n}',
+  },
+  {
     name: 'AcpProviderDefinition',
     declaration: 'export interface AcpProviderDefinition {\n    readonly id: \'codex\' | \'claude\';\n    readonly name: string;\n    readonly packageName: string;\n    readonly binName: string;\n    readonly command?: string;\n    readonly args?: readonly string[];\n    readonly env?: Readonly<Record<string, string>>;\n}',
   },
@@ -4783,12 +4835,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIOverviewRequest {\n    readonly workspaceId: WorkspaceId;\n}',
   },
   {
+    name: 'PaperAIProbeAgentRequest',
+    declaration: 'export interface PaperAIProbeAgentRequest {\n    readonly provider: \'codex\' | \'claude\';\n    readonly force: boolean;\n}',
+  },
+  {
     name: 'PaperAIProjectOverview',
     declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
   },
   {
     name: 'PaperAIReadNodeRequest',
     declaration: 'export interface PaperAIReadNodeRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n}',
+  },
+  {
+    name: 'PaperAIRecoverWorkingRequest',
+    declaration: 'export interface PaperAIRecoverWorkingRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly plan: import(\'@paperai/commit-service/doctor-types\').WorkingRecoveryPlan;\n}',
   },
   {
     name: 'PaperAIRemoveTemplateFormatRequest',
@@ -4961,6 +5021,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ProjectId',
     declaration: 'export type ProjectId = Branded<\'PaperAI.ProjectId\'>;',
+  },
+  {
+    name: 'ProjectIntegrityIssue',
+    declaration: 'export interface ProjectIntegrityIssue {\n    readonly documentId: DocumentId;\n    readonly code: \'missing-source\' | \'source-changed\' | \'missing-working\' | \'working-changed\' | \'invalid-head\' | \'invalid-snapshot\' | \'duplicate-path\' | \'unsafe-path\' | \'unreadable-file\';\n    readonly path: string;\n    readonly detail: string;\n}',
+  },
+  {
+    name: 'ProjectIntegrityReport',
+    declaration: 'export interface ProjectIntegrityReport {\n    readonly checkedAt: string;\n    readonly documents: number;\n    readonly issues: readonly ProjectIntegrityIssue[];\n    readonly repairs: readonly WorkingRecoveryPlan[];\n}',
   },
   {
     name: 'ProjectionChangeListener',
@@ -6265,6 +6333,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkingRecoveryPlan',
+    declaration: 'export interface WorkingRecoveryPlan {\n    readonly documentId: DocumentId;\n    readonly headCommitId: DocumentCommitId;\n    readonly sha256: string;\n    readonly workingPath: string;\n}',
   },
   {
     name: 'WritingCharterSyncResult',

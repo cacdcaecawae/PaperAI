@@ -1,9 +1,11 @@
 # Artifact Index
 
-Last updated: 2026-09-03
+Last updated: 2026-09-05
 
 | Artifact | Purpose |
 | --- | --- |
+| [Agentero adoption review](review/2026-09-05-agentero-adoption.md) | Current architecture comparison, implementation, and acceptance |
+| [Agentero adoption task](task-packets/2026-09-05-agentero-adoption.md) | Five accepted deliverables and publication scope |
 | [Context brief](context-brief.md) | Current handoff |
 | [UI takeover review](review/2026-09-03-ui-takeover.md) | Findings, validation, and limits |
 | [Windows picker review](review/2026-09-03-windows-picker.md) | Native window ownership, cancellation, and validation limits |

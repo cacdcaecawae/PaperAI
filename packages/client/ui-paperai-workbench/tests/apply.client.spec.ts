@@ -35,8 +35,9 @@ async function bench(mountError?: Error) {
   ctx.provide('locale', locale)
   const connectWorkspace = vi.fn(async () => SESSION_ID)
   const workspaceList = createSnapshotStore({
-    items: [] as Array<{ workspaceId: typeof WORKSPACE_ID }>,
+    items: [] as Array<{ workspaceId: typeof WORKSPACE_ID; sessionIds: Array<typeof SESSION_ID> }>,
   })
+  const sessionList = createSnapshotStore<{ current: typeof SESSION_ID | undefined }>({ current: undefined })
   const openSession = vi.fn()
   const openDetails = vi.fn()
   const closeDetails = vi.fn()
@@ -46,7 +47,9 @@ async function bench(mountError?: Error) {
   const disposeOnboardingProfile = vi.fn()
   const configureOnboarding = vi.fn(() => disposeOnboardingProfile)
   ctx.provide('workspaces', { connectWorkspace, list: workspaceList } as never)
-  ctx.provide('sessions', { open: openSession } as never)
+  ctx.provide('sessions', { open: openSession, list: sessionList } as never)
+  ctx.provide('conversation', {} as never)
+  ctx.provide('inputTriggers', { registerSource: vi.fn(() => () => {}) } as never)
   ctx.provide('conversationDetails', { open: openDetails, close: closeDetails })
   ctx.provide('layout', { configure: configureLayout, setDetailsFocus } as never)
   ctx.provide('modelsOnboarding', { configure: configureOnboarding } as never)
@@ -93,6 +96,7 @@ async function bench(mountError?: Error) {
     locale,
     connectWorkspace,
     workspaceList,
+    sessionList,
     openSession,
     openDetails,
     configureLayout,
@@ -130,7 +134,7 @@ describe('PaperAI workbench browser plugin', () => {
   it('requires the generated Remote mount instead of a guessed namespace', () => {
     expect(inject).toEqual([
       'slots', 'locale', 'sessions', 'workspaces', 'conversationDetails', 'layout',
-      'modelsOnboarding', 'remote',
+      'modelsOnboarding', 'remote', 'conversation', 'inputTriggers',
     ])
     expect(inject).not.toContain('remote.paperaiWorkbench')
   })
@@ -180,9 +184,25 @@ describe('PaperAI workbench browser plugin', () => {
     declare(b.slots)
     const overview = vi.spyOn(b.remote, 'overview')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    b.workspaceList.set({ items: [{ workspaceId: WORKSPACE_ID }] })
+    b.workspaceList.set({ items: [{ workspaceId: WORKSPACE_ID, sessionIds: [] }] })
     await vi.waitFor(() => { expect(overview).toHaveBeenCalledOnce() })
     expect(overview).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID }, expect.any(AbortSignal))
+    await b.ctx.fiber.dispose()
+  })
+
+  it('keeps document navigation in the selected project session', async () => {
+    const b = await bench()
+    b.workspaceList.set({ items: [{ workspaceId: WORKSPACE_ID, sessionIds: [SESSION_ID] }] })
+    b.sessionList.set({ current: SESSION_ID })
+    declare(b.slots)
+    const open = vi.spyOn(b.remote, 'open')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const workspace = injected(b.slots, 'sidebar.workspaces.content') as PaperAIWorkspaceContentInjected
+    await workspace.openDocument(WORKSPACE_ID, RESOURCE_ID)
+    await workspace.openDocument(WORKSPACE_ID, RESOURCE_ID)
+    expect(b.connectWorkspace).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledOnce()
+    expect(b.openSession).toHaveBeenLastCalledWith(SESSION_ID)
     await b.ctx.fiber.dispose()
   })
 

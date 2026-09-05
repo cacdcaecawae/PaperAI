@@ -441,6 +441,12 @@ export class TestSessions implements ISessions {
   }
 
   /** Apply a confirmed preset switch into the fixture list, as production does. */
+  retainBinding(sessionId: SessionId): () => void {
+    if (!this.records.has(sessionId)) throw new Error(`test session "${sessionId}" not added`)
+    // Fixtures have no Host replacement stream; their scopes remain until explicit remove().
+    return () => {}
+  }
+
   noteAgentPreset(sessionId: SessionId, agentPreset: string): void {
     this.list.update((draft) => {
       const summary = draft.byId[sessionId]

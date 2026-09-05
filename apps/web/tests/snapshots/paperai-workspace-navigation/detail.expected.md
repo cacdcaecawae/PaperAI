@@ -9,6 +9,7 @@
     - list "文档":
       - listitem:
         - button "打开 Workspace brief.docx": Workspace brief
+    - button "项目体检"
   - heading "会话" [level=3]
   - button "在“Paper project”中新建会话":
     - img

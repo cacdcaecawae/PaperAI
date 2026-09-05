@@ -53,6 +53,7 @@ function libraryState(overrides: Partial<PaperAILibraryState> = {}): PaperAILibr
 
 function workbenchState(overrides: Partial<PaperAIWorkbenchState> = {}): PaperAIWorkbenchState {
   return {
+    retained: [], scrollTop: 0,
     phase: 'idle', document: null, edit: null, action: null, panel: null, diff: null, typeSuggestion: null,
     exportReceipt: null, externalUpdate: null, error: null, actionError: null, ...overrides,
   }
@@ -75,6 +76,7 @@ function workspaceProps(state: PaperAIProjectState) {
   const openDocument = vi.fn(async () => {})
   const props = {
     workspaceId: WORKSPACE_ID, path: 'F:/paper', title: 'Paper', active: true,
+    useDiagnostics: bind(createSnapshotStore({ projects: {} })), inspectProject: vi.fn(),
     useProjects: bind(store), ensureProject, refreshProject, openDocument, t,
   } as unknown as PaperAIWorkspaceContentProps
   return { props, store, ensureProject, refreshProject, openDocument }
@@ -113,6 +115,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
   const libraryStore = createSnapshotStore(libraryState())
   const actions = libraryActions()
   const callbacks = {
+    quoteSelection: vi.fn(), setScroll: vi.fn(),
     closeDetails: vi.fn(),
     setDraft: vi.fn(),
     retryOpen: vi.fn(async () => {}),
@@ -385,7 +388,7 @@ describe('DocumentWorkbench', () => {
     const editor = shadow.querySelector('textarea')!
     expect(editor.value).toBe('Research background')
     expect(paragraph.hasAttribute('data-paperai-editing')).toBe(true)
-    fireEvent.change(editor, { target: { value: 'Rewritten background' } })
+    fireEvent.input(editor, { target: { value: 'Rewritten background' } })
     expect(b.updateDraft).toHaveBeenCalledWith('Rewritten background')
     fireEvent.keyDown(editor, { key: 'Escape' })
     expect(b.cancelEdit).toHaveBeenCalledOnce()
@@ -563,12 +566,12 @@ describe('DocumentWorkbench', () => {
     expect(b.exportDocument).toHaveBeenCalledWith('delivery-export')
   })
 
-  it('tells the writer when a refresh dropped the block draft', () => {
+  it('tells the writer when a refresh retains a conflicting draft', () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready', document: documentSnapshot(), actionError: 'block changed externally; local draft dropped',
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('这一段已被其他会话修改，本地草稿已放弃。')
+    expect(screen.getByRole('alert').textContent).toBe('这一段已被其他会话修改。草稿已保留，请复制需要的内容后取消编辑。')
   })
 
   it('renders a Remote failure with only its backed retry action', () => {

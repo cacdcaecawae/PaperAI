@@ -68,7 +68,8 @@ function MessageItem({ node, t: translate, referenceLabels }: MessageItemProps) 
         ? { ...node, referenceLabels }
         : node,
   }
-  const props = { node: viewNode, t: translate, renderMessageImages } as ChatNodeViewProps
+  const renderUserText: ChatNodeViewProps['renderUserText'] = (_key, _owner, opts) => opts?.fallback ?? null
+  const props = { node: viewNode, t: translate, renderMessageImages, renderUserText } as ChatNodeViewProps
   switch (node.kind) {
     case 'user':
     case 'steering':

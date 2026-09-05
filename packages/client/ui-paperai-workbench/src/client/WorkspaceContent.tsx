@@ -7,6 +7,7 @@ import type { PaperAIDocumentRow, PaperAIProjectState } from './types.ts'
 import type { PaperAIWorkspaceContentProps } from './slots.ts'
 import { DOCUMENT_TYPE_KEYS } from './locales.ts'
 import css from './WorkspaceContent.module.css'
+import { ProjectDoctor } from './ProjectDoctor.tsx'
 
 const PROJECT_EMPTY: PaperAIProjectState = Object.freeze({
   phase: 'cold' as const, overview: null, selected: null, error: null, action: null, actionError: null,
@@ -39,9 +40,10 @@ function DocumentRow({ row, selected, open, t }: {
 
 /** Render the document list for one project. */
 export function WorkspaceContent({
-  workspaceId, useProjects, ensureProject, refreshProject, openDocument, t,
+  workspaceId, useProjects, useDiagnostics, inspectProject, ensureProject, refreshProject, openDocument, t,
 }: PaperAIWorkspaceContentProps): ReactNode {
   const state = useProjects(directory => directory.workspaces[workspaceId] ?? PROJECT_EMPTY)
+  const diagnostics = useDiagnostics(value => value.projects[workspaceId])
 
   useEffect(() => {
     void ensureProject(workspaceId)
@@ -87,6 +89,7 @@ export function WorkspaceContent({
           ))}
         </div>
       )}
+      <ProjectDoctor key={workspaceId} state={diagnostics} inspect={plan => inspectProject(workspaceId, plan)} t={t} />
     </section>
   )
 }

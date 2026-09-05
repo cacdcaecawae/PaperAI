@@ -171,7 +171,7 @@ function commitRecord(id: string, parentId?: string): DocumentCommit {
   }
 }
 
-function createHarness(rootPath = 'F:\\paper'): Harness {
+async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
   const ctx = new Context()
   contexts.push(ctx)
   const harness = {} as Harness
@@ -312,6 +312,8 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
     rollbackImport,
   } as never)
   ctx.provide('paperCommits', {
+    inspectProject: vi.fn(async () => ({ checkedAt: '2026-09-05T00:00:00.000Z', documents: 1, issues: [], repairs: [] })),
+    recoverMissingWorking: vi.fn(async () => {}),
     listHistory: () => structuredClone(harness.history),
     submit,
     revert,
@@ -414,14 +416,16 @@ function createHarness(rootPath = 'F:\\paper'): Harness {
   )
   ctx.provide('paperExports', { exportDocument } as never)
   ctx.provide('paperRepository', {
+    listProjects: () => [structuredClone(harness.project)],
     getCommit: (id: ReturnType<typeof DocumentCommitId>) => (
       harness.history.find(commit => commit.id === id)
     ),
     getDocument: (id: ReturnType<typeof DocumentId>) => (
-      id === DocumentId('template-source') ? harness.templateSource : undefined
+      id === DOCUMENT_ID ? structuredClone(harness.document) : id === DocumentId('template-source') ? harness.templateSource : undefined
     ),
   } as never)
-  const service = new PaperAiWorkbenchService(ctx)
+  await ctx.plugin(PaperAiWorkbenchService).await()
+  const service = ctx.paperaiWorkbench
   Object.assign(harness, {
     ctx, service, submit, rollbackImport, revert, check, exportDocument, importDocument, installPack,
     previewHtml, readTextNodes,
@@ -462,12 +466,32 @@ function templateContract(origin: 'built-in' | 'uploaded' = 'built-in'): Templat
 }
 
 describe('PaperAiWorkbenchService', () => {
+  it('scans only existing projects and rejects repair plans owned by another project', async () => {
+    const h = await createHarness()
+    const create = vi.spyOn(h.ctx.paperProjects, 'create')
+    const recover = vi.spyOn(h.ctx.paperCommits, 'recoverMissingWorking')
+    await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).resolves.toMatchObject({ documents: 1, issues: [] })
+    expect(create).not.toHaveBeenCalled()
+    expect(recover).not.toHaveBeenCalled()
+    await expect(h.service.inspectProject({ workspaceId: WorkspaceId('missing') })).rejects.toThrow(/does not exist/)
+    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValueOnce([])
+    await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).rejects.toThrow(/not initialized/)
+    const plan = { documentId: DOCUMENT_ID, headCommitId: DocumentCommitId('commit-1'), sha256: 'digest', workingPath: h.document.workingPath }
+    h.document = { ...h.document, projectId: ProjectId('another') }
+    await expect(h.service.recoverWorking({ workspaceId: WORKSPACE_ID, plan })).rejects.toThrow(/does not belong/)
+    expect(recover).not.toHaveBeenCalled()
+    h.document = { ...h.document, projectId: PROJECT_ID }
+    await expect(h.service.recoverWorking({ workspaceId: WORKSPACE_ID, plan })).resolves.toMatchObject({ issues: [] })
+    expect(recover).toHaveBeenCalledExactlyOnceWith(plan, undefined)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('describes the project: its template decision, the chosen set, and only tracked documents', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-overview-'))
     roots.push(root)
     await mkdir(join(root, 'documents', 'working'), { recursive: true })
     await writeFile(join(root, 'documents', 'working', 'unregistered.docx'), 'not-a-domain-document')
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     harness.contracts = [{ ...templateContract(), status: 'confirmed' }]
     harness.document = { ...harness.document, templateId: TemplateContractId('template-1') }
 
@@ -504,7 +528,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('records the project template choice, including the choice of none', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const chosen = await harness.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })
     expect(chosen).toMatchObject({ templateDecided: true, templatePackId: null, template: null })
     expect(harness.project.templatePackId).toBeUndefined()
@@ -521,8 +545,8 @@ describe('PaperAiWorkbenchService', () => {
       .rejects.toThrow('no format')
   })
 
-  it('emits JSON-safe document changes only for committed Working document puts', () => {
-    const harness = createHarness()
+  it('emits JSON-safe document changes only for committed Working document puts', async () => {
+    const harness = await createHarness()
     const seen: unknown[] = []
     harness.ctx.on('paperai/document-changed', (change) => { seen.push(structuredClone(change)) })
     const commit = commitRecord('commit-event')
@@ -553,8 +577,8 @@ describe('PaperAiWorkbenchService', () => {
     expect(JSON.parse(JSON.stringify(seen[0]))).toEqual(seen[0])
   })
 
-  it('contains document change listener failures without interrupting durable change observers', () => {
-    const harness = createHarness()
+  it('contains document change listener failures without interrupting durable change observers', async () => {
+    const harness = await createHarness()
     const commit = commitRecord('commit-event-listener-failure')
     harness.history = [commit]
     const current = {
@@ -575,7 +599,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('opens read-only preview and edits only one semantic node through a commit', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await harness.service.open({
       workspaceId: WORKSPACE_ID,
       sessionId: SESSION_ID,
@@ -620,7 +644,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('runs a live gate and restores through a new recoverable commit', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await harness.service.open({
       workspaceId: WORKSPACE_ID,
       sessionId: SESSION_ID,
@@ -660,7 +684,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('rejects unknown Workspaces, resources, nodes, and unborn restores', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     await expect(harness.service.overview({ workspaceId: WorkspaceId('missing') })).rejects.toThrow('does not exist')
     await expect(harness.service.open({
       workspaceId: WORKSPACE_ID,
@@ -686,7 +710,7 @@ describe('PaperAiWorkbenchService', () => {
   it('stages a browser Word upload, creates its root commit, and cleans staging', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-upload-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const result = await harness.service.importDocument({
       workspaceId: WORKSPACE_ID,
       sessionId: SESSION_ID,
@@ -712,7 +736,7 @@ describe('PaperAiWorkbenchService', () => {
   it('treats the root commit as the commit point: a failed or cancelled preview still returns the created document', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-preview-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     harness.previewHtml.mockRejectedValueOnce(new Error('OfficeCLI preview crashed'))
     const controller = new AbortController()
     const request = {
@@ -742,7 +766,7 @@ describe('PaperAiWorkbenchService', () => {
   it('rolls back the imported document when root commit submission rejects', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-submit-reject-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const failure = new Error('root commit rejected')
     harness.submit.mockRejectedValueOnce(failure)
 
@@ -761,7 +785,7 @@ describe('PaperAiWorkbenchService', () => {
   it('finishes import rollback after root commit submission is cancelled', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-submit-cancel-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const controller = new AbortController()
     const cancelled = new Error('root commit cancelled')
     harness.submit.mockImplementationOnce(async (request) => {
@@ -786,7 +810,7 @@ describe('PaperAiWorkbenchService', () => {
   it('reports root submission and import rollback failures together', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-rollback-failure-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const submissionFailure = new Error('root commit rejected')
     const rollbackFailure = new Error('import rollback failed')
     harness.submit.mockRejectedValueOnce(submissionFailure)
@@ -812,7 +836,7 @@ describe('PaperAiWorkbenchService', () => {
   it('starts a document of one type from the project template and binds its format in the root commit', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-template-start-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const templatePath = join(root, 'templates', 'hit-proposal.docx')
     await mkdir(join(root, 'templates'), { recursive: true })
     await writeFile(templatePath, 'word-upload')
@@ -861,7 +885,7 @@ describe('PaperAiWorkbenchService', () => {
     })).rejects.toThrow('accepts no upload')
 
     // Starting again reuses the confirmed contract and the caller's own name.
-    const again = createHarness(root)
+    const again = await createHarness(root)
     again.templateSource = harness.templateSource
     again.installPack.mockImplementationOnce(async () => {
       again.contracts = structuredClone(harness.contracts)
@@ -900,7 +924,7 @@ describe('PaperAiWorkbenchService', () => {
   it('formats an uploaded manuscript with the project reference format', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-template-reference-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     harness.installPack.mockImplementation(async () => {
       harness.contracts = [{
         ...templateContract(), name: 'HIT 论文范例', usage: 'format-reference', appliesToRoles: ['manuscript'],
@@ -935,7 +959,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('applies the project format for a type through one commit, changing the type when it differs, and detaches it again', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     harness.document = { ...harness.document, role: 'other' }
     const opened = await openDocument(harness)
     expect(opened.document).toMatchObject({ documentType: 'other', template: null, projectFormatAvailable: false })
@@ -991,7 +1015,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('guesses a document type from the title, then the opening text, then keeps the current type', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     harness.document = { ...harness.document, name: '硕士学位论文开题报告', role: 'other' }
     expect(await harness.service.suggestDocumentType({ documentId: DOCUMENT_ID }))
       .toEqual({ documentId: DOCUMENT_ID, documentType: 'proposal', basis: 'title' })
@@ -1008,7 +1032,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('diffs a version against its parent at paragraph level and lists a root version as all additions', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await openDocument(harness)
     const first = await harness.service.commit({
       sessionId: SESSION_ID, documentId: DOCUMENT_ID, baseRevision: opened.document.revision, baseCommitId: null,
@@ -1048,7 +1072,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('lists, creates, fills, and deletes custom template sets through the library', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     expect((await harness.service.listTemplateLibrary()).sets.map(set => set.packId)).toEqual([HIT_PACK_ID])
     const created = await harness.service.createTemplateSet({ name: '我们学院 2026 版', description: '学院自定' })
     expect(created.sets).toEqual([
@@ -1077,7 +1101,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('keeps a validation claim started after template application publication but before settlement', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     harness.contracts = [{ ...templateContract(), status: 'confirmed' }]
     const opened = await openDocument(harness)
     const associationSettlement = deferSubmitSettlement(harness.submit)
@@ -1112,7 +1136,7 @@ describe('PaperAiWorkbenchService', () => {
   it('exports into the project tree and refreshes the milestone-backed version', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await harness.service.open({
       workspaceId: WORKSPACE_ID,
       sessionId: SESSION_ID,
@@ -1153,7 +1177,7 @@ describe('PaperAiWorkbenchService', () => {
   it('does not let a delayed validation replace the gate for a newer exported revision', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-race-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await openDocument(harness)
     const delayed = deferred<GateReport>()
     harness.check.mockReturnValueOnce(delayed.promise)
@@ -1192,7 +1216,7 @@ describe('PaperAiWorkbenchService', () => {
   it('lets an export advancing the revision supersede a later validation from its source revision', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-source-race-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await openDocument(harness)
     const delayedExport = deferred<ExportDocumentResult>()
     const delayedValidation = deferred<GateReport>()
@@ -1241,7 +1265,7 @@ describe('PaperAiWorkbenchService', () => {
   it('lets validation from the exported revision fence the completing export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-target-race-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await openDocument(harness)
     const delayedExport = deferred<ExportDocumentResult>()
     const delayedValidation = deferred<GateReport>()
@@ -1291,7 +1315,7 @@ describe('PaperAiWorkbenchService', () => {
   it('does not attach a completed export report to a later external revision', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-external-export-race-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await openDocument(harness)
     const delayed = deferred<ExportDocumentResult>()
     harness.exportDocument.mockReturnValueOnce(delayed.promise)
@@ -1333,7 +1357,7 @@ describe('PaperAiWorkbenchService', () => {
   it('does not let an earlier validation replace a later blocked-export gate for the same revision', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-blocked-race-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await openDocument(harness)
     const delayed = deferred<GateReport>()
     harness.check.mockReturnValueOnce(delayed.promise)
@@ -1379,7 +1403,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('keeps the current gate when a pre-commit validation settles last', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await openDocument(harness)
     const delayed = deferred<GateReport>()
     harness.check.mockReturnValueOnce(delayed.promise)
@@ -1410,7 +1434,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('keeps a validation claim started after commit publication but before commit settlement', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await openDocument(harness)
     const commitSettlement = deferSubmitSettlement(harness.submit)
     const committing = harness.service.commit({
@@ -1444,7 +1468,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('keeps the current gate when a pre-restore validation settles last', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await openDocument(harness)
     const committed = await harness.service.commit({
       sessionId: SESSION_ID,
@@ -1482,7 +1506,7 @@ describe('PaperAiWorkbenchService', () => {
   })
 
   it('keeps a validation claim started after restore publication but before restore settlement', async () => {
-    const harness = createHarness()
+    const harness = await createHarness()
     const opened = await openDocument(harness)
     const committed = await harness.service.commit({
       sessionId: SESSION_ID,
@@ -1525,7 +1549,7 @@ describe('PaperAiWorkbenchService', () => {
   it('returns a projectable blocked delivery without creating an export commit', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-blocked-export-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await harness.service.open({
       workspaceId: WORKSPACE_ID,
       sessionId: SESSION_ID,
@@ -1583,7 +1607,7 @@ describe('PaperAiWorkbenchService', () => {
   it('does not disguise non-gate export failures as blocked results', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paperai-workbench-export-error-'))
     roots.push(root)
-    const harness = createHarness(root)
+    const harness = await createHarness(root)
     const opened = await harness.service.open({
       workspaceId: WORKSPACE_ID,
       sessionId: SESSION_ID,

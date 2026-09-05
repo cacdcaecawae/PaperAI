@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-09-03-paperai-ui-overhaul.zh.md)
 
+Partially superseded: layout and draft refresh are governed by the [document-centered workbench decision](../architecture/2026-09-05-paperai-agentero-adoption.md). Other decisions below remain active.
+
 ## Problem
 
 The PaperAI client had grown a hierarchy the user could not read. Under each Workspace the sidebar listed template rows, per-template start actions, a New Document row, and folder groups for images, experiments, and code beside the tracked documents and the Session list, so a project's second level mixed configuration, actions, and content. The document view was a set of tabs whose Edit tab presented one semantic node per page, unlike the preview beside it, and its Templates tab asked the user to pick a template per document from a flat catalog. The shell was painted in a pine-green accent over DSH's theme, carried a "论文工作台" descriptor under the wordmark, and opened blank sessions with DSH's "探索未至之境 / 预览版" copy, so the product looked torn from the harness it runs on. The user asked for a rebuild: a sidebar as plain as DSH's, DSH colors and row metrics, one place to configure templates, and an editing view that looks like the document.

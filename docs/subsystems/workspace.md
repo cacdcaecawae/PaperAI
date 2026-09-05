@@ -228,6 +228,20 @@ Owns the two exact ACP factory routes and every lifecycle they create.
 resolveProvider(definition: AcpProviderDefinition): AcpProviderDefinition
 
 /**
+ * Read installation and cached catalogs without spawning any adapter.
+ * @returns metadata for both configured providers, independent from live model selection.
+ */
+diagnosticStatus(): readonly AcpDiagnostic[]
+
+/**
+ * Run a prompt-free probe with shared failure cooldown and process teardown.
+ * @param provider - installed peer Agent to inspect.
+ * @param force - explicit retry bypassing failure cooldown.
+ * @returns observed ACP metadata, including a cached model preview.
+ */
+probe(provider: 'codex' | 'claude', force: boolean): Promise<AcpDiagnostic>
+
+/**
  * Complete setup, atomically publish the DSH lifecycle, and return its owner capability.
  * @param ownerCtx - active Context whose lifetime owns the published Agent and Session.
  * @param provider - configured ACP provider definition to launch.
@@ -259,6 +273,35 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
  * @throws when the Workspace or its PaperAI project cannot be resolved.
  */
 @Remote('overview') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>
+
+/**
+ * Read configured Agent discovery and cached model previews without starting processes.
+ * @returns configured ACP peers, or an empty roster when the provider plugin is absent.
+ */
+@Remote('agentDiagnostics') agentDiagnostics(): readonly PaperAIAgentDiagnostic[]
+
+/**
+ * Probe ACP initialization in an empty directory without a model prompt.
+ * @param request - selected provider and explicit cooldown bypass.
+ * @returns readiness and model metadata after the diagnostic process exits.
+ */
+@Remote('probeAgent') probeAgent(request: PaperAIProbeAgentRequest): Promise<PaperAIAgentDiagnostic>
+
+/**
+ * Inspect the selected project's retained files and document ownership.
+ * @param request - registered Workspace to scan.
+ * @param signal - optional cancellation between artifact reads.
+ * @returns read-only issues and explicit recovery plans.
+ */
+@Remote('inspectProject') async inspectProject(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>
+
+/**
+ * Restore missing working bytes using an unchanged verified version.
+ * @param request - owning Workspace and scan-bound recovery plan.
+ * @param signal - optional cancellation before publication.
+ * @returns a fresh integrity report after recovery.
+ */
+@Remote('recoverWorking') async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>
 
 /**
  * Record the template set the project writes against, or the explicit
@@ -468,6 +511,22 @@ getCommit(commitId: DocumentCommitIdType): DocumentCommit | undefined
  * @returns newest-first isolated commit records.
  */
 listHistory(documentId: DocumentId): DocumentCommitHistory
+
+/**
+ * Scan a registered project's artifacts without changing files or records.
+ * @param project - registered project.
+ * @param signal - optional cancellation.
+ * @returns current integrity issues and explicit recovery plans.
+ */
+inspectProject(project: ProjectRecord, signal?: AbortSignal): Promise<ProjectIntegrityReport>
+
+/**
+ * Materialize missing working bytes from an unchanged verified head; existing files are never overwritten.
+ * @param plan - exact recovery candidate returned by the integrity scan.
+ * @param signal - cancellation before the atomic file publication.
+ * @returns after the existing version's bytes are restored; no content or version history is changed.
+ */
+recoverMissingWorking(plan: WorkingRecoveryPlan, signal?: AbortSignal): Promise<void>
 ```
 
 Source: [`packages/paperai/commit-service/src/index.ts`](../../packages/paperai/commit-service/src/index.ts)

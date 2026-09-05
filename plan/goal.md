@@ -1,6 +1,6 @@
 # Goal
 
-Last updated: 2026-09-03
+Last updated: 2026-09-05
 
 Build PaperAI v1 as a polished local academic-document workbench on the complete pinned DeepSeek Harness foundation.
 
@@ -8,7 +8,7 @@ Success means a user can choose a project directory, import institutional DOC/DO
 
 ## Current objective
 
-Complete the inherited UI overhaul on `feat/paperai-ui-overhaul`, repair gaps in editing and template workflows, verify the assembled application, and leave a current handoff. This is local continuation of the existing implementation.
+Implement the five accepted Agentero architecture adaptations and the document-centered layout in the current workspace, validate the assembled application, and open a pull request against PaperAI main. The deliverables and acceptance criteria are in the [current task packet](task-packets/2026-09-05-agentero-adoption.md).
 
 ## Product invariants
 
@@ -27,4 +27,4 @@ Complete the inherited UI overhaul on `feat/paperai-ui-overhaul`, repair gaps in
 - Prefer pinned MIT, Apache-2.0, or BSD dependencies and existing DSH/Open Source capabilities.
 - Verify services, Loader composition, browser workflows, constrained-width layout, and real Word fixtures.
 - Preserve the legacy recovery pointers recorded in [context-brief.md](context-brief.md).
-- The August 28 history reset and publication are completed historical work; see [progress.md](progress.md). The current objective is completing the existing development branch.
+- The August 28 history reset and publication are completed historical work; see [progress.md](progress.md). The inherited UI overhaul is preserved in the current branch.

@@ -141,6 +141,17 @@
   background: var(--dsw-alias-bg-base);
 }
 
+.previewSeat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.previewSeat[hidden] {
+  display: none;
+}
+
 .centerMessage {
   margin: auto;
   padding: 24px;
