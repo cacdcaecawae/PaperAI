@@ -158,7 +158,7 @@ export type PaperAIDocumentNodeKind =
   | 'field'
   | 'unknown'
 
-/** One block of the document; only Host-marked editable nodes can request an edit buffer. */
+/** One block of the document; only Host-marked editable nodes can open a browser editor. */
 export interface PaperAIDocumentNodeSummary {
   readonly nodeId: PaperAIDocumentNodeId
   readonly kind: PaperAIDocumentNodeKind
@@ -166,18 +166,6 @@ export interface PaperAIDocumentNodeSummary {
   readonly depth: number
   readonly editable: boolean
   /** Current plain text, the block editor's starting value. */
-  readonly text: string
-}
-
-/** Temporary plain-text content for exactly one selected semantic node. */
-export interface PaperAISelectedNodeBuffer {
-  readonly documentId: PaperAIDocumentId
-  readonly nodeId: PaperAIDocumentNodeId
-  readonly label: string
-  readonly kind: PaperAIDocumentNodeKind
-  readonly baseRevision: PaperAIDocumentRevision
-  readonly baseCommitId: PaperAIDocumentCommitId | null
-  readonly format: 'text'
   readonly text: string
 }
 
@@ -276,10 +264,9 @@ export interface PaperAIDocumentSnapshot {
   readonly gate: PaperAITemplateGateReport
 }
 
-/** Result of opening a Working DOCX and its optional initial node buffer. */
+/** Result of opening a Working DOCX with its semantic-node text. */
 export interface PaperAIDocumentOpenResult {
   readonly document: PaperAIDocumentSnapshot
-  readonly selectedNode: PaperAISelectedNodeBuffer | null
 }
 
 /** Result of applying node mutations and creating one recoverable commit. */
@@ -300,15 +287,6 @@ export interface PaperAIOpenDocumentRequest {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
   readonly resourceId: PaperAIResourceId
-}
-
-/** Request for a fresh temporary buffer of one semantic node. */
-export interface PaperAIReadNodeRequest {
-  readonly sessionId: SessionId
-  readonly documentId: PaperAIDocumentId
-  readonly nodeId: PaperAIDocumentNodeId
-  readonly revision: PaperAIDocumentRevision
-  readonly headCommitId: PaperAIDocumentCommitId | null
 }
 
 /** Optimistic node-mutation request that must create one durable version. */

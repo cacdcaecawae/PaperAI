@@ -1310,17 +1310,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'open\') async open(request: PaperAIOpenDocumentRequest, signal?: AbortSignal): Promise<PaperAIDocumentOpenResult>',
-        description: 'Open a read-only Working DOCX projection and its first editable node.',
+        description: 'Open a read-only Working DOCX projection with plain text for each semantic node.',
         parameters: [{ name: 'request', description: 'Workspace, Session, and document resource to open.' }, { name: 'signal', description: 'optional cancellation signal for preview generation.' }],
-        returns: 'the current document projection and optional first editable-node buffer.',
+        returns: 'the current document projection.',
         throws: ['when the Workspace or document is missing, mismatched, or cannot be projected.'],
-      },
-      {
-        signature: '@Remote(\'readNode\') readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer>',
-        description: 'Read one semantic node into a temporary plain-text edit buffer.',
-        parameters: [{ name: 'request', description: 'document projection identity and semantic node to read.' }, { name: 'signal', description: 'optional cancellation signal for the node read.' }],
-        returns: 'a fresh buffer tied to the observed revision and head commit.',
-        throws: ['when the document or node is missing or the observed projection is stale.'],
       },
       {
         signature: '@Remote(\'commit\') async commit( request: PaperAICommitDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>',
@@ -4756,7 +4749,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIDocumentOpenResult',
-    declaration: 'export interface PaperAIDocumentOpenResult {\n    readonly document: PaperAIDocumentSnapshot;\n    readonly selectedNode: PaperAISelectedNodeBuffer | null;\n}',
+    declaration: 'export interface PaperAIDocumentOpenResult {\n    readonly document: PaperAIDocumentSnapshot;\n}',
   },
   {
     name: 'PaperAIDocumentRevision',
@@ -4843,10 +4836,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
   },
   {
-    name: 'PaperAIReadNodeRequest',
-    declaration: 'export interface PaperAIReadNodeRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n}',
-  },
-  {
     name: 'PaperAIRecoverWorkingRequest',
     declaration: 'export interface PaperAIRecoverWorkingRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly plan: import(\'@paperai/commit-service/doctor-types\').WorkingRecoveryPlan;\n}',
   },
@@ -4865,10 +4854,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PaperAIRestoreDocumentRequest',
     declaration: 'export interface PaperAIRestoreDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly targetCommitId: PaperAIDocumentCommitId;\n}',
-  },
-  {
-    name: 'PaperAISelectedNodeBuffer',
-    declaration: 'export interface PaperAISelectedNodeBuffer {\n    readonly documentId: PaperAIDocumentId;\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly label: string;\n    readonly kind: PaperAIDocumentNodeKind;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly format: \'text\';\n    readonly text: string;\n}',
   },
   {
     name: 'PaperAISetProjectTemplateRequest',

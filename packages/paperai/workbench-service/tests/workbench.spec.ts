@@ -25,7 +25,6 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import PaperAiWorkbenchService from '../src/index.ts'
 import type {
   PaperAIDocumentCommitId,
-  PaperAIDocumentNodeId,
   PaperAIDocumentRevision,
   PaperAIResourceId,
 } from '../src/types.ts'
@@ -606,7 +605,7 @@ describe('PaperAiWorkbenchService', () => {
       resourceId: `document:${DOCUMENT_ID}` as PaperAIResourceId,
     })
     expect(opened.document.previewHtml).toContain('只读预览')
-    expect(opened.selectedNode).toMatchObject({ format: 'text', nodeId: NODE_ID, text: '原始段落' })
+    expect(opened.document.nodes.find(node => node.nodeId === NODE_ID)).toMatchObject({ editable: true, text: '原始段落' })
 
     const committed = await harness.service.commit({
       sessionId: SESSION_ID,
@@ -623,24 +622,18 @@ describe('PaperAiWorkbenchService', () => {
     expect(harness.submit.mock.calls[0]?.[0].actor).toMatchObject({
       kind: 'human', client: 'paperai', sessionId: SESSION_ID,
     })
-    expect(committed.selectedNode?.text).toBe('人工修改后的段落')
+    expect(committed.document.nodes.find(node => node.nodeId === NODE_ID)?.text).toBe('人工修改后的段落')
     expect(committed.document.versions[0]?.actor.name).toBe('用户')
     expect(committed.createdCommitId).toBe('commit-1')
 
-    await expect(harness.service.readNode({
+    await expect(harness.service.commit({
       sessionId: SESSION_ID,
       documentId: DOCUMENT_ID,
-      nodeId: NODE_ID,
-      revision: opened.document.revision,
-      headCommitId: null,
+      baseRevision: opened.document.revision,
+      baseCommitId: null,
+      mutations: [{ type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '过期编辑' }],
     })).rejects.toThrow('changed; reload')
-    await expect(harness.service.readNode({
-      sessionId: SESSION_ID,
-      documentId: DOCUMENT_ID,
-      nodeId: NODE_ID,
-      revision: committed.document.revision,
-      headCommitId: committed.document.headCommitId,
-    }, AbortSignal.abort())).rejects.toThrow('aborted')
+    expect(harness.submit).toHaveBeenCalledOnce()
   })
 
   it('runs a live gate and restores through a new recoverable commit', async () => {
@@ -683,7 +676,7 @@ describe('PaperAiWorkbenchService', () => {
     expect(restored.createdCommitId).toBe('commit-2')
   })
 
-  it('rejects unknown Workspaces, resources, nodes, and unborn restores', async () => {
+  it('rejects unknown Workspaces, resources, and unborn restores', async () => {
     const harness = await createHarness()
     await expect(harness.service.overview({ workspaceId: WorkspaceId('missing') })).rejects.toThrow('does not exist')
     await expect(harness.service.open({
@@ -691,13 +684,6 @@ describe('PaperAiWorkbenchService', () => {
       sessionId: SESSION_ID,
       resourceId: 'template:x' as PaperAIResourceId,
     })).rejects.toThrow('not an openable')
-    await expect(harness.service.readNode({
-      sessionId: SESSION_ID,
-      documentId: DOCUMENT_ID,
-      nodeId: 'missing' as PaperAIDocumentNodeId,
-      revision: 'unborn:source-sha:2026-08-28T00:00:00.000Z' as PaperAIDocumentRevision,
-      headCommitId: null,
-    })).rejects.toThrow('does not belong')
     await expect(harness.service.restore({
       sessionId: SESSION_ID,
       documentId: DOCUMENT_ID,

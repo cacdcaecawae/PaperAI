@@ -73,11 +73,9 @@ import type {
   PaperAIOverviewRequest,
   PaperAIProjectOverview,
   PaperAIRecoverWorkingRequest,
-  PaperAIReadNodeRequest,
   PaperAIRemoveTemplateFormatRequest,
   PaperAIResourceId,
   PaperAIRestoreDocumentRequest,
-  PaperAISelectedNodeBuffer,
   PaperAISetProjectTemplateRequest,
   PaperAISuggestDocumentTypeRequest,
   PaperAITemplateGateReport,
@@ -845,10 +843,10 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   /**
-   * Open a read-only Working DOCX projection and its first editable node.
+   * Open a read-only Working DOCX projection with plain text for each semantic node.
    * @param request - Workspace, Session, and document resource to open.
    * @param signal - optional cancellation signal for preview generation.
-   * @returns the current document projection and optional first editable-node buffer.
+   * @returns the current document projection.
    * @throws when the Workspace or document is missing, mismatched, or cannot be projected.
    */
   @Remote('open')
@@ -860,23 +858,6 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       throw new Error(`paperai-workbench: document '${id}' does not belong to Workspace '${request.workspaceId}'`)
     }
     return await this.projectOpen(project, snapshot.document, snapshot.nodes, request.sessionId, signal)
-  }
-
-  /**
-   * Read one semantic node into a temporary plain-text edit buffer.
-   * @param request - document projection identity and semantic node to read.
-   * @param signal - optional cancellation signal for the node read.
-   * @returns a fresh buffer tied to the observed revision and head commit.
-   * @throws when the document or node is missing or the observed projection is stale.
-   */
-  @Remote('readNode')
-  readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer> {
-    return Promise.resolve().then(() => {
-      signal?.throwIfAborted()
-      const snapshot = this.requireDocument(DocumentId(String(request.documentId)))
-      this.assertProjection(snapshot.document, request.revision, request.headCommitId)
-      return this.bufferFor(snapshot.document, snapshot.nodes, DocumentNodeId(String(request.nodeId)))
-    })
   }
 
   /**
@@ -916,9 +897,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       })),
       ...(signal === undefined ? {} : { signal }),
     })
-    return await this.commitResult(
-      id, request.baseRevision, request.sessionId, commit, signal, DocumentNodeId(String(firstMutation.nodeId)),
-    )
+    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
   }
 
   /**
@@ -1133,7 +1112,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     // projection runs without the caller's signal and tolerates a missing preview.
     const current = this.requireDocument(imported.document.id)
     const opened = await this.projectOpen(
-      project, current.document, current.nodes, root.sessionId, undefined, undefined, 'best-effort',
+      project, current.document, current.nodes, root.sessionId, undefined, 'best-effort',
     )
     return {
       status: 'imported',
@@ -1149,12 +1128,11 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     sessionId: SessionId,
     commit: DocumentCommit,
     signal?: AbortSignal,
-    selectedNodeId?: DocumentNode['id'],
   ): Promise<PaperAIDocumentCommitResult> {
     const after = this.requireDocument(id)
     this.fenceGateMutation(after.document, baseRevision)
     const project = this.requireProject(after.document.projectId)
-    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal, selectedNodeId)
+    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal)
     return { ...opened, createdCommitId: commit.id }
   }
 
@@ -1241,27 +1219,6 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
   }
 
-  private bufferFor(
-    document: DocumentRecord,
-    nodes: readonly DocumentNode[],
-    nodeId: DocumentNode['id'],
-  ): PaperAISelectedNodeBuffer {
-    const node = nodes.find(candidate => candidate.id === nodeId)
-    if (node === undefined) throw new Error(`paperai-workbench: node '${nodeId}' does not belong to document '${document.id}'`)
-    const summary = nodeSummary(node)
-    if (!summary.editable) throw new Error(`paperai-workbench: node '${nodeId}' is not text-editable`)
-    return {
-      documentId: document.id,
-      nodeId: node.id,
-      label: summary.label,
-      kind: summary.kind,
-      baseRevision: revisionOf(document),
-      baseCommitId: headOf(document),
-      format: 'text',
-      text: node.text,
-    }
-  }
-
   private templateSummary(contract: TemplateContract | undefined): PaperAITemplateSummary | null {
     if (contract === undefined) return null
     const pack = contract.origin.packId === undefined ? undefined : this.findSet(contract.origin.packId)
@@ -1291,7 +1248,6 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     nodes: readonly DocumentNode[],
     sessionId: SessionId,
     signal?: AbortSignal,
-    selectedNodeId?: DocumentNode['id'],
     preview: 'required' | 'best-effort' = 'required',
   ): Promise<PaperAIDocumentOpenResult> {
     const previewHtml = await this.previewFor(document.id, signal, preview)
@@ -1316,13 +1272,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         && projectSet.members.some(member => member.appliesToRoles.includes(document.role)),
       gate: this.gateFor(document) ?? { status: 'not-run', findings: [] },
     }
-    const selected = selectedNodeId === undefined
-      ? nodes.find(node => nodeSummary(node).editable)
-      : nodes.find(node => node.id === selectedNodeId)
-    return {
-      document: snapshot,
-      selectedNode: selected === undefined ? null : this.bufferFor(document, nodes, selected.id),
-    }
+    return { document: snapshot }
   }
 
   /**

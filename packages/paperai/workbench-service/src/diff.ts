@@ -1,9 +1,10 @@
 /** Paragraph-level diff between two text sequences for the version timeline. */
 
+import { diffArrays } from 'diff'
 import type { PaperAIVersionChange } from './types.ts'
 
-/** Above this many cell comparisons the diff falls back to position alignment. */
-const MAX_LCS_CELLS = 4_000_000
+/** Above this many paragraph pairs the diff falls back to position alignment. */
+const MAX_PARAGRAPH_PAIRS = 4_000_000
 
 /** Result of diffing two paragraph sequences. */
 export interface ParagraphDiff {
@@ -20,9 +21,9 @@ export interface ParagraphDiff {
  * @returns the changes in document order plus the count of untouched paragraphs.
  */
 export function diffParagraphs(before: readonly string[], after: readonly string[]): ParagraphDiff {
-  const script = before.length * after.length > MAX_LCS_CELLS
+  const script = before.length * after.length > MAX_PARAGRAPH_PAIRS
     ? alignByPosition(before, after)
-    : alignByLcs(before, after)
+    : alignByDiff(before, after)
   const changes: PaperAIVersionChange[] = []
   let unchangedCount = 0
   let removed: string[] = []
@@ -57,40 +58,10 @@ type EditStep =
   | { readonly kind: 'removed'; readonly text: string }
   | { readonly kind: 'added'; readonly text: string }
 
-function alignByLcs(before: readonly string[], after: readonly string[]): EditStep[] {
-  const columns = after.length + 1
-  // lengths[i * columns + j] = LCS length of before[i..] and after[j..]; the
-  // typed array reads 0 past either end, which is the empty-suffix base case.
-  const lengths = new Uint32Array((before.length + 1) * columns)
-  const at = (i: number, j: number): number => lengths[i * columns + j] ?? 0
-  for (let i = before.length - 1; i >= 0; i--) {
-    for (let j = after.length - 1; j >= 0; j--) {
-      lengths[i * columns + j] = before[i] === after[j]
-        ? at(i + 1, j + 1) + 1
-        : Math.max(at(i + 1, j), at(i, j + 1))
-    }
-  }
-  const script: EditStep[] = []
-  let i = 0
-  let j = 0
-  while (i < before.length && j < after.length) {
-    const left = before[i] ?? ''
-    const right = after[j] ?? ''
-    if (left === right) {
-      script.push({ kind: 'equal', text: left })
-      i++
-      j++
-    } else if (at(i + 1, j) >= at(i, j + 1)) {
-      script.push({ kind: 'removed', text: left })
-      i++
-    } else {
-      script.push({ kind: 'added', text: right })
-      j++
-    }
-  }
-  for (const text of before.slice(i)) script.push({ kind: 'removed', text })
-  for (const text of after.slice(j)) script.push({ kind: 'added', text })
-  return script
+function alignByDiff(before: readonly string[], after: readonly string[]): EditStep[] {
+  return diffArrays([...before], [...after]).flatMap(part => part.value.map(text => ({
+    kind: part.added ? 'added' : part.removed ? 'removed' : 'equal', text,
+  })))
 }
 
 function alignByPosition(before: readonly string[], after: readonly string[]): EditStep[] {

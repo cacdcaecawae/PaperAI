@@ -30,6 +30,8 @@ Word selections become removable input references containing exact text, block i
 
 Preview retention has a configurable bound including the active view. Eviction releases heavy rendering while lightweight scroll offsets and drafts survive navigation. External changes invalidate cached previews. A changed block retains its local draft for copying or discarding and forbids overwriting the replacement block. DOCX commits remain the only durable edit path.
 
+The document snapshot carries every node's current text and the revision used for a block draft. Selection stays in the browser so a second selected-node response cannot duplicate that state; the commit path validates the observed revision and head. Paragraph alignment uses the existing `diff` dependency, with document-specific replacement pairing and positional fallback above the paragraph-pair limit owned by the workbench.
+
 ## Project inspection and recovery
 
 Project Doctor reads registered project records, originals, working files, and retained snapshots without initializing or repairing them. It reports missing or changed files, invalid heads or snapshots, duplicate ownership, and unsafe paths. Only a missing working file with a verified owned head receives a recovery candidate.

@@ -427,22 +427,13 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 @Remote('exportDocument') async exportDocument( request: PaperAIExportDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIExportDocumentResult>
 
 /**
- * Open a read-only Working DOCX projection and its first editable node.
+ * Open a read-only Working DOCX projection with plain text for each semantic node.
  * @param request - Workspace, Session, and document resource to open.
  * @param signal - optional cancellation signal for preview generation.
- * @returns the current document projection and optional first editable-node buffer.
+ * @returns the current document projection.
  * @throws when the Workspace or document is missing, mismatched, or cannot be projected.
  */
 @Remote('open') async open(request: PaperAIOpenDocumentRequest, signal?: AbortSignal): Promise<PaperAIDocumentOpenResult>
-
-/**
- * Read one semantic node into a temporary plain-text edit buffer.
- * @param request - document projection identity and semantic node to read.
- * @param signal - optional cancellation signal for the node read.
- * @returns a fresh buffer tied to the observed revision and head commit.
- * @throws when the document or node is missing or the observed projection is stale.
- */
-@Remote('readNode') readNode(request: PaperAIReadNodeRequest, signal?: AbortSignal): Promise<PaperAISelectedNodeBuffer>
 
 /**
  * Apply block text mutations and create one immediate human commit.

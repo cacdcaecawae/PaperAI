@@ -179,7 +179,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       sessionId: normalizationSessionId,
       resourceId,
     })
-    if (initial.selectedNode === null) throw new Error('PaperAI browser fixture has no node to normalize')
+    const initialNode = initial.document.nodes.find(node => node.editable)
+    if (initialNode === undefined) throw new Error('PaperAI browser fixture has no node to normalize')
     await scaffold.ctx.paperaiWorkbench.commit({
       sessionId: normalizationSessionId,
       documentId: initial.document.documentId,
@@ -187,8 +188,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       baseCommitId: initial.document.headCommitId,
       mutations: [{
         type: 'replace-text',
-        nodeId: initial.selectedNode.nodeId,
-        baseText: initial.selectedNode.text,
+        nodeId: initialNode.nodeId,
+        baseText: initialNode.text,
         nextText: 'Initial browser paragraph — normalized',
       }],
     }).catch(reportDocumentSetupFailure)
@@ -573,8 +574,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await preview.locator('[data-paperai-block]', { hasText: '外部会话写入的最新文本' }).first().click()
     await editor.waitFor({ timeout: 10_000 })
     await editor.fill('浏览器合并后的最终文本')
+    const savedBlock = preview.locator('[data-paperai-block]', { hasText: '浏览器合并后的最终文本' })
+    expect(await savedBlock.count()).toBe(0)
     await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存' }).click()
-    await preview.getByText('浏览器合并后的最终文本').waitFor({ timeout: 30_000 })
+    await savedBlock.waitFor({ timeout: 30_000 })
     await expect.poll(() => editor.count(), { timeout: 10_000 }).toBe(0)
     const committed = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
     expect(committed.document.nodes.find(node => node.nodeId === target.nodeId)?.text).toBe('浏览器合并后的最终文本')

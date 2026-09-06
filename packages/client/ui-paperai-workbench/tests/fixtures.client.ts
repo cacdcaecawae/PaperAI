@@ -162,7 +162,7 @@ export function documentOpenResult(
   revision: PaperAIDocumentRevision = REVISION_1,
   overrides: Partial<PaperAIDocumentSnapshot> = {},
 ): PaperAIDocumentOpenResult {
-  return { document: documentSnapshot(revision, overrides), selectedNode: null }
+  return { document: documentSnapshot(revision, overrides) }
 }
 
 function commitResult(
@@ -170,7 +170,7 @@ function commitResult(
   createdCommitId: PaperAIDocumentCommitId,
   overrides: Partial<PaperAIDocumentSnapshot> = {},
 ): PaperAIDocumentCommitResult {
-  return { document: documentSnapshot(revision, overrides), selectedNode: null, createdCommitId }
+  return { document: documentSnapshot(revision, overrides), createdCommitId }
 }
 
 export const DIFF: PaperAIVersionDiff = {

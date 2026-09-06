@@ -527,13 +527,7 @@ export class PaperAIWorkbenchController {
       baseCommitId: document.headCommitId,
       mutations: [{ type: 'replace-text', nodeId: edit.nodeId, baseText: edit.baseText, nextText: edit.draft }],
     }, request.signal))
-    if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
-    if (!result.ok) return this.fail(entry.store, remoteError(result.error))
-    if (!commitMatches(result.value, document)) {
-      return this.fail(entry.store, 'paperaiWorkbench returned an invalid commit projection')
-    }
-    this.publishOpenResult(entry.store, result.value)
-    return OK
+    return this.settleCommit(entry, request, document, result)
   }
 
   /**
