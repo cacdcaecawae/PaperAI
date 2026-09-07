@@ -74,6 +74,10 @@ function fixtureDocxBase64(withFigureAndTable = false): string {
       + '<Default Extension="xml" ContentType="application/xml"/>'
       + (withFigureAndTable ? '<Default Extension="png" ContentType="image/png"/>' : '')
       + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+      + (withFigureAndTable
+        ? '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>'
+          + '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>'
+        : '')
       + '</Types>',
     ),
     '_rels/.rels': strToU8(
@@ -103,15 +107,25 @@ function fixtureDocxBase64(withFigureAndTable = false): string {
           + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
           + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
         : '')
-      + '<w:sectPr/></w:body></w:document>',
+      + (withFigureAndTable
+        ? '<w:sectPr xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+          + '<w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/></w:sectPr>'
+        : '<w:sectPr/>')
+      + '</w:body></w:document>',
     ),
     ...(withFigureAndTable ? {
       'word/_rels/document.xml.rels': strToU8(
         '<?xml version="1.0" encoding="UTF-8"?>'
         + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         + '<Relationship Id="rIdFigure" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/figure.png"/>'
+        + '<Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>'
+        + '<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>'
         + '</Relationships>',
       ),
+      'word/header1.xml': strToU8('<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        + '<w:p><w:r><w:t>Initial browser paragraph</w:t></w:r></w:p></w:hdr>'),
+      'word/footer1.xml': strToU8('<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        + '<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p></w:ftr>'),
       'word/media/figure.png': Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQyVgDAAHsATleaPIZAAAAAElFTkSuQmCC', 'base64'),
     } : {}),
   })).toString('base64')
@@ -709,6 +723,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('preserves a newly typed draft when a real Word import response arrives', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-import-draft'))
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
     await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
     await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
     await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
@@ -786,6 +801,27 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'table-figure.expected.md'), await preview.ariaSnapshot(), MODE)
   }, 90_000)
 
+  it('keeps headers and footers read-only when body paragraphs have the same text', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-header-footer'))
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
+    for (const band of ['doc-header', 'doc-footer']) {
+      await preview.locator(`.${band} p`).click()
+      await page.getByRole('status').filter({ hasText: '这一段暂时无法在此修改' }).waitFor()
+      expect(await editor.count()).toBe(0)
+    }
+    const body = preview.locator('.page-body p[data-path="/body/p[1]"]')
+    expect(await body.textContent()).toBe(await preview.locator('.doc-header p').textContent())
+    await body.click()
+    await editor.fill('Body edited; header unchanged')
+    await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存', exact: true }).click()
+    await preview.getByText('Body edited; header unchanged', { exact: true }).waitFor({ timeout: 30_000 })
+    await editor.waitFor({ state: 'hidden' })
+    expect(await preview.locator('.doc-header p').textContent()).toBe('Initial browser paragraph')
+    expect(await preview.locator('.doc-footer p').textContent()).toBe('Second paragraph')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'header-footer.expected.md'), await preview.ariaSnapshot(), MODE)
+  }, 90_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -798,6 +834,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
       'external-update.expected.md',
+      'header-footer.expected.md',
       'import-draft.expected.md',
       'model-failure.expected.md',
       'model-menu.expected.md',

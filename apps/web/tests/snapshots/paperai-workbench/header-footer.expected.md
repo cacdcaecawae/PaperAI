@@ -1,6 +1,6 @@
 - document "文档预览":
   - paragraph: Initial browser paragraph
-  - paragraph: Initial browser paragraph
+  - paragraph: Body edited; header unchanged
   - paragraph: Second paragraph
   - table:
     - rowgroup:

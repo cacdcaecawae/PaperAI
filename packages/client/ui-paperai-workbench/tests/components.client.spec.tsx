@@ -350,14 +350,41 @@ describe('TemplateLibraryView', () => {
 })
 
 describe('DocumentWorkbench', () => {
+  it.each(['doc-header', 'doc-footer'])('does not bind a repeated %s to a same-text body paragraph', (band) => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(undefined, {
+      previewHtml: `<div class="page"><div class="${band}"><p>Research background</p></div></div>`
+        + '<div class="page"><div class="page-body"><p data-path="/body/p[2]">Research background</p></div></div>',
+    }) }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    fireEvent.click(shadow.querySelector(`.${band} p`)!)
+    expect(b.selectBlock).not.toHaveBeenCalled()
+    fireEvent.click(shadow.querySelector('.page-body p')!)
+    expect(b.selectBlock).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH)
+  })
+
+  it('does not consume body matches for unaddressed preview content', () => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(undefined, {
+      previewHtml: '<p>Research background</p><p data-path="">Research background</p>'
+        + '<p data-path="/body/p[2]">Different text</p><p data-path="/body/p[2]">Research background</p>',
+    }) }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraphs = shadow.querySelectorAll('p')
+    for (const paragraph of [...paragraphs].slice(0, 3)) fireEvent.click(paragraph)
+    expect(b.selectBlock).not.toHaveBeenCalled()
+    fireEvent.click(paragraphs[3]!)
+    expect(b.selectBlock).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH)
+  })
+
   it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
     const snapshot = documentSnapshot()
     const paragraph = snapshot.nodes.find(node => node.nodeId === NODE_PARAGRAPH)!
     const b = workbenchProps(workbenchState({ phase: 'ready', document: {
       ...snapshot,
       previewHtml: '<table><tr><td>Unindexed one</td><td>Unindexed two</td>'
-        + '<td><p>Research background</p></td></tr></table>'
-        + '<p>Research background</p><p>Research background</p>',
+        + '<td><p data-path="/body/tbl[1]/tr[1]/tc[3]/p[1]">Research background</p></td></tr></table>'
+        + '<p data-path="/body/p[2]">Research background</p><p data-path="/body/p[3]">Research background</p>',
       nodes: [
         { ...paragraph, nodeId: NODE_TABLE, kind: cell === 'unindexed' ? 'table' : 'table-cell', editable: cell === 'editable' },
         paragraph,

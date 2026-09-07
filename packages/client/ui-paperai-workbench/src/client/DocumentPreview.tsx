@@ -83,8 +83,8 @@ function blocksOf(container: HTMLElement): HTMLElement[] {
 }
 
 /**
- * Pair blocks with indexed nodes by text and table-cell membership, consuming
- * repeated text in reading order. Read-only matches cannot open an editor.
+ * Pair provider-addressed blocks by text and table-cell membership, consuming
+ * repeated text in reading order. Page bands lack addresses and stay read-only.
  */
 function mapBlocks(
   blocks: readonly HTMLElement[],
@@ -98,6 +98,7 @@ function mapBlocks(
   const used = new Set<PaperAIDocumentNodeId>()
   const mapping = new Map<HTMLElement, PaperAIDocumentNodeId>()
   blocks.forEach((block) => {
+    if (!block.dataset.path) return
     const cell = block.closest('td, th') !== null
     const node = byText.get(normalize(block.textContent))?.find(candidate =>
       !used.has(candidate.nodeId) && (candidate.kind === 'table-cell') === cell)

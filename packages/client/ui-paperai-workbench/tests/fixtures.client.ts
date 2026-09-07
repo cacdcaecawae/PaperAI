@@ -73,9 +73,9 @@ export const UNDECIDED_OVERVIEW: PaperAIProjectOverview = {
 }
 
 const PREVIEW_HTML = '<html><head><style>p { margin: 0 }</style></head><body>'
-  + '<h1>Introduction</h1><p>Research background</p><p></p>'
+  + '<h1 data-path="/body/p[1]">Introduction</h1><p data-path="/body/p[2]">Research background</p><p data-path="/body/p[3]"></p>'
   + '<table><tr><td>Experiment results</td></tr></table>'
-  + '<script>alert(1)</script><p onclick="alert(2)">Closing remarks</p>'
+  + '<script>alert(1)</script><p data-path="/body/p[4]" onclick="alert(2)">Closing remarks</p>'
   + '</body></html>'
 
 function headFor(revision: PaperAIDocumentRevision): PaperAIDocumentCommitId {
