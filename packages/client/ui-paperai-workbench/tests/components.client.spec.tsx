@@ -16,7 +16,7 @@ import type {
   PaperAILibraryState, PaperAIProjectDirectoryState, PaperAIProjectState, PaperAIWorkbenchState,
 } from '../src/client/types.ts'
 import {
-  COMMIT_0, CUSTOM_PACK_ID, DIFF, documentSnapshot, HIT_PACK_ID, LIBRARY, NODE_PARAGRAPH,
+  COMMIT_0, CUSTOM_PACK_ID, DIFF, documentSnapshot, HIT_PACK_ID, LIBRARY, NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE,
   OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, UNDECIDED_OVERVIEW, WORKSPACE_ID,
 } from './fixtures.client.ts'
 
@@ -350,6 +350,49 @@ describe('TemplateLibraryView', () => {
 })
 
 describe('DocumentWorkbench', () => {
+  it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
+    const snapshot = documentSnapshot()
+    const paragraph = snapshot.nodes.find(node => node.nodeId === NODE_PARAGRAPH)!
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: {
+      ...snapshot,
+      previewHtml: '<table><tr><td>Unindexed one</td><td>Unindexed two</td>'
+        + '<td><p>Research background</p></td></tr></table>'
+        + '<p>Research background</p><p>Research background</p>',
+      nodes: [
+        { ...paragraph, nodeId: NODE_TABLE, kind: cell === 'unindexed' ? 'table' : 'table-cell', editable: cell === 'editable' },
+        paragraph,
+        { ...paragraph, nodeId: NODE_HEADING },
+      ],
+    } }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    fireEvent.click(shadow.querySelector('td p')!)
+    if (cell === 'editable') expect(b.selectBlock).toHaveBeenCalledWith(NODE_TABLE)
+    else expect(b.selectBlock).not.toHaveBeenCalled()
+    b.selectBlock.mockClear()
+    const paragraphs = [...shadow.querySelectorAll('p')].filter(element => element.closest('td') === null)
+    fireEvent.click(paragraphs[0]!)
+    fireEvent.click(paragraphs[1]!)
+    expect(b.selectBlock.mock.calls).toEqual([[NODE_PARAGRAPH], [NODE_HEADING]])
+  })
+
+  it('retains embedded raster figures while removing executable data URLs and handlers', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo='
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(undefined, {
+      previewHtml: `<img id="figure" alt="Research diagram" src="${png}" onerror="alert(1)">`
+        + '<img id="svg" src="data:image/svg+xml;base64,PHN2Zz4=">'
+        + '<img id="html" src="data:text/html;base64,PHNjcmlwdD4=">'
+        + `<a id="download" href="${png}">Download</a>`
+        + '<a id="script" href="javascript:alert(1)">Script</a>',
+    }) }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    expect(shadow.querySelector('#figure')?.getAttribute('src')).toBe(png)
+    expect(shadow.querySelector('#figure')?.hasAttribute('onerror')).toBe(false)
+    for (const id of ['svg', 'html']) expect(shadow.querySelector(`#${id}`)?.hasAttribute('src')).toBe(false)
+    for (const id of ['download', 'script']) expect(shadow.querySelector(`#${id}`)?.hasAttribute('href')).toBe(false)
+  })
+
   it('quotes an exact shadow-tree selection and preserves its scroll without starting a block edit', () => {
     const snapshot = documentSnapshot()
     const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot, scrollTop: 120 }))

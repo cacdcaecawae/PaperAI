@@ -219,11 +219,11 @@ export class PaperAIWorkbenchController {
   }
 
   /**
-   * Import one browser-selected Word file as a free-writing document and open its Working copy.
+   * Import one browser-selected Word file; later drafting or navigation prevents automatic opening.
    * @param workspaceId - Workspace that receives the document.
    * @param sessionId - Session that displays the Working copy.
    * @param input - Word payload and optional display name.
-   * @returns the settled local result after the project and workbench projections are updated.
+   * @returns the settled local result after the project lists the imported document.
    */
   importDocument(
     workspaceId: WorkspaceId,
@@ -238,11 +238,11 @@ export class PaperAIWorkbenchController {
   }
 
   /**
-   * Start one document of a type from the project template and open its Working copy.
+   * Start one document from the project template; later drafting or navigation prevents automatic opening.
    * @param workspaceId - Workspace that receives the new document.
    * @param sessionId - Session that displays the new Working copy.
    * @param input - document type, optional manuscript upload, and display name.
-   * @returns the settled local result after the project and workbench projections are updated.
+   * @returns the settled local result after the project lists the created document.
    */
   createFromTemplate(
     workspaceId: WorkspaceId,
@@ -857,7 +857,7 @@ export class PaperAIWorkbenchController {
 
   /**
    * Run one Host document-establishing call (import or template start) and
-   * open the resulting Working copy in the Session's workbench.
+   * open its Working copy unless the user has since drafted or navigated.
    */
   private async establishDocument(
     workspaceId: WorkspaceId,
@@ -868,6 +868,7 @@ export class PaperAIWorkbenchController {
     if (!prepared.ok) return prepared.result
     const { entry: project, request } = prepared
     const workbench = this.workbenchEntry(sessionId)
+    const generation = workbench.generation
     if (workbench.store.getSnapshot().action !== null) {
       return this.fail(project.store, 'workbench is busy')
     }
@@ -886,13 +887,20 @@ export class PaperAIWorkbenchController {
     if (opened.document.workspaceId !== workspaceId || opened.document.sessionId !== sessionId) {
       return this.fail(project.store, 'paperaiWorkbench returned a document for another Workspace or Session')
     }
-    this.targets.set(sessionId, { workspaceId, resourceId: opened.document.resourceId })
+    const current = workbench.store.getSnapshot()
+    const show = workbench.generation === generation && !hasUnsavedEdit(current)
     project.store.update((state) => {
-      state.selected = opened.document.resourceId
+      if (show) state.selected = opened.document.resourceId
       state.action = null
       state.actionError = null
     })
-    this.publishOpenResult(workbench.store, opened)
+    if (show) {
+      this.begin(workbench)
+      const retained = this.retain(sessionId, current, opened.document.resourceId)
+      this.targets.set(sessionId, { workspaceId, resourceId: opened.document.resourceId })
+      workbench.store.update((state) => { state.retained = retained })
+      this.publishOpenResult(workbench.store, opened)
+    }
     await this.loadProject(workspaceId)
     return OK
   }

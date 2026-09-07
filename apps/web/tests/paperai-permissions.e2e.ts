@@ -65,13 +65,14 @@ async function readAcpLog(path: string): Promise<AcpLogEntry[]> {
 }
 
 /** Small valid OOXML document sent through the real browser import path. */
-function fixtureDocxBase64(): string {
+function fixtureDocxBase64(withFigureAndTable = false): string {
   return Buffer.from(zipSync({
     '[Content_Types].xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8"?>'
       + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
       + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
       + '<Default Extension="xml" ContentType="application/xml"/>'
+      + (withFigureAndTable ? '<Default Extension="png" ContentType="image/png"/>' : '')
       + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
       + '</Types>',
     ),
@@ -86,8 +87,33 @@ function fixtureDocxBase64(): string {
       + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
       + '<w:p><w:r><w:t>Initial browser paragraph</w:t></w:r></w:p>'
       + '<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p>'
+      + (withFigureAndTable
+        ? '<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid>'
+          + '<w:tr><w:tc><w:tcPr/><w:p><w:r><w:t>Repeated passage</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+          + '<w:p><w:r><w:t>Repeated passage</w:t></w:r></w:p>'
+          + '<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+          + '<wp:extent cx="914400" cy="914400"/><wp:docPr id="1" name="Research figure" descr="Research figure"/>'
+          + '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+          + '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+          + '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+          + '<pic:nvPicPr><pic:cNvPr id="1" name="figure.png"/><pic:cNvPicPr/></pic:nvPicPr>'
+          + '<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdFigure"/>'
+          + '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+          + '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>'
+          + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+          + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+        : '')
       + '<w:sectPr/></w:body></w:document>',
     ),
+    ...(withFigureAndTable ? {
+      'word/_rels/document.xml.rels': strToU8(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + '<Relationship Id="rIdFigure" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/figure.png"/>'
+        + '</Relationships>',
+      ),
+      'word/media/figure.png': Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQyVgDAAHsATleaPIZAAAAAElFTkSuQmCC', 'base64'),
+    } : {}),
   })).toString('base64')
 }
 
@@ -681,6 +707,85 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('button', { name: '项目体检', exact: true }).click()
   }, 90_000)
 
+  it('preserves a newly typed draft when a real Word import response arrives', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-import-draft'))
+    await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
+    await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    await preview.locator('[data-paperai-block]').first().waitFor({ timeout: 20_000 })
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+    await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
+    const ready = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const pattern = '**/api/paperaiWorkbench/importDocument'
+    await page.route(pattern, async (route) => {
+      const response = await route.fetch()
+      ready.resolve(undefined)
+      await release.promise
+      await route.fulfill({ response })
+    })
+    try {
+      const choosing = page.waitForEvent('filechooser')
+      await page.getByRole('button', { name: '导入 Word，自由写', exact: true }).click()
+      await (await choosing).setFiles({
+        name: 'Review figures.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        buffer: Buffer.from(fixtureDocxBase64(true), 'base64'),
+      })
+      await ready.promise
+      await preview.locator('[data-paperai-block]').first().click()
+      const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
+      await editor.fill('导入期间新写的草稿')
+      release.resolve(undefined)
+      await page.getByRole('button', { name: '打开 Review figures.docx', exact: true }).waitFor({ timeout: 20_000 })
+      expect(await editor.inputValue()).toBe('导入期间新写的草稿')
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'import-draft.expected.md'),
+        await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd), MODE)
+      await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '取消', exact: true }).click()
+    } finally {
+      release.resolve(undefined)
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  }, 120_000)
+
+  it('loads embedded figures and edits body text without retargeting a matching table cell', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-table-figure'))
+    await page.getByRole('button', { name: '打开 Review figures.docx', exact: true }).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const figure = preview.locator('img')
+    await figure.waitFor({ timeout: 20_000 })
+    expect(await figure.count()).toBe(1)
+    await expect.poll(() => figure.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const row = overview.documents.find(document => document.fileName === 'Review figures.docx')!
+    const before = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('review-read'), resourceId: row.id })
+    const cell = before.document.nodes.find(node => node.kind === 'table-cell' && node.text === 'Repeated passage' && node.editable)
+    await preview.locator('td').getByText('Repeated passage', { exact: true }).click()
+    const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
+    if (cell === undefined) {
+      await page.getByRole('status').filter({ hasText: '这一段暂时无法在此修改' }).waitFor()
+      expect(await editor.count()).toBe(0)
+    } else {
+      await editor.waitFor()
+      await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '取消', exact: true }).click()
+    }
+    const body = preview.locator('p[data-paperai-block]:not(table p)', { hasText: /^Repeated passage$/u })
+    expect(await body.count()).toBe(1)
+    await body.click()
+    await editor.fill('Only the body paragraph changed')
+    await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存', exact: true }).click()
+    await preview.getByText('Only the body paragraph changed', { exact: true }).waitFor({ timeout: 30_000 })
+    await editor.waitFor({ state: 'hidden' })
+    expect(await preview.locator('td').innerText()).toBe('Repeated passage')
+    await expect.poll(() => figure.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    const after = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('review-read'), resourceId: row.id })
+    expect(after.document.nodes.filter(node => node.kind === 'table-cell').map(node => node.text))
+      .toEqual(before.document.nodes.filter(node => node.kind === 'table-cell').map(node => node.text))
+    expect(after.document.nodes.find(node => node.kind === 'paragraph' && node.text === 'Only the body paragraph changed')).toBeDefined()
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'table-figure.expected.md'), await preview.ariaSnapshot(), MODE)
+  }, 90_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -693,6 +798,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
       'external-update.expected.md',
+      'import-draft.expected.md',
       'model-failure.expected.md',
       'model-menu.expected.md',
       'permission-default.expected.md',
@@ -700,6 +806,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'permission-read-only.expected.md',
       'project-doctor.expected.md',
       'retained-draft.expected.md',
+      'table-figure.expected.md',
       'word-selection.expected.md',
       'word-selection-message.expected.md',
     ])

@@ -156,6 +156,42 @@ describe('PaperAIWorkbenchController projects', () => {
     expect(controller.projectStore(WORKSPACE_ID).getSnapshot().actionError).toContain('another Workspace or Session')
   })
 
+  it.each(['importDocument', 'createFromTemplate'] as const)('preserves a draft typed while %s is pending', async (method) => {
+    const { controller, remote, store } = await openedController()
+    const overview = vi.spyOn(remote, 'overview')
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof remote.importDocument>>>()
+    vi.spyOn(remote, method).mockReturnValueOnce(pending.promise)
+    const starting = method === 'importDocument'
+      ? controller.importDocument(WORKSPACE_ID, SESSION_ID, { fileName: 'new.docx', contentBase64: 'd29yZA==' })
+      : controller.createFromTemplate(WORKSPACE_ID, SESSION_ID, { documentType: 'proposal' })
+    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: true })
+    controller.updateDraft(SESSION_ID, 'Written during import')
+    const current = store.getSnapshot()
+    pending.resolve({ ok: true, value: {
+      status: 'imported', createdCommitId: COMMIT_2,
+      opened: documentOpenResult(REVISION_2, { resourceId: 'document:imported' as never, documentId: 'imported' as never }),
+    } })
+    await expect(starting).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot()).toEqual(current)
+    expect(controller.projectStore(WORKSPACE_ID).getSnapshot()).toMatchObject({ selected: RESOURCE_ID, action: null })
+    expect(overview).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a later document selection when an import completes', async () => {
+    const { controller, remote, store } = await openedController()
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof remote.importDocument>>>()
+    vi.spyOn(remote, 'importDocument').mockReturnValueOnce(pending.promise)
+    const starting = controller.importDocument(WORKSPACE_ID, SESSION_ID, { fileName: 'new.docx', contentBase64: 'd29yZA==' })
+    vi.spyOn(remote, 'open').mockResolvedValueOnce({ ok: true, value: documentOpenResult(undefined, {
+      resourceId: 'document:chosen' as never, documentId: 'chosen' as never,
+    }) })
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, 'document:chosen' as never)
+    pending.resolve({ ok: true, value: { status: 'imported', createdCommitId: COMMIT_2, opened: documentOpenResult(REVISION_2) } })
+    await expect(starting).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().document?.documentId).toBe('chosen')
+    expect(controller.projectStore(WORKSPACE_ID).getSnapshot().selected).toBe('document:chosen')
+  })
+
   it('refuses to start a document while the Session workbench is busy', async () => {
     const remote = successfulRemote()
     let finish!: (value: RemoteResult<PaperAIDocumentCommitResult>) => void

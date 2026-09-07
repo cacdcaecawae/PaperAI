@@ -65,7 +65,9 @@ function sanitize(html: string): { readonly styles: string; readonly body: Node[
   for (const element of parsed.querySelectorAll('*')) {
     for (const attribute of [...element.attributes]) {
       const name = attribute.name.toLowerCase()
-      const scripted = URL_ATTRIBUTES.has(name) && /^\s*(?:javascript|data):/iu.test(attribute.value)
+      const raster = element.tagName === 'IMG' && name === 'src'
+        && /^\s*data:image\/(?:png|jpeg|gif|webp|bmp|avif);base64,/iu.test(attribute.value)
+      const scripted = URL_ATTRIBUTES.has(name) && /^\s*(?:javascript|data):/iu.test(attribute.value) && !raster
       if (name.startsWith('on') || scripted) element.removeAttribute(attribute.name)
     }
   }
@@ -81,30 +83,27 @@ function blocksOf(container: HTMLElement): HTMLElement[] {
 }
 
 /**
- * Pair rendered blocks with editable nodes by text. Equal texts are told
- * apart by position, so repeated boilerplate and blank lines still land on
- * their own nodes; a block nothing matches stays unmapped rather than guessed.
+ * Pair blocks with indexed nodes by text and table-cell membership, consuming
+ * repeated text in reading order. Read-only matches cannot open an editor.
  */
 function mapBlocks(
   blocks: readonly HTMLElement[],
   nodes: readonly PaperAIDocumentNodeSummary[],
 ): Map<HTMLElement, PaperAIDocumentNodeId> {
-  const editable = nodes.filter(node => node.editable)
   const byText = new Map<string, PaperAIDocumentNodeSummary[]>()
-  editable.forEach((node) => {
+  nodes.filter(node => node.kind !== 'table').forEach((node) => {
     const key = normalize(node.text)
     byText.set(key, [...(byText.get(key) ?? []), node])
   })
-  const position = new Map(editable.map((node, index) => [node.nodeId, index]))
   const used = new Set<PaperAIDocumentNodeId>()
   const mapping = new Map<HTMLElement, PaperAIDocumentNodeId>()
-  blocks.forEach((block, index) => {
-    const candidates = (byText.get(normalize(block.textContent)) ?? []).filter(node => !used.has(node.nodeId))
-    if (candidates.length === 0) return
-    const distance = (node: PaperAIDocumentNodeSummary): number => Math.abs((position.get(node.nodeId) ?? 0) - index)
-    const best = candidates.reduce((closest, node) => distance(node) < distance(closest) ? node : closest)
-    used.add(best.nodeId)
-    mapping.set(block, best.nodeId)
+  blocks.forEach((block) => {
+    const cell = block.closest('td, th') !== null
+    const node = byText.get(normalize(block.textContent))?.find(candidate =>
+      !used.has(candidate.nodeId) && (candidate.kind === 'table-cell') === cell)
+    if (node === undefined) return
+    used.add(node.nodeId)
+    if (node.editable) mapping.set(block, node.nodeId)
   })
   return mapping
 }

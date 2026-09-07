@@ -29,7 +29,7 @@
   border-radius: 999px;
   padding: 3px 10px;
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2);
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font: inherit;
