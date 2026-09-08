@@ -36,6 +36,11 @@ export interface AcpSelection {
   readonly configOptions?: Readonly<Record<string, string | boolean>>
 }
 
+/** A requested option rejected by local validation before sending that option to the provider. */
+export class AcpOptionUnavailableError extends Error {
+  override readonly name = 'AcpOptionUnavailableError'
+}
+
 /**
  * A selection the provider rejected part-way. `restored` reports whether every
  * step that had already taken effect was put back, so the provider session
@@ -922,7 +927,7 @@ export class AcpRuntime {
       model.trim() === '' ||
       (!allowUnlisted && !before.models.some(option => option.id === model))
     ) {
-      throw new Error(`${this.provider.name} did not advertise model "${model}"`)
+      throw new AcpOptionUnavailableError(`${this.provider.name} did not advertise model "${model}"`)
     }
     const modelChanges = model !== before.currentModel
     if (!modelChanges && options.reasoningEffort !== undefined) this.assertEffortAdvertised(options.reasoningEffort)
@@ -1024,14 +1029,14 @@ export class AcpRuntime {
   private assertEffortAdvertised(effortId: string): AcpEffortState {
     const effort = this.modelState.effort
     if (effort === undefined || !effort.efforts.some(level => level.id === effortId)) {
-      throw new Error(`${this.provider.name} did not advertise reasoning effort "${effortId}"`)
+      throw new AcpOptionUnavailableError(`${this.provider.name} did not advertise reasoning effort "${effortId}"`)
     }
     return effort
   }
 
   private assertSwitchAdvertised(id: string): AcpSwitchState {
     const current = this.modelState.switches.find(entry => entry.configId === id)
-    if (current === undefined) throw new Error(`${this.provider.name} did not advertise switch "${id}"`)
+    if (current === undefined) throw new AcpOptionUnavailableError(`${this.provider.name} did not advertise switch "${id}"`)
     return current
   }
 
@@ -1058,7 +1063,7 @@ export class AcpRuntime {
   async selectConfigOption(id: string, value: string | boolean): Promise<void> {
     const option = this.optionsState.find(entry => entry.id === id)
     if (option === undefined || isAcpPermissionOption(option))
-      throw new Error(`ACP option ${id} is unavailable or belongs to the permission selector`)
+      throw new AcpOptionUnavailableError(`ACP option ${id} is unavailable or belongs to the permission selector`)
     if (option.category === 'model' && typeof value === 'string') {
       await this.selectModel(value, {}, true)
       return
@@ -1071,7 +1076,7 @@ export class AcpRuntime {
             .flatMap(entry => ('options' in entry ? entry.options : [entry]))
             .some(entry => entry.value === value)
     ) {
-      throw new Error(`ACP option ${id} did not advertise the selected value`)
+      throw new AcpOptionUnavailableError(`ACP option ${id} did not advertise the selected value`)
     }
     this.selectionDepth += 1
     try {

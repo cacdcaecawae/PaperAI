@@ -10,7 +10,7 @@ PaperAI 工作台通过既有 `ui-layout` 服务配置 420–960 px 的详情栏
 
 权限继续由 `@deepseek-ai/dsh-base` 负责。当用户保存的权限默认值以及部署或 profile 配置都没有选择其他 preset 时，新的 PaperAI 会话以 `workspace-write` 和 `ask` 启动：Agent 可以修改所选 Workspace，超出该权限的操作需要请求批准。用户仍可通过标准 DSH 权限选择器主动开启完全访问，并完成既有风险确认；部署方也可以通过明确配置覆盖默认值。
 
-PaperAI 只开放 Codex 和 Claude，默认选择 Codex，并关闭用户 preset 根目录。两者的 ACP 工厂贡献可选路由。ACP 设置页分别展示各渠道的实际连接、安装和握手观测状态。其他 DSH profile 保留随附及用户自建的 preset。
+PaperAI 只开放 Codex 和 Claude，默认选择 Codex，并关闭用户 preset 根目录。已有用户自建 preset 文件仍保留在磁盘上，但不出现在 PaperAI 选择器中。两者的 ACP 工厂贡献可选路由。ACP 设置页分别展示各渠道的实际连接、安装和握手观测状态。其他 DSH profile 保留随附及用户自建的 preset。
 
 使用 `pnpm paperai` 运行源码 profile。profile 自有的 `cordis.patch.yml` 与 DSH home patch 仍然应用在本组合包之上，因此标准 DSH 配置和插件管理继续可用。
 

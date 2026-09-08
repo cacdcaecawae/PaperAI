@@ -129,13 +129,17 @@ class TestPersistence extends SessionPersistence {
 class TestSettings extends SettingsProvider {
   private readonly storedDocument: Record<string, unknown>
 
-  constructor(ctx: Context, options: { readonly document: Record<string, unknown> }) {
+  constructor(ctx: Context, private readonly options: {
+    readonly document: Record<string, unknown>
+    readonly writable: boolean
+    readonly failWrites: boolean
+  }) {
     super(ctx)
     this.storedDocument = structuredClone(options.document)
   }
 
   override get writable(): boolean {
-    return true
+    return this.options.writable
   }
 
   protected override load(): Promise<Record<string, unknown>> {
@@ -143,6 +147,7 @@ class TestSettings extends SettingsProvider {
   }
 
   protected override persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
+    if (this.options.failWrites) return Promise.reject(new Error('Settings storage unavailable'))
     this.storedDocument[ns] = structuredClone(section)
     return Promise.resolve()
   }
@@ -226,6 +231,8 @@ async function mountHarness(options: {
   readonly approvalOutcome?: ApprovalOutcome
   readonly records?: Map<string, StoredSession>
   readonly settingsDocument?: Record<string, unknown>
+  readonly settingsWritable?: boolean
+  readonly settingsFailWrites?: boolean
   readonly writePath?: (workspaceRoot: string, fallbackRoot: string) => string
 } = {}): Promise<Harness> {
   const scratchRoot = await mkdtemp(join(homedir(), 'paperai-agent-acp-'))
@@ -274,7 +281,11 @@ async function mountHarness(options: {
     })
   }
   if (options.settingsDocument !== undefined) {
-    await ctx.plugin(TestSettings, { document: options.settingsDocument })
+    await ctx.plugin(TestSettings, {
+      document: options.settingsDocument,
+      writable: options.settingsWritable ?? true,
+      failWrites: options.settingsFailWrites ?? false,
+    })
   }
   const commonEnv = {
     FAKE_ACP_LOG: logPath,
@@ -404,6 +415,136 @@ async function runLifecycleProbe(action: 'dispose' | 'startup-rollback'): Promis
 }
 
 describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
+  it('migrates stored legacy credentials before editing and never resurrects cleared values', async () => {
+    const harness = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: {
+      codex: { apiKey: 'old-codex-key', env: { LEGACY_SECRET: 'old-env' }, baseURL: 'https://legacy.example' },
+      claude: { apiKey: 'old-claude-key' },
+      providers: { codex: { apiKey: 'new-codex-key' } },
+    } } })
+    const descriptor = () => harness.ctx.settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)!
+    await expect.poll(() => descriptor().user).toEqual({ providers: {
+      codex: { apiKey: 'new-codex-key', env: { LEGACY_SECRET: 'old-env' }, baseURL: 'https://legacy.example' },
+      claude: { apiKey: 'old-claude-key' },
+    } })
+    await Promise.all([createAgent(harness, 'migrated-codex'), createAgent(harness, 'migrated-claude', 'claude')])
+    const initialized = (await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')
+    expect(initialized.find(entry => entry.label === 'codex')?.environment).toMatchObject({ openAiApiKey: 'new-codex-key' })
+    expect(initialized.find(entry => entry.label === 'claude')?.environment).toMatchObject({ anthropicApiKey: 'old-claude-key' })
+    const wire = JSON.stringify(harness.ctx.settings.describe({ redactSecrets: true }))
+    for (const secret of ['old-codex-key', 'new-codex-key', 'old-claude-key', 'old-env']) expect(wire).not.toContain(secret)
+    await harness.ctx.settings.mutate(ACP_AGENT_SETTINGS_NAMESPACE, [
+      { op: 'unset', path: ['providers', 'codex', 'apiKey'] },
+      { op: 'unset', path: ['providers', 'codex', 'env'] },
+    ])
+    const restarted = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: descriptor().user } })
+    const provider = restarted.ctx.paperAiAcpAgents.providers().find(entry => entry.id === 'codex')!
+    expect(provider.env).not.toHaveProperty('OPENAI_API_KEY')
+    expect(provider.env).not.toHaveProperty('LEGACY_SECRET')
+    expect(provider.env).toHaveProperty('OPENAI_BASE_URL', 'https://legacy.example')
+  })
+
+  it('starts with custom model defaults and skips obsolete effort, switch and session preferences', async () => {
+    const harness = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: {
+      model: 'private-model', reasoningEffort: 'obsolete', switches: { removed: true, fast: true },
+      configOptions: { removed: 'old', effort: 'high', mode: 'agent-full-access' },
+    } } } } })
+    const handle = await createAgent(harness, 'optional-defaults')
+    expect(handle.agent.modelController).toMatchObject({ currentModel: 'private-model', currentReasoningEffort: 'high' })
+    expect(handle.agent.modelController?.switches).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fast', enabled: true })]))
+    const writes = (await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option')
+    expect(writes.map(entry => [entry.configId, entry.value])).toEqual([['model', 'private-model'], ['fast', true], ['effort', 'high']])
+    await runTurn(handle, 'Use the custom provider model')
+    expect(handle.agent.session.events.findLast(event => event.type === 'turn/end')?.data.reason).toEqual({ kind: 'completed' })
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+  })
+
+  it.each(['read-only', 'write-failure'])('keeps legacy credentials usable and redacted with %s settings', async (mode) => {
+    const harness = await mountHarness({
+      settingsWritable: mode !== 'read-only', settingsFailWrites: mode === 'write-failure',
+      settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: { codex: { apiKey: 'retained-legacy-key' } } },
+    })
+    const handle = await createAgent(harness, `legacy-${mode}`)
+    expect(harness.ctx.paperAiAcpAgents.providers()[0]?.env).toHaveProperty('OPENAI_API_KEY', 'retained-legacy-key')
+    expect(harness.ctx.settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)?.user)
+      .toEqual({ codex: { apiKey: 'retained-legacy-key' } })
+    expect(JSON.stringify(harness.ctx.settings.describe({ redactSecrets: true }))).not.toContain('retained-legacy-key')
+    await runTurn(handle, 'Continue the configured account')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+  })
+
+  it('settles cancellation while an optional startup model request is pending', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_NEVER_SET_CONFIG: 'pending-default' }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { model: 'pending-default' } } },
+    } })
+    const signal = new AbortController()
+    const creating = expect(harness.ctx.agents.create({
+      sessionId: SessionId('cancel-default'), factoryRoute: 'codex', meta: { cwd: harness.root }, signal: signal.signal,
+    })).rejects.toThrow('Cancel optional default')
+    await expect.poll(async () => (await readLog(harness.logPath)).some(entry => entry.event === 'set-config-option')).toBe(true)
+    signal.abort(new Error('Cancel optional default'))
+    await expectResolvesWithin(creating, 5_000)
+    expect(harness.ctx.agents.get(SessionId('cancel-default'))).toBeUndefined()
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()[0]?.connected).toBe(false)
+  })
+
+  it('keeps a usable session when the provider rejects a default and restores its selection', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'retired-model' }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { model: 'retired-model', reasoningEffort: 'high' } } },
+    } })
+    const handle = await createAgent(harness, 'rejected-default')
+    expect(handle.agent.modelController).toMatchObject({ currentModel: 'fake-alpha', currentReasoningEffort: 'high' })
+    await runTurn(handle, 'Continue with the available model')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(1)
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+  })
+
+  it('refuses startup when a rejected preference cannot restore the provider configuration', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high,medium' }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { reasoningEffort: 'high' } } },
+    } })
+    await expect(createAgent(harness, 'broken-default-rollback')).rejects.toMatchObject({ restored: false })
+    expect(harness.ctx.agents.get(SessionId('broken-default-rollback'))).toBeUndefined()
+  })
+
+  it.each(['completed', 'cancelled'])('bounds streaming tool progress and retains the final output when %s', async (outcome) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_STREAM_TOOL: outcome, FAKE_ACP_STOP_REASON: outcome === 'cancelled' ? 'cancelled' : 'end_turn' } })
+    const handle = await createAgent(harness, `streaming-${outcome}`)
+    await runTurn(handle, 'Read a long terminal output')
+    const progress = handle.agent.session.events.filter(event => event.type === 'tool/progress')
+    expect(progress).toHaveLength(2)
+    expect(progress.map(event => JSON.parse(event.data.arguments) as { status: string })).toMatchObject([
+      { status: 'in_progress' }, { status: outcome === 'completed' ? 'completed' : 'in_progress' },
+    ])
+    const last = JSON.parse(progress.at(-1)!.data.arguments) as { output: string; truncated: boolean }
+    expect(last.output).toContain(`399 ${'x'.repeat(250)}\n`)
+    expect(last.truncated).toBe(true)
+    expect(Buffer.byteLength(last.output)).toBeLessThanOrEqual(65_536)
+    expect(Buffer.byteLength(JSON.stringify(handle.agent.session.events))).toBeLessThan(180_000)
+    if (outcome === 'completed') expect(handle.agent.session.events.find(event => event.type === 'tool/result')?.data.message.content)
+      .toMatchObject([{ type: 'tool-result', content: [{ type: 'text', text: last.output }] }])
+  })
+
+  it('keeps startup and diagnostics across prompt preferences but cancels for launch changes', async () => {
+    const harness = await mountHarness({ settingsDocument: {} })
+    const gate = join(harness.root, 'startup-gate')
+    await writeFile(gate, 'hold')
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { env: { FAKE_ACP_STARTUP_GATE_FILE: gate } } } })
+    const creating = Promise.allSettled([createAgent(harness, 'preference-startup')])
+    await expect.poll(async () => (await readLog(harness.logPath)).some(entry => entry.event === 'new-session')).toBe(true)
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { language: '中文', personalPrompt: 'Be concise.', name: 'My Codex' } } })
+    await expect.poll(() => harness.ctx.paperAiAcpAgents.providers()[0]?.language).toBe('中文')
+    await rm(gate)
+    const [created] = await creating
+    expect(created?.status).toBe('fulfilled')
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()[0]?.status).toBe('ready')
+    await writeFile(gate, 'hold')
+    const cancelled = expect(createAgent(harness, 'launch-changed')).rejects.toThrow()
+    await expect.poll(async () => (await readLog(harness.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(2)
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { apiKey: 'replacement-key' } } })
+    await cancelled
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()[0]?.status).toBe('discovered')
+  })
+
   it('creates through an exact route and selects only an advertised provider model', async () => {
     const harness = await mountHarness()
     expect(harness.ctx.agents.hasFactoryRoute('codex')).toBe(true)

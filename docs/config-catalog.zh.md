@@ -3314,6 +3314,10 @@ export interface AcpConfig {
   readonly installationDirectory?: string
   /** Channel overrides keyed only by codex or claude. */
   readonly providers?: Record<string, AcpProviderConfig>
+  /** Legacy launch settings, migrated into providers.codex when user settings are writable. */
+  readonly codex?: AcpProviderConfig | null
+  /** Legacy launch settings, migrated into providers.claude when user settings are writable. */
+  readonly claude?: AcpProviderConfig | null
 }
 
 /** Launch and defaults for one separately configured ACP instance. */
@@ -3336,13 +3340,13 @@ export interface AcpProviderConfig {
   readonly baseURL?: string
   /** Proxy URL applied to HTTP, HTTPS, and ALL_PROXY. */
   readonly proxy?: string
-  /** Initial provider model id for new sessions. */
+  /** Preferred model for new sessions; custom ids are validated by the provider. */
   readonly model?: string
-  /** Initial advertised reasoning level. */
+  /** Preferred reasoning level; unavailable defaults warn and retain the provider selection. */
   readonly reasoningEffort?: string
-  /** Initial boolean driver options. */
+  /** Preferred boolean driver options; unavailable defaults warn and are skipped. */
   readonly switches?: Record<string, boolean>
-  /** Initial advertised session options excluding standing permission modes. */
+  /** Preferred session options; unavailable values and standing permission modes warn and are skipped. */
   readonly configOptions?: Record<string, string | boolean>
   /** Model ids promoted in this channel's model picker. */
   readonly favoriteModels?: string[]
@@ -3373,7 +3377,7 @@ export interface AcpSshConfig {
 }
 ```
 
-来源： [`packages/paperai/agent-acp/src/index.ts:61`](../packages/paperai/agent-acp/src/index.ts)
+来源： [`packages/paperai/agent-acp/src/index.ts:63`](../packages/paperai/agent-acp/src/index.ts)
 
 <a id="paperaidocument-engine-officecli"></a>
 

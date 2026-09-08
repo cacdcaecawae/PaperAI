@@ -1,6 +1,7 @@
 /** ACP templates and instance configuration, independent of conversation state. */
 
 import z from '@deepseek-ai/schemastery'
+import { createHash } from 'node:crypto'
 import type { AcpProviderDefinition } from './runtime.ts'
 import { sshLaunch, type AcpSshConfig } from './ssh.ts'
 
@@ -24,13 +25,13 @@ export interface AcpProviderConfig {
   readonly baseURL?: string
   /** Proxy URL applied to HTTP, HTTPS, and ALL_PROXY. */
   readonly proxy?: string
-  /** Initial provider model id for new sessions. */
+  /** Preferred model for new sessions; custom ids are validated by the provider. */
   readonly model?: string
-  /** Initial advertised reasoning level. */
+  /** Preferred reasoning level; unavailable defaults warn and retain the provider selection. */
   readonly reasoningEffort?: string
-  /** Initial boolean driver options. */
+  /** Preferred boolean driver options; unavailable defaults warn and are skipped. */
   readonly switches?: Record<string, boolean>
-  /** Initial advertised session options excluding standing permission modes. */
+  /** Preferred session options; unavailable values and standing permission modes warn and are skipped. */
   readonly configOptions?: Record<string, string | boolean>
   /** Model ids promoted in this channel's model picker. */
   readonly favoriteModels?: string[]
@@ -68,6 +69,10 @@ export interface AcpConfig {
   readonly installationDirectory?: string
   /** Channel overrides keyed only by codex or claude. */
   readonly providers?: Record<string, AcpProviderConfig>
+  /** Legacy launch settings, migrated into providers.codex when user settings are writable. */
+  readonly codex?: AcpProviderConfig | null
+  /** Legacy launch settings, migrated into providers.claude when user settings are writable. */
+  readonly claude?: AcpProviderConfig | null
 }
 
 /** Public template metadata; installation operations use these declared packages only. */
@@ -108,12 +113,44 @@ export const AcpProviderConfigSchema: z<AcpProviderConfig> = z.object({
 })
 
 /**
+ * Move legacy channel fields under providers without mutating the stored input.
+ * @param config - schema-validated ACP settings; canonical fields take precedence.
+ * @returns settings with legacy fields removed and their credentials preserved.
+ */
+export function migrateProviders(config: AcpConfig): AcpConfig {
+  if (config.codex === undefined && config.claude === undefined) return config
+  const { codex, claude, ...current } = config
+  const providers = { ...current.providers }
+  for (const [id, legacy] of Object.entries({ codex, claude })) {
+    if (legacy == null) continue
+    const canonical = providers[id]
+    providers[id] = {
+      ...legacy, ...canonical,
+      ...(legacy.env === undefined && canonical?.env === undefined ? {} : { env: { ...legacy.env, ...canonical?.env } }),
+    }
+  }
+  return { ...current, providers }
+}
+
+/**
+ * Identify settings that affect adapter startup and isolated operations.
+ * @param provider - resolved channel, including private launch values.
+ * @returns a digest excluding display names and prompt-only preferences.
+ */
+export function providerLaunchKey(provider: AcpProviderDefinition): string {
+  return createHash('sha256').update(JSON.stringify([
+    provider.id, provider.enabled, provider.packageName, provider.binName,
+    provider.command, provider.args, provider.env, provider.ssh, provider.permissionModes,
+  ])).digest('hex')
+}
+
+/**
  * Resolve templates and instance overrides without opening files or spawning processes.
  * @param config - resolved settings, including secret launch values.
  * @returns Codex and Claude with their configured launch values.
  */
 export function resolveProviders(config: AcpConfig): AcpProviderDefinition[] {
-  if ('codex' in config || 'claude' in config) throw new Error('ACP settings use providers.codex and providers.claude; the previous top-level format is not supported')
+  config = migrateProviders(config)
   for (const id of Object.keys(config.providers ?? {})) {
     if (!ACP_TEMPLATES.some(template => template.id === id)) throw new Error(`ACP currently supports only Codex and Claude: ${id}`)
   }

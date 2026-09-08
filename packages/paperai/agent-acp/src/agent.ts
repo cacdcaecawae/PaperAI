@@ -127,6 +127,7 @@ interface ToolProjection {
   name: string
   title: string
   resultWritten: boolean
+  progressPending: boolean
   display: AcpToolDisplay
   images: ContentBlock[]
 }
@@ -239,6 +240,7 @@ class AcpTurnProjection {
 
   async finish(response: PromptResponse, interrupted: boolean): Promise<void> {
     await this.pending
+    for (const tool of this.tools.values()) if (tool.progressPending) this.writeToolProgress(tool, false)
     interrupted ||= this.failure !== undefined
     for (const state of this.text) {
       const block: ContentBlock = { type: state.type, text: state.value }
@@ -313,6 +315,7 @@ class AcpTurnProjection {
         name,
         title: update.title?.trim() || name,
         resultWritten: false,
+        progressPending: false,
         images: [],
         display: {
           name,
@@ -333,6 +336,7 @@ class AcpTurnProjection {
       projected.title = update.title?.trim() || projected.title
     }
     const display = projected.display
+    const previousStatus = display.status
     display.name = projected.name
     display.title = projected.title
     display.kind = update.kind ?? display.kind
@@ -366,13 +370,8 @@ class AcpTurnProjection {
     display.output = retained.text
     display.truncated =
       retained.truncated || (update.rawOutput === undefined && update.content == null && display.truncated)
-    this.session.append(first ? 'tool/call' : 'tool/progress', {
-      turn: this.turn,
-      step: this.step,
-      callId: projected.callId,
-      name: ACP_TOOL,
-      arguments: argumentsText(display),
-    })
+    projected.progressPending = true
+    if (first || previousStatus !== display.status) this.writeToolProgress(projected, first)
     if (projected.resultWritten || (update.status !== 'completed' && update.status !== 'failed')) return
     projected.resultWritten = true
     const isError = update.status === 'failed'
@@ -398,6 +397,17 @@ class AcpTurnProjection {
       },
       { surfaceOp: 'append' },
     )
+  }
+
+  private writeToolProgress(tool: ToolProjection, first: boolean): void {
+    this.session.append(first ? 'tool/call' : 'tool/progress', {
+      turn: this.turn,
+      step: this.step,
+      callId: tool.callId,
+      name: ACP_TOOL,
+      arguments: argumentsText(tool.display),
+    })
+    tool.progressPending = false
   }
 
   private usage(response: PromptResponse): TokenUsage | undefined {
@@ -623,11 +633,11 @@ export class AcpAgent implements Agent {
     await this.withModelRuntime(async (runtime) => {
       try {
         await runtime.selectConfigOption(id, value)
-        await this.syncSandboxMode()
       } catch (error: unknown) {
-        this.runtimeNeedsRestart = true
+        if (error instanceof AcpSelectionError && !error.restored) this.runtimeNeedsRestart = true
         throw error
       }
+      await this.syncSandboxMode()
     })
   }
 
@@ -1072,8 +1082,8 @@ export class AcpAgent implements Agent {
         this.recordProviderState()
       } finally {
         const interrupted = signal.aborted || response?.stopReason === 'cancelled'
-        await projection.finish(response ?? { stopReason: 'cancelled' }, interrupted || response === undefined)
         this.activeProjection = undefined
+        await projection.finish(response ?? { stopReason: 'cancelled' }, interrupted || response === undefined)
       }
       if (response.stopReason === 'max_tokens') reason = { kind: 'max-tokens' }
       if (signal.aborted || response.stopReason === 'cancelled') {

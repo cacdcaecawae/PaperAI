@@ -1,6 +1,5 @@
 /** Adapter discovery, cached model metadata, and bounded prompt-free ACP diagnostics. */
 
-import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { InitializeResponse } from '@agentclientprotocol/sdk'
 import { AcpRuntime, discoverAdapter, ISOLATED_ACP_CALLBACKS, type AcpProviderDefinition, type AcpSessionStart } from './runtime.ts'
 import type { AcpDiagnostic, AcpDiagnosticLimits } from './diagnostic-types.ts'
+import { providerLaunchKey } from './providers.ts'
 
 /**
  * Project advertised features without extension metadata or authentication environment values.
@@ -35,10 +35,6 @@ export function diagnosticCapabilities(initialized: InitializeResponse): Pick<Ac
   }
 }
 
-function providerKey(provider: AcpProviderDefinition): string {
-  return createHash('sha256').update(JSON.stringify(provider)).digest('hex')
-}
-
 /** Per-plugin diagnostic cache; it never owns or shares a conversation's ACP process. */
 export class AcpDiagnostics {
   private readonly cache = new Map<string, { readonly key: string; readonly result: AcpDiagnostic }>()
@@ -55,7 +51,7 @@ export class AcpDiagnostics {
    */
   read(provider: AcpProviderDefinition): AcpDiagnostic {
     const cached = this.cache.get(provider.id)
-    if (cached?.key === providerKey(provider)) return cached.result
+    if (cached?.key === providerLaunchKey(provider)) return cached.result
     try {
       return { provider: provider.id, ...discoverAdapter(provider), status: 'discovered', models: [], checkedAt: null, retryAt: null, error: null, agentVersion: null, elapsedMs: null }
     } catch {
@@ -78,7 +74,7 @@ export class AcpDiagnostics {
       agentVersion: started.initialized.agentInfo?.version ?? null, elapsedMs,
       stage: 'session', ...diagnosticCapabilities(started.initialized),
     }
-    if (!this.lifetime.signal.aborted) this.cache.set(provider.id, { key: providerKey(provider), result })
+    if (!this.lifetime.signal.aborted) this.cache.set(provider.id, { key: providerLaunchKey(provider), result })
     return result
   }
 
@@ -91,7 +87,7 @@ export class AcpDiagnostics {
    */
   probe(provider: AcpProviderDefinition, limits: AcpDiagnosticLimits, force: boolean): Promise<AcpDiagnostic> {
     this.lifetime.signal.throwIfAborted()
-    const key = providerKey(provider)
+    const key = providerLaunchKey(provider)
     const pending = this.pending.get(key)
     if (pending !== undefined) return pending.result
     const current = this.read(provider)
@@ -135,7 +131,7 @@ export class AcpDiagnostics {
    */
   promptSucceeded(provider: AcpProviderDefinition): void {
     const cached = this.cache.get(provider.id)
-    if (cached?.key === providerKey(provider)) this.cache.set(provider.id, { ...cached, result: { ...cached.result, stage: 'prompt' } })
+    if (cached?.key === providerLaunchKey(provider)) this.cache.set(provider.id, { ...cached, result: { ...cached.result, stage: 'prompt' } })
   }
 
   private async run(provider: AcpProviderDefinition, limits: AcpDiagnosticLimits, callerSignal: AbortSignal): Promise<AcpDiagnostic> {
@@ -170,7 +166,7 @@ export class AcpDiagnostics {
         agentVersion: initialized.agentInfo?.version ?? null, elapsedMs: Date.now() - began,
         stage: 'handshake', ...diagnosticCapabilities(initialized),
       }
-      this.cache.set(provider.id, { key: providerKey(provider), result })
+      this.cache.set(provider.id, { key: providerLaunchKey(provider), result })
       return result
     } catch (cause) {
       if (lifetime.aborted) throw cause
@@ -181,7 +177,7 @@ export class AcpDiagnostics {
           : /ENOENT|Cannot find module|does not expose/iu.test(text) ? 'unavailable' : 'protocol',
         elapsedMs: Date.now() - began,
       }
-      if (this.cache.get(provider.id) === previous) this.cache.set(provider.id, { key: providerKey(provider), result })
+      if (this.cache.get(provider.id) === previous) this.cache.set(provider.id, { key: providerLaunchKey(provider), result })
       return this.read(provider)
     } finally {
       clearTimeout(timer)

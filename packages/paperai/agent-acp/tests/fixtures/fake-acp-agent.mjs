@@ -419,6 +419,25 @@ function makeAgent(connection) {
         ]
         for (const update of updates) await connection.sessionUpdate({ sessionId: params.sessionId, update })
       }
+      const streamTool = process.env.FAKE_ACP_STREAM_TOOL
+      if (streamTool !== undefined) {
+        await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call', toolCallId: 'streaming-tool', name: 'terminal', title: 'Streaming output', kind: 'execute', status: 'pending',
+        } })
+        await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', status: 'in_progress',
+        } })
+        let output = ''
+        for (let index = 0; index < Number(process.env.FAKE_ACP_STREAM_UPDATES ?? 400); index++) {
+          output += `${String(index).padStart(3, '0')} ${'x'.repeat(250)}\n`
+          await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+            sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', rawOutput: output,
+          } })
+        }
+        if (streamTool === 'completed') await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', status: 'completed',
+        } })
+      }
       if (process.env.FAKE_ACP_FULL_UPDATES === '1') {
         await connection.sessionUpdate({
           sessionId: params.sessionId,

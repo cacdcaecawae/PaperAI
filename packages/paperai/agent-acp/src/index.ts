@@ -14,7 +14,7 @@ import { hostname } from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { Context, Service } from '@deepseek-ai/cordis'
-import { ACP_TEMPLATES, AcpProviderConfigSchema, resolveProviders, type AcpConfig } from './providers.ts'
+import { ACP_TEMPLATES, AcpProviderConfigSchema, migrateProviders, providerLaunchKey, resolveProviders, type AcpConfig, type AcpProviderConfig } from './providers.ts'
 import {
   emitAgentEvent,
   type AgentFactory,
@@ -36,6 +36,8 @@ import type {
 } from './diagnostic-types.ts'
 import {
   AcpRuntime,
+  AcpSelectionError,
+  AcpOptionUnavailableError,
   ISOLATED_ACP_CALLBACKS,
   providerHost,
   resolveLaunch,
@@ -60,6 +62,7 @@ declare module '@deepseek-ai/cordis' {
 /** ACP instance directory and deployment limits. */
 export type Config = AcpConfig
 export type { AcpProviderConfig } from './providers.ts'
+const legacyProviderConfig = z({ type: 'object', dict: { ...AcpProviderConfigSchema.dict } })
 /** Validated runtime configuration and structurally redacted settings schema. */
 export const Config: z<Config> = z.object({
   probeTimeoutMs: z.number().min(1).default(15_000),
@@ -73,6 +76,8 @@ export const Config: z<Config> = z.object({
   installTimeoutMs: z.number().min(1).default(600_000),
   installationDirectory: z.string(),
   providers: z.dict(AcpProviderConfigSchema),
+  codex: legacyProviderConfig,
+  claude: legacyProviderConfig,
 })
 /** Shared settings namespace for ACP launch credentials and instance preferences. */
 export const ACP_AGENT_SETTINGS_NAMESPACE = settingsNamespace('paperai-acp-agents')
@@ -157,7 +162,7 @@ export class PaperAiAcpAgents extends Service {
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paperAiAcpAgents')
-    this.configSource = () => config
+    this.configSource = () => migrateProviders(config)
     this.diagnostics = new AcpDiagnostics(ctx)
     ctx.effect(() => () => this.diagnostics.dispose(), 'paperAiAcpAgents.diagnostics()')
     ctx.effect(() => () => this.disposeFactories(), 'paperAiAcpAgents.lifecycles()')
@@ -223,7 +228,7 @@ export class PaperAiAcpAgents extends Service {
     })
     installSettingsSection(ctx, ACP_AGENT_SETTINGS_NAMESPACE, Config, config, {
       setSource: (source) => {
-        this.configSource = source
+        this.configSource = () => migrateProviders(source())
       },
       onChange: () => {
         this.syncRoutes()
@@ -233,15 +238,32 @@ export class PaperAiAcpAgents extends Service {
         resolveProviders(value)
       },
     })
+    ctx.inject(['settings'], async (sctx) => {
+      const descriptor = sctx.settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)
+      // Registration has validated this raw document through Config; keep defaults out of the persisted user layer.
+      const user = descriptor?.user as Config | undefined
+      if (user === undefined || (user.codex === undefined && user.claude === undefined)) return
+      if (!sctx.settings.writable) {
+        sctx.logger.warn('ACP legacy settings are readable; writable settings are required to persist their migration')
+        return
+      }
+      try {
+        await sctx.settings.replace(ACP_AGENT_SETTINGS_NAMESPACE, migrateProviders(user), descriptor?.revision)
+      } catch {
+        // A failed or concurrent settings write leaves the legacy document readable and its secrets intact.
+        sctx.logger.warn('ACP settings migration was not saved; legacy settings remain active until the next settings reload')
+      }
+    })
   }
 
   private syncRoutes(): void {
     const providers = this.providers()
+    const revisions = new Map<string, string>(providers.map(provider => [provider.id, providerLaunchKey(provider)]))
     for (const [id, previous] of this.providerRevisions) {
-      if (previous === JSON.stringify(providers.find(provider => provider.id === id))) continue
+      if (previous === revisions.get(id)) continue
       this.cancelOperation(id)
     }
-    this.providerRevisions = new Map(providers.map(provider => [provider.id, JSON.stringify(provider)]))
+    this.providerRevisions = revisions
     const enabled = providers.filter(provider => provider.enabled)
     for (const [id, dispose] of this.routes) {
       if (enabled.some(provider => provider.id === id)) continue
@@ -755,19 +777,14 @@ export class PaperAiAcpAgents extends Service {
       const started = await raceAbort(agent.start(abort.signal), abort.signal, id)
       this.diagnostics.remember(provider, started, Date.now() - startedAt)
       const defaults = 'resumeSessionId' in options ? undefined : this.configSource().providers?.[provider.id]
-      const requestedModel = options.agentOptions?.model ?? ('resumeSessionId' in options ? undefined : defaults?.model)
-      if (requestedModel !== undefined || defaults?.reasoningEffort !== undefined || defaults?.switches !== undefined) {
-        await raceAbort(
-          agent.modelController.selectModel(requestedModel ?? agent.modelController.currentModel, {
-            ...(defaults?.reasoningEffort === undefined ? {} : { reasoningEffort: defaults.reasoningEffort }),
-            ...(defaults?.switches === undefined ? {} : { switches: defaults.switches }),
-          }),
-          abort.signal,
-          id,
-        )
+      const requestedModel = options.agentOptions?.model
+      if (requestedModel !== undefined)
+        await raceAbort(agent.modelController.selectModel(requestedModel), abort.signal, id)
+      if (defaults !== undefined) {
+        const preferences = { ...defaults }
+        if (requestedModel !== undefined) delete preferences.model
+        await raceAbort(this.applyDefaults(agent, preferences, abort.signal), abort.signal, id)
       }
-      for (const [key, value] of Object.entries(defaults?.configOptions ?? {}))
-        await raceAbort(agent.selectConfigOption(key, value), abort.signal, id)
       const setupCommit = await raceAbort(options.setup?.(agent.ctx), abort.signal, id)
       setupCommit?.commit()
       await raceAbort(agent.syncSandboxMode(abort.signal), abort.signal, id)
@@ -794,6 +811,33 @@ export class PaperAiAcpAgents extends Service {
       this.ctx.emit('paperai/acp-changed', id)
       preparation[Symbol.dispose]()
     }
+  }
+
+  private async applyDefaults(agent: AcpAgent, defaults: AcpProviderConfig, signal: AbortSignal): Promise<void> {
+    const apply = async (id: string | undefined, value: string | boolean, label: string): Promise<void> => {
+      signal.throwIfAborted()
+      const warn = (): void => {
+        this.ctx.logger.warn('%s ACP default %s is unavailable; keeping the provider selection', agent.provider.id, label)
+      }
+      if (id === undefined) {
+        warn()
+        return
+      }
+      try {
+        await agent.selectConfigOption(id, value)
+      } catch (error: unknown) {
+        signal.throwIfAborted()
+        if (!agent.connected
+          || !(error instanceof AcpOptionUnavailableError || (error instanceof AcpSelectionError && error.restored))) throw error
+        warn()
+      }
+    }
+    if (defaults.model !== undefined)
+      await apply(agent.details().options.find(option => option.category === 'model')?.id, defaults.model, 'model')
+    if (defaults.reasoningEffort !== undefined)
+      await apply(agent.details().options.find(option => option.category === 'thought_level')?.id, defaults.reasoningEffort, 'reasoning effort')
+    for (const [key, value] of Object.entries(defaults.switches ?? {})) await apply(key, value, 'switch')
+    for (const [key, value] of Object.entries(defaults.configOptions ?? {})) await apply(key, value, 'session option')
   }
 
   private async disposeFactories(): Promise<void> {
