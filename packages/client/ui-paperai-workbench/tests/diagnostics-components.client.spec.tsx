@@ -30,14 +30,16 @@ function agentProps(agents: readonly PaperAIAgentDiagnostic[] = []): AgentDiagno
 }
 
 describe('Agent diagnostics interactions', () => {
-  it('shows the live connection status without treating a successful past probe as connected', () => {
+  it('shows diagnostics independently of another conversation using the same provider', () => {
     const props = agentProps([{ ...discovered, status: 'ready', connected: false }])
     const view = render(<AgentDiagnostics {...props} />)
-    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('未连接')
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('检测通过')
     view.rerender(<AgentDiagnostics {...agentProps([{ ...discovered, connected: true }])} />)
-    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('已连接')
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('待检测')
     view.rerender(<AgentDiagnostics {...agentProps([{ ...discovered, connected: true }])} connecting />)
-    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('未连接')
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('连接中')
+    view.rerender(<AgentDiagnostics {...agentProps([{ ...discovered, status: 'error', connected: true }])} />)
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('检测失败')
   })
   it('keeps metadata behind a disclosure and requests a probe only on an explicit action', () => {
     const props = agentProps([discovered])

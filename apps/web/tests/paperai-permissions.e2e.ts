@@ -353,10 +353,12 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(async () => (await readAcpLog(acpLogPath)).filter(entry => entry.event === 'initialize').length)
       .toBeGreaterThan(before.filter(entry => entry.event === 'initialize').length)
     await details.getByRole('button', { name: '检测 / 重试', exact: true }).waitFor()
+    const diagnostic = page.getByRole('button', { name: 'Agent 状态', exact: true })
+    await expect.poll(() => diagnostic.textContent()).toBe('检测通过')
     expect(await model.getAttribute('aria-label')).toBe(selected)
     expect((await readAcpLog(acpLogPath)).slice(before.length).filter(entry => entry.event === 'prompt')).toEqual([])
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-diagnostics.expected.md'),
-      await details.getByText('历史模型预览 · 连接完成后再选择', { exact: true }).ariaSnapshot(), MODE)
+      [await diagnostic.ariaSnapshot(), await details.getByText('历史模型预览 · 连接完成后再选择', { exact: true }).ariaSnapshot()].join('\n'), MODE)
     await page.getByRole('button', { name: 'Agent 状态', exact: true }).click()
   }, 60_000)
 
