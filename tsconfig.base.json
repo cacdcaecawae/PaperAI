@@ -28,6 +28,9 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@paperai/ui-acp": ["./packages/client/ui-paperai-acp/src/index.ts"],
+      "@paperai/ui-acp/client": ["./packages/client/ui-paperai-acp/src/client/index.ts"],
+      "@paperai/ui-acp/invariant": ["./packages/client/ui-paperai-acp/src/invariant.ts"],
       "@deepseek-ai/cordis": ["./vendor/cordis/src"],
       "@deepseek-ai/cosmokit": ["./vendor/cosmokit/src"],
       "@deepseek-ai/schemastery": ["./vendor/schemastery/src"],

@@ -1,5 +1,7 @@
-- button "Tool call paperai.edit · introduction" [expanded]:
+- button "Tool call Edit before cancellation" [expanded]:
   - img
-  - text: Tool call paperai.edit · introduction
+  - text: Tool call Edit before cancellation
 - text: "IN { \"section\": \"introduction\" } OUT {\"changedParagraphs\":1}"
 - button "Inspect"
+- button "图片，点击查看原图":
+  - img "图片"

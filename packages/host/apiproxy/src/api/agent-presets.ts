@@ -72,7 +72,7 @@ export interface AgentPresetsApi {
    * identity through the target factory; replacement failure restores the
    * recorded route and composition.
    */
-  select(request: RpcRequest<{ sessionId: SessionId; agentPreset: string }>):
+  select(request: RpcRequest<{ sessionId: SessionId; agentPreset: string }>, signal?: AbortSignal):
   Promise<RpcResponse<{ agentPreset: string }>>
 
   /**

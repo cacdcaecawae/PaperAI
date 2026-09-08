@@ -241,6 +241,7 @@ export const toolDefinition: ConversationNodeDefinition<ToolState> = {
     if (event.type === 'tool/result' && isAppendSurfaceEvent(event)) {
       return { id: String(event.data.message.source.callId), role: 'update' }
     }
+    if (event.type === 'tool/progress') return { id: String(event.data.callId), role: 'update' }
     if (event.type === 'tool/code-dispatch-start' || event.type === 'tool/code-dispatch') {
       const rootCallId: unknown = event.data.rootCallId
       return typeof rootCallId === 'string' && rootCallId !== ''
@@ -251,6 +252,12 @@ export const toolDefinition: ConversationNodeDefinition<ToolState> = {
   },
   start: (_context, match) => ({ root: rootCall(match), children: new Map(), parents: new Map() }),
   update: (context, match) => {
+    if (match.event.type === 'tool/progress') {
+      const root = context.state.root
+      if ('kind' in root) return context.state
+      return { ...context.state, root: { ...root, name: match.event.data.name, argsRaw: match.event.data.arguments,
+        callView: match.view?.for === 'call' ? match.view.view : root.callView } }
+    }
     if (match.event.type === 'tool/result') {
       const running = 'kind' in context.state.root ? undefined : context.state.root
       const result = rootResult(match, running)

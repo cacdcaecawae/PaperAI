@@ -2,7 +2,7 @@
 
 /** Locale keys these surfaces render. */
 export type AgentPresetSettingsKey =
-  | 'title' | 'description' | 'loading' | 'error' | 'userTrust' | 'seatHint' | 'headerHint' | 'connecting'
+  | 'title' | 'description' | 'loading' | 'error' | 'userTrust' | 'seatHint' | 'headerHint' | 'connecting' | 'cancelConnection'
   | 'nav' | 'sectionIntro' | 'builtIn' | 'setDefault' | 'view'
   | 'presetStandardName' | 'presetStandardDescription'
   | 'presetCodeName' | 'presetCodeDescription'
@@ -21,6 +21,7 @@ export type AgentPresetSettingsKey =
 /** English copy. */
 export const en: Record<AgentPresetSettingsKey, string> = {
   connecting: 'Connecting… You can keep writing',
+  cancelConnection: 'Cancel connection',
   title: 'Agent preset',
   description: 'Applies to sessions you start from now on. Running sessions keep the preset they began with.',
   loading: 'Loading presets…',
@@ -88,6 +89,7 @@ export const en: Record<AgentPresetSettingsKey, string> = {
 /** Simplified Chinese copy. */
 export const zh: Record<AgentPresetSettingsKey, string> = {
   connecting: '连接中，可继续输入',
+  cancelConnection: '取消连接',
   title: 'Agent 预设',
   description: '对此后新建的会话生效。运行中的会话保持它开始时的预设。',
   loading: '正在加载预设…',

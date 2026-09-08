@@ -30,6 +30,15 @@ function agentProps(agents: readonly PaperAIAgentDiagnostic[] = []): AgentDiagno
 }
 
 describe('Agent diagnostics interactions', () => {
+  it('shows the live connection status without treating a successful past probe as connected', () => {
+    const props = agentProps([{ ...discovered, status: 'ready', connected: false }])
+    const view = render(<AgentDiagnostics {...props} />)
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('未连接')
+    view.rerender(<AgentDiagnostics {...agentProps([{ ...discovered, connected: true }])} />)
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('已连接')
+    view.rerender(<AgentDiagnostics {...agentProps([{ ...discovered, connected: true }])} connecting />)
+    expect(screen.getByRole('button', { name: 'Agent 状态' }).textContent).toBe('未连接')
+  })
   it('keeps metadata behind a disclosure and requests a probe only on an explicit action', () => {
     const props = agentProps([discovered])
     render(<AgentDiagnostics {...props} />)

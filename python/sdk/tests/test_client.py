@@ -42,6 +42,13 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc": "2.0", "method": "session.event", "params": {"sessionId": params["sessionId"], "event": {"type": "agent/inbox/spliced", "data": {"target": "next-turn", "start": 0, "inserted": [{"id": "message-1"}]}}}}), flush=True)
         print(json.dumps({"jsonrpc": "2.0", "method": "session.status", "params": {"sessionId": params["sessionId"], "status": "running"}}), flush=True)
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"messageId": "message-1"}}), flush=True)
+        for event_type in ("tool/call", "tool/progress"):
+            print(json.dumps({"jsonrpc": "2.0", "method": "session.event", "params": {
+                "sessionId": params["sessionId"], "event": {"type": event_type, "data": {
+                    "turn": 0, "step": 0, "callId": "external-tool", "name": "paperai_acp_tool",
+                    "arguments": json.dumps({"output": "partial"}),
+                }},
+            }}), flush=True)
         print(json.dumps({
             "jsonrpc": "2.0",
             "method": "session.event",
@@ -110,6 +117,10 @@ for line in sys.stdin:
     assert result.final_response == "hello from runtime"
     assert result.finish_reason == "max-tokens"
     assert result.events[-1]["type"] == "turn/end"
+    assert [event["data"] for event in result.events if event["type"] == "tool/progress"] == [{
+        "turn": 0, "step": 0, "callId": "external-tool", "name": "paperai_acp_tool",
+        "arguments": '{"output": "partial"}',
+    }]
     dumped_env = json.loads(env_dump.read_text())
     assert dumped_env["DEEPSEEK_API_KEY"] == "env-key"
     assert dumped_env["DEEPSEEK_BASE_URL"] == "http://127.0.0.1:4321"

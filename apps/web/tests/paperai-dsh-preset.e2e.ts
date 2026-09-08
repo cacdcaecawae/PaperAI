@@ -30,7 +30,7 @@ const DOCUMENT_TOOLS = [
   'paperai_revert_document',
 ]
 
-describe('web e2e: PaperAI assembled agent roster', { concurrent: false }, () => {
+describe('web e2e: PaperAI with an explicitly enabled native DSH preset', { concurrent: false }, () => {
   let scaffold: WebScaffold
   let handle: AgentHandle
 
@@ -53,7 +53,7 @@ describe('web e2e: PaperAI assembled agent roster', { concurrent: false }, () =>
     await scaffold?.close()
   })
 
-  it('offers exactly the three PaperAI engines from the product root', async () => {
+  it('allows a deployment to re-enable the native engine alongside the two product channels', async () => {
     const listed = await scaffold.ctx.agentPresets.list()
     expect(listed.map(preset => preset.id).sort()).toEqual(['claude', 'codex', 'dsh'])
     expect(listed.every(preset => preset.trust === 'system')).toBe(true)

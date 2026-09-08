@@ -483,6 +483,22 @@ Tool registry and execution pipeline. Scoped registrations shadow globals; one v
 
 ```ts cordis-catalog
 /**
+ * Register pure presenters for a tool executed by an external Agent driver, without publishing a callable schema.
+ * @param name - driver-owned tool name.
+ * @param presenter - call and result projections from durable arguments and results.
+ * @returns disposer that removes this exact registration.
+ */
+registerPresenter(name: string, presenter: Pick<ToolDefinition, 'presentCall' | 'presentResult'>): () => void
+
+/**
+ * Resolve a callable tool's presenters or a driver-owned presentation-only registration.
+ * @param name - durable tool name.
+ * @param scope - viewing scope for ordinary callable definitions.
+ * @returns available pure presenters, without implying execution support.
+ */
+presenter(name: string, scope?: ScopeKey): Pick<ToolDefinition, 'presentCall' | 'presentResult'> | undefined
+
+/**
  * Present the calling scope's tools in `mode` instead of the deployment
  * default. Nearest scope on the chain wins, so a preset's standing
  * declaration covers every agent joined under it.

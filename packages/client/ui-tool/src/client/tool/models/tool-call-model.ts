@@ -1,8 +1,8 @@
 /**
  * Pure row-model derivation for tool summary rows: variant classification,
  * one-line summary, expanded-body text, and flattened result output from the
- * frozen call slice. Input material comes from the call ARGUMENTS; output and
- * error material from the settled result node. A call whose render intent is
+ * frozen call slice. Generic presenters select input, progress, and result
+ * text; absent presenters use the logged arguments and result. A call whose render intent is
  * a terminal card gets its expanded body from the views instead, through
  * `terminalCardModel` in terminal-card-model.ts.
  */
@@ -107,7 +107,8 @@ export interface ToolRowModel {
  */
 export function resultText(node: ToolResultNode): string {
   const parts: string[] = []
-  for (const block of node.content) {
+  const content = node.resultView?.card === 'generic' ? node.resultView.content ?? node.content : node.content
+  for (const block of content) {
     if (block.type === 'text') parts.push(block.text)
     else parts.push(JSON.stringify(block, null, 2))
   }
@@ -217,6 +218,7 @@ function deriveBody(variant: ToolRowVariant, argsRaw: string): string | null {
 export function toolRowModel(toolName: string, block: ToolCallBlock, cwd?: string, home?: string): ToolRowModel {
   const variant = classifyTool(toolName)
   const done = 'kind' in block
+  const generic = block.callView?.card === 'generic' ? block.callView : null
   const argsRaw = (done ? block.call?.argsRaw : block.argsRaw) ?? ''
   const state: ToolRowState = !done ? 'running'
     : block.error?.code === 'interrupted' ? 'stopped'
@@ -227,20 +229,26 @@ export function toolRowModel(toolName: string, block: ToolCallBlock, cwd?: strin
   const toolTitle = TOOL_TITLES[toolName]
   // Others keeps the static "Tool call" title (figma literal); the real tool
   // name rides the mutable summary slot unless the tool owns a specific title.
-  const summary = variant === 'others' && toolName !== '' && toolTitle === undefined
+  const fallbackSummary = variant === 'others' && toolName !== '' && toolTitle === undefined
     ? `${toolName} · ${base}`
     : base
+  const summary = variant === 'others'
+    ? (done ? block.resultView?.title : undefined) ?? block.callView?.title ?? fallbackSummary
+    : fallbackSummary
   // The empty string is "no text" for both derived result fields: a settled
   // call with blank content has nothing to expand, and a blank first line
   // would erase the collapsed error row's summary slot.
-  const output = done ? (resultText(block) || null) : null
+  const output = done ? (resultText(block) || null)
+    : generic?.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') || null
   const errorSummary = state === 'error' && output !== null ? firstLine(output) : null
   return {
     variant,
     title: toolTitle ?? VARIANT_TITLES[variant],
     summary,
     filePath: deriveFilePath(variant, argsRaw),
-    body: deriveBody(variant, argsRaw),
+    body: generic === null ? deriveBody(variant, argsRaw)
+      : generic.rawInput === undefined ? null
+        : typeof generic.rawInput === 'string' ? generic.rawInput : JSON.stringify(generic.rawInput, null, 2),
     output,
     errorSummary,
     state,

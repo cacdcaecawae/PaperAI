@@ -36,6 +36,55 @@ const DOCUMENT_ID = DocumentId('document-1')
 const NODE_ID = DocumentNodeId('node-1')
 const HIT_PACK_ID = 'hit-master-thesis'
 
+it('forwards ACP operations through the current provider service and clears it when that plugin unloads', async () => {
+  const { ctx, service } = await createHarness()
+  expect(service.agentDiagnostics()).toEqual([])
+  expect(await service.acpCatalog()).toEqual([])
+  expect(service.acpSession({ sessionId: SESSION_ID })).toBeNull()
+  service.acpCancel({ provider: 'codex' })
+  const remote = {
+    diagnosticStatus: vi.fn().mockReturnValue([{ provider: 'codex', connected: true }]),
+    catalog: vi.fn().mockResolvedValue([{ id: 'codex', connected: true }]),
+    cancelOperation: vi.fn(), manage: vi.fn().mockResolvedValue({ sessions: [] }), install: vi.fn().mockResolvedValue(undefined),
+    sessionDetails: vi.fn().mockReturnValue({ provider: 'codex', connected: true }),
+    selectOption: vi.fn().mockResolvedValue(undefined), linkedSession: vi.fn().mockResolvedValue(SESSION_ID),
+    importHistory: vi.fn().mockResolvedValue(SESSION_ID), probe: vi.fn().mockResolvedValue({ provider: 'codex', status: 'ready' }),
+  }
+  const fiber = ctx.plugin((scope) => { scope.provide('paperAiAcpAgents', remote as never) })
+  await fiber
+  await vi.waitFor(() =>{  expect(service.agentDiagnostics()).toEqual([{ provider: 'codex', connected: true }]) })
+  const signal = new AbortController().signal
+  expect(await service.acpCatalog(signal)).toEqual([{ id: 'codex', connected: true }])
+  expect(service.acpSession({ sessionId: SESSION_ID })).toEqual({ provider: 'codex', connected: true })
+  service.acpCancel({ provider: 'claude' })
+  expect(remote.cancelOperation).toHaveBeenCalledWith('claude')
+  expect(await service.acpManage({ provider: 'codex', action: { kind: 'history', cwd: '/paper' } }, signal))
+    .toEqual({ sessions: [] })
+  expect(remote.manage).toHaveBeenCalledWith('codex', { kind: 'history', cwd: '/paper' }, signal)
+  await service.acpInstall({ provider: 'claude', action: 'uninstall' }, signal)
+  expect(remote.install).toHaveBeenCalledWith('claude', 'uninstall', signal)
+  expect(await service.acpLinkedSession({ provider: 'codex', externalSessionId: 'external' }, signal)).toBe(SESSION_ID)
+  expect(remote.linkedSession).toHaveBeenCalledWith('codex', 'external', signal)
+  expect(await service.acpImportHistory({ sessionId: SESSION_ID, externalSessionId: 'external', cwd: '/paper' }, signal))
+    .toBe(SESSION_ID)
+  expect(remote.importHistory).toHaveBeenCalledWith(SESSION_ID, 'external', '/paper', signal)
+  await service.acpSelectOption({ sessionId: SESSION_ID, option: 'fast', value: true })
+  expect(remote.selectOption).toHaveBeenCalledWith(SESSION_ID, 'fast', true)
+  expect(await service.probeAgent({ provider: 'codex', force: true })).toMatchObject({ status: 'ready' })
+  expect(remote.probe).toHaveBeenCalledWith('codex', true)
+  await fiber.dispose()
+  await vi.waitFor(() =>{  expect(service.agentDiagnostics()).toEqual([]) })
+  const actions = [
+    () => service.acpManage({ provider: 'codex', action: { kind: 'history' } }),
+    () => service.acpInstall({ provider: 'codex', action: 'install' }),
+    () => service.acpLinkedSession({ provider: 'codex', externalSessionId: 'external' }),
+    () => service.acpImportHistory({ sessionId: SESSION_ID, externalSessionId: 'external', cwd: '/paper' }),
+    () => service.acpSelectOption({ sessionId: SESSION_ID, option: 'fast', value: true }),
+  ]
+  for (const action of actions) await expect(action()).rejects.toThrow('not configured')
+  expect(() => service.probeAgent({ provider: 'codex', force: true })).toThrow('not configured')
+})
+
 interface MockCommitRequest {
   readonly baseCommitId?: ReturnType<typeof DocumentCommitId>
   readonly actor?: DocumentCommit['actor']

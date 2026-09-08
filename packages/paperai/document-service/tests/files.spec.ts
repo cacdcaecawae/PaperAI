@@ -79,9 +79,9 @@ describe('document file publication', () => {
     const published = await publishStagedDocument(project, staged, 'separated', sourceSha256, [])
     await cleanupStagedDocument(staged)
 
-    const sourceMetadata = await lstat(published.immutableSourcePath)
-    const workingMetadata = await lstat(published.workingPath)
-    expect(sourceMetadata.mode & 0o222).toBe(0)
+    const sourceMetadata = await lstat(published.immutableSourcePath, { bigint: true })
+    const workingMetadata = await lstat(published.workingPath, { bigint: true })
+    expect(sourceMetadata.mode & 0o222n).toBe(0n)
     expect([sourceMetadata.dev, sourceMetadata.ino]).not.toEqual([workingMetadata.dev, workingMetadata.ino])
     await expect(verifyImmutableSourceFile(published.immutableSourcePath, sourceSha256))
       .resolves.toBe(sourceSha256)

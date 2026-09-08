@@ -4,6 +4,9 @@ English | [中文](README.zh.md)
 
 Tool registry and execution pipeline. Tool plugins register their schemas and executors; the agent loop executes each call through `tools/pre-execute` (the extensible allow/deny gate) → monotonic registered guards → `tools/execute` (an around-dispatch wrapper for timeout/retry/metrics plugins) → `tools/post-execute` (inspect/replace the result, attach context) → the definition-owned `finalizeContent` boundary → the observe-only `tools/result` notification. The registry also owns HOW its tools are presented to the model — its `mode` config selects native function calling, [Code Mode](#code-mode), or both, and one agent shadows that default for itself with `presentAs`.
 
+
+External Agent drivers may register pure call/result presenters with registerPresenter(). These registrations resolve through presenter() but contribute no executable tool or model schema. Durable tool/progress events carry complete replacement arguments, allowing live and replayed cards to use the same presenter.
+
 ## Service: `ToolRuntime` (ctx key: `tools`)
 
 ### Config

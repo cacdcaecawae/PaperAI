@@ -8,6 +8,9 @@ For each prompt that can reach a local root or continuable child Agent, the runt
 
 Settings owners share the React-free `SettingsScopeSpec`, `SettingsScope`, and snapshot types defined here. ui-settings owns `ctx.settingsScope.bind(spec)`, its Host transport, schema validation, and lifecycle; see [its package contract](../ui-settings/README.md).
 
+
+ISessions.create() creates a Host-backed session with an optional explicit agentPreset and publishes its list row before resolving. Features that create then open a conversation can use that existing owner without waiting for a separate remote list notification.
+
 ## Slot declaration injection
 
 `ctx.slots.inject(name, callback)` makes a full `SlotMap` key the dependency for a contribution whose plugin can activate independently from the declaring entry. It runs `callback` synchronously when the declaration exists, otherwise waits; declaration collapse disposes the callback effect, and redeclaration reruns it. The controller belongs to the caller's plugin fiber, so unloading the contributor cancels either the wait or its active registrations. A direct `slots.register()` into an undeclared slot still throws.

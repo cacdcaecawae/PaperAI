@@ -159,30 +159,33 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       agentPresets: {
         default: 'codex',
         roots: [
-          { path: PAPERAI_PRESETS, trust: 'system' },
+          { path: PAPERAI_PRESETS, trust: 'system', ids: ['codex', 'claude'] },
         ],
       },
       paperAiAcp: {
-        codex: {
-          command: process.execPath,
-          args: [FAKE_ACP_AGENT],
-          env: {
-            FAKE_ACP_LABEL: 'codex',
-            FAKE_ACP_LOG: acpLogPath,
-            FAKE_ACP_REJECT_SET_MODE: 'read-only',
-            FAKE_ACP_REJECT_SET_MODE_FILE: rejectModePath,
-            FAKE_ACP_REJECT_SET_CONFIG_FILE: rejectModelPath,
-            FAKE_ACP_CANCEL_FINAL_TOOL: '1',
+        providers: {
+          codex: {
+            command: process.execPath,
+            args: [FAKE_ACP_AGENT],
+            env: {
+              FAKE_ACP_LABEL: 'codex',
+              FAKE_ACP_LOG: acpLogPath,
+              FAKE_ACP_REJECT_SET_MODE: 'read-only',
+              FAKE_ACP_REJECT_SET_MODE_FILE: rejectModePath,
+              FAKE_ACP_REJECT_SET_CONFIG_FILE: rejectModelPath,
+              FAKE_ACP_CANCEL_FINAL_TOOL: '1',
+              FAKE_ACP_TOOL_IMAGE: '1',
+            },
           },
-        },
-        claude: {
-          command: process.execPath,
-          args: [FAKE_ACP_AGENT],
-          env: {
-            FAKE_ACP_LABEL: 'claude',
-            FAKE_ACP_STARTUP_GATE_FILE: startupGatePath,
-            FAKE_ACP_MODEL: 'fake-beta',
-            FAKE_ACP_LOG: acpLogPath,
+          claude: {
+            command: process.execPath,
+            args: [FAKE_ACP_AGENT],
+            env: {
+              FAKE_ACP_LABEL: 'claude',
+              FAKE_ACP_STARTUP_GATE_FILE: startupGatePath,
+              FAKE_ACP_MODEL: 'fake-beta',
+              FAKE_ACP_LOG: acpLogPath,
+            },
           },
         },
       },
@@ -275,7 +278,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await trigger.click()
     const menu = page.getByRole('menu')
     await menu.waitFor({ timeout: 10_000 })
-    expect(await menu.getByRole('menuitem').allTextContents()).toHaveLength(3)
+    expect(await menu.getByRole('menuitem').allTextContents()).toHaveLength(2)
     await compareOrRefreshGolden(AGENT_PRESETS_EXPECTED, await menu.ariaSnapshot(), MODE)
     await page.keyboard.press('Escape')
   }, 60_000)
@@ -294,7 +297,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-connecting.expected.md'), await pending.ariaSnapshot(), MODE)
       await pending.click()
       await page.getByRole('menuitem', { name: /^Codex/ }).click()
-      expect(await page.locator('button[aria-busy="true"]').filter({ hasText: 'Codex' }).isEnabled()).toBe(true)
+      expect(await page.getByRole('button', { name: 'Codex', exact: true }).first().isEnabled()).toBe(true)
       expect(await input.inputValue()).toBe('连接期间继续写作')
     } finally {
       await rm(startupGatePath, { force: true })
@@ -304,6 +307,29 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const input = page.locator('textarea:enabled').last()
     expect(await input.inputValue()).toBe('连接期间继续写作')
     await input.fill('')
+  }, 60_000)
+
+  it('shows exactly two ACP channels and keeps a successful probe separate from a live connection', async () => {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '设置', exact: true })
+    await settings.getByRole('button', { name: 'ACP 渠道', exact: true }).click()
+    const directory = settings.getByRole('region', { name: 'ACP 渠道', exact: true })
+    const codex = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Codex/ }) })
+    const claude = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
+    await codex.getByText('已连接', { exact: true }).waitFor()
+    await claude.getByText('未连接', { exact: true }).waitFor()
+    expect(await directory.getByRole('article').count()).toBe(2)
+    expect(await directory.getByRole('combobox', { name: '默认 Agent' }).locator('option').allTextContents()).toEqual(['Codex', 'Claude'])
+    await claude.getByRole('button', { name: '检测', exact: true }).click()
+    await claude.getByRole('button', { name: '检测', exact: true }).waitFor()
+    expect(await claude.getByText('未连接', { exact: true }).isVisible()).toBe(true)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-connection-status.expected.md'), [
+      await codex.getByText('已连接', { exact: true }).ariaSnapshot(),
+      await claude.getByText('未连接', { exact: true }).ariaSnapshot(),
+      await directory.getByRole('combobox', { name: '默认 Agent' }).ariaSnapshot(),
+    ].join('\n'), MODE)
+    await page.keyboard.press('Escape')
+    await settings.waitFor({ state: 'hidden' })
   }, 60_000)
 
   it('inspects cached Agent metadata and explicitly probes without submitting a prompt', async () => {
@@ -425,11 +451,14 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(async () => (
       (await readAcpLog(acpLogPath)).some(entry => entry.event === 'cancel-tool-finished')
     ), { timeout: 10_000 }).toBe(true)
-    const finalTool = page.locator('[data-tool="paperai.edit"]')
+    const finalTool = page.locator('[data-tool="paperai_acp_tool"]')
     await finalTool.waitFor({ timeout: 15_000 })
     await finalTool.locator('[data-disclosure-row]').click()
-    await finalTool.getByText('changedParagraphs', { exact: false }).waitFor({ timeout: 10_000 })
-    const snapshot = await captureStableAria(page, '[data-tool="paperai.edit"]', scaffold.workspaceCwd)
+    await finalTool.getByText('{"changedParagraphs":1}', { exact: true }).waitFor({ timeout: 10_000 })
+    const toolRow = page.locator('[data-chat-call-id="cancel-edit"]')
+    const image = toolRow.getByRole('img', { name: '图片', exact: true })
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth), { timeout: 10_000 }).toBe(1)
+    const snapshot = await captureStableAria(page, '[data-chat-call-id="cancel-edit"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(CANCEL_FINAL_TOOL_EXPECTED, snapshot, MODE)
   }, 60_000)
 
@@ -828,6 +857,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
       'agent-connecting.expected.md',
+      'acp-connection-status.expected.md',
       'agent-diagnostics.expected.md',
       'block-conflict.expected.md',
       'block-editor.expected.md',

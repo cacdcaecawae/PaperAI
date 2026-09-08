@@ -274,6 +274,21 @@ describe('built-in conversation node Definitions', () => {
     })
   })
 
+  it('updates one running tool card and ignores progress that arrives after its final result', () => {
+    const value = assembler([at(1, 'tool/call', { turn: 1, step: 1, callId: 'progress', name: 'external', arguments: '{}' })])
+    const key = node(snapshot(value), 'tool-call')?.key
+    value.append(at(2, 'tool/progress', { turn: 1, step: 1, callId: 'progress', name: 'external', arguments: '{"output":"partial"}' }))
+    value.flush()
+    expect(node(snapshot(value), 'tool-call')?.key).toBe(key)
+    expect((node(snapshot(value), 'tool-call')?.data as ToolChatData).root).toMatchObject({ argsRaw: '{"output":"partial"}' })
+    value.append(at(3, 'tool/result', { turn: 1, step: 1, message: toolResult('progress', 'final') }, { surfaceOp: 'append' }))
+    value.flush()
+    const settled = (node(snapshot(value), 'tool-call')?.data as ToolChatData).root
+    value.append(at(4, 'tool/progress', { turn: 1, step: 1, callId: 'progress', name: 'external', arguments: '{"output":"late"}' }))
+    value.flush()
+    expect((node(snapshot(value), 'tool-call')?.data as ToolChatData).root).toEqual(settled)
+  })
+
   it('keeps one keyed Tool node from running through settlement and replays nested dispatch after prepend', () => {
     const value = assembler([
       at(1, 'turn/start', { turn: 1 }),

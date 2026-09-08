@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AcpDiagnostics } from '../src/diagnostics.ts'
+import { AcpDiagnostics, diagnosticCapabilities } from '../src/diagnostics.ts'
 import type { AcpProviderDefinition } from '../src/runtime.ts'
 
 const resources: Array<{ ctx: Context; diagnostics: AcpDiagnostics; root: string }> = []
@@ -34,6 +34,32 @@ async function setup() {
 }
 
 describe('independent ACP diagnostics', () => {
+  it('cancels a queued probe without allocating a second adapter and keeps the running probe owned', async () => {
+    const { diagnostics, provider } = await setup()
+    const limits = { probeTimeoutMs: 5000, failureCooldownMs: 0, concurrency: 1 }
+    const active = diagnostics.probe({ ...provider, args: ['-e', 'setInterval(() => {}, 1000)'] }, limits, true)
+    const activeRejected = expect(active).rejects.toThrow()
+    const queued = diagnostics.probe({ ...provider, id: 'claude' }, limits, true)
+    const queuedRejected = expect(queued).rejects.toThrow('cancelled')
+    expect(diagnostics.isProbing('claude')).toBe(true)
+    diagnostics.cancel('claude')
+    await queuedRejected
+    expect(diagnostics.isProbing('claude')).toBe(false)
+    expect(diagnostics.isProbing('codex')).toBe(true)
+    diagnostics.cancel('codex')
+    await activeRejected
+    expect(diagnostics.isProbing('codex')).toBe(false)
+  })
+
+  it('projects advertised authentication methods without exposing terminal environment values', () => {
+    expect(diagnosticCapabilities({ protocolVersion: 1, authMethods: [
+      { id: 'agent', name: 'Browser login' },
+      { id: 'terminal', name: 'CLI login', description: 'Use CLI', type: 'terminal', args: [], env: { TOKEN: 'secret' } },
+    ] })).toMatchObject({ authMethods: [
+      { id: 'agent', name: 'Browser login', description: null, type: 'agent' },
+      { id: 'terminal', name: 'CLI login', description: 'Use CLI', type: 'terminal' },
+    ] })
+  })
   it('denies ACP file and permission requests while consuming unsolicited readiness updates', async () => {
     const { diagnostics, provider, log, root } = await setup()
     const path = join(root, 'protected.txt')
@@ -42,7 +68,7 @@ describe('independent ACP diagnostics', () => {
       ...provider, id: 'claude', name: 'Claude',
       env: { ...provider.env, FAKE_ACP_LABEL: 'claude', FAKE_ACP_DIAGNOSTIC_PATH: path },
     }, { probeTimeoutMs: 5000, failureCooldownMs: 60_000 }, true)
-    expect(result).toMatchObject({ status: 'ready', models: [{ id: 'fake-alpha' }, { id: 'fake-beta' }] })
+    expect(result).toMatchObject({ status: 'ready', stage: 'handshake', models: [] })
     const events = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string })
     expect(events.filter(event => event.event === 'diagnostic-file-denied')).toEqual([
       expect.objectContaining({ operation: 'read', message: 'RequestError: Internal error' }),
@@ -72,14 +98,14 @@ describe('independent ACP diagnostics', () => {
     const first = diagnostics.probe(provider, limits, false)
     expect(diagnostics.probe(provider, limits, false)).toBe(first)
     const result = await first
-    expect(result).toMatchObject({ status: 'ready', models: [{ id: 'fake-alpha', name: 'Fake Alpha' }, { id: 'fake-beta', name: 'Fake Beta' }] })
+    expect(result).toMatchObject({ status: 'ready', stage: 'handshake', models: [] })
     expect(await diagnostics.probe(provider, limits, false)).toBe(result)
     const events = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string; mcpServers?: unknown[]; cwd?: string })
     expect(events.filter(event => event.event === 'initialize')).toHaveLength(1)
     expect(events.some(event => event.event === 'prompt')).toBe(false)
-    const session = events.find(event => event.event === 'new-session')!
-    expect(session.mcpServers).toEqual([])
-    await expect(lstat(session.cwd!)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(events.some(event => event.event === 'new-session')).toBe(false)
+    const initialized = events.find(event => event.event === 'initialize')!
+    await expect(lstat(initialized.cwd!)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(diagnostics.read({ ...provider, env: { ...provider.env, NEW_SETTING: 'changed' } }).models).toEqual([])
   })
 

@@ -35,15 +35,17 @@ try {
     }),
   } as never)
   await ctx.plugin(PaperAiAcpAgents, {
-    codex: {
-      command: process.execPath,
-      args: [fakeAgentPath],
-      env: {
-        FAKE_ACP_LABEL: 'codex',
-        FAKE_ACP_SESSION_ID: 'lifecycle-probe',
-        ...action === 'startup-rollback'
-          ? { FAKE_ACP_FAIL_ONCE_FILE: join(root, 'fail-once.marker') }
-          : {},
+    providers: {
+      codex: {
+        command: process.execPath,
+        args: [fakeAgentPath],
+        env: {
+          FAKE_ACP_LABEL: 'codex',
+          FAKE_ACP_SESSION_ID: 'lifecycle-probe',
+          ...action === 'startup-rollback'
+            ? { FAKE_ACP_FAIL_ONCE_FILE: join(root, 'fail-once.marker') }
+            : {},
+        },
       },
     },
   })

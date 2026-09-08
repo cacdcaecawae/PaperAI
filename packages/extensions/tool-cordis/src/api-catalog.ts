@@ -142,6 +142,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the presets, first-root-wins per id.',
       },
       {
+        signature: 'register(preset: AgentPreset): () => void',
+        description: 'Contribute a plugin-owned preset, overriding a discovered directory with the same id.',
+        parameters: [{ name: 'preset', description: 'stable id, composition file, and optional exact factory route.' }],
+        returns: 'disposer withdrawing this contribution without interrupting existing sessions.',
+      },
+      {
+        signature: 'factoryRoute(id: string): string | undefined',
+        description: 'Read a contributed preset\'s required factory before resuming a stored session.',
+        parameters: [{ name: 'id', description: 'recorded preset identity.' }],
+        returns: 'the exact driver route, or undefined for file-based DSH compositions.',
+      },
+      {
         signature: 'async resolve(id?: string): Promise<AgentPreset>',
         description: 'Resolve one preset by id.\n\nA broken preset resolves — deleting one, reading one, and reporting one all need the row — and the mounting paths refuse it AFTER resolution through resolveMountable.',
         parameters: [{ name: 'id', description: 'the preset id, or `undefined` for {@link defaultId}.' }],
@@ -1156,6 +1168,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Owns the two exact ACP factory routes and every lifecycle they create.',
     methods: [
       {
+        signature: 'providers(): readonly AcpProviderDefinition[]',
+        description: 'Resolve the full configured directory without granting project capabilities.',
+        parameters: [],
+        returns: 'built-in templates and independently configured instances.',
+      },
+      {
         signature: 'resolveProvider(definition: AcpProviderDefinition): AcpProviderDefinition',
         description: 'Resolve secrets and endpoint overrides at session creation time.',
         parameters: [{ name: 'definition', description: 'pinned provider definition to combine with the current settings.' }],
@@ -1168,10 +1186,55 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'metadata for both configured providers, independent from live model selection.',
       },
       {
-        signature: 'probe(provider: \'codex\' | \'claude\', force: boolean): Promise<AcpDiagnostic>',
+        signature: 'async catalog(signal?: AbortSignal): Promise<readonly AcpCatalogEntry[]>',
+        description: 'Inspect the current Host\'s executable directory without downloading or authenticating.',
+        parameters: [{ name: 'signal', description: 'optional cancellation for executable lookups.' }],
+        returns: 'all channel instances, including disabled and unavailable templates.',
+      },
+      {
+        signature: 'probe(provider: string, force: boolean): Promise<AcpDiagnostic>',
         description: 'Run a prompt-free probe with shared failure cooldown and process teardown.',
         parameters: [{ name: 'provider', description: 'installed peer Agent to inspect.' }, { name: 'force', description: 'explicit retry bypassing failure cooldown.' }],
         returns: 'observed ACP metadata, including a cached model preview.',
+      },
+      {
+        signature: 'cancelOperation(provider: string): void',
+        description: 'Cancel an outstanding channel diagnostic.',
+        parameters: [{ name: 'provider', description: 'configured channel id.' }],
+      },
+      {
+        signature: 'sessionDetails(id: SessionId): AcpSessionDetails | null',
+        description: 'Read controls from the current runtime without connecting an idle history entry.',
+        parameters: [{ name: 'id', description: 'PaperAI session identity.' }],
+        returns: 'exact provider controls, or null for another Agent driver.',
+      },
+      {
+        signature: 'async linkedSession( provider: string, externalId: string, signal?: AbortSignal, except?: SessionId, ): Promise<SessionId | null>',
+        description: 'Find a local conversation already linked to this provider\'s external history.',
+        parameters: [{ name: 'provider', description: 'supported ACP channel.' }, { name: 'externalId', description: 'external session id.' }, { name: 'signal', description: 'caller cancellation.' }, { name: 'except', description: 'new blank local session excluded during import admission.' }],
+        returns: 'existing local id, or null.',
+      },
+      {
+        signature: 'async importHistory(id: SessionId, externalId: string, cwd: string, caller?: AbortSignal): Promise<SessionId>',
+        description: 'Import provider history into a newly created local conversation with the same working directory.',
+        parameters: [{ name: 'id', description: 'unused local session.' }, { name: 'externalId', description: 'provider history id.' }, { name: 'cwd', description: 'directory from the selected history entry.' }, { name: 'caller', description: 'import cancellation.' }],
+        returns: 'the existing or newly linked local session id.',
+      },
+      {
+        signature: 'async selectOption(id: SessionId, option: string, value: string | boolean): Promise<void>',
+        description: 'Apply a declared ACP session option to its exact active Agent.',
+        parameters: [{ name: 'id', description: 'current PaperAI session identity.' }, { name: 'option', description: 'advertised option id.' }, { name: 'value', description: 'selected string or boolean value.' }],
+      },
+      {
+        signature: 'async manage(provider: string, request: AcpManagementRequest, signal?: AbortSignal): Promise<AcpManagementResult>',
+        description: 'Run a capability-gated account, routing, or provider-history action independently of conversations.',
+        parameters: [{ name: 'provider', description: 'configured channel id.' }, { name: 'request', description: 'explicit management action.' }, { name: 'signal', description: 'caller cancellation.' }],
+        returns: 'non-secret management response fields.',
+      },
+      {
+        signature: 'async install(provider: string, action: \'install\' | \'uninstall\', signal?: AbortSignal): Promise<void>',
+        description: 'Install, update, or uninstall one declared template inside the managed installation root.',
+        parameters: [{ name: 'provider', description: 'configured instance id.' }, { name: 'action', description: 'installation action; uninstall never targets external commands.' }, { name: 'signal', description: 'caller cancellation.' }],
       },
       {
         signature: 'async publish( ownerCtx: Context, provider: AcpProviderDefinition, preparation: SessionPreparation, options: CreateAgentOptions | ResumeAgentOptions, ): Promise<AgentHandle>',
@@ -1199,6 +1262,51 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read configured Agent discovery and cached model previews without starting processes.',
         parameters: [],
         returns: 'configured ACP peers, or an empty roster when the provider plugin is absent.',
+      },
+      {
+        signature: '@Remote(\'acpCatalog\') async acpCatalog(signal?: AbortSignal): Promise<readonly AcpCatalogEntry[]>',
+        description: 'Inspect all configured ACP channels on this Host without a provider prompt.',
+        parameters: [{ name: 'signal', description: 'optional cancellation for executable discovery.' }],
+        returns: 'built-in and custom channels with installation and cached protocol state.',
+      },
+      {
+        signature: '@Remote(\'acpCancel\') acpCancel(request: { provider: string }): void',
+        description: 'Cancel queued or running ACP channel management work.',
+        parameters: [{ name: 'request', description: 'channel owning the operation.' }],
+      },
+      {
+        signature: '@Remote(\'acpManage\') async acpManage(request: { provider: string; action: AcpManagementRequest }, signal?: AbortSignal): Promise<AcpManagementResult>',
+        description: 'Apply a capability-gated ACP account, routing, or external-history operation.',
+        parameters: [{ name: 'request', description: 'instance id and explicit action.' }, { name: 'signal', description: 'caller cancellation.' }],
+        returns: 'declared non-secret history or routing fields.',
+      },
+      {
+        signature: '@Remote(\'acpInstall\') async acpInstall(request: { provider: string; action: \'install\' | \'uninstall\' }, signal?: AbortSignal): Promise<void>',
+        description: 'Change only the selected channel\'s PaperAI-managed installation.',
+        parameters: [{ name: 'request', description: 'channel and install or uninstall action.' }, { name: 'signal', description: 'cancellation including process-tree cleanup.' }],
+      },
+      {
+        signature: '@Remote(\'acpSession\') acpSession(request: { sessionId: SessionId }): AcpSessionDetails | null',
+        description: 'Read the active ACP conversation\'s options and provider-owned status.',
+        parameters: [{ name: 'request', description: 'PaperAI session identity.' }],
+        returns: 'runtime-declared controls, or null for a non-ACP Agent.',
+      },
+      {
+        signature: '@Remote(\'acpLinkedSession\') async acpLinkedSession(request: { provider: string; externalSessionId: string }, signal?: AbortSignal): Promise<SessionId | null>',
+        description: 'Resolve an already imported provider history without opening another connection.',
+        parameters: [{ name: 'request', description: 'provider channel and external id.' }, { name: 'signal', description: 'lookup cancellation.' }],
+        returns: 'known local conversation, or null.',
+      },
+      {
+        signature: '@Remote(\'acpImportHistory\') async acpImportHistory( request: { sessionId: SessionId; externalSessionId: string; cwd: string }, signal?: AbortSignal, ): Promise<SessionId>',
+        description: 'Import selected provider history into an unused local conversation.',
+        parameters: [{ name: 'request', description: 'target local session and provider history identity/directory.' }, { name: 'signal', description: 'caller cancellation.' }],
+        returns: 'the local conversation owning the imported history.',
+      },
+      {
+        signature: '@Remote(\'acpSelectOption\') async acpSelectOption(request: { sessionId: SessionId; option: string; value: string | boolean }): Promise<void>',
+        description: 'Change one provider-declared option without changing the DSH sandbox policy.',
+        parameters: [{ name: 'request', description: 'exact session, option id, and selected value.' }],
       },
       {
         signature: '@Remote(\'probeAgent\') probeAgent(request: PaperAIProbeAgentRequest): Promise<PaperAIAgentDiagnostic>',
@@ -2768,6 +2876,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Tool registry and execution pipeline. Scoped registrations shadow globals; one visibility resolver feeds presentation, lookup, and dispatch.',
     methods: [
       {
+        signature: 'registerPresenter(name: string, presenter: Pick<ToolDefinition, \'presentCall\' | \'presentResult\'>): () => void',
+        description: 'Register pure presenters for a tool executed by an external Agent driver, without publishing a callable schema.',
+        parameters: [{ name: 'name', description: 'driver-owned tool name.' }, { name: 'presenter', description: 'call and result projections from durable arguments and results.' }],
+        returns: 'disposer that removes this exact registration.',
+      },
+      {
+        signature: 'presenter(name: string, scope?: ScopeKey): Pick<ToolDefinition, \'presentCall\' | \'presentResult\'> | undefined',
+        description: 'Resolve a callable tool\'s presenters or a driver-owned presentation-only registration.',
+        parameters: [{ name: 'name', description: 'durable tool name.' }, { name: 'scope', description: 'viewing scope for ordinary callable definitions.' }],
+        returns: 'available pure presenters, without implying execution support.',
+      },
+      {
         signature: 'presentAs(mode: ToolPresentationMode): () => void',
         description: 'Present the calling scope\'s tools in `mode` instead of the deployment default. Nearest scope on the chain wins, so a preset\'s standing declaration covers every agent joined under it.\n\nScoped only, and one declaration per scope: this is how an agent preset composes Code Mode agents beside native ones in the same process, and a process-global override would be the `mode` config field instead.',
         parameters: [{ name: 'mode', description: 'the presentation the covered agents\' models see.' }],
@@ -3064,6 +3184,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'sessionId', description: 'the session whose composition changed.' }, { name: 'agentPreset', description: 'the preset recorded by the committed selection.' }],
   },
   {
+    name: 'agent-presets/changed',
+    mode: 'emit',
+    signature: '\'agent-presets/changed\'(): void',
+    summary: 'Plugin-contributed preset availability changed.',
+    description: 'Plugin-contributed preset availability changed.',
+    parameters: [],
+  },
+  {
     name: 'agent/created',
     mode: 'emit',
     signature: '\'agent/created\'(this: Scoped<Agent>, payload: { agent: Agent }): void',
@@ -3304,6 +3432,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'paperai/acp-changed',
+    mode: 'emit',
+    signature: '\'paperai/acp-changed\'(sessionId: SessionId): void',
+    summary: 'ACP controls or provider-owned status changed for one live conversation.',
+    description: 'ACP controls or provider-owned status changed for one live conversation.',
+    parameters: [{ name: 'sessionId', description: 'owning PaperAI session.' }],
+  },
+  {
     name: 'paperai/document-changed',
     mode: 'emit',
     signature: '\'paperai/document-changed\'(change: PaperAIDocumentChangedEvent): void',
@@ -3540,12 +3676,44 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AcpCatalogEntry',
+    declaration: 'export interface AcpCatalogEntry {\n    readonly id: string;\n    readonly name: string;\n    readonly template: string;\n    readonly enabled: boolean;\n    readonly connected: boolean;\n    readonly startup: {\n        readonly stage: string;\n        readonly elapsedMs: number;\n    } | null;\n    readonly host: string;\n    readonly command: string;\n    readonly args: readonly string[];\n    readonly cli: string | null;\n    readonly adapter: string | null;\n    readonly source: \'bundled\' | \'managed\' | \'external\' | \'remote\';\n    readonly documentation: string | null;\n    readonly login: string | null;\n    readonly installable: boolean;\n    readonly diagnostic: AcpDiagnostic;\n    readonly busy: string | null;\n    readonly output: string | null;\n}',
+  },
+  {
     name: 'AcpDiagnostic',
-    declaration: 'export interface AcpDiagnostic {\n    readonly provider: \'codex\' | \'claude\';\n    readonly executable: string | null;\n    readonly adapterVersion: string | null;\n    readonly agentVersion: string | null;\n    readonly status: \'discovered\' | \'ready\' | \'error\';\n    readonly models: readonly {\n        readonly id: string;\n        readonly name: string;\n    }[];\n    readonly checkedAt: number | null;\n    readonly retryAt: number | null;\n    readonly elapsedMs: number | null;\n    readonly error: \'unavailable\' | \'timeout\' | \'authentication\' | \'protocol\' | null;\n}',
+    declaration: 'export interface AcpDiagnostic {\n    readonly provider: string;\n    readonly executable: string | null;\n    readonly adapterVersion: string | null;\n    readonly agentVersion: string | null;\n    readonly status: \'discovered\' | \'ready\' | \'error\';\n    readonly models: readonly {\n        readonly id: string;\n        readonly name: string;\n    }[];\n    readonly checkedAt: number | null;\n    readonly retryAt: number | null;\n    readonly elapsedMs: number | null;\n    readonly error: \'unavailable\' | \'timeout\' | \'authentication\' | \'protocol\' | null;\n    readonly stage?: \'handshake\' | \'session\' | \'prompt\';\n    readonly connected?: boolean;\n    readonly capabilities?: Readonly<Record<string, boolean>>;\n    readonly authMethods?: readonly {\n        readonly id: string;\n        readonly name: string;\n        readonly description: string | null;\n        readonly type: \'agent\' | \'terminal\';\n    }[];\n}',
+  },
+  {
+    name: 'AcpHistoryEntry',
+    declaration: 'export interface AcpHistoryEntry {\n    readonly sessionId: string;\n    readonly cwd: string;\n    readonly title: string | null;\n    readonly updatedAt: string | null;\n    readonly additionalDirectories: readonly string[];\n}',
+  },
+  {
+    name: 'AcpManagementRequest',
+    declaration: 'export type AcpManagementRequest = {\n    readonly kind: \'authenticate\';\n    readonly methodId: string;\n} | {\n    readonly kind: \'logout\';\n} | {\n    readonly kind: \'history\';\n    readonly cwd?: string;\n    readonly cursor?: string;\n} | {\n    readonly kind: \'delete\';\n    readonly sessionId: string;\n} | {\n    readonly kind: \'providers\';\n} | {\n    readonly kind: \'set-provider\';\n    readonly providerId: string;\n    readonly apiType: string;\n    readonly baseUrl: string;\n    readonly headers: Readonly<Record<string, string>>;\n} | {\n    readonly kind: \'disable-provider\';\n    readonly providerId: string;\n};',
+  },
+  {
+    name: 'AcpManagementResult',
+    declaration: 'export interface AcpManagementResult {\n    readonly sessions?: readonly AcpHistoryEntry[];\n    readonly nextCursor?: string | null;\n    readonly providers?: readonly AcpRoutingProvider[];\n}',
   },
   {
     name: 'AcpProviderDefinition',
-    declaration: 'export interface AcpProviderDefinition {\n    readonly id: \'codex\' | \'claude\';\n    readonly name: string;\n    readonly packageName: string;\n    readonly binName: string;\n    readonly command?: string;\n    readonly args?: readonly string[];\n    readonly env?: Readonly<Record<string, string>>;\n}',
+    declaration: 'export interface AcpProviderDefinition {\n    readonly id: \'codex\' | \'claude\';\n    readonly template?: string;\n    readonly enabled?: boolean;\n    readonly permissionModes?: Readonly<Record<string, string>>;\n    readonly name: string;\n    readonly packageName: string;\n    readonly binName: string;\n    readonly command?: string;\n    readonly args?: readonly string[];\n    readonly env?: Readonly<Record<string, string>>;\n    readonly personalPrompt?: string;\n    readonly language?: string;\n    readonly ssh?: AcpSshConfig;\n}',
+  },
+  {
+    name: 'AcpRoutingProvider',
+    declaration: 'export interface AcpRoutingProvider {\n    readonly id: string;\n    readonly supported: readonly string[];\n    readonly required: boolean;\n    readonly current: {\n        readonly apiType: string;\n        readonly baseUrl: string;\n    } | null;\n}',
+  },
+  {
+    name: 'AcpSessionDetails',
+    declaration: 'export interface AcpSessionDetails {\n    readonly provider: string;\n    readonly name: string;\n    readonly connected: boolean;\n    readonly externalSessionId: string | null;\n    readonly capabilities: Readonly<Record<string, boolean>>;\n    readonly options: readonly {\n        readonly id: string;\n        readonly name: string;\n        readonly description: string | null;\n        readonly category: string | null;\n        readonly value: string | boolean;\n        readonly choices: readonly {\n            readonly value: string;\n            readonly name: string;\n        }[];\n        readonly editable: boolean;\n    }[];\n    readonly state: AcpSessionState;\n}',
+  },
+  {
+    name: 'AcpSessionState',
+    declaration: 'export interface AcpSessionState {\n    readonly commands: readonly {\n        readonly name: string;\n        readonly description: string;\n        readonly hint: string | null;\n    }[];\n    readonly plans: readonly {\n        readonly id: string;\n        readonly text: string;\n        readonly entries: readonly {\n            readonly content: string;\n            readonly status: \'pending\' | \'in_progress\' | \'completed\';\n        }[];\n    }[];\n    readonly compactions: readonly {\n        readonly id: string;\n        readonly status: string;\n        readonly summary: string;\n        readonly error: string | null;\n    }[];\n    readonly title: string | null;\n    readonly updatedAt: string | null;\n    readonly usage: {\n        readonly used: number;\n        readonly size: number;\n        readonly cost: {\n            readonly amount: number;\n            readonly currency: string;\n        } | null;\n    } | null;\n    readonly stopReason: string | null;\n}',
+  },
+  {
+    name: 'AcpSshConfig',
+    declaration: 'export interface AcpSshConfig {\n    readonly host: string;\n    readonly cwd: string;\n    readonly user?: string;\n    readonly port?: number;\n    readonly identityFile?: string;\n    readonly node?: string;\n}',
   },
   {
     name: 'ActorIdentity',
@@ -3605,7 +3773,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentPreset',
-    declaration: 'export interface AgentPreset {\n    readonly id: string;\n    readonly trust: PresetTrust;\n    readonly path: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly broken?: string;\n}',
+    declaration: 'export interface AgentPreset {\n    readonly id: string;\n    readonly trust: PresetTrust;\n    readonly path: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly broken?: string;\n    readonly factoryRoute?: string;\n}',
   },
   {
     name: 'AgentSetup',
@@ -4829,7 +4997,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIProbeAgentRequest',
-    declaration: 'export interface PaperAIProbeAgentRequest {\n    readonly provider: \'codex\' | \'claude\';\n    readonly force: boolean;\n}',
+    declaration: 'export interface PaperAIProbeAgentRequest {\n    readonly provider: string;\n    readonly force: boolean;\n}',
   },
   {
     name: 'PaperAIProjectOverview',
@@ -5265,7 +5433,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionEventMap',
-    declaration: 'export interface SessionEventMap {\n    \'turn/start\': {\n        turn: number;\n    };\n    \'turn/end\': {\n        turn: number;\n        reason: TurnEndReason;\n    };\n    \'step/start\': {\n        turn: number;\n        step: number;\n    };\n    \'step/end\': {\n        turn: number;\n        step: number;\n    };\n    \'user/message\': UserMessage;\n    \'assistant/chunk\': {\n        turn: number;\n        step: number;\n        chunk: StreamChunk;\n    };\n    \'assistant/message\': {\n        turn: number;\n        step: number;\n        message: AssistantMessage;\n        usage?: TokenUsage;\n        interrupted?: true;\n    };\n    \'tool/call\': {\n        turn: number;\n        step: number;\n        callId: CallId;\n        name: string;\n        arguments: string;\n    };\n    \'tool/result\': {\n        turn: number;\n        step: number;\n        message: ToolResultMessage;\n        error?: {\n            name: string;\n            code: string;\n        };\n        meta?: JsonValue;\n    };\n    \'todo/write\': {\n        todos: TodoItem[];\n    };\n    \'request/header\': {\n        header: EpochHeader;\n        reason: RequestHeaderReason;\n    };\n    \'request/context\': RequestContext;\n    \'session/end-seed\': Record<string, never>;\n}',
+    declaration: 'export interface SessionEventMap {\n    \'turn/start\': {\n        turn: number;\n    };\n    \'turn/end\': {\n        turn: number;\n        reason: TurnEndReason;\n    };\n    \'step/start\': {\n        turn: number;\n        step: number;\n    };\n    \'step/end\': {\n        turn: number;\n        step: number;\n    };\n    \'user/message\': UserMessage;\n    \'assistant/chunk\': {\n        turn: number;\n        step: number;\n        chunk: StreamChunk;\n    };\n    \'assistant/message\': {\n        turn: number;\n        step: number;\n        message: AssistantMessage;\n        usage?: TokenUsage;\n        interrupted?: true;\n    };\n    \'tool/call\': {\n        turn: number;\n        step: number;\n        callId: CallId;\n        name: string;\n        arguments: string;\n    };\n    \'tool/progress\': {\n        turn: number;\n        step: number;\n        callId: CallId;\n        name: string;\n        arguments: string;\n    };\n    \'tool/result\': {\n        turn: number;\n        step: number;\n        message: ToolResultMessage;\n        error?: {\n            name: string;\n            code: string;\n        };\n        meta?: JsonValue;\n    };\n    \'todo/write\': {\n        todos: TodoItem[];\n    };\n    \'request/header\': {\n        header: EpochHeader;\n        reason: RequestHeaderReason;\n    };\n    \'request/context\': RequestContext;\n    \'session/end-seed\': Record<string, never>;\n}',
   },
   {
     name: 'SessionEventMetadataFilter',
@@ -6105,7 +6273,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolRuntime',
-    declaration: 'export class ToolRuntime extends Service {\n    static inject;\n    static Config: z<Config>;\n    readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler;\n    constructor(ctx: Context, config: Config = {});\n    presentAs(mode: ToolPresentationMode): () => void;\n    register(definition: ToolDefinition): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    guard(guard: ToolGuard): () => void;\n    get(name: string, scope?: ScopeKey): ToolDefinition | undefined;\n    schemas(scope?: ScopeKey): ToolSchema[];\n    executionMode(exec: ToolExecutionInput): ToolExecutionMode;\n    async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>;\n}',
+    declaration: 'export class ToolRuntime extends Service {\n    static inject;\n    static Config: z<Config>;\n    readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler;\n    registerPresenter(name: string, presenter: Pick<ToolDefinition, \'presentCall\' | \'presentResult\'>): () => void;\n    presenter(name: string, scope?: ScopeKey): Pick<ToolDefinition, \'presentCall\' | \'presentResult\'> | undefined;\n    constructor(ctx: Context, config: Config = {});\n    presentAs(mode: ToolPresentationMode): () => void;\n    register(definition: ToolDefinition): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    guard(guard: ToolGuard): () => void;\n    get(name: string, scope?: ScopeKey): ToolDefinition | undefined;\n    schemas(scope?: ScopeKey): ToolSchema[];\n    executionMode(exec: ToolExecutionInput): ToolExecutionMode;\n    async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>;\n}',
   },
   {
     name: 'ToolRuntimeScheduler',

@@ -424,7 +424,7 @@ describe('BashRow terminal card', () => {
     const view = render(<BashRow {...rowProps(settled({
       content: [{ type: 'text', text: 'Error: command aborted' }],
       isError: true,
-      callView: { card: 'generic', title: 'ls -la', kind: 'execute' },
+      callView: { card: 'generic', title: 'ls -la', kind: 'execute', rawInput: { command: 'ls -la', description: 'List files' } },
       resultView: { card: 'generic' },
     }))} />)
     const row = view.container.querySelector('[data-sample="bash"]')!

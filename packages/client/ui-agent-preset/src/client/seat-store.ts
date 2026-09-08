@@ -63,10 +63,11 @@ export class AgentPresetSeatController {
   private staged: string | undefined
   private targetSession: SessionId | undefined
   private applying: Promise<void> | undefined
+  private selecting: AbortController | undefined
   private disposed = false
 
   constructor(
-    private readonly api: Pick<IApiClient, 'agentPresets'>,
+    private readonly api: Pick<IApiClient, 'agentPresets' | 'sessions'>,
     /** The session the hero is about to hand over to, when there is one. */
     private readonly currentSession: () => SeatSessionSummary | undefined,
     /**
@@ -139,6 +140,7 @@ export class AgentPresetSeatController {
    */
   stage(id: string, introduce = false): void {
     if (this.isDisposed()) return
+    this.selecting?.abort(new Error('Agent selection superseded'))
     this.staged = id
     this.targetSession = undefined
     this.set({ current: id, error: null, introduce })
@@ -148,6 +150,12 @@ export class AgentPresetSeatController {
   introduced(): void {
     if (!this.store.getSnapshot().introduce) return
     this.set({ introduce: false })
+  }
+
+  /** Cancel the pending choice and let the Host restore the preceding Agent. */
+  cancel(): void {
+    this.staged = undefined
+    this.selecting?.abort(new Error('Agent selection cancelled'))
   }
 
   /**
@@ -188,6 +196,7 @@ export class AgentPresetSeatController {
   dispose(): void {
     this.disposed = true
     this.staged = undefined
+    this.selecting?.abort(new Error('Agent selection disposed'))
   }
 
   private async drain(): Promise<void> {
@@ -208,8 +217,9 @@ export class AgentPresetSeatController {
       this.set({ busy: true, error: null })
       let accepted = previous ?? this.fallback
       let failure: string | null = null
+      const selecting = this.selecting = new AbortController()
       try {
-        const response = await this.api.agentPresets.select({ sessionId: session.id, agentPreset: staged })
+        const response = await this.api.agentPresets.select({ sessionId: session.id, agentPreset: staged }, selecting.signal)
         if (response.result.ok) {
           accepted = response.result.value.agentPreset
           applied = { id: session.id, agentPreset: accepted }
@@ -217,7 +227,15 @@ export class AgentPresetSeatController {
         } else failure = response.result.error.message
       } catch (error) {
         failure = messageOf(error)
+        if (selecting.signal.aborted && !this.isDisposed()) {
+          // Fetch cancellation precedes Host rollback. Session model reads join its admission queue.
+          try {
+            const settled = await this.api.sessions.models({ sessionId: session.id })
+            if (!settled.result.ok) failure = settled.result.error.message
+          } catch (settlementError: unknown) { failure = messageOf(settlementError) }
+        }
       } finally {
+        if (this.selecting === selecting) this.selecting = undefined
         release?.()
       }
       if (this.isDisposed()) return

@@ -293,8 +293,9 @@ describe('the new-session chip', () => {
   it('keeps the selector available while a switch is in flight', () => {
     renderSeat({ busy: true })
 
-    expect(screen.getByRole('button')).toHaveProperty('disabled', false)
-    expect(screen.getByRole('button').getAttribute('aria-busy')).toBe('true')
+    const selector = screen.getByRole('button', { name: new RegExp(en.presetStandardName) })
+    expect(selector).toHaveProperty('disabled', false)
+    expect(selector.getAttribute('aria-busy')).toBe('true')
   })
 
   it('shows a refused switch on the trigger', () => {

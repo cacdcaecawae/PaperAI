@@ -11,6 +11,7 @@
 - id: agent-presets
   config:
     default: codex
+    includeUserRoot: false
 
 # PaperAI starts with local ACP Agents, so a DeepSeek API key is optional and
 # belongs in Settings rather than a blocking first-run dialog. The Models page
@@ -74,3 +75,6 @@
 
     - id: ui-paperai-workbench
       name: '@paperai/ui-workbench'
+
+    - id: ui-paperai-acp
+      name: '@paperai/ui-acp'

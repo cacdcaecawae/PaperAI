@@ -4,6 +4,11 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
+     * Plugin-contributed preset availability changed.
+     * @mode emit
+     */
+    'agent-presets/changed'(): void
+    /**
      * One session committed a different agent preset to its durable log.
      * Consumers invalidate only state derived from that session's composition.
      * @mode emit

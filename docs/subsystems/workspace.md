@@ -221,6 +221,12 @@ Owns the two exact ACP factory routes and every lifecycle they create.
 
 ```ts cordis-catalog
 /**
+ * Resolve the full configured directory without granting project capabilities.
+ * @returns built-in templates and independently configured instances.
+ */
+providers(): readonly AcpProviderDefinition[]
+
+/**
  * Resolve secrets and endpoint overrides at session creation time.
  * @param definition - pinned provider definition to combine with the current settings.
  * @returns the provider definition with current command, credential, and endpoint overrides applied.
@@ -234,12 +240,77 @@ resolveProvider(definition: AcpProviderDefinition): AcpProviderDefinition
 diagnosticStatus(): readonly AcpDiagnostic[]
 
 /**
+ * Inspect the current Host's executable directory without downloading or authenticating.
+ * @param signal - optional cancellation for executable lookups.
+ * @returns all channel instances, including disabled and unavailable templates.
+ */
+async catalog(signal?: AbortSignal): Promise<readonly AcpCatalogEntry[]>
+
+/**
  * Run a prompt-free probe with shared failure cooldown and process teardown.
  * @param provider - installed peer Agent to inspect.
  * @param force - explicit retry bypassing failure cooldown.
  * @returns observed ACP metadata, including a cached model preview.
  */
-probe(provider: 'codex' | 'claude', force: boolean): Promise<AcpDiagnostic>
+probe(provider: string, force: boolean): Promise<AcpDiagnostic>
+
+/**
+ * Cancel an outstanding channel diagnostic.
+ * @param provider - configured channel id.
+ */
+cancelOperation(provider: string): void
+
+/**
+ * Read controls from the current runtime without connecting an idle history entry.
+ * @param id - PaperAI session identity.
+ * @returns exact provider controls, or null for another Agent driver.
+ */
+sessionDetails(id: SessionId): AcpSessionDetails | null
+
+/**
+ * Find a local conversation already linked to this provider's external history.
+ * @param provider - supported ACP channel.
+ * @param externalId - external session id.
+ * @param signal - caller cancellation.
+ * @param except - new blank local session excluded during import admission.
+ * @returns existing local id, or null.
+ */
+async linkedSession( provider: string, externalId: string, signal?: AbortSignal, except?: SessionId, ): Promise<SessionId | null>
+
+/**
+ * Import provider history into a newly created local conversation with the same working directory.
+ * @param id - unused local session.
+ * @param externalId - provider history id.
+ * @param cwd - directory from the selected history entry.
+ * @param caller - import cancellation.
+ * @returns the existing or newly linked local session id.
+ */
+async importHistory(id: SessionId, externalId: string, cwd: string, caller?: AbortSignal): Promise<SessionId>
+
+/**
+ * Apply a declared ACP session option to its exact active Agent.
+ * @param id - current PaperAI session identity.
+ * @param option - advertised option id.
+ * @param value - selected string or boolean value.
+ */
+async selectOption(id: SessionId, option: string, value: string | boolean): Promise<void>
+
+/**
+ * Run a capability-gated account, routing, or provider-history action independently of conversations.
+ * @param provider - configured channel id.
+ * @param request - explicit management action.
+ * @param signal - caller cancellation.
+ * @returns non-secret management response fields.
+ */
+async manage(provider: string, request: AcpManagementRequest, signal?: AbortSignal): Promise<AcpManagementResult>
+
+/**
+ * Install, update, or uninstall one declared template inside the managed installation root.
+ * @param provider - configured instance id.
+ * @param action - installation action; uninstall never targets external commands.
+ * @param signal - caller cancellation.
+ */
+async install(provider: string, action: 'install' | 'uninstall', signal?: AbortSignal): Promise<void>
 
 /**
  * Complete setup, atomically publish the DSH lifecycle, and return its owner capability.
@@ -253,7 +324,7 @@ probe(provider: 'codex' | 'claude', force: boolean): Promise<AcpDiagnostic>
 async publish( ownerCtx: Context, provider: AcpProviderDefinition, preparation: SessionPreparation, options: CreateAgentOptions | ResumeAgentOptions, ): Promise<AgentHandle>
 ```
 
-Types: [AgentHandle](core.md) · [CreateAgentOptions](core.md) · [ResumeAgentOptions](core.md) · [SessionPreparation](persistence.md)
+Types: [AgentHandle](core.md) · [CreateAgentOptions](core.md) · [ResumeAgentOptions](core.md) · [SessionId](core.md) · [SessionPreparation](persistence.md)
 
 Source: [`packages/paperai/agent-acp/src/index.ts`](../../packages/paperai/agent-acp/src/index.ts)
 
@@ -279,6 +350,63 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
  * @returns configured ACP peers, or an empty roster when the provider plugin is absent.
  */
 @Remote('agentDiagnostics') agentDiagnostics(): readonly PaperAIAgentDiagnostic[]
+
+/**
+ * Inspect all configured ACP channels on this Host without a provider prompt.
+ * @param signal - optional cancellation for executable discovery.
+ * @returns built-in and custom channels with installation and cached protocol state.
+ */
+@Remote('acpCatalog') async acpCatalog(signal?: AbortSignal): Promise<readonly AcpCatalogEntry[]>
+
+/**
+ * Cancel queued or running ACP channel management work.
+ * @param request - channel owning the operation.
+ */
+@Remote('acpCancel') acpCancel(request: { provider: string }): void
+
+/**
+ * Apply a capability-gated ACP account, routing, or external-history operation.
+ * @param request - instance id and explicit action.
+ * @param signal - caller cancellation.
+ * @returns declared non-secret history or routing fields.
+ */
+@Remote('acpManage') async acpManage(request: { provider: string; action: AcpManagementRequest }, signal?: AbortSignal): Promise<AcpManagementResult>
+
+/**
+ * Change only the selected channel's PaperAI-managed installation.
+ * @param request - channel and install or uninstall action.
+ * @param signal - cancellation including process-tree cleanup.
+ */
+@Remote('acpInstall') async acpInstall(request: { provider: string; action: 'install' | 'uninstall' }, signal?: AbortSignal): Promise<void>
+
+/**
+ * Read the active ACP conversation's options and provider-owned status.
+ * @param request - PaperAI session identity.
+ * @returns runtime-declared controls, or null for a non-ACP Agent.
+ */
+@Remote('acpSession') acpSession(request: { sessionId: SessionId }): AcpSessionDetails | null
+
+/**
+ * Resolve an already imported provider history without opening another connection.
+ * @param request - provider channel and external id.
+ * @param signal - lookup cancellation.
+ * @returns known local conversation, or null.
+ */
+@Remote('acpLinkedSession') async acpLinkedSession(request: { provider: string; externalSessionId: string }, signal?: AbortSignal): Promise<SessionId | null>
+
+/**
+ * Import selected provider history into an unused local conversation.
+ * @param request - target local session and provider history identity/directory.
+ * @param signal - caller cancellation.
+ * @returns the local conversation owning the imported history.
+ */
+@Remote('acpImportHistory') async acpImportHistory( request: { sessionId: SessionId; externalSessionId: string; cwd: string }, signal?: AbortSignal, ): Promise<SessionId>
+
+/**
+ * Change one provider-declared option without changing the DSH sandbox policy.
+ * @param request - exact session, option id, and selected value.
+ */
+@Remote('acpSelectOption') async acpSelectOption(request: { sessionId: SessionId; option: string; value: string | boolean }): Promise<void>
 
 /**
  * Probe ACP initialization in an empty directory without a model prompt.
@@ -462,6 +590,8 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
  */
 @Remote('restore') async restore( request: PaperAIRestoreDocumentRequest, signal?: AbortSignal, ): Promise<PaperAIDocumentCommitResult>
 ```
+
+Types: [SessionId](core.md)
 
 Source: [`packages/paperai/workbench-service/src/index.ts`](../../packages/paperai/workbench-service/src/index.ts)
 
@@ -1097,6 +1227,25 @@ Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/w
 <a id="paperai-events"></a>
 
 ### `paperai/*` events
+
+<a id="paperaiacp-changed--emit"></a>
+
+#### `paperai/acp-changed` — emit
+
+ACP controls or provider-owned status changed for one live conversation.
+
+```ts cordis-catalog
+/**
+ * ACP controls or provider-owned status changed for one live conversation.
+ * @mode emit
+ * @param sessionId - owning PaperAI session.
+ */
+'paperai/acp-changed'(sessionId: SessionId): void
+```
+
+Types: [SessionId](core.md)
+
+Source: [`packages/paperai/agent-acp/src/diagnostic-types.ts`](../../packages/paperai/agent-acp/src/diagnostic-types.ts)
 
 <a id="paperaidocument-changed--emit"></a>
 

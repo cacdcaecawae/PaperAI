@@ -90,7 +90,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-Sources: [`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:408`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:342`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:349`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:378`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:410`](../packages/core/session/src/types.ts)
 
 ## Events
 
@@ -500,6 +500,28 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 
 ### `paperai/*`
 
+<a id="paperaiacpanswer--log-only"></a>
+
+#### `paperai/acp/answer` — log-only
+
+```ts persistence-catalog
+/** Human input returned to an ACP request, retained for model-request reconstruction. */
+'paperai/acp/answer': { provider: string; request: string; response: string }
+```
+
+Source: [`packages/paperai/agent-acp/src/agent.ts:96`](../packages/paperai/agent-acp/src/agent.ts)
+
+<a id="paperaiacpclient-request--log-only"></a>
+
+#### `paperai/acp/client-request` — log-only
+
+```ts persistence-catalog
+/** Filesystem and terminal exchanges returned to the provider's model loop. */
+'paperai/acp/client-request': { provider: string; method: string; request: string; response: string }
+```
+
+Source: [`packages/paperai/agent-acp/src/agent.ts:98`](../packages/paperai/agent-acp/src/agent.ts)
+
 <a id="paperaiacpconfig--log-only"></a>
 
 #### `paperai/acp/config` — log-only
@@ -512,14 +534,37 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
  * alone. Log-only: not a surface event.
  */
 'paperai/acp/config': {
-  provider: 'codex' | 'claude'
+  provider: string
   model: string
   reasoningEffort?: string
   switches?: Record<string, boolean>
+  configOptions?: Record<string, string | boolean>
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:60`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:86`](../packages/paperai/agent-acp/src/agent.ts)
+
+<a id="paperaiacpcontent--log-only"></a>
+
+#### `paperai/acp/content` — log-only
+
+```ts persistence-catalog
+/** Original provider content for media without a canonical DSH content block. */
+'paperai/acp/content': { provider: string; content: AcpContentBlock }
+```
+
+Source: [`packages/paperai/agent-acp/src/content.ts:12`](../packages/paperai/agent-acp/src/content.ts)
+
+<a id="paperaiacpcontext--log-only"></a>
+
+#### `paperai/acp/context` — log-only
+
+```ts persistence-catalog
+/** Exact extra text supplied to an ACP prompt after the durable user inputs. */
+'paperai/acp/context': { provider: string; content: string[] }
+```
+
+Source: [`packages/paperai/agent-acp/src/agent.ts:94`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpsession--log-only"></a>
 
@@ -528,13 +573,25 @@ Source: [`packages/paperai/agent-acp/src/agent.ts:60`](../packages/paperai/agent
 ```ts persistence-catalog
 /** Durable link from one DSH session lifecycle to its provider-owned ACP session. */
 'paperai/acp/session': {
-  provider: 'codex' | 'claude'
+  provider: string
   externalSessionId: string
   resumed: boolean
+  host?: string
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:49`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:74`](../packages/paperai/agent-acp/src/agent.ts)
+
+<a id="paperaiacpstate--log-only"></a>
+
+#### `paperai/acp/state` — log-only
+
+```ts persistence-catalog
+/** Provider-owned status retained independently of DSH's local history and compaction. */
+'paperai/acp/state': { provider: string; state: AcpSessionState }
+```
+
+Source: [`packages/paperai/agent-acp/src/agent.ts:100`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 
@@ -585,7 +642,7 @@ Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/s
 'request/context': RequestContext
 ```
 
-Source: [`packages/core/session/src/types.ts:313`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:315`](../packages/core/session/src/types.ts)
 
 <a id="requestheader--log-only"></a>
 
@@ -599,7 +656,7 @@ Source: [`packages/core/session/src/types.ts:313`](../packages/core/session/src/
 'request/header': { header: EpochHeader; reason: RequestHeaderReason }
 ```
 
-Source: [`packages/core/session/src/types.ts:308`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:310`](../packages/core/session/src/types.ts)
 
 ### `sandbox/*`
 
@@ -674,7 +731,7 @@ Source: [`packages/schedule/schedule/src/types.ts:219`](../packages/schedule/sch
 'session/end-seed': Record<string, never>
 ```
 
-Source: [`packages/core/session/src/types.ts:336`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:338`](../packages/core/session/src/types.ts)
 
 <a id="sessiontitle--log-only"></a>
 
@@ -820,7 +877,7 @@ Source: [`packages/experimental/agent-team/src/types.ts:208`](../packages/experi
 
 Types: [TodoItem](subsystems/session.md)
 
-Source: [`packages/core/session/src/types.ts:303`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:305`](../packages/core/session/src/types.ts)
 
 ### `tool/*`
 
@@ -889,6 +946,19 @@ Source: [`packages/core/tools/src/types.ts:56`](../packages/core/tools/src/types
 
 Source: [`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types.ts)
 
+<a id="toolprogress--log-only"></a>
+
+#### `tool/progress` — log-only
+
+```ts persistence-catalog
+/** Complete current arguments for an existing tool call; does not open another call or settle its result. */
+'tool/progress': { turn: number; step: number; callId: CallId; name: string; arguments: string }
+```
+
+Types: [CallId](subsystems/core.md)
+
+Source: [`packages/core/session/src/types.ts:285`](../packages/core/session/src/types.ts)
+
 <a id="toolresult--surface"></a>
 
 #### `tool/result` — surface
@@ -914,7 +984,7 @@ Source: [`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types
 }
 ```
 
-Source: [`packages/core/session/src/types.ts:295`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:297`](../packages/core/session/src/types.ts)
 
 ### `tool-workflow/*`
 

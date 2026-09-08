@@ -16,6 +16,8 @@ The package also fills `conversation.details.tool` with `ToolDetails`. The row a
 
 Generic rows classify known Tool names into search, read, shell, write, edit, code, or generic variants. Running, successful, failed, and interrupted lifecycle states come only from the frozen call/result slice. File paths resolve against the session `cwd` only when the user invokes the Host open-file callback; presentation code does not read Session services.
 
+Generic presenters select the displayed input, live progress text, and final output. Provider-owned names use the advertised title in the summary instead of exposing transport metadata. Durable result images use conversation's existing image slot beside the owning call, including results with a terminal or diff card.
+
 ## Atomic Tool views
 
 An owning business package registers its wire Tool name into `tool.call.toolview`:

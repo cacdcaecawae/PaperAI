@@ -141,6 +141,7 @@ export class AgentPresets extends Service {
    * off the untraced original (the `jobs-local` selfCtx precedent).
    */
   private readonly selfCtx: Context
+  private readonly contributions = new Map<string, AgentPreset>()
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentPresets')
@@ -218,8 +219,34 @@ export class AgentPresets extends Service {
    * @returns the presets, first-root-wins per id.
    */
   async list(): Promise<AgentPreset[]> {
-    return await discoverPresets(this.resolvedRoots)
+    const discovered = await discoverPresets(this.resolvedRoots)
+    return [...discovered.filter(preset => !this.contributions.has(preset.id)), ...this.contributions.values()]
   }
+
+  /**
+   * Contribute a plugin-owned preset, overriding a discovered directory with the same id.
+   * @param preset - stable id, composition file, and optional exact factory route.
+   * @returns disposer withdrawing this contribution without interrupting existing sessions.
+   */
+  register(preset: AgentPreset): () => void {
+    if (!PRESET_ID.test(preset.id)) throw new Error(`Invalid preset id: ${preset.id}`)
+    if (this.contributions.has(preset.id)) throw new Error(`Preset already registered: ${preset.id}`)
+    const owned = Object.freeze({ ...preset })
+    this.contributions.set(preset.id, owned)
+    this.selfCtx.emit('agent-presets/changed')
+    return () => {
+      if (this.contributions.get(preset.id) !== owned) return
+      this.contributions.delete(preset.id)
+      this.selfCtx.emit('agent-presets/changed')
+    }
+  }
+
+  /**
+   * Read a contributed preset's required factory before resuming a stored session.
+   * @param id - recorded preset identity.
+   * @returns the exact driver route, or undefined for file-based DSH compositions.
+   */
+  factoryRoute(id: string): string | undefined { return this.contributions.get(id)?.factoryRoute }
 
   /**
    * Resolve one preset by id.
@@ -400,6 +427,7 @@ export class AgentPresets extends Service {
    */
   async copy(from: string, id: string, name?: string): Promise<void> {
     const source = await this.resolve(from)
+    if (source.factoryRoute !== undefined) throw new Error('Factory-contributed presets must be configured by their owning plugin')
     // The roster check refuses ids any root supplies — shipped ones included,
     // since a user directory named like a shipped preset is shadowed by it.
     // The disk check inside copyComposition only sees the writable root.

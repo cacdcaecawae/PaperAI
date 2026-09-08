@@ -215,6 +215,7 @@ describe('chat row search body (GenericToolCard fallback)', () => {
 
   it('a non-search result keeps the args-JSON text body', () => {
     const view = render(<GenericToolCard {...ownerProps(settledGrep({
+      callView: { card: 'generic', title: 'Grep foo', rawInput: { pattern: 'foo', path: 'src' } },
       resultView: { card: 'generic' },
     }), 'grep')} />)
     toggleRow(view)
