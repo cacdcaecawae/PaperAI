@@ -33,8 +33,10 @@
 .identity strong { font-size: 14px; font-weight: 600; }
 .identity small { display: block; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); }
 .badge { border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; padding: 2px 5px; font-size: 10px; font-weight: normal; color: var(--dsw-alias-label-secondary); }
+.channelState { display: grid; gap: 5px; text-align: right; }
 .status { color: var(--dsw-alias-label-secondary); font-size: 11px; white-space: nowrap; }
 .status[data-ready='true'] { color: var(--dsw-alias-state-business-primary); }
+.status[data-error='true'] { color: var(--dsw-alias-state-danger-primary); }
 .details { padding: 0 18px 20px 62px; font-size: 12px; line-height: 1.6; }
 .details dl { display: grid; grid-template-columns: 80px 1fr; gap: 6px 12px; }
 .details dt { color: var(--dsw-alias-label-tertiary); }
@@ -65,7 +67,7 @@
   .toolbar input { flex-basis: 100%; }
   .row { flex-wrap: wrap; }
   .identity { flex-basis: calc(100% - 65px); }
-  .row > .status { margin-left: 46px; }
+  .row > .channelState { margin-left: 46px; text-align: left; }
   .row > .actions { margin-left: auto; }
   .details { padding-left: 18px; }
   .fields { grid-template-columns: 1fr; }

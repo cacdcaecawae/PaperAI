@@ -71,7 +71,7 @@ export function AcpSettingsSection({
   const entries = state.entries.filter(entry =>
     `${entry.name} ${entry.id} ${entry.host}`.toLowerCase().includes(query.toLowerCase()),
   )
-  const connected = state.entries.filter(entry => entry.connected).length
+  const inUse = state.entries.filter(entry => entry.connected).length
   return (
     <section className={css.page} aria-labelledby="paperai-acp-title">
       <header className={css.heading}>
@@ -106,8 +106,8 @@ export function AcpSettingsSection({
           <span>已启用</span>
         </div>
         <div>
-          <strong>{connected}</strong>
-          <span>已连接</span>
+          <strong>{state.usageKnown ? inUse : '—'}</strong>
+          <span>正在使用</span>
         </div>
       </div>
       <div className={css.toolbar}>
@@ -143,30 +143,35 @@ export function AcpSettingsSection({
           {state.error}
         </p>
       )}
-      <p className={css.note}>检测仅验证 ACP 握手。登录状态、模型访问权限与余额以实际会话结果为准。</p>
+      <p className={css.note}>最近检测与会话使用独立显示。Codex 和 Claude 可在不同会话同时使用。</p>
       <div className={css.directory}>
         {entries.map((entry) => {
           const diagnostic = entry.diagnostic
           const nextCursor = state.management[entry.id]?.nextCursor
           const busy = state.busy.includes(entry.id) || entry.busy !== null
           const missing = entry.source !== 'remote' && entry.adapter === null
-          const status = busy
+          const status = busy && entry.busy !== 'connecting'
             ? entry.busy === 'install'
               ? '安装中'
               : entry.busy === 'authenticate'
                 ? '认证中'
-                : '处理中'
+                : entry.busy === 'probe'
+                  ? '检测中'
+                  : '处理中'
             : missing
               ? '未安装'
               : diagnostic.status === 'ready'
-                ? diagnostic.stage === 'session'
-                  ? '会话已就绪'
-                  : diagnostic.stage === 'prompt'
-                    ? '模型请求成功'
-                    : '握手通过'
+                ? '检测通过'
                 : diagnostic.status === 'error'
-                  ? '需要处理'
-                  : '等待检测'
+                  ? '检测失败'
+                  : '待检测'
+          const usage = !state.usageKnown
+            ? '使用情况未知'
+            : entry.connected
+              ? '正在使用'
+              : entry.startup !== null
+                ? '连接中'
+                : '未使用'
           return (
             <article className={css.entry} key={entry.id}>
               <div className={css.row}>
@@ -193,9 +198,14 @@ export function AcpSettingsSection({
                     {entry.host} · {entry.command} {entry.args.join(' ')}
                   </small>
                 </button>
-                <span className={css.status} data-ready={entry.connected}>
-                  {entry.connected ? '已连接' : '未连接'}
-                </span>
+                <div className={css.channelState}>
+                  <span className={css.status} data-ready={status === '检测通过'} data-error={status === '检测失败'}>
+                    {status}
+                  </span>
+                  <span className={css.status} data-ready={state.usageKnown && entry.connected}>
+                    {usage}
+                  </span>
+                </div>
                 <div className={css.actions}>
                   {busy ? (
                     <button
@@ -236,7 +246,17 @@ export function AcpSettingsSection({
                     <dt>CLI</dt>
                     <dd>{entry.cli ?? (entry.source === 'remote' ? '远程路径未报告' : '未在此主机发现')}</dd>
                     <dt>检测 / 操作</dt>
-                    <dd>{status}</dd>
+                    <dd>
+                      {status}
+                      {status === '检测通过' && (
+                        <>
+                          {' · '}
+                          {diagnostic.stage === 'prompt' ? '模型请求成功' : diagnostic.stage === 'session' ? '会话已就绪' : '握手通过'}
+                        </>
+                      )}
+                    </dd>
+                    <dt>会话使用</dt>
+                    <dd>正在使用表示有会话已连接此渠道；不同会话可以同时使用不同渠道。</dd>
                     {entry.startup !== null && (
                       <>
                         <dt>连接阶段</dt>
@@ -289,6 +309,7 @@ export function AcpSettingsSection({
                       )}
                     </dd>
                   </dl>
+                  <p className={css.note}>握手检测不发送模型请求。登录状态、模型访问权限与余额以实际对话为准。</p>
                   {diagnostic.error !== null && (
                     <p role="alert" className={css.error}>
                       {diagnostic.error === 'authentication'

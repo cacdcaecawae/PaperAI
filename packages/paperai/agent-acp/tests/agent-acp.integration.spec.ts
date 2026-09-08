@@ -1981,6 +1981,24 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().find(entry => entry.provider === 'codex')).toMatchObject({ status: 'ready', connected: false })
   })
 
+  it('uses Codex and Claude concurrently and releases either channel independently', async () => {
+    const harness = await mountHarness()
+    const [codex, claude] = await Promise.all([
+      createAgent(harness, 'parallel-codex', 'codex'),
+      createAgent(harness, 'parallel-claude', 'claude'),
+    ])
+    expect((await harness.ctx.paperAiAcpAgents.catalog()).map(entry => [entry.id, entry.connected]))
+      .toEqual([['codex', true], ['claude', true]])
+    await Promise.all([runTurn(codex, 'Codex conversation'), runTurn(claude, 'Claude conversation')])
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'prompt').map(entry => entry.label).sort())
+      .toEqual(['claude', 'codex'])
+    await codex.dispose()
+    expect((await harness.ctx.paperAiAcpAgents.catalog()).map(entry => [entry.id, entry.connected]))
+      .toEqual([['codex', false], ['claude', true]])
+    await runTurn(claude, 'Continue Claude independently')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'prompt' && entry.label === 'claude')).toHaveLength(2)
+  })
+
   it('clears connected status after the provider process exits unexpectedly', async () => {
     const harness = await mountHarness({ env: { FAKE_ACP_CRASH_ON_PROMPT: '1' } })
     const handle = await createAgent(harness, 'crashed-connection')

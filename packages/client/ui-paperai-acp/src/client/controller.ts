@@ -45,6 +45,8 @@ export interface ChannelDraft {
 /** One ACP settings page snapshot. */
 export interface AcpSettingsState {
   entries: readonly AcpCatalogEntry[]
+  /** Whether the Host has supplied session usage since the last connection or refresh failure. */
+  usageKnown: boolean
   loading: boolean
   error: string | null
   busy: readonly string[]
@@ -70,6 +72,7 @@ export class AcpSettingsController {
   /** Shared channel observations and unsaved editor state. */
   readonly store = createSnapshotStore<AcpSettingsState>({
     entries: [],
+    usageKnown: false,
     loading: false,
     error: null,
     busy: [],
@@ -135,11 +138,13 @@ export class AcpSettingsController {
       if (!result.ok) throw new Error(result.error.message)
       this.store.update((state) => {
         state.entries = result.value
+        state.usageKnown = true
       })
     } catch (error: unknown) {
       if (!this.isDisposed() && generation === this.generation)
         this.store.update((state) => {
           state.error = String(error)
+          state.usageKnown = false
           state.entries = state.entries.map(entry => ({ ...entry, connected: false }))
         })
     } finally {
@@ -511,6 +516,7 @@ export class AcpSettingsController {
     this.generation += 1
     this.store.update((state) => {
       state.loading = false
+      state.usageKnown = false
       state.entries = state.entries.map(entry => ({ ...entry, connected: false }))
     })
   }

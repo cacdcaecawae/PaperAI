@@ -16,7 +16,7 @@ This partially supersedes the initial PaperAI roster in the [product-profile dec
 
 ## Ownership
 
-Only a published conversation with an open ACP connection is connected. Discovery and isolated probes report observations. Probes and management connections receive no project files, permissions, or PaperAI MCP descriptor. Startup has a deadline and cancellation; a superseded selection cancels the old startup while preserving the browser's session binding until Host replacement settles.
+Diagnostic results and conversation usage are independent. The directory reports a channel as in use when a published conversation holds its ACP connection; an unused channel is not an unavailable channel. Each conversation owns its process, allowing Codex and Claude to run concurrently and close independently. Missing Host observations make usage unknown. Probes and management connections receive no project files, permissions, or PaperAI MCP descriptor. Startup has a deadline and cancellation; a superseded selection cancels the old startup while preserving the browser's session binding until Host replacement settles.
 
 The settings mirror remains the browser's sole settings reader. Credential edits use path mutations so redacted values cannot be erased by an unrelated edit. Model favorites and default settings belong to a channel; negotiated options and plans belong to one conversation.
 

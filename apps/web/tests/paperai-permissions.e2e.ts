@@ -309,15 +309,15 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await input.fill('')
   }, 60_000)
 
-  it('shows exactly two ACP channels and keeps a successful probe separate from a live connection', async () => {
+  it('shows channel diagnostics separately from session usage', async () => {
     await page.getByRole('button', { name: '设置', exact: true }).click()
     const settings = page.getByRole('dialog', { name: '设置', exact: true })
     await settings.getByRole('button', { name: 'ACP 渠道', exact: true }).click()
     const directory = settings.getByRole('region', { name: 'ACP 渠道', exact: true })
     const codex = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Codex/ }) })
     const claude = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
-    await codex.getByText('已连接', { exact: true }).waitFor()
-    await claude.getByText('未连接', { exact: true }).waitFor()
+    await codex.getByText('正在使用', { exact: true }).waitFor()
+    await claude.getByText('未使用', { exact: true }).waitFor()
     expect(await directory.getByRole('article').count()).toBe(2)
     expect(await directory.getByRole('combobox', { name: '默认 Agent' }).locator('option').allTextContents()).toEqual(['Codex', 'Claude'])
     expect(await codex.locator('svg[aria-hidden="true"]').count()).toBe(1)
@@ -325,15 +325,15 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const detectAll = directory.getByRole('button', { name: '一键检测', exact: true })
     await detectAll.click()
     await expect.poll(() => detectAll.isEnabled()).toBe(true)
-    await codex.getByRole('button', { name: /^Codex/ }).click()
-    await codex.getByText('握手通过', { exact: true }).waitFor()
-    await claude.getByRole('button', { name: /^Claude/ }).click()
-    await claude.getByText('握手通过', { exact: true }).waitFor()
-    expect(await claude.getByText('未连接', { exact: true }).isVisible()).toBe(true)
+    await codex.getByText('检测通过', { exact: true }).waitFor()
+    await claude.getByText('检测通过', { exact: true }).waitFor()
+    expect(await claude.getByText('未使用', { exact: true }).isVisible()).toBe(true)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-connection-status.expected.md'), [
       await detectAll.ariaSnapshot(),
-      await codex.getByText('已连接', { exact: true }).ariaSnapshot(),
-      await claude.getByText('未连接', { exact: true }).ariaSnapshot(),
+      await codex.getByText('检测通过', { exact: true }).ariaSnapshot(),
+      await codex.getByText('正在使用', { exact: true }).ariaSnapshot(),
+      await claude.getByText('检测通过', { exact: true }).ariaSnapshot(),
+      await claude.getByText('未使用', { exact: true }).ariaSnapshot(),
       await directory.getByRole('combobox', { name: '默认 Agent' }).ariaSnapshot(),
     ].join('\n'), MODE)
     await page.keyboard.press('Escape')

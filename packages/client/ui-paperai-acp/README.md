@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-ACP settings and conversation controls for PaperAI. The directory exposes Codex and Claude, showing **Connected / Disconnected** from live provider connections. A successful diagnostic handshake is a separate observation and never sets the connection status.
+ACP settings and conversation controls for PaperAI. The directory exposes Codex and Claude with separate diagnostic results and conversation usage. **检测通过 / 待检测 / 检测失败** describe the last diagnostic; **正在使用 / 未使用** indicate whether an open conversation holds a provider connection. Both channels can be in use concurrently in different conversations. Loss of Host observations makes usage unknown until a successful refresh; it does not imply that another conversation stopped.
 
 The **一键检测** button runs channel diagnostics in parallel without sending a model prompt. Channel logos come from the keyed `paperai.acp.channel.mark` slot, supplied by the product's brand plugin.
 

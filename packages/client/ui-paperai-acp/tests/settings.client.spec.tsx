@@ -119,18 +119,57 @@ function settingsProps(b: Awaited<ReturnType<typeof bench>>): AcpSettingsProps {
   } as AcpSettingsProps
 }
 
-it('shows only Codex and Claude, using live connection state instead of a successful handshake', async () => {
+it('shows probe results and session usage independently for Codex and Claude', async () => {
   const b = await bench()
   render(<AcpSettingsSection {...settingsProps(b)} />)
   const codex = screen.getByText('Codex', { selector: 'strong' }).closest('article')!
   const claude = screen.getByText('Claude', { selector: 'strong' }).closest('article')!
-  expect(within(codex).getByText('已连接')).toBeTruthy()
-  expect(within(claude).getByText('未连接')).toBeTruthy()
+  expect(within(codex).getByText('检测通过')).toBeTruthy()
+  expect(within(codex).getByText('正在使用')).toBeTruthy()
+  expect(within(claude).getByText('检测通过')).toBeTruthy()
+  expect(within(claude).getByText('未使用')).toBeTruthy()
+  expect(screen.queryByText('未连接')).toBeNull()
   expect(screen.queryByText('DSH')).toBeNull()
   expect(screen.getAllByRole('article')).toHaveLength(2)
   fireEvent.click(within(claude).getByRole('button', { name: '检测' }))
   expect(b.remote.probeAgent).toHaveBeenCalledWith({ provider: 'claude', force: true })
   expect(b.describe).toHaveBeenCalledOnce()
+})
+
+it.each([
+  { status: 'discovered', adapter: '/adapter', expected: '待检测' },
+  { status: 'error', adapter: '/adapter', expected: '检测失败' },
+  { status: 'error', adapter: null, expected: '未安装' },
+] as const)('shows $expected without treating a diagnostic as session usage', async ({ status, adapter, expected }) => {
+  const b = await bench()
+  b.remote.acpCatalog.mockResolvedValue({ ok: true, value: entries.map(entry => ({
+    ...entry, adapter, connected: false, diagnostic: { ...entry.diagnostic, status },
+  })) })
+  await b.controller.load()
+  render(<AcpSettingsSection {...settingsProps(b)} />)
+  for (const row of screen.getAllByRole('article')) {
+    expect(within(row).getByText(expected)).toBeTruthy()
+    expect(within(row).getByText('未使用')).toBeTruthy()
+  }
+})
+
+it('shows both channels in use and marks usage unknown when the Host observation is lost', async () => {
+  const b = await bench()
+  b.remote.acpCatalog.mockResolvedValue({ ok: true, value: entries.map(entry => ({ ...entry, connected: true })) })
+  await b.controller.load()
+  render(<AcpSettingsSection {...settingsProps(b)} />)
+  for (const row of screen.getAllByRole('article')) expect(within(row).getByText('正在使用')).toBeTruthy()
+  await act(async () => { b.controller.disconnected() })
+  for (const row of screen.getAllByRole('article')) {
+    expect(within(row).getByText('使用情况未知')).toBeTruthy()
+    expect(within(row).getByText('检测通过')).toBeTruthy()
+  }
+  await act(async () => { await b.controller.load() })
+  for (const row of screen.getAllByRole('article')) expect(within(row).getByText('正在使用')).toBeTruthy()
+  b.remote.acpCatalog.mockRejectedValueOnce(new Error('Host unavailable'))
+  await act(async () => { await b.controller.load() })
+  expect(b.controller.store.getSnapshot().usageKnown).toBe(false)
+  expect(screen.getAllByText('使用情况未知')).toHaveLength(2)
 })
 
 it('preserves unseen credentials, keeps channel identity fixed and validates default disable before writing', async () => {
