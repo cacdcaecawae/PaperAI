@@ -1800,10 +1800,14 @@ describe('ACP update transcript projection', { concurrent: false }, () => {
 
 describe('ACP Agent settings and secret handling', { concurrent: false }, () => {
   it('changes advertised session options, permits a manual model id and rejects invalid or busy changes', async () => {
-    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high' }, promptBarrier: true })
+    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high', FAKE_ACP_PERMISSION_OPTION: '1' }, promptBarrier: true })
     const handle = await createAgent(harness, 'session-options')
     const id = handle.agent.session.id
     const service = harness.ctx.paperAiAcpAgents
+    expect(service.sessionDetails(id)?.options.find(option => option.id === 'mode')?.editable).toBe(false)
+    await expect(service.selectOption(id, 'mode', 'agent-full-access')).rejects.toThrow('permission selector')
+    expect((await readLog(harness.logPath)).filter(event => event.event === 'set-config-option' && event.configId === 'mode'))
+      .toEqual([])
     await service.selectOption(id, 'fast', true)
     expect(service.sessionDetails(id)?.options.find(option => option.id === 'fast')?.value).toBe(true)
     await expect(service.selectOption(id, 'effort', 'high')).rejects.toThrow()

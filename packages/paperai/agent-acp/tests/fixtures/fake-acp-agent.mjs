@@ -26,7 +26,10 @@ function log(event, data = {}) {
 }
 
 function modelOptions() {
-  return [{
+  return [...(process.env.FAKE_ACP_PERMISSION_OPTION === '1' ? [{
+    type: 'select', id: 'mode', name: 'Mode', category: 'mode', currentValue: currentMode,
+    options: modes().availableModes.map(mode => ({ value: mode.id, name: mode.name })),
+  }] : []), {
     type: 'select',
     id: 'model',
     name: 'Model',

@@ -54,6 +54,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 import { SessionTitleProviderId } from '@deepseek-ai/dsh-session-title'
 import type { AcpSessionDetails, AcpSessionState } from './diagnostic-types.ts'
 import { diagnosticCapabilities } from './diagnostics.ts'
+import { isAcpPermissionOption } from './catalog.ts'
 import { environmentSecrets, redactAcpText } from './redaction.ts'
 import { ACP_TOOL, type AcpToolDisplay } from './tool-presentation.ts'
 import { projectAcpContent } from './content.ts'
@@ -589,7 +590,7 @@ export class AcpAgent implements Agent {
         description: option.description ?? null,
         category: option.category ?? null,
         value: option.currentValue,
-        editable: !/permission|sandbox|approval/iu.test(option.id),
+        editable: !isAcpPermissionOption(option),
         choices:
           option.type === 'boolean'
             ? []

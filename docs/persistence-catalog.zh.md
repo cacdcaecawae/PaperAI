@@ -511,7 +511,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'paperai/acp/answer': { provider: string; request: string; response: string }
 ```
 
-来源： [`packages/paperai/agent-acp/src/agent.ts:96`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:97`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpclient-request--log-only"></a>
 
@@ -522,7 +522,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'paperai/acp/client-request': { provider: string; method: string; request: string; response: string }
 ```
 
-来源： [`packages/paperai/agent-acp/src/agent.ts:98`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:99`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpconfig--log-only"></a>
 
@@ -544,7 +544,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/paperai/agent-acp/src/agent.ts:86`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:87`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpcontent--log-only"></a>
 
@@ -566,7 +566,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'paperai/acp/context': { provider: string; content: string[] }
 ```
 
-来源： [`packages/paperai/agent-acp/src/agent.ts:94`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:95`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpsession--log-only"></a>
 
@@ -582,7 +582,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/paperai/agent-acp/src/agent.ts:74`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:75`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpstate--log-only"></a>
 
@@ -593,7 +593,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'paperai/acp/state': { provider: string; state: AcpSessionState }
 ```
 
-来源： [`packages/paperai/agent-acp/src/agent.ts:100`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:101`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 

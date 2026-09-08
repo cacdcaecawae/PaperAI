@@ -26,7 +26,7 @@ import { environmentSecrets, redactAcpText } from './redaction.ts'
 import { negotiateMcp } from './mcp.ts'
 import { sshLaunch, forwardedPort, type AcpSshConfig } from './ssh.ts'
 import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
-import { modelStateFromConfigOptions, type AcpEffortState, type AcpModelState, type AcpSwitchState } from './catalog.ts'
+import { isAcpPermissionOption, modelStateFromConfigOptions, type AcpEffortState, type AcpModelState, type AcpSwitchState } from './catalog.ts'
 
 /** The selection a provider session applies: model plus the advertised effort and switch values. */
 export interface AcpSelection {
@@ -1057,7 +1057,7 @@ export class AcpRuntime {
    */
   async selectConfigOption(id: string, value: string | boolean): Promise<void> {
     const option = this.optionsState.find(entry => entry.id === id)
-    if (option === undefined || /permission|sandbox|approval/iu.test(id))
+    if (option === undefined || isAcpPermissionOption(option))
       throw new Error(`ACP option ${id} is unavailable or belongs to the permission selector`)
     if (option.category === 'model' && typeof value === 'string') {
       await this.selectModel(value, {}, true)

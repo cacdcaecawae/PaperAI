@@ -36,6 +36,15 @@ export interface AcpModelState {
 
 const EFFORT_OPTION_IDS = new Set(['effort', 'reasoning_effort', 'reasoning-effort'])
 
+/**
+ * Identify native permission controls that remain owned by the DSH permission selector.
+ * @param option - provider-advertised config option.
+ * @returns whether general session controls must leave this option read-only.
+ */
+export function isAcpPermissionOption(option: SessionConfigOption): boolean {
+  return option.category === 'mode' || option.id === 'mode' || /permission|sandbox|approval/iu.test(option.id)
+}
+
 function text(value: string | null | undefined): string | undefined {
   const clean = value?.trim()
   return clean === '' ? undefined : clean

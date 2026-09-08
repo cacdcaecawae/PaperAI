@@ -509,7 +509,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 'paperai/acp/answer': { provider: string; request: string; response: string }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:96`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:97`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpclient-request--log-only"></a>
 
@@ -520,7 +520,7 @@ Source: [`packages/paperai/agent-acp/src/agent.ts:96`](../packages/paperai/agent
 'paperai/acp/client-request': { provider: string; method: string; request: string; response: string }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:98`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:99`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpconfig--log-only"></a>
 
@@ -542,7 +542,7 @@ Source: [`packages/paperai/agent-acp/src/agent.ts:98`](../packages/paperai/agent
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:86`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:87`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpcontent--log-only"></a>
 
@@ -564,7 +564,7 @@ Source: [`packages/paperai/agent-acp/src/content.ts:12`](../packages/paperai/age
 'paperai/acp/context': { provider: string; content: string[] }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:94`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:95`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpsession--log-only"></a>
 
@@ -580,7 +580,7 @@ Source: [`packages/paperai/agent-acp/src/agent.ts:94`](../packages/paperai/agent
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:74`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:75`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpstate--log-only"></a>
 
@@ -591,7 +591,7 @@ Source: [`packages/paperai/agent-acp/src/agent.ts:74`](../packages/paperai/agent
 'paperai/acp/state': { provider: string; state: AcpSessionState }
 ```
 
-Source: [`packages/paperai/agent-acp/src/agent.ts:100`](../packages/paperai/agent-acp/src/agent.ts)
+Source: [`packages/paperai/agent-acp/src/agent.ts:101`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 
