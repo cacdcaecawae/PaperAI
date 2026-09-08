@@ -2539,6 +2539,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@paperai/ui-acp':
+        specifier: workspace:*
+        version: link:../ui-paperai-acp
       '@paperai/ui-workbench':
         specifier: workspace:*
         version: link:../ui-paperai-workbench

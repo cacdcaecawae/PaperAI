@@ -115,6 +115,7 @@ function settingsProps(b: Awaited<ReturnType<typeof bench>>): AcpSettingsProps {
     install: (id, action) => b.controller.install(id, action),
     importHistory: (id, history) => b.controller.importHistory(id, history),
     close: vi.fn(),
+    renderSlot: () => null,
   } as AcpSettingsProps
 }
 
@@ -340,7 +341,7 @@ it('confirms destructive channel actions and validates provider headers without 
   render(<AcpSettingsSection {...props} />)
   const click = async (name: string) => act(async () => fireEvent.click(screen.getByRole('button', { name })))
   await act(async () => fireEvent.change(screen.getByLabelText(/默认 Agent/), { target: { value: 'claude' } }))
-  await click('检测可用渠道')
+  await click('一键检测')
   await click('刷新安装状态')
   fireEvent.change(screen.getByLabelText('搜索 ACP 渠道'), { target: { value: 'missing' } })
   expect(screen.getByText('没有匹配的渠道')).toBeTruthy()

@@ -1,3 +1,4 @@
+- button "一键检测"
 - text: 已连接
 - text: 未连接
 - combobox "默认 Agent 用于新建会话；当前会话保留自己的配置。":

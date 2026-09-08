@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from './brand-slot.ts'
 import type { AcpSettingsState, ChannelDraft } from './controller.ts'
 import type { AcpHistoryEntry, AcpManagementRequest } from '@paperai/agent-acp/diagnostic-types'
 import css from './SettingsSection.module.css'
@@ -25,7 +26,9 @@ export interface AcpSettingsInjected {
 }
 
 /** Settings section owner and injected actions. */
-export type AcpSettingsProps = PropsRuntime<'settings.section'> & InjectFace<AcpSettingsInjected>
+export type AcpSettingsProps = PropsRuntime<'settings.section'>
+  & PropsRenderSlots<'paperai.acp.channel.mark'>
+  & InjectFace<AcpSettingsInjected>
 
 /** Render the complete channel directory without switching the active conversation. */
 export function AcpSettingsSection({
@@ -42,6 +45,7 @@ export function AcpSettingsSection({
   install,
   importHistory,
   close,
+  renderSlot,
 }: AcpSettingsProps) {
   const state = useAcp(value => value)
   const [query, setQuery] = useState('')
@@ -131,7 +135,7 @@ export function AcpSettingsSection({
             void probe()
           }}
         >
-          检测可用渠道
+          一键检测
         </button>
       </div>
       {state.error !== null && (
@@ -167,7 +171,10 @@ export function AcpSettingsSection({
             <article className={css.entry} key={entry.id}>
               <div className={css.row}>
                 <span className={css.mark} aria-hidden="true">
-                  {entry.name.slice(0, 1).toUpperCase()}
+                  {renderSlot('paperai.acp.channel.mark', {
+                    presetId: entry.id,
+                    size: 22,
+                  }, { entryKey: entry.id })}
                 </span>
                 <button
                   type="button"

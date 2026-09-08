@@ -38,6 +38,7 @@
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-workspace",
+        "@paperai/ui-acp",
         "@paperai/ui-workbench"
       ],
       "platform": "web"
@@ -60,6 +61,7 @@
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@paperai/ui-acp": "workspace:*",
     "@paperai/ui-workbench": "workspace:*"
   },
   "devDependencies": {
@@ -73,6 +75,7 @@
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@paperai/ui-acp": "workspace:*",
     "@paperai/ui-workbench": "workspace:*",
     "@testing-library/react": "^16.1.0",
     "@types/react": "~18.3.1",

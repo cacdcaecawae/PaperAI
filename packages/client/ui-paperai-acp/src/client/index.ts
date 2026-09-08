@@ -10,6 +10,8 @@ import { AcpSettingsSection, type AcpSettingsInjected } from './SettingsSection.
 import { AcpSessionController } from './session-controller.ts'
 import { AcpSessionControls, type AcpSessionInjected } from './SessionControls.tsx'
 
+export type { AcpChannelMarkOwnerProps } from './brand-slot.ts'
+
 /** Required runtime services; the workbench plugin owns the shared generated Remote mount. */
 export const inject = ['slots', 'sessions', 'settingsScope', 'connection', 'remote', 'remote.paperaiWorkbench']
 
@@ -82,6 +84,7 @@ export function apply(ctx: ClientContext): void {
         id: 'paperai-acp',
         order: -20,
         label: 'ACP 渠道',
+        children: { 'paperai.acp.channel.mark': { kind: 'keyed', scope: 'root' } },
         inject: () => injected,
       },
       AcpSettingsSection,

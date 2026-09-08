@@ -10,13 +10,15 @@
 
 PaperAI 产品 profile 在挂载本包前必须禁用 `@deepseek-ai/dsh-client-ui-brand-official`，因为两个插件占用相同的 single slot。
 
+ACP 目录通过带键的 `paperai.acp.channel.mark` slot 复用 Codex 与 Claude 预设图标。注册跟随 ACP 设置声明，声明撤除时一并移除。
+
 ## 模型体验
 
 ### 浏览器品牌呈现
 
 #### 模型看到的内容
 
-无；本包只在浏览器中占用 `sidebar.brand.mark`、`sidebar.brand.name`、`conversation.hero.brand.mark`、`paperai.start.mark` 和 `conversation.hero.agentPreset.mark`，并改写 shell 文案。
+无；本包只在浏览器中占用 `sidebar.brand.mark`、`sidebar.brand.name`、`conversation.hero.brand.mark`、`paperai.start.mark`、`conversation.hero.agentPreset.mark` 和 `paperai.acp.channel.mark`，并改写 shell 文案。
 
 #### Token 影响
 

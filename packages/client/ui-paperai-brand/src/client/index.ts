@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@paperai/ui-workbench/client'
+import type {} from '@paperai/ui-acp/client'
 import {
   ClaudeAgentMark,
   CodexAgentMark,
@@ -96,5 +97,9 @@ export function apply(ctx: ClientContext): void {
     yield ctx.slots.register({ name: 'conversation.hero.agentPreset.mark', key: 'codex' }, CodexAgentMark)
     yield ctx.slots.register({ name: 'conversation.hero.agentPreset.mark', key: 'claude' }, ClaudeAgentMark)
     yield ctx.slots.register({ name: 'conversation.hero.agentPreset.mark', key: 'dsh' }, DshAgentMark)
+  })
+  ctx.slots.inject('paperai.acp.channel.mark', function* () {
+    yield ctx.slots.register({ name: 'paperai.acp.channel.mark', key: 'codex' }, CodexAgentMark)
+    yield ctx.slots.register({ name: 'paperai.acp.channel.mark', key: 'claude' }, ClaudeAgentMark)
   })
 }
