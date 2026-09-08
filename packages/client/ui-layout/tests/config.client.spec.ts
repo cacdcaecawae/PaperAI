@@ -19,6 +19,7 @@ describe('resolveLayoutConfig', () => {
       detailsMax: DETAILS_MAX,
       detailsVisibility: DEFAULT_DETAILS_VISIBILITY,
       detailsNarrowMode: DEFAULT_DETAILS_NARROW_MODE,
+      detailsPosition: 'end',
     })
     expect(Object.isFrozen(resolved)).toBe(true)
   })
@@ -31,6 +32,7 @@ describe('resolveLayoutConfig', () => {
       detailsMax: 960,
       detailsVisibility: 'current-session',
       detailsNarrowMode: 'focus',
+      detailsPosition: 'end',
     })).toEqual({
       centerMin: 520,
       detailsMin: 400,
@@ -38,6 +40,7 @@ describe('resolveLayoutConfig', () => {
       detailsMax: 960,
       detailsVisibility: 'current-session',
       detailsNarrowMode: 'focus',
+      detailsPosition: 'end',
     })
   })
 
@@ -49,6 +52,7 @@ describe('resolveLayoutConfig', () => {
       detailsMax: DETAILS_MAX,
       detailsVisibility: DEFAULT_DETAILS_VISIBILITY,
       detailsNarrowMode: DEFAULT_DETAILS_NARROW_MODE,
+      detailsPosition: 'end',
     })
   })
 

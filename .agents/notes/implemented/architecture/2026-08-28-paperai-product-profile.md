@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-08-28-paperai-product-profile.zh.md)
 
+> The product profile, the fork strategy, and the domain-service split remain current. Two rows of the client contribution table are superseded by [the PaperAI UI overhaul](../feature/2026-09-03-paperai-ui-overhaul.md): the `ui-workspace` slot now lists only tracked Word documents, and the `ui-conversation` details view is one preview-first document surface with template, gate, version, and export panels rather than four views. Template selection and upload follow [the PaperAI template model](2026-09-03-paperai-template-model.md), where a template set holds one format per document type and the project chooses the set.
+
 ## Problem
 
 PaperAI needs a complete local academic-document product, but its first implementation copied DeepSeek Harness presentation into a separate React/Fastify application. That duplicated the generic Agent shell, settings, permissions, model selection, session lifecycle, and responsive behavior while still looking and behaving unlike the pinned upstream client. The result made every upstream improvement expensive to adopt and left document-specific code coupled to a second application framework.

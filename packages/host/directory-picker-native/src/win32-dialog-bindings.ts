@@ -53,6 +53,8 @@ const SIGDN_FILESYSPATH = 0x80058000 | 0
  */
 const DPI_AWARENESS_CONTEXTS = [-4, -3, -2]
 const WM_CLOSE = 0x10
+const WS_POPUP = 0x80000000
+const WS_EX_TOOLWINDOW = 0x80
 
 /** IFileOpenDialog vtable slots (IUnknown 0-2, IModalWindow 3, IFileDialog 4+). */
 const SLOT_RELEASE = 2
@@ -99,6 +101,11 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
   const coCreateInstance = ole32.func('__stdcall', 'CoCreateInstance', 'int32', ['void *', 'void *', 'uint32', 'void *', 'void *'])
   const coTaskMemFree = ole32.func('__stdcall', 'CoTaskMemFree', 'void', ['void *'])
   const getCurrentThreadId = kernel32.func('__stdcall', 'GetCurrentThreadId', 'uint32', [])
+  const getLastError = kernel32.func('__stdcall', 'GetLastError', 'uint32', [])
+  const createWindowEx = user32.func('__stdcall', 'CreateWindowExW', 'void *', [
+    'uint32', 'str16', 'str16', 'uint32', 'int', 'int', 'int', 'int', 'void *', 'void *', 'void *', 'void *',
+  ])
+  const destroyWindow = user32.func('__stdcall', 'DestroyWindow', 'int', ['void *'])
 
   const protoShow = koffi.proto('int32 __stdcall DshDialogShow(void *self, void *owner)')
   const protoSetOptions = koffi.proto('int32 __stdcall DshDialogSetOptions(void *self, uint32 options)')
@@ -146,7 +153,19 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
       return {
         setOptions: options => method(dialog, SLOT_SET_OPTIONS, protoSetOptions)(options),
         setTitle: title => method(dialog, SLOT_SET_TITLE, protoSetTitle)(title),
-        show: () => method(dialog, SLOT_SHOW, protoShow)(null),
+        show: () => {
+          // A hidden owner keeps the picker off the taskbar without attaching
+          // the web host's dialog to an unrelated foreground application's window.
+          const owner = createWindowEx(WS_EX_TOOLWINDOW, 'STATIC', '', WS_POPUP, 0, 0, 0, 0, null, null, null, null)
+          if (owner === null) throw new Error(`CreateWindowExW(folder dialog owner) failed: Win32 ${String(getLastError())}`)
+          try {
+            return method(dialog, SLOT_SHOW, protoShow)(owner)
+          } finally {
+            if (destroyWindow(owner) === 0) {
+              throw new Error(`DestroyWindow(folder dialog owner) failed: Win32 ${String(getLastError())}`)
+            }
+          }
+        },
         resultPath: () => {
           const itemOut: unknown[] = [null]
           const gotItem = method(dialog, SLOT_GET_RESULT, protoGetResult)(itemOut)
@@ -172,19 +191,20 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
 }
 
 /**
- * Post `WM_CLOSE` to every window of a native thread — the driver's abort
- * lever against the worker blocked inside `Show`, after which `Show` returns
- * `HRESULT_CANCELLED` and the worker unwinds normally.
+ * Post `WM_CLOSE` to visible windows of a native thread. The worker closes
+ * its hidden owner after `Show` returns; closing the owner during `Show`
+ * would destroy the owned dialog before COM can unwind it.
  * @param threadId - the dialog thread's native id (from the `showing` notice).
  */
 export async function closeThreadWindows(threadId: number): Promise<void> {
   const koffi = (await import('koffi')).default as unknown as Koffi
   const user32 = koffi.load('user32.dll')
   const enumThreadWindows = user32.func('__stdcall', 'EnumThreadWindows', 'int', ['uint32', 'void *', 'intptr'])
+  const isWindowVisible = user32.func('__stdcall', 'IsWindowVisible', 'int', ['void *'])
   const postMessageW = user32.func('__stdcall', 'PostMessageW', 'int', ['void *', 'uint32', 'uintptr', 'intptr'])
   const protoEnumProc = koffi.proto('int __stdcall DshEnumThreadWndProc(void *hwnd, intptr lparam)')
   const callback = koffi.register((hwnd: unknown) => {
-    postMessageW(hwnd, WM_CLOSE, 0, 0)
+    if (isWindowVisible(hwnd)) postMessageW(hwnd, WM_CLOSE, 0, 0)
     return 1
   }, koffi.pointer(protoEnumProc))
   try {

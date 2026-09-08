@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-09-02-multi-agent-thesis-writing-baseline.zh.md)
 
+> Templateless free mode, the writing charter, the gate digest, the native document tools, and the access scope remain current. The template-first sidebar start flow, the tabbed workbench with its status bar, the pine-green `ctx.theme.overrideTokens` layer, and the consequence that the hero copy had no override seam are superseded by [the PaperAI UI overhaul](2026-09-03-paperai-ui-overhaul.md); the template model behind the new start flow is [the PaperAI template model](../architecture/2026-09-03-paperai-template-model.md).
+
 ## Problem
 
 PaperAI's product direction is several peer agents — the built-in DSH agent, Codex, and Claude — writing one thesis under one version ledger, but four gaps blocked that parity. A document without a template was forced into a `template_missing` hard error that blocked formal delivery, so templateless free writing was impossible. No channel carried a writing workflow to the external CLIs: ACP cannot inject a system prompt, and nothing told Codex or Claude to read template contracts or fix gate findings. Commit results carried the stored gate report only as an unlabeled field no model was told to read. And the built-in DSH agent had no document capability at all — the ten PaperAI MCP tools were issued only to ACP sessions behind a `codex`/`claude` actor whitelist, so the shipped `standard` preset could not touch a Working DOCX.

@@ -2,59 +2,75 @@ import clsx from 'clsx'
 import type { HeroBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AgentPresetBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import type { SidebarBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import {
+  MARK_HEIGHT, MARK_PATH, MARK_VIEW_BOX, MARK_WIDTH,
+  WORDMARK_HEIGHT, WORDMARK_PATH, WORDMARK_VIEW_BOX, WORDMARK_WIDTH,
+} from './brand-paths.ts'
 import styles from './PaperAIBrand.module.css'
 
 type PaperAIBrandMarkProps = HeroBrandMarkOwnerProps & SidebarBrandMarkOwnerProps
 
-function DocumentMarkSvg({ size, className }: { size: number; className?: string | undefined }) {
+/**
+ * The mark is portrait (a golden rectangle); hosts reserve a square edge, so
+ * the height fills it and the width follows the artwork's ratio.
+ * @param size - square edge the host reserves, in px.
+ * @returns the rendered width in px, rounded to a hundredth.
+ */
+function markWidth(size: number): number {
+  return Math.round((size * MARK_WIDTH / MARK_HEIGHT) * 100) / 100
+}
+
+function MarkSvg({ size, className }: { size: number; className?: string | undefined }) {
   return (
     <svg
       aria-hidden="true"
       className={clsx(styles.mark, className)}
       focusable="false"
       height={size}
-      viewBox="0 0 24 24"
-      width={size}
+      width={markWidth(size)}
+      viewBox={MARK_VIEW_BOX}
     >
-      {/* Solid page so the mark carries the same weight as the 600 wordmark;
-          the fold and rules are knocked out of it, and the short accent rule
-          is the one coloured element. */}
-      <path className={styles.page} d="M5.6 2.4h8.05l4.75 4.75V21.6H5.6z" />
-      <path className={styles.fold} d="M13.65 2.4h4.75v4.75z" />
-      <path className={styles.rule} d="M8.5 11.4h7M8.5 14.5h7" />
-      <path className={styles.accentRule} d="M8.5 17.6h4.2" />
+      <path fill="currentColor" fillRule="evenodd" d={MARK_PATH} />
     </svg>
   )
 }
 
 /**
- * Render the PaperAI document mark with the presentation requested by its host.
+ * Render the PaperAI mark (robot pen over an open book) at the host's size.
  * @param props - Host-supplied mark presentation.
- * @returns the decorative PaperAI document mark.
+ * @returns the decorative PaperAI mark.
  */
 export function PaperAIBrandMark({ size, className }: PaperAIBrandMarkProps) {
-  return <DocumentMarkSvg className={className} size={size} />
+  return <MarkSvg className={className} size={size} />
 }
 
 /**
- * Present the PaperAI document mark as the built-in thesis agent's identity.
+ * Present the PaperAI mark as the built-in thesis engine's identity.
  * @param props - Host-supplied preset-mark presentation.
- * @returns the decorative thesis-agent mark.
+ * @returns the decorative thesis-engine mark.
  */
 export function DshAgentMark({ size, className }: AgentPresetBrandMarkOwnerProps) {
-  return <DocumentMarkSvg className={className} size={size} />
+  return <MarkSvg className={className} size={size} />
 }
 
 /**
- * Render the compact PaperAI wordmark for the sidebar brand row.
- * @returns the PaperAI product name and Chinese descriptor.
+ * Render the PaperAI wordmark for the sidebar brand row: outlines of
+ * "PaperAI", the same ink and height as the DSH wordmark it replaces.
+ * @returns the decorative wordmark.
  */
 export function PaperAIBrandName() {
   return (
-    <span className={styles.wordmark}>
-      <span className={styles.productName}>paperai</span>
-      <span className={styles.descriptor}>论文工作台</span>
-    </span>
+    <svg
+      aria-hidden="true"
+      className={styles.wordmark}
+      data-brand-name="PaperAI"
+      focusable="false"
+      height={WORDMARK_HEIGHT}
+      width={WORDMARK_WIDTH}
+      viewBox={WORDMARK_VIEW_BOX}
+    >
+      <path fill="currentColor" d={WORDMARK_PATH} />
+    </svg>
   )
 }
 

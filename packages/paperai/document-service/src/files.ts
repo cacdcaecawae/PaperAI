@@ -79,11 +79,11 @@ function layout(projectRoot: string): {
   working: string
   staging: string
 } {
-  const root = join(resolve(projectRoot), '.paperai', 'documents', 'v1')
+  const root = resolve(projectRoot)
   return {
-    sources: join(root, 'sources'),
-    working: join(root, 'working'),
-    staging: join(root, '.staging'),
+    sources: join(root, 'documents', 'source'),
+    working: join(root, 'documents', 'working'),
+    staging: join(root, '.paperai', 'documents', 'v1', '.staging'),
   }
 }
 
@@ -223,6 +223,7 @@ function candidateName(stem: string, sequence: number): string {
  * @param staged - complete immutable source and Working DOCX staging pair.
  * @param requestedStem - validated normalized display/file stem.
  * @param expectedSourceSha256 - digest of the staged source before publication.
+ * @param reservedNames - names retained by tracked documents, including missing files.
  * @param signal - optional import cancellation.
  * @returns final paths and the conflict-resolved display name.
  */
@@ -231,12 +232,15 @@ export async function publishStagedDocument(
   staged: StagedDocumentFiles,
   requestedStem: string,
   expectedSourceSha256: string,
+  reservedNames: readonly string[],
   signal?: AbortSignal,
 ): Promise<PublishedDocumentFiles> {
   const paths = layout(projectRoot)
+  const reserved = new Set(reservedNames.map(name => name.normalize('NFC').toLocaleLowerCase('en-US')))
   for (let sequence = 1; ; sequence += 1) {
     signal?.throwIfAborted()
     const name = candidateName(requestedStem, sequence)
+    if (reserved.has(name.toLocaleLowerCase('en-US'))) continue
     const immutableSourcePath = join(paths.sources, `${name}${staged.sourceExtension}`)
     const workingPath = join(paths.working, `${name}.docx`)
     try {

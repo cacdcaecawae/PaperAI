@@ -169,7 +169,7 @@ export function AppFrame({
     sidebarPreference,
     detailsSession === undefined ? 0 : panels.details,
     configuration,
-    configuration.detailsNarrowMode,
+    panels.conversationFocus ? 'close' : configuration.detailsNarrowMode,
     panels.detailsFocus,
   )
   const colsRef = useRef(cols)
@@ -190,14 +190,17 @@ export function AppFrame({
     actions.setSidebar(sidebarBase.current + dx)
   }, [actions])
   const onDetailsDrag = useCallback((dx: number) => {
-    actions.setDetails(detailsBase.current - dx, configuration)
+    actions.setDetails(detailsBase.current + (configuration.detailsPosition === 'start' ? dx : -dx), configuration)
   }, [actions, configuration])
 
   return (
     <div
       ref={frameRef}
       className={css.frame}
-      style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
+      style={{ gridTemplateColumns: configuration.detailsPosition === 'start'
+        ? `${cols.sidebar}px ${cols.details}px minmax(0, 1fr)`
+        : `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
+      data-details-position={configuration.detailsPosition}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-details-collapsed={cols.details === 0 || undefined}
       data-details-focused={cols.detailsFocused || undefined}
@@ -220,7 +223,9 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CenterColumn inactive={cols.detailsFocused}>{renderSlot('conversation', {})}</CenterColumn>
+        <CenterColumn inactive={cols.detailsFocused}>{renderSlot('conversation', {
+          compact: configuration.detailsPosition === 'start' && panels.details > 0,
+        })}</CenterColumn>
         <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
@@ -228,7 +233,7 @@ export function AppFrame({
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.details > 0 && !cols.detailsFocused && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {cols.details > 0 && !cols.detailsFocused && <DragHandle side="details" left={configuration.detailsPosition === 'start' ? cols.sidebar + cols.details : viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
     </div>
   )
 }

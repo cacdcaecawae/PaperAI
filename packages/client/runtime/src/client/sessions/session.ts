@@ -575,6 +575,18 @@ export class Session implements SessionFace {
     this.notifier.markDirty()
   }
 
+  /**
+   * Mark a resident session available after the host publishes a replacement.
+   * List baselines alone cannot clear removal because they may be stale.
+   * @param blank - the added session's derived empty-log bit.
+   */
+  handleAdded(blank: boolean): void {
+    this.handleBlank(blank)
+    if (!this.removed) return
+    this.removed = false
+    this.notifier.markDirty()
+  }
+
   /** host/session-removed relay: flag the snapshot (instance survives — resident-instance rule). */
   handleRemoved(): void {
     this.removed = true

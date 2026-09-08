@@ -91,6 +91,10 @@ export interface ProjectRecord {
   workspaceId: string
   name: string
   rootPath: string
+  /** The template set (pack) this project writes against; absent while undecided or when the project writes freely. */
+  templatePackId?: string
+  /** When the template choice was made (including the explicit choice to use none); absent until the user decides. */
+  templateDecidedAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -147,6 +151,8 @@ export type DocumentMutation =
   | { type: 'set-style'; nodeId: DocumentNodeId; patch: Record<string, unknown> }
   | { type: 'set-fact'; key: string; value: string }
   | { type: 'bind-template'; templateId: TemplateContractId }
+  | { type: 'unbind-template' }
+  | { type: 'set-document-type'; documentType: DocumentRole }
   | { type: 'revert'; targetCommitId: DocumentCommitId }
   | { type: 'milestone'; label: string }
 

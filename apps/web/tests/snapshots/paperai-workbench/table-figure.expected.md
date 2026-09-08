@@ -1,0 +1,12 @@
+- document "文档预览":
+  - paragraph: Initial browser paragraph
+  - paragraph: Initial browser paragraph
+  - paragraph: Second paragraph
+  - table:
+    - rowgroup:
+      - row "Repeated passage":
+        - cell "Repeated passage"
+  - paragraph: Only the body paragraph changed
+  - paragraph:
+    - img "Research figure"
+  - paragraph: Second paragraph

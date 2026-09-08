@@ -52,13 +52,13 @@ describe('document file publication', () => {
     const first = await stageSourceFile(project, input, '.docx')
     await copyDocxWorkingFile(first)
     const firstSha256 = await sha256File(first.sourcePath)
-    const published = await publishStagedDocument(project, first, '论文', firstSha256)
+    const published = await publishStagedDocument(project, first, '论文', firstSha256, [])
     await cleanupStagedDocument(first)
 
     const second = await stageSourceFile(project, input, '.docx')
     await copyDocxWorkingFile(second)
     const secondSha256 = await sha256File(second.sourcePath)
-    const conflict = await publishStagedDocument(project, second, '论文', secondSha256)
+    const conflict = await publishStagedDocument(project, second, '论文', secondSha256, [])
     expect(conflict.name).toBe('论文 (2)')
     expect(await readFile(published.immutableSourcePath, 'utf8')).toBe('source')
     expect(await readFile(published.workingPath, 'utf8')).toBe('source')
@@ -76,7 +76,7 @@ describe('document file publication', () => {
     const staged = await stageSourceFile(project, input, '.docx')
     await copyDocxWorkingFile(staged)
     const sourceSha256 = await sha256File(staged.sourcePath)
-    const published = await publishStagedDocument(project, staged, 'separated', sourceSha256)
+    const published = await publishStagedDocument(project, staged, 'separated', sourceSha256, [])
     await cleanupStagedDocument(staged)
 
     const sourceMetadata = await lstat(published.immutableSourcePath)
@@ -110,8 +110,8 @@ describe('document file publication', () => {
     await writeFile(input, 'source')
     const staged = await stageSourceFile(project, input, '.docx')
     const sourceSha256 = await sha256File(staged.sourcePath)
-    await expect(publishStagedDocument(project, staged, 'broken', sourceSha256)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(await readdir(join(project, '.paperai', 'documents', 'v1', 'sources'))).toEqual([])
+    await expect(publishStagedDocument(project, staged, 'broken', sourceSha256, [])).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(join(project, 'documents', 'source'))).toEqual([])
     await cleanupStagedDocument(staged)
 
     const missingSource: StagedDocumentFiles = {
@@ -120,7 +120,7 @@ describe('document file publication', () => {
       sourcePath: join(project, 'missing-source.docx'),
       workingPath: input,
     }
-    await expect(publishStagedDocument(project, missingSource, 'missing', sourceSha256)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(publishStagedDocument(project, missingSource, 'missing', sourceSha256, [])).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('surfaces exact cleanup failures and hashes staged bytes', async () => {

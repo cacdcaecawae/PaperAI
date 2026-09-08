@@ -143,6 +143,8 @@ function syncDocumentLanguage(active: LocaleId): void {
  */
 export class LocaleRuntime {
   private dicts = new Map<string, Map<string, LocaleDict>>()
+  /** Product overlays consulted before a namespace's own dictionary; one layer per (namespace, locale). */
+  private overrides = new Map<string, Map<string, LocaleDict>>()
   private bound = new Map<string, Translate>()
   private snapshot: LocaleSnapshot
   private listeners = new Set<() => void>()
@@ -283,6 +285,60 @@ export class LocaleRuntime {
   }
 
   /**
+   * Overlay product copy on a namespace another package owns: a deployment
+   * renames what the shell calls things ("workspace" becomes "project")
+   * without forking that package's dictionaries. Overlays hold only the keys
+   * they change, per locale; each locale keeps one overlay at a time (a second
+   * overlay for the same namespace and locale throws), and the overlay is
+   * consulted before the owner's dictionary for that locale. Registration
+   * bumps the revision so mounted outlets repaint.
+   * @param ns - a namespace merged into LocaleNamespaceMap.
+   * @param dicts - partial dictionaries keyed by locale id.
+   * @returns disposer removing every overlay registered by this call (idempotent).
+   */
+  override<N extends keyof LocaleNamespaceMap & string>(
+    ns: N,
+    dicts: Partial<Record<LocaleId, Partial<LocaleDictOf<N>>>>,
+  ): () => void
+  /**
+   * Untyped form for namespaces outside the merge table (dynamic
+   * composition, tests).
+   * @param ns - namespace.
+   * @param dicts - partial dictionaries keyed by locale tag.
+   * @returns disposer (idempotent).
+   */
+  override(ns: string, dicts: Record<string, LocaleDict>): () => void
+  override(ns: string, dicts: Record<string, LocaleDict | undefined>): () => void {
+    const pairs = Object.entries(dicts).flatMap(([locale, entries]): [string, LocaleDict][] => (
+      entries === undefined ? [] : [[locale, entries]]
+    ))
+    let locales = this.overrides.get(ns)
+    if (!locales) {
+      locales = new Map()
+      this.overrides.set(ns, locales)
+    }
+    for (const [locale] of pairs) {
+      if (locales.has(locale)) throw new Error(`locale namespace "${ns}" already has an overlay for locale "${locale}"`)
+    }
+    for (const [locale, entries] of pairs) locales.set(locale, entries)
+    this.publish(this.snapshot.active, false)
+    return () => {
+      const owner = this.overrides.get(ns)
+      /* v8 ignore next -- defensive: a namespace's overlay map is created on
+       * first override and never removed, so the disposer always finds it. */
+      if (!owner) return
+      let removed = false
+      for (const [locale, entries] of pairs) {
+        if (owner.get(locale) === entries) {
+          owner.delete(locale)
+          removed = true
+        }
+      }
+      if (removed) this.publish(this.snapshot.active, false)
+    }
+  }
+
+  /**
    * Bind a declared namespace to a translate function typed to its
    * dictionary key union (plus the shared common vocabulary) — the same key
    * domain the framework-injected `t` seat carries. The returned reference
@@ -320,7 +376,11 @@ export class LocaleRuntime {
 
   private lookup(ns: string, key: string): string | undefined {
     const locales = this.dicts.get(ns)
-    return locales?.get(this.snapshot.active)?.[key] ?? locales?.get(FALLBACK_LOCALE)?.[key]
+    const overlays = this.overrides.get(ns)
+    return overlays?.get(this.snapshot.active)?.[key]
+      ?? locales?.get(this.snapshot.active)?.[key]
+      ?? overlays?.get(FALLBACK_LOCALE)?.[key]
+      ?? locales?.get(FALLBACK_LOCALE)?.[key]
   }
 
   /**

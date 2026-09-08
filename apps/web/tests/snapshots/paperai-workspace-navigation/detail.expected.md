@@ -1,17 +1,18 @@
-- button "返回工作区列表":
+- button "返回项目列表":
   - img
 - heading "Paper project" [level=2]
 - text: {{cwd}}/paper-project
-- region "工作区详情":
-  - heading "项目内容" [level=3]
-  - region "新建文档":
-    - button "新建文档"
+- region "项目详情":
   - region "文档":
-    - text: 文档 1
-    - button "打开 Workspace brief.docx": Workspace brief.docx 已同步
+    - heading "文档" [level=3]
+    - text: "1"
+    - list "文档":
+      - listitem:
+        - button "打开 Workspace brief.docx": Workspace brief
+    - button "项目体检"
   - heading "会话" [level=3]
   - button "在“Paper project”中新建会话":
     - img
     - text: 新会话
-  - tree "工作区会话":
+  - tree "项目会话":
     - status: 暂无会话。选择“新会话”即可开始。

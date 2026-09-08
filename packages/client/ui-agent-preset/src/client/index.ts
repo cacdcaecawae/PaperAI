@@ -115,6 +115,12 @@ export function apply(ctx: ClientContext): void {
         }
     }, (sessionId, agentPreset) => {
       scope.sessions.noteAgentPreset(sessionId as never, agentPreset)
+    }, (sessionId) => {
+      const releaseBinding = scope.sessions.retainBinding(sessionId)
+      const releaseBlock = scope.conversation.blocks.hold(sessionId, {
+        reason: scope.locale.bind('settings.agentPreset')('connecting'), allowDraft: true,
+      })
+      return () => { releaseBinding(); releaseBlock() }
     })
 
     const seatInjected = (): AgentPresetSeatInjected => ({
@@ -179,6 +185,7 @@ export function apply(ctx: ClientContext): void {
         inject: seatInjected,
         children: {
           'conversation.hero.agentPreset.mark': { kind: 'keyed', scope: 'root' },
+          'conversation.hero.agentPreset.status': { kind: 'single', scope: 'root' },
         },
       }, AgentPresetSeat)
       const label = scope.slots.register({
@@ -190,6 +197,7 @@ export function apply(ctx: ClientContext): void {
         inject: labelInjected,
       }, AgentPresetLabel)
       return () => {
+        seat.dispose()
         stop()
         settingsMoved()
         presetSelected()

@@ -32,6 +32,7 @@ import {
   type DocumentCommit,
   type DocumentMutation,
   type DocumentNode,
+  type DocumentRole,
   type GateMode,
   type PaperAccessScope,
 } from '@paperai/domain'
@@ -117,6 +118,26 @@ const mutationSpec = {
       properties: {
         type: { type: 'string', const: 'bind-template', required: true },
         templateId: { type: 'string', required: true, description: 'Confirmed compatible template contract id.' },
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        type: { type: 'string', const: 'unbind-template', required: true },
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        type: { type: 'string', const: 'set-document-type', required: true },
+        documentType: {
+          type: 'string',
+          required: true,
+          enum: ['manuscript', 'proposal', 'midterm', 'final', 'other'],
+          description: 'Document type. Changing it drops a bound format unless the same commit binds another.',
+        },
       },
     },
     {
@@ -230,6 +251,8 @@ type MutationInput =
   | { type: 'insert-node'; text: string; afterNodeId?: string; beforeNodeId?: string; style?: string }
   | { type: 'delete-node'; nodeId: string; baseText?: string }
   | { type: 'bind-template'; templateId: string }
+  | { type: 'unbind-template' }
+  | { type: 'set-document-type'; documentType: DocumentRole }
   | { type: 'milestone'; label: string }
 
 /**
@@ -269,6 +292,10 @@ function toMutation(input: MutationInput): DocumentMutation {
       }
     case 'bind-template':
       return { type: input.type, templateId: TemplateContractId(requireId(input.templateId, 'templateId')) }
+    case 'unbind-template':
+      return { type: input.type }
+    case 'set-document-type':
+      return { type: input.type, documentType: input.documentType }
     case 'milestone':
       return { type: input.type, label: requireText(input.label, 'milestone label') }
   }

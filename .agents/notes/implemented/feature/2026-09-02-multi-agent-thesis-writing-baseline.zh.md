@@ -4,6 +4,8 @@ Status: implemented
 
 [English](2026-09-02-multi-agent-thesis-writing-baseline.md) | 中文
 
+> 无模板自由写作、写作章程、门禁摘要、原生文档工具和访问范围仍然有效。模板优先的侧边栏起始流程、带状态栏的分页工作台、松绿色 `ctx.theme.overrideTokens` 层，以及“hero 文案没有覆盖 seam”这条推论，均被 [PaperAI UI 大改](2026-09-03-paperai-ui-overhaul.zh.md)取代；新起始流程背后的模板模型见 [PaperAI 模板模型](../architecture/2026-09-03-paperai-template-model.zh.md)。
+
 ## Problem
 
 PaperAI 的产品方向是多个平级智能体——内置 DSH、Codex、Claude——在同一版本账本下共写一份论文，但四个缺口挡住了这种平权。未关联模板的文档被强制打上 `template_missing` 硬错误并阻断正式交付，无模板自由写作根本不可能。没有任何通道把写作流程送达外部 CLI：ACP 无法注入系统提示词，也没有东西告诉 Codex 或 Claude 去读模板契约、修复门禁发现。提交结果里虽然带着已存储的门禁报告，却只是一个没人被告知要读的无名字段。而内置 DSH 智能体完全没有文档能力——十个 PaperAI MCP 工具只发给 `codex`/`claude` 白名单后的 ACP 会话，随产品发布的 `standard` 预设碰不到 Working DOCX。

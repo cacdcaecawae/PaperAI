@@ -1,0 +1,8 @@
+- text: Paper project
+- paragraph:
+  - text: 本项目模板：HIT 硕士毕设
+  - button "更换…"
+- button "从本项目模板新建开题报告": 新建开题报告
+- button "从本项目模板新建中期报告": 新建中期报告
+- button "导入 Word 初稿并套用学位论文格式": 导入初稿，套学位论文格式
+- button "导入 Word，自由写"

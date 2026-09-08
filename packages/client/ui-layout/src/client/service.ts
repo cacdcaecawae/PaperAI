@@ -40,6 +40,8 @@ export interface ILayout {
    * @param active - whether the focus demand is on.
    */
   setDetailsFocus(active: boolean): void
+  /** Reveal the conversation, retaining details beside it when both panels fit. */
+  revealConversation(): void
   /**
    * Apply a product-level layout profile without changing the generic DSH
    * defaults. The returned disposer restores the deployment baseline unless
@@ -91,6 +93,10 @@ export class LayoutController implements ILayout {
   /** Demand or release the whole-content-area details focus. */
   setDetailsFocus(active: boolean): void {
     this.#require().setDetailsFocus(active)
+  }
+
+  revealConversation(): void {
+    this.#require().revealConversation()
   }
 
   /** Apply one runtime product profile and return its stale-safe disposer. */

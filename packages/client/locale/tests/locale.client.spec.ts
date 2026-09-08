@@ -70,6 +70,39 @@ describe('LocaleRuntime', () => {
     expect(svc.bind('common' as string)('nope')).toBe('nope')
   })
 
+  it('lets a product overlay rename another namespace\'s copy per locale and lifts it on dispose', () => {
+    const { svc } = make()
+    svc.register('ns', 'zh', { section: '工作区', keep: '保留' })
+    svc.register('ns', 'en', { section: 'Workspaces', keep: 'Keep' })
+    const t = svc.bind('ns')
+    const before = svc.getSnapshot().revision
+    const revisions: number[] = []
+    const off = svc.subscribe(() => { revisions.push(svc.getSnapshot().revision) })
+
+    const dispose = svc.override('ns', { zh: { section: '项目' } })
+    expect(svc.getSnapshot().revision).toBe(before + 1)
+    expect(revisions).toEqual([before + 1])
+    expect(t('section')).toBe('项目')
+    expect(t('keep')).toBe('保留')
+    // Only the overlaid locale changes; English keeps the owner's copy.
+    svc.setLocale('en')
+    expect(t('section')).toBe('Workspaces')
+    // An active locale with no dictionary at all falls back to the en overlay before the en dictionary.
+    svc.setLocale('zh')
+    svc.override('other', { en: { section: 'Projects' } })
+    svc.register('other', 'en', { section: 'Workspaces', keep: 'Keep' })
+    const other = svc.bind('other')
+    expect(other('section')).toBe('Projects')
+    expect(other('keep')).toBe('Keep')
+
+    // One overlay per namespace and locale: a second registrant fails loud.
+    expect(() => svc.override('ns', { zh: { keep: '别的' } })).toThrow('already has an overlay')
+    dispose()
+    dispose()
+    expect(t('section')).toBe('工作区')
+    off()
+  })
+
   it('interpolates {name} params and leaves unknown placeholders intact', () => {
     const { svc } = make()
     svc.register('ns', 'zh', { greet: '你好，{name}！第 {n} 次', partial: '{known} 与 {unknown}' })

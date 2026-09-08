@@ -15,7 +15,6 @@ CLAUDE.md
 documents/
   source/
   working/
-  history/
 templates/
 references/
 figures/
@@ -28,7 +27,7 @@ exports/
   delivery/
 ```
 
-`documents/source/` holds immutable imports, `documents/working/` holds authoritative Working DOCX files, and `documents/history/` holds recoverable snapshots. `PAPERAI.md` gives later Agents a compact place for the current goal, progress, working agreements, and next step. It is created with exclusive file creation and is never overwritten when already present; an existing non-file path with that name fails initialization without replacing it.
+`documents/source/` holds immutable imports and `documents/working/` holds authoritative Working DOCX files. Version snapshots and temporary files live under `.paperai/`, owned by the [commit service](../commit-service/README.md). `PAPERAI.md` gives later Agents a compact place for the current goal, progress, working agreements, and next step. It is created with exclusive file creation and is never overwritten when already present; an existing non-file path with that name fails initialization without replacing it.
 
 ## Writing charter
 
@@ -38,7 +37,7 @@ exports/
 
 ```ts
 import type { ProjectRecord } from '@paperai/domain'
-import type { ProjectGitStatus } from '@paperai/project-service'
+import type { ProjectGitStatus, WritingCharterSyncResult } from '@paperai/project-service'
 
 interface CreatePaperProjectInput {
   rootPath: string
@@ -49,11 +48,14 @@ interface CreatePaperProjectResult {
   project: ProjectRecord
   projectCreated: boolean
   contextFile: 'created' | 'preserved'
+  charter: WritingCharterSyncResult
   git: ProjectGitStatus
 }
 ```
 
 `create(input)` serializes initialization calls. Repeating it for the same canonical path preserves the project id, name, creation time, context file, and all user files. If a DSH workspace exists for the path, the service reuses it. If the project record points at a workspace registration that was recreated, the service repairs the association without changing project identity.
+
+`setTemplateChoice(id, packId)` records the template set the project writes against — a template set id, or `null` for the explicit choice to write without one. Both spellings stamp `templateDecidedAt`, so the browser's first-open template prompt does not return; `templatePackId` is written or removed accordingly, and every other field of the `ProjectRecord` is preserved. The call shares the initialization queue and fails for an unknown project.
 
 Fatal filesystem, workspace, and repository failures remove only unchanged files and empty directories created by the current call. A newly registered workspace is also removed when repository publication fails. Existing content is never recursively deleted. If rollback itself fails, the service reports the initiating and cleanup failures together.
 

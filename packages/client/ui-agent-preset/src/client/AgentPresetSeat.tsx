@@ -61,7 +61,7 @@ function introStaggerMs(count: number): number {
 /** Full component props. */
 export type AgentPresetSeatProps =
   PropsRuntime<'conversation.hero.agentPreset'>
-  & PropsRenderSlots<'conversation.hero.agentPreset.mark'>
+  & PropsRenderSlots<'conversation.hero.agentPreset.mark' | 'conversation.hero.agentPreset.status'>
   & PropsLocale<'settings.agentPreset'>
   & InjectFace<AgentPresetSeatInjected>
 
@@ -130,64 +130,69 @@ export function AgentPresetSeat({
     : label
 
   return (
-    <Menu
-      open={open}
-      onClose={() => { setOpen(false) }}
-      items={state.options.map((option) => {
-        const text = presetDisplayText(option, t)
-        return {
-          id: option.id,
-          // Name and description together: the id alone never says what a
-          // preset does, which is why the roster carries display copy.
-          label: (
-            <span className={css.item}>
-              {renderSlot('conversation.hero.agentPreset.mark', {
-                presetId: option.id,
-                size: 16,
-                className: css.itemMark,
-              }, { entryKey: option.id })}
-              <span className={css.itemCopy}>
-                <span className={css.itemName}>{text.name}</span>
-                <span className={css.itemDesc}>{text.description ?? t('noDescription')}</span>
+    <span>
+      <Menu
+        open={open}
+        onClose={() => { setOpen(false) }}
+        items={state.options.map((option) => {
+          const text = presetDisplayText(option, t)
+          return {
+            id: option.id,
+            // Name and description together: the id alone never says what a
+            // preset does, which is why the roster carries display copy.
+            label: (
+              <span className={css.item}>
+                {renderSlot('conversation.hero.agentPreset.mark', {
+                  presetId: option.id,
+                  size: 16,
+                  className: css.itemMark,
+                }, { entryKey: option.id })}
+                <span className={css.itemCopy}>
+                  <span className={css.itemName}>{text.name}</span>
+                  <span className={css.itemDesc}>{text.description ?? t('noDescription')}</span>
+                </span>
               </span>
-            </span>
-          ),
-        }
-      })}
-      selectedId={state.current}
-      onSelect={(id) => {
-        setOpen(false)
-        void select(id)
-      }}
-      align="start"
-      portal
-      anchor={(
-        <button
-          type="button"
-          className={css.seat}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title={state.error ?? t('seatHint')}
-          disabled={state.busy}
-          onClick={() => { setOpen(value => !value) }}
-        >
-          {renderSlot('conversation.hero.agentPreset.mark', {
-            presetId: state.current,
-            size: 16,
-            className: introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon,
-          }, {
-            entryKey: state.current,
-            fallback: (
-              <IconAgentPresetOutline16
-                size={16}
-                className={introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon}
-              />
             ),
-          })}
-          {shownLabel}
-          <IconChevronDownOutline14 className={css.chevron} />
-        </button>
-      )}
-    />
+          }
+        })}
+        selectedId={state.current}
+        onSelect={(id) => {
+          setOpen(false)
+          void select(id)
+        }}
+        align="start"
+        portal
+        anchor={(
+          <button
+            type="button"
+            className={css.seat}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title={state.error ?? t('seatHint')}
+            aria-busy={state.busy || undefined}
+            onClick={() => { setOpen(value => !value) }}
+          >
+            {renderSlot('conversation.hero.agentPreset.mark', {
+              presetId: state.current,
+              size: 16,
+              className: introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon,
+            }, {
+              entryKey: state.current,
+              fallback: (
+                <IconAgentPresetOutline16
+                  size={16}
+                  className={introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon}
+                />
+              ),
+            })}
+            {shownLabel}
+            {state.busy && <span role="status">{t('connecting')}</span>}
+            <IconChevronDownOutline14 className={css.chevron} />
+          </button>
+        )}
+      />
+      {renderSlot('conversation.hero.agentPreset.status', { presetId: state.current, connecting: state.busy })}
+      {state.error !== null && <span role="alert">{state.error}</span>}
+    </span>
   )
 }

@@ -1,4 +1,4 @@
-- tree "工作区":
+- tree "项目":
   - treeitem "Empty project":
     - img
     - text: Empty project

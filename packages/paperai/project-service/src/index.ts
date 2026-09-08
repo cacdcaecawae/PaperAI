@@ -213,6 +213,27 @@ export class PaperProjectService extends Service {
   }
 
   /**
+   * Record the template set a project writes against. `null` records the
+   * explicit choice to write without a template; either way the project counts
+   * as decided, so the first-open prompt does not return.
+   * @param id - PaperAI project id.
+   * @param packId - template set id, or `null` for no template.
+   * @returns the updated record.
+   */
+  setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord> {
+    return this.enqueue(async () => {
+      const project = this.ctx.paperRepository.getProject(id)
+      if (project === undefined) throw new Error(`PaperAI project not found: ${id}`)
+      const now = new Date().toISOString()
+      const next: ProjectRecord = { ...project, templateDecidedAt: now, updatedAt: now }
+      if (packId === null) delete next.templatePackId
+      else next.templatePackId = nonBlank(packId, 'template set id')
+      await this.ctx.paperRepository.putProject(next)
+      return structuredClone(next)
+    })
+  }
+
+  /**
    * Resolve a project by an existing directory spelling.
    * @param rootPath - Existing directory path.
    * @returns the unique record for its canonical path, or `undefined`.

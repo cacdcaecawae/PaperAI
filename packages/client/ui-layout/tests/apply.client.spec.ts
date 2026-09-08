@@ -65,7 +65,7 @@ describe('ui-layout client apply', () => {
     expect((injected as { hooks: { layoutConfiguration: { getSnapshot: () => unknown } } })
       .hooks.layoutConfiguration.getSnapshot()).toEqual({
       centerMin: 640, detailsMin: 300, detailsDefault: 360, detailsMax: 520,
-      detailsVisibility: 'nonblank-session', detailsNarrowMode: 'close',
+      detailsVisibility: 'nonblank-session', detailsNarrowMode: 'close', detailsPosition: 'end',
     })
     const layout = ctx.get('layout') as LayoutController
     layout.toggleSidebar()
@@ -81,6 +81,7 @@ describe('ui-layout client apply', () => {
       detailsMax: 960,
       detailsVisibility: 'current-session',
       detailsNarrowMode: 'focus',
+      detailsPosition: 'end',
     })
     await fiber.await()
     const actions = {
@@ -92,7 +93,7 @@ describe('ui-layout client apply', () => {
     })(actions as never)
     expect(injected.hooks.layoutConfiguration.getSnapshot()).toEqual({
       centerMin: 520, detailsMin: 400, detailsDefault: 600, detailsMax: 960,
-      detailsVisibility: 'current-session', detailsNarrowMode: 'focus',
+      detailsVisibility: 'current-session', detailsNarrowMode: 'focus', detailsPosition: 'end',
     })
   })
 
@@ -145,6 +146,7 @@ describe('node half + invariant companion', () => {
         detailsMax: 960,
         detailsVisibility: 'current-session',
         detailsNarrowMode: 'focus',
+        detailsPosition: 'end',
       })
     }).not.toThrow()
     expect(() => {

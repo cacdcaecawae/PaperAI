@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ComponentType } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
+import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply as brandApply, inject as brandInject } from '../src/client/index.ts'
 
@@ -40,9 +41,9 @@ const BrandHoles = {
   },
 }
 
-const ThemeStub = {
+const LocaleStub = {
   apply(ctx: Context): void {
-    ctx.provide('theme', { overrideTokens: () => () => {} } as never)
+    ctx.provide('locale', new LocaleRuntime(ctx))
   },
 }
 
@@ -52,7 +53,7 @@ async function loadComposition(): Promise<SlotRegistry> {
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     "- name: 'test-slot-registry'",
-    "- name: 'test-theme'",
+    "- name: 'test-locale'",
     "- name: 'test-brand-holes'",
     "- name: '@paperai/ui-brand'",
     '',
@@ -64,7 +65,7 @@ async function loadComposition(): Promise<SlotRegistry> {
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
     ['test-slot-registry', SlotRegistry],
-    ['test-theme', ThemeStub],
+    ['test-locale', LocaleStub],
     ['test-brand-holes', BrandHoles],
     ['@paperai/ui-brand', { inject: brandInject, apply: brandApply }],
   ])
@@ -93,9 +94,8 @@ describe('PaperAI brand real Loader composition', () => {
     const slots = await loadComposition()
 
     const Name = slots.entries('sidebar.brand.name')[0]?.component as ComponentType
-    render(<Name />)
-    expect(screen.getByText('paperai')).toBeDefined()
-    expect(screen.getByText('论文工作台')).toBeDefined()
+    const name = render(<Name />)
+    expect(name.container.querySelector('svg[data-brand-name="PaperAI"]')).not.toBeNull()
     cleanup()
 
     const Mark = slots.entries('conversation.hero.brand.mark')[0]?.component as ComponentType<{
@@ -104,7 +104,7 @@ describe('PaperAI brand real Loader composition', () => {
     }>
     const mark = render(<Mark size={34} className="hero-mark" />)
     const svg = mark.container.querySelector('svg')
-    expect(svg?.getAttribute('width')).toBe('34')
+    expect(svg?.getAttribute('height')).toBe('34')
     expect(svg?.getAttribute('class')?.split(' ')).toContain('hero-mark')
   })
 })

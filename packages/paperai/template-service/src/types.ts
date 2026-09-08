@@ -60,9 +60,13 @@ export interface TemplatePackManifest {
   readonly members: readonly TemplatePackMember[]
 }
 
+/** Where a template set comes from: shipped with the product or added by the user. */
+export type TemplatePackKind = 'built-in' | 'custom'
+
 /** Asset-free pack summary safe to expose to UI and command consumers. */
 export interface TemplatePackSummary {
   readonly id: TemplatePackId
+  readonly kind: TemplatePackKind
   readonly name: string
   readonly description: string
   readonly version: string
@@ -109,6 +113,8 @@ export interface CheckTemplateInput {
 export interface AssociateTemplateInput {
   readonly documentId: import('@paperai/domain').DocumentId
   readonly templateId: TemplateContractId
+  /** Document type the binding commit switches to; defaults to the stored role. */
+  readonly role?: DocumentRole
 }
 
 /** Runs a gate against staged DOCX bytes without publishing them as Working state. */

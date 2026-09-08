@@ -4,6 +4,8 @@
 
 PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperCommits`，是人工或 agent（智能体）修改权威 Working DOCX 的唯一受支持路径。`submit()` 或 `revert()` 成功时，修改已经应用且文档 head 已前移；不要求用户再次确认。
 
+`inspectProject(project)` 只读检查已登记原件、工作文件、当前版本、路径归属和保留快照，返回问题与独立的 `WorkingRecoveryPlan` 候选方案。`recoverMissingWorking(plan)` 与文档提交串行，重新检查当前提交和最新扫描结果，验证快照字节及项目内无符号链接的目标祖先，再原子创建缺失的工作文件，不覆盖已存在目标。过期方案会被拒绝。恢复只是重新实体化已有当前提交，保留历史且不创建内容提交。原件丢失、快照损坏、重复归属和外部修改只报告问题，不自动修复。仅含传输数据的报告和方案类型通过 `/doctor-types` 发布。
+
 ## 服务：`PaperCommitService`（`ctx.paperCommits`）
 
 该服务依赖 `paperRepository`、`documentEngine` 和 `paperDocuments`。
@@ -14,6 +16,8 @@ PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperC
 - `listHistory(documentId)` 从新到旧沿 `headCommitId` 和 `parentId` 读取历史，不包含不可达的恢复对象。
 
 `submit()` 要求非空消息和至少一项修改。`baseCommitId` 必须等于当前 head；只有首次提交前可以省略。`revert()` 要求调用方提供当前 head，并指定一个不同且从该 head 可达的目标。
+
+编译的修改覆盖 `replace-text`、`insert-node`、`delete-node`、`bind-template`、`unbind-template`、`set-document-type` 与 `milestone`。`bind-template` 会以同一提交要切换到的文档类型调用 `paperTemplates.validateAssociation()`；`unbind-template` 在文档没有绑定模板时失败；`set-document-type` 在类型未变化时失败，并且除非同一提交绑定了另一模板，否则会先记录一条 `unbind-template` 操作，因为一份绑定的格式只适用于一种类型。发布的 `DocumentRecord` 携带最终的类型与模板绑定。
 
 ## 发布与恢复
 
@@ -41,7 +45,7 @@ DOCX 快照是项目内的内容寻址对象，路径为 `.paperai/objects/docx/
 
 回滚的发布可能留下不可达提交或快照对象，其中包括首次提交回滚所保留的原始 Working 映像。`listHistory()` 仅暴露从当前文档 head 可达的父提交链。已知对象 id 时，`getCommit()` 特意允许直接检查恢复对象。
 
-`revert()` 会校验目标快照路径与 SHA-256，在私有副本上校验并重建索引，恢复目标提交的模板绑定，然后创建以当前 head 为父级的新提交。恢复后的字节可以复用目标的内容寻址快照，而 actor 和操作来源仍只属于这次 revert 提交。
+`revert()` 会校验目标快照路径与 SHA-256，在私有副本上校验并重建索引，恢复目标提交的模板绑定但保留文档当前的类型，然后创建以当前 head 为父级的新提交。恢复后的字节可以复用目标的内容寻址快照，而 actor 和操作来源仍只属于这次 revert 提交。
 
 ## 来源与失败
 

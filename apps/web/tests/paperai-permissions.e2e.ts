@@ -39,7 +39,8 @@ const MODEL_FAILURE_EXPECTED = join(SNAPSHOT_DIR, 'model-failure.expected.md')
 const MODEL_MENU_EXPECTED = join(SNAPSHOT_DIR, 'model-menu.expected.md')
 const CANCEL_BEFORE_PROMPT_EXPECTED = join(SNAPSHOT_DIR, 'cancel-before-prompt.expected.md')
 const CANCEL_FINAL_TOOL_EXPECTED = join(SNAPSHOT_DIR, 'cancel-final-tool.expected.md')
-const CONFLICT_EXPECTED = join(SNAPSHOT_DIR, 'external-conflict.expected.md')
+const EXTERNAL_UPDATE_EXPECTED = join(SNAPSHOT_DIR, 'external-update.expected.md')
+const BLOCK_EDITOR_EXPECTED = join(SNAPSHOT_DIR, 'block-editor.expected.md')
 const MODE = webSnapshotMode()
 
 interface AcpLogEntry {
@@ -64,14 +65,19 @@ async function readAcpLog(path: string): Promise<AcpLogEntry[]> {
 }
 
 /** Small valid OOXML document sent through the real browser import path. */
-function fixtureDocxBase64(): string {
+function fixtureDocxBase64(withFigureAndTable = false): string {
   return Buffer.from(zipSync({
     '[Content_Types].xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8"?>'
       + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
       + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
       + '<Default Extension="xml" ContentType="application/xml"/>'
+      + (withFigureAndTable ? '<Default Extension="png" ContentType="image/png"/>' : '')
       + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+      + (withFigureAndTable
+        ? '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>'
+          + '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>'
+        : '')
       + '</Types>',
     ),
     '_rels/.rels': strToU8(
@@ -85,8 +91,43 @@ function fixtureDocxBase64(): string {
       + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
       + '<w:p><w:r><w:t>Initial browser paragraph</w:t></w:r></w:p>'
       + '<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p>'
-      + '<w:sectPr/></w:body></w:document>',
+      + (withFigureAndTable
+        ? '<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid>'
+          + '<w:tr><w:tc><w:tcPr/><w:p><w:r><w:t>Repeated passage</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+          + '<w:p><w:r><w:t>Repeated passage</w:t></w:r></w:p>'
+          + '<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+          + '<wp:extent cx="914400" cy="914400"/><wp:docPr id="1" name="Research figure" descr="Research figure"/>'
+          + '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+          + '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+          + '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+          + '<pic:nvPicPr><pic:cNvPr id="1" name="figure.png"/><pic:cNvPicPr/></pic:nvPicPr>'
+          + '<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdFigure"/>'
+          + '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+          + '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>'
+          + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+          + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+        : '')
+      + (withFigureAndTable
+        ? '<w:sectPr xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+          + '<w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/></w:sectPr>'
+        : '<w:sectPr/>')
+      + '</w:body></w:document>',
     ),
+    ...(withFigureAndTable ? {
+      'word/_rels/document.xml.rels': strToU8(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + '<Relationship Id="rIdFigure" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/figure.png"/>'
+        + '<Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>'
+        + '<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>'
+        + '</Relationships>',
+      ),
+      'word/header1.xml': strToU8('<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        + '<w:p><w:r><w:t>Initial browser paragraph</w:t></w:r></w:p></w:hdr>'),
+      'word/footer1.xml': strToU8('<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        + '<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p></w:ftr>'),
+      'word/media/figure.png': Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQyVgDAAHsATleaPIZAAAAAElFTkSuQmCC', 'base64'),
+    } : {}),
   })).toString('base64')
 }
 
@@ -95,13 +136,14 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   let browser: Browser
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
-  let workspaceId: Parameters<WebScaffold['ctx']['paperaiWorkbench']['list']>[0]['workspaceId']
-  let resourceId: Awaited<ReturnType<WebScaffold['ctx']['paperaiWorkbench']['list']>>['resources'][number]['id']
+  let workspaceId: Parameters<WebScaffold['ctx']['paperaiWorkbench']['overview']>[0]['workspaceId']
+  let resourceId: Awaited<ReturnType<WebScaffold['ctx']['paperaiWorkbench']['overview']>>['documents'][number]['id']
   let originalPermissionMode: string | undefined
   let acpFixtureRoot: string | undefined
   let acpLogPath: string
   let rejectModePath: string
   let rejectModelPath: string
+  let startupGatePath: string
   const sessionEvents: SessionEvent[] = []
 
   beforeAll(async () => {
@@ -111,6 +153,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     acpLogPath = join(acpFixtureRoot, 'events.jsonl')
     rejectModePath = join(acpFixtureRoot, 'reject-set-mode')
     rejectModelPath = join(acpFixtureRoot, 'reject-set-config')
+    startupGatePath = join(acpFixtureRoot, 'startup-gate')
     scaffold = await launchWebScaffold({
       extraOverlayPath: PAPERAI_OVERLAY,
       agentPresets: {
@@ -132,6 +175,16 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
             FAKE_ACP_CANCEL_FINAL_TOOL: '1',
           },
         },
+        claude: {
+          command: process.execPath,
+          args: [FAKE_ACP_AGENT],
+          env: {
+            FAKE_ACP_LABEL: 'claude',
+            FAKE_ACP_STARTUP_GATE_FILE: startupGatePath,
+            FAKE_ACP_MODEL: 'fake-beta',
+            FAKE_ACP_LOG: acpLogPath,
+          },
+        },
       },
     })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
@@ -139,22 +192,22 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await mkdir(projectRoot, { recursive: true })
     const workspace = await scaffold.ctx.workspaceRegistry.create(projectRoot, 'Paper project')
     workspaceId = workspace.id
-    await scaffold.ctx.paperaiWorkbench.list({ workspaceId })
+    await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    await scaffold.ctx.paperaiWorkbench.setProjectTemplate({ workspaceId, packId: null })
     const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
       workspaceId,
       sessionId: SessionId('paperai-browser-import'),
       fileName: 'proposal.docx',
       contentBase64: fixtureDocxBase64(),
-      role: 'proposal',
       name: 'Browser conflict proposal',
     }).catch(reportDocumentSetupFailure)
     if (imported.status !== 'imported') {
       throw new Error(`PaperAI browser fixture import unavailable: ${imported.capability}: ${imported.detail}`)
     }
-    const resources = await scaffold.ctx.paperaiWorkbench.list({ workspaceId })
-    const documentResource = resources.resources.find(resource => resource.category === 'document')
-    if (documentResource === undefined) throw new Error('PaperAI browser fixture has no document resource')
-    resourceId = documentResource.id
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const documentRow = overview.documents[0]
+    if (documentRow === undefined) throw new Error('PaperAI browser fixture has no tracked document')
+    resourceId = documentRow.id
 
     // The first OfficeCLI save normalizes the compact fixture into the same
     // representation used by later edits. Run that save through the shipped
@@ -166,7 +219,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       sessionId: normalizationSessionId,
       resourceId,
     })
-    if (initial.selectedNode === null) throw new Error('PaperAI browser fixture has no node to normalize')
+    const initialNode = initial.document.nodes.find(node => node.editable)
+    if (initialNode === undefined) throw new Error('PaperAI browser fixture has no node to normalize')
     await scaffold.ctx.paperaiWorkbench.commit({
       sessionId: normalizationSessionId,
       documentId: initial.document.documentId,
@@ -174,8 +228,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       baseCommitId: initial.document.headCommitId,
       mutations: [{
         type: 'replace-text',
-        nodeId: initial.selectedNode.nodeId,
-        baseText: initial.selectedNode.text,
+        nodeId: initialNode.nodeId,
+        baseText: initialNode.text,
         nextText: 'Initial browser paragraph — normalized',
       }],
     }).catch(reportDocumentSetupFailure)
@@ -190,7 +244,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const open = page.getByRole('button', { name: '打开 Browser conflict proposal.docx' })
     await open.waitFor({ timeout: 15_000 })
     await open.click()
-    await page.getByRole('tab', { name: '编辑' }).waitFor({ timeout: 30_000 })
+    await page.getByRole('document', { name: '文档预览' }).waitFor({ timeout: 30_000 })
   }, 180_000)
 
   afterAll(async () => {
@@ -225,6 +279,81 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(AGENT_PRESETS_EXPECTED, await menu.ariaSnapshot(), MODE)
     await page.keyboard.press('Escape')
   }, 60_000)
+
+  it('keeps drafting during initialization and honors the latest Agent pick', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-pending-agent'))
+    await writeFile(startupGatePath, 'hold startup', 'utf8')
+    try {
+      await page.getByRole('button', { name: 'Codex', exact: true }).first().click()
+      await page.getByRole('menuitem', { name: /^Claude/ }).click()
+      const pending = page.locator('button[aria-busy="true"]').filter({ hasText: 'Claude' })
+      await pending.waitFor({ timeout: 15_000 })
+      const input = page.locator('textarea:enabled').last()
+      await input.fill('连接期间继续写作')
+      expect(await page.getByRole('button', { name: '发送消息', exact: true }).isEnabled()).toBe(false)
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-connecting.expected.md'), await pending.ariaSnapshot(), MODE)
+      await pending.click()
+      await page.getByRole('menuitem', { name: /^Codex/ }).click()
+      expect(await page.locator('button[aria-busy="true"]').filter({ hasText: 'Codex' }).isEnabled()).toBe(true)
+      expect(await input.inputValue()).toBe('连接期间继续写作')
+    } finally {
+      await rm(startupGatePath, { force: true })
+    }
+    await page.getByRole('button', { name: 'Codex', exact: true }).first().waitFor({ timeout: 20_000 })
+    await expect.poll(() => page.getByRole('button', { name: 'Codex', exact: true }).first().getAttribute('aria-busy')).not.toBe('true')
+    const input = page.locator('textarea:enabled').last()
+    expect(await input.inputValue()).toBe('连接期间继续写作')
+    await input.fill('')
+  }, 60_000)
+
+  it('inspects cached Agent metadata and explicitly probes without submitting a prompt', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-agent-diagnostics'))
+    const before = await readAcpLog(acpLogPath)
+    const model = page.locator('button[aria-label^="选择模型"]').first()
+    const selected = await model.getAttribute('aria-label')
+    await page.getByRole('button', { name: 'Agent 状态', exact: true }).click()
+    const details = page.getByRole('region', { name: 'Agent 状态', exact: true })
+    await details.getByText('历史模型预览 · 连接完成后再选择', { exact: true }).waitFor()
+    expect(await details.innerText()).toContain('Fake Alpha')
+    await details.getByRole('button', { name: '检测 / 重试', exact: true }).click()
+    await expect.poll(async () => (await readAcpLog(acpLogPath)).filter(entry => entry.event === 'initialize').length)
+      .toBeGreaterThan(before.filter(entry => entry.event === 'initialize').length)
+    await details.getByRole('button', { name: '检测 / 重试', exact: true }).waitFor()
+    expect(await model.getAttribute('aria-label')).toBe(selected)
+    expect((await readAcpLog(acpLogPath)).slice(before.length).filter(entry => entry.event === 'prompt')).toEqual([])
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-diagnostics.expected.md'),
+      await details.getByText('历史模型预览 · 连接完成后再选择', { exact: true }).ariaSnapshot(), MODE)
+    await page.getByRole('button', { name: 'Agent 状态', exact: true }).click()
+  }, 60_000)
+
+  it('keeps model selection usable across Claude and Codex round trips', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-provider-round-trip'))
+    const model = page.locator('button[aria-label^="选择模型"]').first()
+    let current = 'Codex'
+    for (const [provider, wanted] of [
+      ['Claude', 'Fake Alpha'],
+      ['Codex', 'Fake Beta'],
+      ['Claude', 'Fake Alpha'],
+      ['Codex', 'Fake Alpha'],
+    ] as const) {
+      await page.getByRole('button', { name: current, exact: true }).first().click()
+      await page.getByRole('menuitem', { name: new RegExp(`^${provider}`) }).click()
+      const providerChip = page.getByRole('button', { name: provider, exact: true }).first()
+      await providerChip.waitFor({ timeout: 15_000 })
+      await expect.poll(() => providerChip.getAttribute('aria-busy'), { timeout: 15_000 }).not.toBe('true')
+      await expect.poll(() => providerChip.isEnabled(), { timeout: 15_000 }).toBe(true)
+      await expect.poll(() => model.isEnabled(), { timeout: 10_000 }).toBe(true)
+      await model.click()
+      await page.getByRole('menuitem', { name: /^模型/ }).click()
+      await page.getByRole('menuitemradio', { name: new RegExp(wanted) }).click()
+      await expect.poll(() => model.getAttribute('aria-label'), { timeout: 10_000 }).toContain(wanted)
+      await expect.poll(() => page.getByRole('menu').count(), { timeout: 10_000 }).toBe(0)
+      current = provider
+    }
+    await model.click()
+    await compareOrRefreshGolden(MODEL_MENU_EXPECTED, await page.getByRole('menu', { name: '模型与推理等级' }).ariaSnapshot(), MODE)
+    await model.click()
+  }, 90_000)
 
   it('snapshots the default permission and a real picker switch', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-permissions'))
@@ -413,56 +542,50 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     }
   }, 60_000)
 
-  it('compares and merges a same-node external change from the latest revision', async () => {
+  it('keeps block drafts across external versions and prevents overwriting a changed block', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-conflict'))
-    await page.getByRole('tab', { name: '编辑' }).click()
-    const editor = page.locator('textarea[aria-label^="编辑节点："]')
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx' }).click()
+    await expect.poll(() => page.locator('[data-phase="active"]').count()).toBeGreaterThan(0)
+    const preview = page.getByRole('document', { name: '文档预览' })
+    await preview.locator('[data-paperai-block]', { hasText: 'Initial browser paragraph — normalized' }).first().click()
+    const editor = page.getByRole('textbox', { name: '编辑段落' })
     await editor.waitFor({ timeout: 10_000 })
     await editor.fill('浏览器中的本地草稿')
+    await expect.poll(() => page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存', exact: true }).isEnabled()).toBe(true)
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx' }).click()
+    expect(await editor.inputValue()).toBe('浏览器中的本地草稿')
 
     const externalSessionId = SessionId('paperai-browser-external-writer')
     const before = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
-    const selected = before.selectedNode
-    if (selected === null) throw new Error('PaperAI browser fixture has no editable selected node')
-    const external = await scaffold.ctx.paperaiWorkbench.commit({
+    const target = before.document.nodes.find(node => node.editable && node.text === 'Initial browser paragraph — normalized')
+    const other = before.document.nodes.find(node => node.editable && node.text === 'Second paragraph')
+    if (target === undefined || other === undefined) throw new Error('PaperAI browser fixture lost its paragraphs')
+
+    // A version on another block: the banner offers the refresh and the draft survives it.
+    await scaffold.ctx.paperaiWorkbench.commit({
       sessionId: externalSessionId,
       documentId: before.document.documentId,
       baseRevision: before.document.revision,
       baseCommitId: before.document.headCommitId,
       mutations: [{
         type: 'replace-text',
-        nodeId: selected.nodeId,
-        baseText: selected.text,
-        nextText: 'Initial browser paragraph — 外部会话写入的最新文本',
+        nodeId: other.nodeId,
+        baseText: other.text,
+        nextText: 'Second paragraph — unrelated external update',
       }],
     })
-    expect(external.selectedNode?.nodeId).toBe(selected.nodeId)
+    const banner = page.getByRole('status').filter({ hasText: '发现文档新版本' })
+    await banner.waitFor({ timeout: 10_000 })
+    await compareOrRefreshGolden(EXTERNAL_UPDATE_EXPECTED, await banner.ariaSnapshot(), MODE)
+    await banner.getByRole('button', { name: '刷新' }).click()
+    await expect.poll(() => banner.count(), { timeout: 30_000 }).toBe(0)
+    await preview.getByText('Second paragraph — unrelated external update').waitFor({ timeout: 10_000 })
+    expect(await editor.inputValue()).toBe('浏览器中的本地草稿')
+    const snapshot = await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(BLOCK_EDITOR_EXPECTED, snapshot, MODE)
 
-    const review = page.getByRole('button', { name: '查看并解决' })
-    await review.waitFor({ timeout: 10_000 })
-    await review.click()
-    await page.getByRole('textbox', { name: '外部最新文本' }).waitFor({ timeout: 30_000 })
-    const conflictHeading = page.getByText('当前节点也有外部修改', { exact: true })
-    await expect.poll(() => conflictHeading.evaluate(element => document.activeElement === element)).toBe(true)
-    expect(await page.getByRole('textbox', { name: '本地草稿' }).inputValue()).toBe('浏览器中的本地草稿')
-    expect(await page.getByRole('textbox', { name: '外部最新文本' }).inputValue())
-      .toBe('Initial browser paragraph — 外部会话写入的最新文本')
-
-    await editor.fill('浏览器合并中的草稿')
-    const latest = await scaffold.ctx.paperaiWorkbench.open({
-      workspaceId,
-      sessionId: externalSessionId,
-      resourceId,
-    })
-    const other = latest.document.nodes.find(node => node.editable && node.nodeId !== selected.nodeId)
-    if (other === undefined) throw new Error('PaperAI browser fixture has no second editable node')
-    const otherBuffer = await scaffold.ctx.paperaiWorkbench.readNode({
-      sessionId: externalSessionId,
-      documentId: latest.document.documentId,
-      nodeId: other.nodeId,
-      revision: latest.document.revision,
-      headCommitId: latest.document.headCommitId,
-    })
+    // A version on the edited block retains the draft but prevents an automatic overwrite.
+    const latest = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
     await scaffold.ctx.paperaiWorkbench.commit({
       sessionId: externalSessionId,
       documentId: latest.document.documentId,
@@ -470,48 +593,259 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       baseCommitId: latest.document.headCommitId,
       mutations: [{
         type: 'replace-text',
-        nodeId: other.nodeId,
-        baseText: otherBuffer.text,
-        nextText: `${otherBuffer.text} — unrelated external update`,
+        nodeId: target.nodeId,
+        baseText: target.text,
+        nextText: 'Initial browser paragraph — 外部会话写入的最新文本',
       }],
     })
-    await review.waitFor({ timeout: 10_000 })
-    await review.click()
-    await expect.poll(() => editor.isEnabled(), { timeout: 30_000 }).toBe(true)
-    expect(await page.getByRole('textbox', { name: '本地草稿' }).inputValue()).toBe('浏览器中的本地草稿')
-    expect(await page.getByRole('textbox', { name: '外部最新文本' }).inputValue())
-      .toBe('Initial browser paragraph — 外部会话写入的最新文本')
-    expect(await editor.inputValue()).toBe('浏览器合并中的草稿')
-    const snapshot = await captureStableAria(page, '[data-paperai-node-editor]', scaffold.workspaceCwd)
-    await compareOrRefreshGolden(CONFLICT_EXPECTED, snapshot, MODE)
+    await banner.waitFor({ timeout: 10_000 })
+    await banner.getByRole('button', { name: '刷新' }).click()
+    await page.getByRole('alert').filter({ hasText: '草稿已保留' }).waitFor({ timeout: 30_000 })
+    expect(await editor.inputValue()).toBe('浏览器中的本地草稿')
+    expect(await page.getByRole('button', { name: '保存', exact: true }).isEnabled()).toBe(false)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'block-conflict.expected.md'),
+      await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd), MODE)
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    await expect.poll(() => editor.count()).toBe(0)
+    await preview.getByText('Initial browser paragraph — 外部会话写入的最新文本').waitFor({ timeout: 10_000 })
+    expect(await page.locator('body').innerText()).not.toContain('local draft dropped')
 
+    // Editing the refreshed block saves one version on top of the external one.
+    await preview.locator('[data-paperai-block]', { hasText: '外部会话写入的最新文本' }).first().click()
+    await editor.waitFor({ timeout: 10_000 })
     await editor.fill('浏览器合并后的最终文本')
-    await page.getByRole('button', { name: '使用合并内容' }).click()
-    await expect.poll(() => editor.evaluate(element => document.activeElement === element)).toBe(true)
-    const commit = page.getByRole('button', { name: '提交并创建版本' })
-    await commit.click()
-    await page.getByRole('heading', { name: '浏览器合并后的最终文本' }).waitFor({ timeout: 30_000 })
-    const committed = await scaffold.ctx.paperaiWorkbench.open({
-      workspaceId,
-      sessionId: externalSessionId,
-      resourceId,
-    })
-    expect(committed.selectedNode?.text).toBe('浏览器合并后的最终文本')
+    const savedBlock = preview.locator('[data-paperai-block]', { hasText: '浏览器合并后的最终文本' })
+    expect(await savedBlock.count()).toBe(0)
+    await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存' }).click()
+    await savedBlock.waitFor({ timeout: 30_000 })
+    await expect.poll(() => editor.count(), { timeout: 10_000 }).toBe(0)
+    const committed = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: externalSessionId, resourceId })
+    expect(committed.document.nodes.find(node => node.nodeId === target.nodeId)?.text).toBe('浏览器合并后的最终文本')
   }, 120_000)
+
+  it('retains a Word preview, scroll position, and draft while navigating documents', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-preview-retention'))
+    const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('paperai-cache-import'), fileName: 'second.docx',
+      contentBase64: fixtureDocxBase64(), name: 'Second proposal',
+    })
+    expect(imported.status).toBe('imported')
+    const preview = page.getByRole('document', { name: '文档预览' })
+    const original = await preview.elementHandle()
+    if (original === null) throw new Error('document preview missing')
+    await preview.locator('[data-paperai-block]', { hasText: '浏览器合并后的最终文本' }).click()
+    const editor = page.getByRole('textbox', { name: '编辑段落' })
+    await editor.fill('切换文档保留的草稿')
+    await preview.evaluate((element) => { element.scrollTop = 120 })
+    await expect.poll(() => preview.evaluate(element => element.scrollTop)).toBe(120)
+    await page.getByRole('button', { name: '打开 Second proposal.docx', exact: true }).click()
+    await preview.getByText('Initial browser paragraph', { exact: true }).waitFor({ timeout: 20_000 })
+    expect(await original.evaluate(element => element.isConnected)).toBe(true)
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    await expect.poll(() => editor.inputValue()).toBe('切换文档保留的草稿')
+    await expect.poll(() => preview.evaluate(element => element.scrollTop)).toBe(120)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'retained-draft.expected.md'),
+      await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd), MODE)
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    await original.dispose()
+  }, 90_000)
+
+  it('quotes exact Word text into a logged message and reveals the Agent at narrow widths', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-selection'))
+    await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
+    await page.getByRole('button', { name: 'Codex', exact: true }).first().click()
+    await page.getByRole('menuitem', { name: /^Claude/ }).click()
+    await page.getByRole('button', { name: 'Claude', exact: true }).first().waitFor({ timeout: 20_000 })
+    await expect.poll(() => page.getByRole('button', { name: 'Claude', exact: true }).first().getAttribute('aria-busy')).not.toBe('true')
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    const preview = page.getByRole('document', { name: '文档预览' })
+    await preview.waitFor({ timeout: 15_000 })
+    expect(await page.locator('[data-paperai-start="project"]').count()).toBe(0)
+    const frame = page.locator('[data-details-position="start"]')
+    expect(await frame.count()).toBe(1)
+    await page.setViewportSize({ width: 760, height: 900 })
+    const block = preview.locator('[data-paperai-block]', { hasText: '浏览器合并后的最终文本' }).first()
+    await block.evaluate((element) => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
+    })
+    const selection = page.getByRole('region', { name: '选中的文字' })
+    await selection.waitFor({ timeout: 10_000 })
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection.expected.md'), await selection.ariaSnapshot(), MODE)
+    await selection.getByRole('button', { name: '交给 Agent' }).click()
+    const composer = page.locator('textarea:enabled').last()
+    await expect.poll(() => composer.isVisible()).toBe(true)
+    expect(await composer.inputValue()).toContain('浏览器合并后的最终文本')
+    const eventStart = sessionEvents.length
+    const settled = scaffold.whenTurnSettled(60_000)
+    await page.getByRole('button', { name: '发送消息', exact: true }).click()
+    await settled
+    const message = sessionEvents.slice(eventStart).find(event => event.type === 'user/message')
+    expect(JSON.stringify(message?.data)).toContain('[Word selection]')
+    expect(JSON.stringify(message?.data)).toContain('浏览器合并后的最终文本')
+    expect(JSON.stringify(message?.data)).toContain('version')
+    await page.setViewportSize({ width: 1680, height: 1000 })
+    await expect.poll(async () => (await preview.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(480)
+    await expect.poll(async () => (await page.locator('[class*=sidebarCol]').boundingBox())?.width ?? 0).toBe(280)
+    await expect.poll(async () => (await page.locator('[class*=detailsCol]').boundingBox())?.width ?? 0).toBe(760)
+    const quotedMessage = page.locator('[data-word-selection-message]').last()
+    await quotedMessage.waitFor()
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection-message.expected.md'), await quotedMessage.ariaSnapshot(), MODE)
+    await page.screenshot({ path: join(process.cwd(), '.artifacts', 'paperai-agentero-workbench.png') })
+  }, 90_000)
+
+  it('scans without writing and restores missing working bytes only after reviewing a recovery plan', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-doctor'))
+    const projection = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('doctor-read'), resourceId })
+    const path = join(scaffold.workspaceCwd, 'paper-project', projection.document.path)
+    const bytes = await readFile(path)
+    const head = projection.document.headCommitId
+    await rm(path)
+    await page.getByRole('button', { name: '项目体检', exact: true }).click()
+    const report = page.getByRole('region', { name: '项目体检', exact: true })
+    await report.getByText('工作文件丢失', { exact: true }).waitFor({ timeout: 20_000 })
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'project-doctor.expected.md'),
+      await captureStableAria(page, '[aria-label="项目体检"]', scaffold.workspaceCwd), MODE)
+    await report.getByRole('button', { name: /^查看恢复方案/ }).click()
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await report.getByRole('button', { name: '恢复缺失文件', exact: true }).click()
+    await report.getByText('文档文件与版本快照完整。', { exact: true }).waitFor({ timeout: 20_000 })
+    expect(await readFile(path)).toEqual(bytes)
+    const restored = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('doctor-read'), resourceId })
+    expect(restored.document.headCommitId).toBe(head)
+    await page.getByRole('button', { name: '项目体检', exact: true }).click()
+  }, 90_000)
+
+  it('preserves a newly typed draft when a real Word import response arrives', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-import-draft'))
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+    await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
+    await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
+    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    await preview.locator('[data-paperai-block]').first().waitFor({ timeout: 20_000 })
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+    await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
+    const ready = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const pattern = '**/api/paperaiWorkbench/importDocument'
+    await page.route(pattern, async (route) => {
+      const response = await route.fetch()
+      ready.resolve(undefined)
+      await release.promise
+      await route.fulfill({ response })
+    })
+    try {
+      const choosing = page.waitForEvent('filechooser')
+      await page.getByRole('button', { name: '导入 Word，自由写', exact: true }).click()
+      await (await choosing).setFiles({
+        name: 'Review figures.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        buffer: Buffer.from(fixtureDocxBase64(true), 'base64'),
+      })
+      await ready.promise
+      await preview.locator('[data-paperai-block]').first().click()
+      const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
+      await editor.fill('导入期间新写的草稿')
+      release.resolve(undefined)
+      await page.getByRole('button', { name: '打开 Review figures.docx', exact: true }).waitFor({ timeout: 20_000 })
+      expect(await editor.inputValue()).toBe('导入期间新写的草稿')
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'import-draft.expected.md'),
+        await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd), MODE)
+      await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '取消', exact: true }).click()
+    } finally {
+      release.resolve(undefined)
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  }, 120_000)
+
+  it('loads embedded figures and edits body text without retargeting a matching table cell', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-table-figure'))
+    await page.getByRole('button', { name: '打开 Review figures.docx', exact: true }).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const figure = preview.locator('img')
+    await figure.waitFor({ timeout: 20_000 })
+    expect(await figure.count()).toBe(1)
+    await expect.poll(() => figure.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const row = overview.documents.find(document => document.fileName === 'Review figures.docx')!
+    const before = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('review-read'), resourceId: row.id })
+    const cell = before.document.nodes.find(node => node.kind === 'table-cell' && node.text === 'Repeated passage' && node.editable)
+    await preview.locator('td').getByText('Repeated passage', { exact: true }).click()
+    const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
+    if (cell === undefined) {
+      await page.getByRole('status').filter({ hasText: '这一段暂时无法在此修改' }).waitFor()
+      expect(await editor.count()).toBe(0)
+    } else {
+      await editor.waitFor()
+      await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '取消', exact: true }).click()
+    }
+    const body = preview.locator('p[data-paperai-block]:not(table p)', { hasText: /^Repeated passage$/u })
+    expect(await body.count()).toBe(1)
+    await body.click()
+    await editor.fill('Only the body paragraph changed')
+    await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存', exact: true }).click()
+    await preview.getByText('Only the body paragraph changed', { exact: true }).waitFor({ timeout: 30_000 })
+    await editor.waitFor({ state: 'hidden' })
+    expect(await preview.locator('td').innerText()).toBe('Repeated passage')
+    await expect.poll(() => figure.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    const after = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('review-read'), resourceId: row.id })
+    expect(after.document.nodes.filter(node => node.kind === 'table-cell').map(node => node.text))
+      .toEqual(before.document.nodes.filter(node => node.kind === 'table-cell').map(node => node.text))
+    expect(after.document.nodes.find(node => node.kind === 'paragraph' && node.text === 'Only the body paragraph changed')).toBeDefined()
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'table-figure.expected.md'), await preview.ariaSnapshot(), MODE)
+  }, 90_000)
+
+  it('keeps headers and footers read-only when body paragraphs have the same text', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-header-footer'))
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
+    for (const band of ['doc-header', 'doc-footer']) {
+      await preview.locator(`.${band} p`).click()
+      await page.getByRole('status').filter({ hasText: '这一段暂时无法在此修改' }).waitFor()
+      expect(await editor.count()).toBe(0)
+    }
+    const body = preview.locator('.page-body p[data-path="/body/p[1]"]')
+    expect(await body.textContent()).toBe(await preview.locator('.doc-header p').textContent())
+    await body.click()
+    await editor.fill('Body edited; header unchanged')
+    await page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存', exact: true }).click()
+    await preview.getByText('Body edited; header unchanged', { exact: true }).waitFor({ timeout: 30_000 })
+    await editor.waitFor({ state: 'hidden' })
+    expect(await preview.locator('.doc-header p').textContent()).toBe('Initial browser paragraph')
+    expect(await preview.locator('.doc-footer p').textContent()).toBe('Second paragraph')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'header-footer.expected.md'), await preview.ariaSnapshot(), MODE)
+  }, 90_000)
 
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
+      'agent-connecting.expected.md',
+      'agent-diagnostics.expected.md',
+      'block-conflict.expected.md',
+      'block-editor.expected.md',
       'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
-      'external-conflict.expected.md',
+      'external-update.expected.md',
+      'header-footer.expected.md',
+      'import-draft.expected.md',
       'model-failure.expected.md',
       'model-menu.expected.md',
       'permission-default.expected.md',
       'permission-failure.expected.md',
       'permission-read-only.expected.md',
+      'project-doctor.expected.md',
+      'retained-draft.expected.md',
+      'table-figure.expected.md',
+      'word-selection.expected.md',
+      'word-selection-message.expected.md',
     ])
   })
 })

@@ -50,6 +50,7 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^",
+    "diff": "^9.0.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {
@@ -60,12 +61,14 @@
     "@deepseek-ai/dsh-workspace": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@paperai/commit-service": "workspace:*",
+    "@paperai/document-engine": "workspace:*",
     "@paperai/document-service": "workspace:*",
     "@paperai/domain": "workspace:*",
     "@paperai/export-service": "workspace:*",
     "@paperai/project-service": "workspace:*",
     "@paperai/repository": "workspace:*",
-    "@paperai/template-service": "workspace:*"
+    "@paperai/template-service": "workspace:*",
+    "@paperai/agent-acp": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-brand": "workspace:^",
@@ -75,11 +78,13 @@
     "@deepseek-ai/dsh-workspace": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@paperai/commit-service": "workspace:*",
+    "@paperai/document-engine": "workspace:*",
     "@paperai/document-service": "workspace:*",
     "@paperai/domain": "workspace:*",
     "@paperai/export-service": "workspace:*",
     "@paperai/project-service": "workspace:*",
     "@paperai/repository": "workspace:*",
-    "@paperai/template-service": "workspace:*"
+    "@paperai/template-service": "workspace:*",
+    "@paperai/agent-acp": "workspace:*"
   }
 }

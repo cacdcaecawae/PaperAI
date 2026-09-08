@@ -305,7 +305,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       graceMs: this.config.terminateGraceMs,
       signal: combined,
       env: {
-        OFFICECLI_NO_AUTO_UPDATE: '1',
+        OFFICECLI_SKIP_UPDATE: '1',
         OFFICECLI_RESIDENT_FLUSH: 'each',
       },
     })

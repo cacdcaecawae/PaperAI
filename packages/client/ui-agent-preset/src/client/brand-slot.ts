@@ -8,6 +8,12 @@
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /** Provider-owned discovery and cached readiness information for the selected preset. */
+    'conversation.hero.agentPreset.status': {
+      kind: 'single'
+      scope: 'root'
+      owner: { presetId: string; connecting: boolean }
+    }
     /** Brand mark for one Agent preset, dispatched by preset id. */
     'conversation.hero.agentPreset.mark': {
       kind: 'keyed'

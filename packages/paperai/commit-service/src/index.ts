@@ -6,6 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { link, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { EngineMutation } from '@paperai/document-engine'
@@ -22,6 +24,7 @@ import type {
   DocumentNode,
   DocumentOperation,
   DocumentRecord,
+  DocumentRole,
   ProjectRecord,
   TemplateContractId,
 } from '@paperai/domain'
@@ -37,6 +40,8 @@ import {
   storeSnapshot,
 } from './files.ts'
 import type { CommitFilePaths, FileImage } from './files.ts'
+import { inspectProject, verifyProjectPath, type ProjectIntegrityReport, type WorkingRecoveryPlan } from './doctor.ts'
+export type { ProjectIntegrityReport, ProjectIntegrityIssue, WorkingRecoveryPlan } from './doctor.ts'
 import {
   DocumentHeadConflictError,
   DocumentValidationError,
@@ -102,6 +107,8 @@ interface CompiledMutations {
   readonly currentNodes: readonly DocumentNode[]
   readonly templateChanged: boolean
   readonly templateId: TemplateContractId | undefined
+  /** Document type the commit publishes; equals the stored role unless a mutation changed it. */
+  readonly role: DocumentRole
 }
 
 interface PublishCandidateRequest {
@@ -116,6 +123,7 @@ interface PublishCandidateRequest {
   readonly currentNodes: readonly DocumentNode[]
   readonly templateChanged: boolean
   readonly templateId: TemplateContractId | undefined
+  readonly role: DocumentRole
   readonly signal: AbortSignal | undefined
 }
 
@@ -250,6 +258,47 @@ export class PaperCommitService extends Service {
     return this.reachableHistory(this.requireDocument(documentId)).map(cloneCommit)
   }
 
+  /**
+   * Scan a registered project's artifacts without changing files or records.
+   * @param project - registered project.
+   * @param signal - optional cancellation.
+   * @returns current integrity issues and explicit recovery plans.
+   */
+  inspectProject(project: ProjectRecord, signal?: AbortSignal): Promise<ProjectIntegrityReport> {
+    return inspectProject(this.dependencies.paperRepository, project, signal)
+  }
+
+  /**
+   * Materialize missing working bytes from an unchanged verified head; existing files are never overwritten.
+   * @param plan - exact recovery candidate returned by the integrity scan.
+   * @param signal - cancellation before the atomic file publication.
+   * @returns after the existing version's bytes are restored; no content or version history is changed.
+   */
+  recoverMissingWorking(plan: WorkingRecoveryPlan, signal?: AbortSignal): Promise<void> {
+    return this.enqueue(plan.documentId, signal, async () => {
+      const document = this.requireDocument(plan.documentId)
+      this.assertHead(document, plan.headCommitId)
+      const project = this.requireProject(document)
+      const report = await inspectProject(this.dependencies.paperRepository, project, signal)
+      const current = report.repairs.find(candidate => candidate.documentId === plan.documentId)
+      if (current === undefined || current.sha256 !== plan.sha256 || current.workingPath !== plan.workingPath) {
+        throw new PaperCommitError('WORKING_COPY_CHANGED', 'recovery plan is stale; scan the project again')
+      }
+      const head = this.dependencies.paperRepository.getCommit(plan.headCommitId)
+      if (head === undefined) throw new PaperCommitError('COMMIT_NOT_FOUND', 'recovery head is missing')
+      const paths = resolveCommitFilePaths(project.rootPath, document.workingPath)
+      const snapshot = await readSnapshot(paths, head.snapshotPath, plan.sha256)
+      await this.withCandidate(paths, snapshot.bytes, async (candidatePath) => {
+        await verifyProjectPath(project.rootPath, paths.workingPath)
+        await mkdir(dirname(paths.workingPath), { recursive: true })
+        await verifyProjectPath(project.rootPath, paths.workingPath)
+        signal?.throwIfAborted()
+        this.assertHead(this.requireDocument(document.id), plan.headCommitId)
+        await link(candidatePath, paths.workingPath)
+      })
+    })
+  }
+
   private get dependencies(): CommitContext {
     return this.ctx as CommitContext
   }
@@ -342,6 +391,7 @@ export class PaperCommitService extends Service {
         currentNodes: compiled.currentNodes,
         templateChanged: compiled.templateChanged,
         templateId: compiled.templateId,
+        role: compiled.role,
         signal: request.signal,
       })
     })
@@ -394,6 +444,7 @@ export class PaperCommitService extends Service {
         currentNodes,
         templateChanged: document.templateId !== target.gate.templateId,
         templateId: target.gate.templateId,
+        role: document.role,
         signal: request.signal,
       })
     ))
@@ -440,6 +491,7 @@ export class PaperCommitService extends Service {
     const operations: DocumentOperation[] = []
     let templateChanged = false
     let templateId = document.templateId
+    let role = document.role
 
     const requireNode = (nodeId: DocumentNode['id']): DocumentNode => {
       const node = nodes.get(nodeId)
@@ -519,6 +571,7 @@ export class PaperCommitService extends Service {
           this.dependencies.paperTemplates.validateAssociation({
             documentId: document.id,
             templateId: mutation.templateId,
+            role,
           })
           operations.push({
             type: mutation.type,
@@ -528,6 +581,33 @@ export class PaperCommitService extends Service {
           templateChanged = true
           templateId = mutation.templateId
           break
+        case 'unbind-template':
+          if (templateId === undefined) {
+            throw new PaperCommitError('INVALID_REQUEST', `document '${document.id}' has no template to unbind`)
+          }
+          operations.push({ type: mutation.type, before: templateId, after: null })
+          templateChanged = true
+          templateId = undefined
+          break
+        case 'set-document-type': {
+          if (mutation.documentType === role) {
+            throw new PaperCommitError(
+              'INVALID_REQUEST',
+              `document '${document.id}' already has type '${role}'`,
+            )
+          }
+          // A bound format applies to one type; changing the type without
+          // rebinding in the same commit would leave a mismatched binding.
+          const rebinds = mutations.some(candidate => candidate.type === 'bind-template')
+          if (templateId !== undefined && !rebinds) {
+            operations.push({ type: 'unbind-template', before: templateId, after: null })
+            templateChanged = true
+            templateId = undefined
+          }
+          operations.push({ type: mutation.type, before: role, after: mutation.documentType })
+          role = mutation.documentType
+          break
+        }
         case 'milestone': {
           const label = mutation.label.trim()
           if (label.length === 0) {
@@ -555,6 +635,7 @@ export class PaperCommitService extends Service {
       currentNodes,
       templateChanged,
       templateId,
+      role,
     }
   }
 
@@ -678,6 +759,7 @@ export class PaperCommitService extends Service {
     )
     const documentAfter: DocumentRecord = {
       ...documentBefore,
+      role: request.role,
       headCommitId: commit.id,
       nodeCount: nextNodes.length,
       updatedAt: commit.createdAt,

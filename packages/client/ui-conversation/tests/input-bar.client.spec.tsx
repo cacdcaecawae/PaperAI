@@ -72,6 +72,7 @@ interface BenchOptions {
   running?: boolean
   subagent?: Exclude<ConversationSnapshot['subagent'], null>
   disabled?: boolean
+  blocked?: InputBarProps['blocked']
   inert?: boolean
   workspacePickerOpen?: boolean
   onRequestWorkspace?: () => void
@@ -152,6 +153,7 @@ function bench(over?: BenchOptions) {
     return null
   }) as InputBarProps['renderSlot']
   const props: InputBarProps = {
+    ...(over?.blocked === undefined ? {} : { blocked: over.blocked }),
     sessionId: SID,
     SessionProvider: ({ children }) => children(SID),
     useSession: bindSnapshotSelector(session),
@@ -234,6 +236,20 @@ function attachmentOwner(slotCalls: readonly { key: string; owner: unknown }[]):
 }
 
 describe('image draft rail', () => {
+  it('keeps a draft editable while a replacement Agent initializes and gates both send gestures', () => {
+    const { textarea, button, sink, shell, view, props } = bench({
+      disabled: true, blocked: { reason: 'Connecting', allowDraft: true }, draft: 'Before',
+    })
+    expect(textarea.disabled).toBe(false)
+    expect(button.disabled).toBe(true)
+    fireEvent.change(textarea, { target: { value: 'Continue writing' } })
+    expect(shell.state.getSnapshot().draft).toBe('Continue writing')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.click(button)
+    expect(sink).not.toHaveBeenCalled()
+    view.rerender(<InputBar {...props} blocked={{ reason: 'Choose a model' }} />)
+    expect(textarea.disabled).toBe(true)
+  })
   it('collects clipboard files while preserving text from a mixed paste', () => {
     const addImages = vi.fn(() => null)
     const { textarea, shell } = bench({ addImages })
@@ -733,6 +749,16 @@ describe('running and lock semantics', () => {
     expect(sink).toHaveBeenCalledWith('go', [], 'queue', expect.any(AbortSignal))
     const empty = bench()
     expect(empty.button.disabled).toBe(true)
+  })
+
+  it('unlock keeps focus in a composer menu that is already open', () => {
+    const { props, view } = bench({ blocked: { reason: 'Choose a model' }, modelEntry: <button type="button">Model menu</button> })
+    const model = view.getByRole('button', { name: 'Model menu' })
+    model.focus()
+    const { blocked: _blocked, ...unblocked } = props
+    view.rerender(<InputBar {...unblocked} />)
+    expect(document.activeElement).toBe(model)
+    expect(view.getByRole('textbox').hasAttribute('disabled')).toBe(false)
   })
 
   it('unlock refocuses the textarea; mousedown on the button keeps focus', () => {

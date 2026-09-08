@@ -23,12 +23,17 @@
       "default": "./lib/invariant.js"
     },
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./diagnostic-types": {
+      "types": "./lib/types/diagnostic-types.d.ts",
+      "default": "./lib/types/diagnostic-types.js"
+    }
   },
   "files": [
     "lib/index.js",
     "lib/invariant.js",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.js"
   ],
   "license": "MIT",
   "dependencies": {

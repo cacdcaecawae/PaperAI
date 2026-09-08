@@ -19,6 +19,7 @@ const WM_CLOSE = 0x10
  * this width (the win32-ia32 bug class).
  */
 const FAKE_POINTER_SIZE = 4
+const HIDDEN_OWNER = { kind: 'hidden-owner' }
 
 interface ComWorld {
   coInitHr: number
@@ -26,6 +27,9 @@ interface ComWorld {
   showHr: number
   getResultHr: number
   getDisplayNameHr: number
+  createOwnerFails: boolean
+  destroyOwnerFails: boolean
+  showThrows: boolean
   hasThreadDpi: boolean
   /** Contexts `SetThreadDpiAwarenessContext` accepts; others return NULL. */
   supportedDpiContexts: number[]
@@ -40,15 +44,20 @@ interface ComWorld {
   registered: number
   unregistered: number
   uninitialized: number
+  ownerArgs: unknown[]
+  shownOwners: unknown[]
+  ownerHistory: string[]
 }
 
 function comWorld(overrides: Partial<ComWorld> = {}): ComWorld {
   return {
     coInitHr: 0, coCreateHr: 0, showHr: 0, getResultHr: 0, getDisplayNameHr: 0,
     hasThreadDpi: true, supportedDpiContexts: [-4], enumThrows: false,
+    createOwnerFails: false, destroyOwnerFails: false, showThrows: false,
     path: 'C:\\选中\\directory',
     titles: [], options: [], dpiContexts: [], freed: [], released: [], posted: [],
     registered: 0, unregistered: 0, uninitialized: 0,
+    ownerArgs: [], shownOwners: [], ownerHistory: [],
     ...overrides,
   }
 }
@@ -67,7 +76,11 @@ function installFakeKoffi(world: ComWorld): void {
       switch (slot) {
         case 9: world.options.push(args[0] as number); return 0
         case 17: world.titles.push(args[0] as string); return 0
-        case 3: return world.showHr
+        case 3:
+          world.shownOwners.push(args[0])
+          world.ownerHistory.push('show')
+          if (world.showThrows) throw new Error('native Show refused')
+          return world.showHr
         case 20: {
           if (world.getResultHr < 0) return world.getResultHr
           ;(args[0] as unknown[])[0] = itemPtr
@@ -106,6 +119,18 @@ function installFakeKoffi(world: ComWorld): void {
             }
             case 'CoTaskMemFree': return (ptr: unknown) => { world.freed.push(ptr) }
             case 'GetCurrentThreadId': return () => 31337
+            case 'GetLastError': return () => 5
+            case 'CreateWindowExW': return (...args: unknown[]) => {
+              world.ownerArgs = args
+              if (world.createOwnerFails) return null
+              world.ownerHistory.push('create')
+              return HIDDEN_OWNER
+            }
+            case 'DestroyWindow': return (hwnd: unknown) => {
+              if (hwnd !== HIDDEN_OWNER) throw new Error('DestroyWindow received another window')
+              world.ownerHistory.push('destroy')
+              return world.destroyOwnerFails ? 0 : 1
+            }
             case 'SetThreadDpiAwarenessContext': {
               if (!world.hasThreadDpi) throw new Error(`${dll}: SetThreadDpiAwarenessContext not found`)
               return (context: unknown) => {
@@ -120,6 +145,7 @@ function installFakeKoffi(world: ComWorld): void {
               return 1
             }
             case 'PostMessageW': return (hwnd: unknown, message: number) => { world.posted.push({ hwnd, message }); return 1 }
+            case 'IsWindowVisible': return (hwnd: { n: number }) => hwnd.n === 1 ? 1 : 0
             default: throw new Error(`unexpected native import ${dll}/${name}`)
           }
         },
@@ -178,6 +204,9 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
     expect(world.freed).toHaveLength(1)
     expect(world.released).toEqual(['item', 'dialog'])
     expect(world.uninitialized).toBe(1)
+    expect(world.ownerArgs).toEqual([0x80, 'STATIC', '', 0x80000000, 0, 0, 0, 0, null, null, null, null])
+    expect(world.shownOwners).toEqual([HIDDEN_OWNER])
+    expect(world.ownerHistory).toEqual(['create', 'show', 'destroy'])
   })
 
   it('maps dismissal and the S_FALSE CoInitializeEx', async () => {
@@ -186,6 +215,22 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
     const { loadWin32DialogBindings } = await loadBindingsModule()
     const bindings = await loadWin32DialogBindings()
     expect(runFolderDialog(bindings, 'Pick', vi.fn())).toBeNull()
+    expect(world.released).toEqual(['dialog'])
+    expect(world.uninitialized).toBe(1)
+    expect(world.ownerHistory).toEqual(['create', 'show', 'destroy'])
+  })
+
+  it.each([
+    { overrides: { createOwnerFails: true }, error: 'CreateWindowExW(folder dialog owner) failed: Win32 5', history: [] },
+    { overrides: { showHr: E_FAIL }, error: 'Show failed', history: ['create', 'show', 'destroy'] },
+    { overrides: { showThrows: true }, error: 'native Show refused', history: ['create', 'show', 'destroy'] },
+    { overrides: { destroyOwnerFails: true }, error: 'DestroyWindow(folder dialog owner) failed: Win32 5', history: ['create', 'show', 'destroy'] },
+  ])('releases COM after $error', async ({ overrides, error, history }) => {
+    const world = comWorld(overrides)
+    installFakeKoffi(world)
+    const bindings = await (await loadBindingsModule()).loadWin32DialogBindings()
+    expect(() => runFolderDialog(bindings, 'Pick', vi.fn())).toThrow(error)
+    expect(world.ownerHistory).toEqual(history)
     expect(world.released).toEqual(['dialog'])
     expect(world.uninitialized).toBe(1)
   })
@@ -242,14 +287,13 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
 })
 
 describe('closeThreadWindows over the fake COM world', () => {
-  it('posts WM_CLOSE to every window of the thread and unregisters the callback', async () => {
+  it('closes the visible dialog while preserving its hidden owner for cleanup', async () => {
     const world = comWorld()
     installFakeKoffi(world)
     const { closeThreadWindows } = await loadBindingsModule()
     await closeThreadWindows(777)
     expect(world.posted).toEqual([
       { hwnd: { kind: 'hwnd', n: 1 }, message: WM_CLOSE },
-      { hwnd: { kind: 'hwnd', n: 2 }, message: WM_CLOSE },
     ])
     expect(world.registered).toBe(1)
     expect(world.unregistered).toBe(1)

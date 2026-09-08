@@ -1,0 +1,124 @@
+/* The start page stands where the DSH headline stood: the same 34px mark
+   seat and 26/32 wt500 title (figma 34:10412), then one caption line and one
+   row of outlined capsule buttons. It paints no card and no accent of its
+   own; the composer card below stays the visual anchor. */
+
+.root {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.headline {
+  display: grid;
+  grid-template-columns: 34px auto;
+  align-items: center;
+  justify-content: center;
+  column-gap: 10px;
+  min-width: 0;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 32px;
+}
+
+.markSeat {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+}
+
+.mark {
+  color: var(--dsw-alias-label-primary);
+}
+
+.headlineText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead,
+.templateLine {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.templateLine {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px 8px;
+}
+
+/* The change affordance is a text link in the caption's own line; a button
+   there would outrank the document actions below. */
+.changeTemplate {
+  border: 0;
+  border-radius: 6px;
+  padding: 0 4px;
+  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.changeTemplate:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.changeTemplate:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.changeTemplate:disabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: default;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.failure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.error {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

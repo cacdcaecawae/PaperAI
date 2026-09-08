@@ -53,6 +53,57 @@ async function feedList(b: Bench, rows: FeedRow[]): Promise<void> {
 }
 
 describe('list store projection', () => {
+  it('retains the selected binding through replacement and adopts live replacement metadata', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 's1', blank: true, cwd: '/project', agentPreset: 'codex' }])
+    b.svc.open(sid('s1'))
+    const release = b.svc.retainBinding(sid('s1'))
+    b.svc.handleHostEnvelope({ rpcId: 'remove' as never, payload: { type: 'host/session-removed', sessionId: sid('s1') } })
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({ current: 's1', byId: { s1: { cwd: '/project', agentPreset: 'codex' } } })
+    await feedList(b, [])
+    expect(b.svc.list.getSnapshot().current).toBe('s1')
+    b.svc.noteAgentPreset(sid('s1'), 'claude')
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().byId[sid('s1')]).toMatchObject({ cwd: '/project', agentPreset: 'claude' })
+    b.svc.handleHostEnvelope({ rpcId: 'add' as never, payload: { type: 'host/session-added', sessionId: sid('s1'), blank: true, cwd: '/project', agentPreset: 'claude' } })
+    release()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({ current: 's1', byId: { s1: { agentPreset: 'claude' } } })
+    release()
+    expect(b.svc.list.getSnapshot().current).toBe('s1')
+  })
+
+  it('exposes removal after all replacement leases release and preserves newer navigation', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 's1', blank: true }, { id: 's2' }])
+    b.svc.open(sid('s1'))
+    const first = b.svc.retainBinding(sid('s1'))
+    const last = b.svc.retainBinding(sid('s1'))
+    b.svc.handleHostEnvelope({ rpcId: 'remove' as never, payload: { type: 'host/session-removed', sessionId: sid('s1') } })
+    first()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().current).toBe('s1')
+    b.svc.open(sid('s2'))
+    last()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({ current: 's2', ids: ['s2'] })
+    expect(() => b.svc.retainBinding(sid('missing'))).toThrow('unknown session')
+  })
+
+  it('unmasks a failed replacement when its owner releases the selected binding', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 's1', blank: true }])
+    b.svc.open(sid('s1'))
+    const release = b.svc.retainBinding(sid('s1'))
+    b.svc.handleHostEnvelope({ rpcId: 'remove' as never, payload: { type: 'host/session-removed', sessionId: sid('s1') } })
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().current).toBe('s1')
+    release()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({ current: undefined, ids: [] })
+  })
+
   it('projects durable titles separately from cwd/id display fallbacks and parent links', async () => {
     const b = bench()
     b.svc.handleMuxEnvelope({

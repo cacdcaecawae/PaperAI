@@ -190,6 +190,7 @@ export function fakeDomain(report: GateReport = gate('pass')): FakeDomain {
         listContracts: vi.fn(projectId => projectId === project.id ? [template] : []),
         listPacks: vi.fn(() => [{
           id: TemplatePackId('hit-master'),
+          kind: 'built-in' as const,
           name: 'HIT Master',
           description: 'Built-in templates',
           version: '1',

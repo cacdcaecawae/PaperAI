@@ -20,6 +20,8 @@ import { SessionPreparation, type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { AcpAgent } from './agent.ts'
+import { AcpDiagnostics } from './diagnostics.ts'
+import type { AcpDiagnostic } from './diagnostic-types.ts'
 import type { AcpProviderDefinition, AcpRuntimeOptions } from './runtime.ts'
 import type PaperMcpService from '@paperai/mcp'
 import type { PaperMcpDescriptorLease } from '@paperai/mcp'
@@ -47,6 +49,10 @@ export interface AcpProviderConfig {
 
 /** PaperAI ACP Agent plugin configuration. */
 export interface Config {
+  /** Maximum duration of an independent prompt-free ACP diagnostic. */
+  readonly probeTimeoutMs?: number
+  /** Failed automatic diagnostics wait this long before another process can start. */
+  readonly failureCooldownMs?: number
   /** Local Codex ACP launch overrides. */
   readonly codex?: AcpProviderConfig
   /** Local Claude ACP launch overrides. */
@@ -66,6 +72,8 @@ const providerConfig: z<AcpProviderConfig> = z.object({
 
 /** Runtime and settings schema; credentials are structurally redacted on every wire surface. */
 export const Config: z<Config> = z.object({
+  probeTimeoutMs: z.number().min(1).default(15_000),
+  failureCooldownMs: z.number().min(1).default(120_000),
   codex: providerConfig,
   claude: providerConfig,
 })
@@ -167,6 +175,7 @@ export class PaperAiAcpAgents extends Service {
   private readonly teardown = new AbortController()
   private readonly live = new Set<(ownerTriggered?: boolean) => Promise<void>>()
   private configSource: () => Config
+  private readonly diagnostics: AcpDiagnostics
 
   /** Dependency-complete context inherited by provider factories and Agents. */
   get hostCtx(): Context {
@@ -176,6 +185,8 @@ export class PaperAiAcpAgents extends Service {
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paperAiAcpAgents')
     this.configSource = () => config
+    this.diagnostics = new AcpDiagnostics(ctx)
+    ctx.effect(() => () => this.diagnostics.dispose(), 'paperAiAcpAgents.diagnostics()')
     const codex = new ProviderFactory(this, configuredProvider(CODEX, config.codex))
     const claude = new ProviderFactory(this, configuredProvider(CLAUDE, config.claude))
 
@@ -196,6 +207,28 @@ export class PaperAiAcpAgents extends Service {
   resolveProvider(definition: AcpProviderDefinition): AcpProviderDefinition {
     const config = this.configSource()[definition.id]
     return configuredProvider(definition, config)
+  }
+
+  /**
+   * Read installation and cached catalogs without spawning any adapter.
+   * @returns metadata for both configured providers, independent from live model selection.
+   */
+  diagnosticStatus(): readonly AcpDiagnostic[] {
+    return [CODEX, CLAUDE].map(provider => this.diagnostics.read(this.resolveProvider(provider)))
+  }
+
+  /**
+   * Run a prompt-free probe with shared failure cooldown and process teardown.
+   * @param provider - installed peer Agent to inspect.
+   * @param force - explicit retry bypassing failure cooldown.
+   * @returns observed ACP metadata, including a cached model preview.
+   */
+  probe(provider: 'codex' | 'claude', force: boolean): Promise<AcpDiagnostic> {
+    const config = this.configSource()
+    return this.diagnostics.probe(this.resolveProvider(provider === 'codex' ? CODEX : CLAUDE), {
+      probeTimeoutMs: config.probeTimeoutMs ?? 15_000,
+      failureCooldownMs: config.failureCooldownMs ?? 120_000,
+    }, force)
   }
 
   /**
@@ -286,7 +319,9 @@ export class PaperAiAcpAgents extends Service {
           runId,
         })
       })
-      await raceAbort(agent.start(abort.signal), abort.signal, id)
+      const startedAt = Date.now()
+      const started = await raceAbort(agent.start(abort.signal), abort.signal, id)
+      this.diagnostics.remember(provider, started, Date.now() - startedAt)
       const requestedModel = options.agentOptions?.model
       if (requestedModel !== undefined && requestedModel !== agent.modelController.currentModel) {
         await raceAbort(agent.modelController.selectModel(requestedModel), abort.signal, id)

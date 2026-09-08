@@ -2385,6 +2385,44 @@ Apply supported Working DOCX mutations through PaperAI and create one recoverabl
             "properties": {
               "type": {
                 "type": "string",
+                "const": "unbind-template"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "set-document-type"
+              },
+              "documentType": {
+                "type": "string",
+                "description": "Document type. Changing it drops a bound format unless the same commit binds another.",
+                "enum": [
+                  "manuscript",
+                  "proposal",
+                  "midterm",
+                  "final",
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "documentType"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
                 "const": "milestone"
               },
               "label": {

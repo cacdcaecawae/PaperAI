@@ -162,7 +162,7 @@ export function paperAiClientCapabilities(): ClientCapabilities {
   }
 }
 
-function resolveLaunch(definition: AcpProviderDefinition): readonly string[] {
+function resolveLaunch(definition: AcpProviderDefinition): readonly [string, ...string[]] {
   if (definition.command !== undefined) return [definition.command, ...(definition.args ?? [])]
   const packagePath = moduleRequire.resolve(`${definition.packageName}/package.json`)
   const manifest = moduleRequire(packagePath) as { bin?: string | Record<string, string> }
@@ -171,6 +171,19 @@ function resolveLaunch(definition: AcpProviderDefinition): readonly string[] {
     throw new Error(`${definition.packageName} does not expose ${definition.binName}`)
   }
   return [process.execPath, join(dirname(packagePath), relative)]
+}
+
+/**
+ * Resolve an adapter installation without executing its CLI.
+ * @param definition - pinned adapter or explicit command override.
+ * @returns executable and pinned version; an override has no inferred package version.
+ */
+export function discoverAdapter(definition: AcpProviderDefinition): { executable: string; adapterVersion: string | null } {
+  const argv = resolveLaunch(definition)
+  const manifest = definition.command === undefined
+    ? moduleRequire(`${definition.packageName}/package.json`) as { version: string }
+    : undefined
+  return { executable: argv[0], adapterVersion: manifest?.version ?? null }
 }
 
 function stderrText(process: SubprocessHandle): string {

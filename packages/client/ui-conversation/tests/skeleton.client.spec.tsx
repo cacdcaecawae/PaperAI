@@ -154,12 +154,15 @@ function mount(
   /** Owner share handed to the two composer tool-row seats, per render. */
   const seatOwners: { key: string; owner: unknown }[] = []
   let pickerOwner: unknown
+  let heroContentOwner: unknown
   const renderSlot = ((key: string, owner: object, opts?: { only?: string; fallback?: ReactNode }) => {
     slotCalls.push(key)
     if (key === 'conversation.input.model' || key === 'conversation.input.plan') {
       seatOwners.push({ key, owner })
     }
     if (key === 'conversation.hero.workspace') { pickerOwner = owner; return null }
+    // The headline seat renders the DSH headline until a product occupies it.
+    if (key === 'conversation.hero.content') { heroContentOwner = owner; return opts?.fallback ?? null }
     if (key === 'conversation.session.header.lineage') {
       lineageOwners.push(owner as ConversationHeaderLineageOwnerProps)
       return opts?.fallback ?? null
@@ -273,25 +276,48 @@ function mount(
   return {
     view, chat, sink, retargetWorkspace, session, slotCalls, lineageOwners, seatOwners, open,
     pickerOwner: () => pickerOwner,
+    heroContentOwner: () => heroContentOwner,
     rerender: () => { view.rerender(<ConversationRoot {...props} />) },
   }
 }
 
 describe('Hero chrome', () => {
   it('renders the English preview badge through the hero locale seat', () => {
-    const renderSlot = vi.fn<HeroShellProps['renderSlot']>(() => null)
-    const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} />)
+    const renderSlot = vi.fn<HeroShellProps['renderSlot']>((key, _owner, opts) => (
+      // An unoccupied headline seat shows the DSH headline; the mark seat stays empty here.
+      key === 'conversation.hero.content' ? opts?.fallback ?? null : null
+    ))
+    const content = { sessionId: undefined, workspaceId: undefined, openWorkspacePicker: vi.fn() }
+    const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} content={content} />)
     expect(view.getByText('Into the Unknown')).toBeTruthy()
     expect(view.getByText('Preview')).toBeTruthy()
-    expect(renderSlot).toHaveBeenCalledOnce()
-    expect(renderSlot.mock.calls[0]?.[0]).toBe('conversation.hero.brand.mark')
-    const brandMarkOwner = renderSlot.mock.calls[0]?.[1]
+    expect(renderSlot).toHaveBeenCalledTimes(2)
+    // The headline seat comes first and carries the owner share as given.
+    expect(renderSlot.mock.calls[0]?.[0]).toBe('conversation.hero.content')
+    expect(renderSlot.mock.calls[0]?.[1]).toBe(content)
+    expect(renderSlot.mock.calls[0]?.[2]?.fallback).toBeTruthy()
+    expect(renderSlot.mock.calls[1]?.[0]).toBe('conversation.hero.brand.mark')
+    const brandMarkOwner = renderSlot.mock.calls[1]?.[1]
     if (brandMarkOwner === undefined || !('size' in brandMarkOwner) || !('className' in brandMarkOwner)) {
       throw new Error('hero brand-mark owner must provide size and className')
     }
     expect(brandMarkOwner.size).toBe(34)
     expect(brandMarkOwner.className).toBeTypeOf('string')
-    expect(renderSlot.mock.calls[0]?.[2]?.fallback).toBeTruthy()
+    expect(renderSlot.mock.calls[1]?.[2]?.fallback).toBeTruthy()
+  })
+
+  it('replaces the whole headline when a product occupies the content seat', () => {
+    const renderSlot = vi.fn<HeroShellProps['renderSlot']>(key => (
+      key === 'conversation.hero.content' ? <div>Project start page</div> : null
+    ))
+    const view = render(<HeroShell
+      t={makeTranslate(en, commonEn)}
+      renderSlot={renderSlot}
+      content={{ sessionId: undefined, workspaceId: undefined, openWorkspacePicker: vi.fn() }}
+    />)
+    expect(view.getByText('Project start page')).toBeTruthy()
+    expect(view.queryByText('Into the Unknown')).toBeNull()
+    expect(renderSlot.mock.calls.map(call => call[0])).toEqual(['conversation.hero.content'])
   })
 })
 
@@ -533,6 +559,23 @@ describe('ConversationRoot resident composer', () => {
     // The agent-preset chip sits in the same row, for the same reason: both
     // choices are only open before the first message.
     expect(b.slotCalls).toContain('conversation.hero.agentPreset')
+  })
+
+  it('hands the headline seat the blank session, its workspace, and a way to open the picker', async () => {
+    const b = mount(
+      conversationSnapshot({ composerPhase: 'blank', blank: true }),
+      [{ ...workspace('one'), sessionIds: [SID] }],
+    )
+    const owner = b.heroContentOwner() as {
+      sessionId: unknown
+      workspaceId: unknown
+      openWorkspacePicker: () => void
+    }
+    expect(owner.sessionId).toBe(SID)
+    expect(owner.workspaceId).toBe(wid('one'))
+    expect((b.pickerOwner() as { open: boolean }).open).toBe(false)
+    await act(async () => { owner.openWorkspacePicker(); await Promise.resolve() })
+    expect((b.pickerOwner() as { open: boolean }).open).toBe(true)
   })
 
   it('prompt failure renders the promptError strip (ordinary failure, no transaction UI)', () => {

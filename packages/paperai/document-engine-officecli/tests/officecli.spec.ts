@@ -70,7 +70,7 @@ describe('OfficeCliDocumentEngine', () => {
     await expect(ready.engine.health()).resolves.toMatchObject({ status: 'ready', version: '1.0.145' })
     expect(ready.calls[0]?.argv).toEqual(['C:\\bin\\officecli.exe', '--version'])
     expect(ready.calls[0]?.env).toMatchObject({
-      OFFICECLI_NO_AUTO_UPDATE: '1',
+      OFFICECLI_SKIP_UPDATE: '1',
       OFFICECLI_RESIDENT_FLUSH: 'each',
     })
 

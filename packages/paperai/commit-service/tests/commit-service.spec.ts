@@ -87,6 +87,14 @@ class FakePaperRepository extends Service {
     return this.documents.get(id)
   }
 
+  listDocuments(projectId: ProjectIdType): DocumentRecord[] {
+    return [...this.documents.values()].filter(document => document.projectId === projectId)
+  }
+
+  listCommits(documentId: DocumentIdType): DocumentCommit[] {
+    return [...this.commits.values()].filter(commit => commit.documentId === documentId)
+  }
+
   getCommit(id: DocumentCommitId): DocumentCommit | undefined {
     return this.commits.get(id)
   }
@@ -413,6 +421,72 @@ const humanActor: ActorIdentity = {
   client: 'paperai',
   sessionId: 'session-human-1',
 }
+
+describe('project integrity and missing Working DOCX recovery', () => {
+  async function initialized() {
+    const harness = await createHarness()
+    const commit = await harness.ctx.paperCommits.submit({
+      documentId: harness.documentId, actor: humanActor, message: 'Initial snapshot',
+      mutations: [{ type: 'milestone', label: 'Initial snapshot' }],
+    })
+    const project = harness.repository.getProject(ProjectId('project-1'))!
+    return { ...harness, project, commit }
+  }
+
+  it('separates a read-only scan from restoring verified missing bytes without changing history', async () => {
+    const h = await initialized()
+    expect((await h.ctx.paperCommits.inspectProject(h.project)).issues).toEqual([])
+    await rm(h.workingPath)
+    const report = await h.ctx.paperCommits.inspectProject(h.project)
+    expect(report.issues.map(issue => issue.code)).toEqual(['missing-working'])
+    expect(report.repairs).toHaveLength(1)
+    await expect(readFile(h.workingPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await h.ctx.paperCommits.recoverMissingWorking(report.repairs[0]!)
+    expect(await readFile(h.workingPath, 'utf8')).toBe('alpha')
+    expect(h.ctx.paperCommits.listHistory(h.documentId).map(commit => commit.id)).toEqual([h.commit.id])
+    expect((await h.ctx.paperCommits.inspectProject(h.project)).issues).toEqual([])
+    await expect(h.ctx.paperCommits.recoverMissingWorking(report.repairs[0]!)).rejects.toThrow('stale')
+  })
+
+  it('refuses stale recovery plans and preserves a file that appears after scanning', async () => {
+    const h = await initialized()
+    await rm(h.workingPath)
+    const plan = (await h.ctx.paperCommits.inspectProject(h.project)).repairs[0]!
+    await writeFile(h.workingPath, 'external work', 'utf8')
+    await expect(h.ctx.paperCommits.recoverMissingWorking(plan)).rejects.toThrow('stale')
+    expect(await readFile(h.workingPath, 'utf8')).toBe('external work')
+    await rm(h.workingPath)
+    await expect(h.ctx.paperCommits.recoverMissingWorking({ ...plan, headCommitId: DocumentCommitId('old-head') }))
+      .rejects.toBeInstanceOf(DocumentHeadConflictError)
+    await expect(h.ctx.paperCommits.recoverMissingWorking({ ...plan, sha256: 'wrong' })).rejects.toThrow('stale')
+  })
+
+  it('reports damaged snapshots and duplicate ownership without proposing unsafe repairs', async () => {
+    const h = await initialized()
+    await rm(h.workingPath)
+    const duplicate = { ...h.repository.getDocument(h.documentId)!, id: DocumentId('duplicate') }
+    h.repository.documents.set(duplicate.id, duplicate)
+    const duplicateReport = await h.ctx.paperCommits.inspectProject(h.project)
+    expect(duplicateReport.issues.some(issue => issue.code === 'duplicate-path')).toBe(true)
+    expect(duplicateReport.repairs).toEqual([])
+    h.repository.documents.delete(duplicate.id)
+    await writeFile(h.commit.snapshotPath, 'broken', 'utf8')
+    const corrupted = await h.ctx.paperCommits.inspectProject(h.project)
+    expect(corrupted.issues.some(issue => issue.code === 'invalid-snapshot')).toBe(true)
+    expect(corrupted.repairs).toEqual([])
+  })
+
+  it('reports lost originals, invalid heads and outside paths, and honors cancellation', async () => {
+    const h = await initialized()
+    const document = h.repository.getDocument(h.documentId)!
+    await rm(document.immutableSourcePath)
+    h.repository.documents.set(document.id, { ...document, workingPath: join(h.root, '..', 'outside.docx'), headCommitId: DocumentCommitId('missing') })
+    const report = await h.ctx.paperCommits.inspectProject(h.project)
+    expect(report.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['missing-source', 'unsafe-path', 'invalid-head']))
+    expect(report.repairs).toEqual([])
+    await expect(h.ctx.paperCommits.inspectProject(h.project, AbortSignal.abort())).rejects.toThrow()
+  })
+})
 
 function replaceMutation(nodeId: DocumentNodeIdType, baseText: string, nextText: string) {
   return { type: 'replace-text', nodeId, baseText, nextText } as const

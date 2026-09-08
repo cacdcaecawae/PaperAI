@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/paperai/document-engine-officecli/README.md
-README.md: 1e3f765a0fcb3d61f1f3170641303e779070c361
-README.zh.md: b41d08421f8d2ae83407b9f427e0f0ec43a7c2a6
+README.md: 80f568a7a224207304adac127175919c49b60d07
+README.zh.md: 2921f4c7865f384fb05b63866c894aa05910b55e

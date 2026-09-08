@@ -1085,7 +1085,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return result
   }
 
-  /** Keep a prompt from entering an Agent while its preset may replace that Agent. */
+  /** Serialize prompt and model access with replacement of their owning Agent. */
   async function serializeSessionAdmission<T>(sessionId: SessionId, operation: () => Promise<T>): Promise<T> {
     const result = (sessionAdmissionChains.get(sessionId) ?? Promise.resolve()).then(operation)
     const tail = result.then(() => undefined, () => undefined)
@@ -2261,110 +2261,114 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async models(request) {
         const { sessionId } = request.payload
-        const found = await agentFor(sessionId)
-        if ('error' in found) return err(request, found.error)
-        const controlled = found.agent.modelController
-        if (controlled !== undefined) {
-          try {
-            const models = await controlled.listModels()
-            const switches = driverSwitches(controlled)
-            return ok(request, {
-              current: driverSelection(controlled),
-              routable: true,
-              groups: [{
-                id: controlled.provider.id,
-                name: controlled.provider.name,
-                models: models.map(model => ({
-                  id: model.id,
-                  name: model.name,
-                  ...model.description === undefined ? {} : { description: model.description },
-                  ...model.reasoning === undefined
-                    ? {}
-                    : {
-                      reasoning: {
-                        efforts: model.reasoning.efforts.map(effort => ({
-                          id: effort.id,
-                          name: effort.name,
-                          ...effort.description === undefined ? {} : { description: effort.description },
-                        })),
-                        ...model.reasoning.defaultEffort === undefined
-                          ? {}
-                          : { defaultEffort: model.reasoning.defaultEffort },
+        return serializeSessionAdmission(sessionId, async () => {
+          const found = await agentFor(sessionId)
+          if ('error' in found) return err(request, found.error)
+          const controlled = found.agent.modelController
+          if (controlled !== undefined) {
+            try {
+              const models = await controlled.listModels()
+              const switches = driverSwitches(controlled)
+              return ok(request, {
+                current: driverSelection(controlled),
+                routable: true,
+                groups: [{
+                  id: controlled.provider.id,
+                  name: controlled.provider.name,
+                  models: models.map(model => ({
+                    id: model.id,
+                    name: model.name,
+                    ...model.description === undefined ? {} : { description: model.description },
+                    ...model.reasoning === undefined
+                      ? {}
+                      : {
+                        reasoning: {
+                          efforts: model.reasoning.efforts.map(effort => ({
+                            id: effort.id,
+                            name: effort.name,
+                            ...effort.description === undefined ? {} : { description: effort.description },
+                          })),
+                          ...model.reasoning.defaultEffort === undefined
+                            ? {}
+                            : { defaultEffort: model.reasoning.defaultEffort },
+                        },
                       },
-                    },
-                })),
-              }],
-              failures: [],
-              ...switches === undefined ? {} : { switches },
-            })
-          } catch (error: unknown) {
-            return ok(request, {
-              current: driverSelection(controlled),
-              routable: false,
-              groups: [],
-              failures: [{
-                id: controlled.provider.id,
-                name: controlled.provider.name,
-                message: error instanceof Error ? error.message : String(error),
-              }],
-            })
+                  })),
+                }],
+                failures: [],
+                ...switches === undefined ? {} : { switches },
+              })
+            } catch (error: unknown) {
+              return ok(request, {
+                current: driverSelection(controlled),
+                routable: false,
+                groups: [],
+                failures: [{
+                  id: controlled.provider.id,
+                  name: controlled.provider.name,
+                  message: error instanceof Error ? error.message : String(error),
+                }],
+              })
+            }
           }
-        }
-        const current = selectionFor(found.agent).current
-        const { groups, failures } = await buildModelCatalog(ctx)
-        const routable = routeServed(found.agent, current.provider)
-        return ok(request, { current: { ...current }, routable, groups, failures })
+          const current = selectionFor(found.agent).current
+          const { groups, failures } = await buildModelCatalog(ctx)
+          const routable = routeServed(found.agent, current.provider)
+          return ok(request, { current: { ...current }, routable, groups, failures })
+        })
       },
 
       async selectModel(request) {
         const { sessionId, provider, model, reasoningEffort, switches } = request.payload
-        const found = await agentFor(sessionId)
-        if ('error' in found) return err(request, found.error)
-        return serializeImageAdmission(found.agent, async () => {
-          try {
-            const controlled = found.agent.modelController
-            if (controlled !== undefined) {
-              if (provider !== controlled.provider.id) {
-                throw new Error(`Agent driver "${controlled.provider.name}" does not serve provider "${provider}"`)
-              }
-              // The driver owns effort and switch validation: it rejects an
-              // option it does not advertise instead of the Host guessing.
-              const accepted = await controlled.selectModel(model, {
-                ...reasoningEffort === undefined ? {} : { reasoningEffort },
-                ...switches === undefined ? {} : { switches },
-              })
-              return ok(request, { selected: driverSelection(controlled, accepted) })
-            }
-            const resolved = await ctx.llm.resolveCallConfig({
-              provider,
-              model,
-              ...reasoningEffort === undefined
-                ? {}
-                : { reasoningEffort: ReasoningEffortId(reasoningEffort) },
-            })
-            const selected: ModelSelection = {
-              provider: resolved.provider,
-              model: resolved.model,
-              ...resolved.reasoningEffort === undefined
-                ? {}
-                : { reasoningEffort: resolved.reasoningEffort },
-            }
-            selectionFor(found.agent).current = selected
+        return serializeSessionAdmission(sessionId, async () => {
+          const found = await agentFor(sessionId)
+          if ('error' in found) return err(request, found.error)
+          return serializeImageAdmission(found.agent, async () => {
             try {
-              await defaults.saveDefaultModelSelection?.(selected)
+              const controlled = found.agent.modelController
+              if (controlled !== undefined) {
+                if (provider !== controlled.provider.id) {
+                  throw new Error(`Agent driver "${controlled.provider.name}" does not serve provider "${provider}"`)
+                }
+                // The driver owns effort and switch validation: it rejects an
+                // option it does not advertise instead of the Host guessing.
+                const accepted = await controlled.selectModel(model, {
+                  ...reasoningEffort === undefined ? {} : { reasoningEffort },
+                  ...switches === undefined ? {} : { switches },
+                })
+                return ok(request, { selected: driverSelection(controlled, accepted) })
+              }
+              const resolved = await ctx.llm.resolveCallConfig({
+                provider,
+                model,
+                ...reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: ReasoningEffortId(reasoningEffort) },
+              })
+              const selected: ModelSelection = {
+                provider: resolved.provider,
+                model: resolved.model,
+                ...resolved.reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: resolved.reasoningEffort },
+              }
+              selectionFor(found.agent).current = selected
+              try {
+                await defaults.saveDefaultModelSelection?.(selected)
+              } catch (error: unknown) {
+                ctx.logger.warn(
+                  `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
+                )
+              }
+              return ok(request, { selected: { ...selected } })
             } catch (error: unknown) {
-              ctx.logger.warn(
-                `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
-              )
+              return err(request, {
+                code: 'model-unavailable',
+                message: error instanceof Error ? error.message : String(error),
+                details: { provider, model },
+              })
             }
-            return ok(request, { selected: { ...selected } })
-          } catch (error: unknown) {
-            return err(request, {
-              code: 'model-unavailable',
-              message: error instanceof Error ? error.message : String(error),
-              details: { provider, model },
-            })
-          }
+          })
         })
       },
 

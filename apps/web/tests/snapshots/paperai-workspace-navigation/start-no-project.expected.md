@@ -1,0 +1,5 @@
+- text: PaperAI
+- paragraph: 选择一个文件夹。已有项目会保留文档和模板选择。
+- button "新建或打开项目":
+  - img
+  - text: 新建或打开项目

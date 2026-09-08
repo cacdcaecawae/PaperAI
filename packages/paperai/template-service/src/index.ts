@@ -23,6 +23,8 @@ import type PaperRepository from '@paperai/repository'
 import { compileTemplateDraft } from './compiler.ts'
 import type { CompiledTemplateDraft } from './compiler.ts'
 import { checkTemplateContract } from './gate.ts'
+import { TemplateLibrary } from './library.ts'
+import type { AddLibraryFormatInput, TemplateLibraryPack } from './library.ts'
 import { TemplateAssetStore } from './storage.ts'
 import type { TemplateAssetStoreConfig } from './storage.ts'
 import type {
@@ -31,6 +33,7 @@ import type {
   CheckTemplateInput,
   InstallTemplatePackInput,
   TemplatePackId as TemplatePackIdType,
+  TemplatePackKind,
   TemplatePackManifest,
   TemplatePackMember,
   TemplatePackMemberId as TemplatePackMemberIdType,
@@ -39,10 +42,17 @@ import type {
 } from './types.ts'
 
 export type {
+  AddLibraryFormatInput,
+  TemplateLibraryAsset,
+  TemplateLibraryFormat,
+  TemplateLibraryPack,
+} from './library.ts'
+export type {
   AssociateTemplateInput,
   CheckTemplateCandidateInput,
   CheckTemplateInput,
   InstallTemplatePackInput,
+  TemplatePackKind,
   TemplatePackManifest,
   TemplatePackMember,
   TemplatePackMemberSummary,
@@ -116,11 +126,13 @@ export class PaperTemplateService extends Service {
   private readonly packs = new Map<TemplatePackIdType, TemplatePackManifest>()
   private readonly leases = new Map<string, Promise<void>>()
   private readonly assets: TemplateAssetStore
+  private readonly library: TemplateLibrary
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'paperTemplates')
     const resolved = resolveConfig(config)
     this.assets = new TemplateAssetStore(ctx, resolved)
+    this.library = new TemplateLibrary(resolved.storageRoot, this.assets, ctx.logger)
   }
 
   /**
@@ -140,29 +152,62 @@ export class PaperTemplateService extends Service {
   }
 
   /**
-   * List registered packs without exposing Host asset paths.
-   * @returns deterministic display-name order with asset-free member summaries.
+   * List every installable template set without exposing Host asset paths:
+   * built-in packs in display-name order, then the user's custom sets that
+   * hold at least one format, in creation order.
+   * @returns asset-free pack summaries.
    */
   listPacks(): TemplatePackSummary[] {
-    return [...this.packs.values()]
+    const builtIn = [...this.packs.values()]
       .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
-      .map(pack => ({
-        id: pack.id,
-        name: pack.name,
-        description: pack.description,
-        version: pack.version,
-        sourceLabel: pack.sourceLabel,
-        members: pack.members.map(member => ({
-          id: member.id,
-          name: member.name,
-          description: member.description,
-          appliesToRoles: [...member.appliesToRoles],
-          usage: member.usage,
-          sourceVersion: member.sourceVersion,
-          originalFileName: member.source.originalFileName,
-          sourceSha256: member.source.sha256,
-        })),
-      }))
+      .map(pack => summarizePack(pack, 'built-in'))
+    const custom = this.library.manifests().map(pack => summarizePack(pack, 'custom'))
+    return [...builtIn, ...custom]
+  }
+
+  /**
+   * List the user's custom template sets, including sets that hold no format yet.
+   * @returns fresh library records in creation order.
+   */
+  listLibraryPacks(): TemplateLibraryPack[] {
+    return this.library.list()
+  }
+
+  /**
+   * Create an empty custom template set.
+   * @param input - display name and optional description.
+   * @returns the created set.
+   */
+  createLibraryPack(input: { readonly name: string; readonly description?: string }): Promise<TemplateLibraryPack> {
+    return this.library.createPack(input)
+  }
+
+  /**
+   * Remove a custom template set; contracts already installed from it stay valid.
+   * @param packId - custom set id.
+   */
+  deleteLibraryPack(packId: string): Promise<void> {
+    return this.library.deletePack(packId)
+  }
+
+  /**
+   * Add or replace the Word format for one document type in a custom set.
+   * @param input - set, document type, usage, optional name, and the upload bytes.
+   * @param signal - optional cancellation signal for staging and normalization.
+   * @returns the updated set.
+   */
+  addLibraryFormat(input: AddLibraryFormatInput, signal?: AbortSignal): Promise<TemplateLibraryPack> {
+    return this.library.addFormat(input, signal)
+  }
+
+  /**
+   * Remove the format for one document type from a custom set.
+   * @param packId - custom set id.
+   * @param role - document type whose format is removed.
+   * @returns the updated set.
+   */
+  removeLibraryFormat(packId: string, role: TemplateLibraryPack['formats'][number]['id']): Promise<TemplateLibraryPack> {
+    return this.library.removeFormat(packId, role)
   }
 
   /**
@@ -193,7 +238,7 @@ export class PaperTemplateService extends Service {
    */
   async installPack(input: InstallTemplatePackInput, signal?: AbortSignal): Promise<TemplateContract[]> {
     this.requireProject(input.projectId)
-    const pack = this.packs.get(input.packId)
+    const pack = this.packs.get(input.packId) ?? this.library.manifest(input.packId)
     if (pack === undefined) throw new Error(`template-service: unknown template pack: ${input.packId}`)
     const members = selectedMembers(pack, input.memberIds)
     const contracts: TemplateContract[] = []
@@ -301,8 +346,9 @@ export class PaperTemplateService extends Service {
     if (template.projectId !== document.projectId) {
       throw new Error(`template-service: template ${template.id} belongs to another project`)
     }
-    if (!template.appliesToRoles.includes(document.role)) {
-      throw new Error(`template-service: template ${template.id} does not apply to document role ${document.role}`)
+    const role = input.role ?? document.role
+    if (!template.appliesToRoles.includes(role)) {
+      throw new Error(`template-service: template ${template.id} does not apply to document role ${role}`)
     }
     return structuredClone(document)
   }
@@ -420,6 +466,27 @@ function resolveWordComCommand(configured: string | undefined): Pick<ResolvedCon
   const command = configured ?? (process.platform === 'win32' ? 'powershell.exe' : undefined)
   /* v8 ignore next -- the undefined arm is the POSIX peer of the Windows default exercised in this workspace. */
   return command === undefined ? {} : { wordComPowerShellCommand: command }
+}
+
+function summarizePack(pack: TemplatePackManifest, kind: TemplatePackKind): TemplatePackSummary {
+  return {
+    id: pack.id,
+    kind,
+    name: pack.name,
+    description: pack.description,
+    version: pack.version,
+    sourceLabel: pack.sourceLabel,
+    members: pack.members.map(member => ({
+      id: member.id,
+      name: member.name,
+      description: member.description,
+      appliesToRoles: [...member.appliesToRoles],
+      usage: member.usage,
+      sourceVersion: member.sourceVersion,
+      originalFileName: member.source.originalFileName,
+      sourceSha256: member.source.sha256,
+    })),
+  }
 }
 
 function retainManifest(manifest: TemplatePackManifest): TemplatePackManifest {

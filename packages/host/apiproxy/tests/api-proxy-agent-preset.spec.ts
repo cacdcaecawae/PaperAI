@@ -154,7 +154,7 @@ interface DriverSnapshot {
 }
 
 /** Minimal persisted factory bench that exposes which top-level driver is live. */
-async function routingHarness() {
+async function routingHarness(prepare?: (driver: string, agent: Agent) => Promise<void>) {
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-apiproxy-routing-')))
   const ctx = new Context()
   await ctx.plugin(SessionStore)
@@ -190,6 +190,7 @@ async function routingHarness() {
       const agent = stubAgent(session)
       const agentCtx = ownerCtx.extend({ agent })
       Object.assign(agent, { ctx: agentCtx, driver })
+      await prepare?.(driver, agent)
       const commit = await setup?.(agentCtx)
       commit?.commit()
       const detachSession = ctx.sessions.enter(session)
@@ -556,6 +557,34 @@ describe('agentPreset.select', () => {
     const session = ctx.sessions.get(sessionId)
     if (session === undefined) throw new Error('route switch did not publish the replacement Session')
     expect(resolveSessionPreset(session)).toBe('standard')
+  })
+
+  it('waits for replacement before listing or selecting the new driver models', async () => {
+    const entered = Promise.withResolvers<undefined>()
+    const ready = Promise.withResolvers<undefined>()
+    const accessed: string[] = []
+    const { api, ctx } = await routingHarness(async (driver, agent) => {
+      if (driver === 'claude') { entered.resolve(undefined); await ready.promise }
+      Object.assign(agent, { modelController: {
+        provider: { id: driver, name: driver }, currentModel: 'alpha',
+        listModels: () => { accessed.push(`${driver}:list`); return Promise.resolve([{ id: 'alpha', name: 'Alpha' }]) },
+        selectModel: (model: string) => { accessed.push(`${driver}:select`); return Promise.resolve(model) },
+      } })
+    })
+    const sessionId = SessionId('models-during-replacement')
+    await api.sessions.create(request({ sessionId, agentPreset: 'codex' }))
+    const replacement = api.agentPresets.select(request({ sessionId, agentPreset: 'claude' }))
+    await entered.promise
+    const listing = api.sessions.models(request({ sessionId }))
+    const selection = api.sessions.selectModel(request({ sessionId, provider: 'claude', model: 'alpha' }))
+    await Promise.resolve()
+    expect(accessed).toEqual([])
+    ready.resolve(undefined)
+    expect((await replacement).result.ok).toBe(true)
+    expect((await listing).result).toMatchObject({ ok: true, value: { current: { provider: 'claude' }, routable: true } })
+    expect((await selection).result).toMatchObject({ ok: true, value: { selected: { provider: 'claude' } } })
+    expect(accessed).toEqual(['claude:list', 'claude:select'])
+    await ctx.fiber.dispose()
   })
 
   it('records the switch in the log, and the list reads it back', async () => {

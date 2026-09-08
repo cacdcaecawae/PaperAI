@@ -9,7 +9,7 @@
  * Scope disposal drops the directory (HMR safety).
  */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -299,6 +299,18 @@ describe('ui-model-selection dual entry', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')).toBeUndefined()
+  })
+
+  it('refreshes only a resident directory when its Agent preset changes', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const face = b.seat().inject!(sid('s1'))
+    await b.ctx.modelDirectories.directoryFor(sid('s1')).load()
+    b.setHostCurrent({ provider: 'deepseek-official', model: 'replacement-model' })
+    b.ctx.remote.$dispatch('agent-preset/selected', [sid('unopened'), 'claude'])
+    expect(face.directory.getSnapshot().current?.model).not.toBe('replacement-model')
+    b.ctx.remote.$dispatch('agent-preset/selected', [sid('s1'), 'claude'])
+    await vi.waitFor(() => { expect(face.directory.getSnapshot().current?.model).toBe('replacement-model') })
   })
 
   it('never blocks on catalog membership alone', async () => {

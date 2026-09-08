@@ -1,0 +1,6 @@
+- status:
+  - strong: 发现文档新版本
+  - text: 其他会话或 Agent 已提交修改。
+  - button "刷新":
+    - img
+    - text: 刷新
