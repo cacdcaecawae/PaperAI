@@ -113,8 +113,8 @@ describe('pinned provider ACP permission modes', { concurrent: false }, () => {
       requestPermission: () => Promise.resolve({ outcome: { outcome: 'cancelled' } }),
       readTextFile: () => Promise.reject(new Error('unexpected read')),
       writeTextFile: () => Promise.reject(new Error('unexpected write')),
-      unstable_createElicitation: () => Promise.reject(new Error('unexpected elicitation')),
-      unstable_completeElicitation: () => Promise.resolve(),
+      createElicitation: () => Promise.reject(new Error('unexpected elicitation')),
+      completeElicitation: () => Promise.resolve(),
       extNotification: () => Promise.resolve(),
     } satisfies ConstructorParameters<typeof ClaudeAcpAgent>[0]
     const adapter = new ClaudeAcpAgent(client)
