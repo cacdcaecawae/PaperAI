@@ -28,6 +28,8 @@ Filesystem and terminal requests retain their owning session and cancellation. R
 
 Tool progress coalesces output updates on a configurable timer so running commands remain visible without logging every growing prefix. Status changes and turn termination, including cancellation, flush immediately; termination clears the timer before draining accepted updates. History replay uses no timer. Consumers retain the existing progress-event format; final results and cancelled output remain reconstructable.
 
+Codex-owned terminals report output through tool metadata rather than client terminal callbacks. Their deltas enter the bounded projection under the owning tool call ID, keeping intermediate output visible without misidentifying the terminal as a missing client process.
+
 Managed npm installations publish a new directory atomically after validation. Cancellation preserves the previous installation. Uninstall targets only the current managed generation; bundled and external installations remain separate. Previous generations remain available for another process that may still own them.
 
 SSH starts an installed adapter on an explicitly configured POSIX host. Launch data goes through stdin, host-key checking is strict, and the session's revocable HTTP MCP endpoint travels over a private reverse tunnel. Remote adapters do not receive local filesystem or terminal callbacks. HTTP MCP falls back to a standard stdio bridge only for local adapters that lack HTTP support.
@@ -40,7 +42,7 @@ SSH starts an installed adapter on an explicitly configured POSIX host. Launch d
 
 **Copying Agentero's state framework or history database.** Existing Cordis services, slots, settings, and session logs already own these responsibilities. Adopting another state system would duplicate lifecycle and persistence rules.
 
-**Persisting every output snapshot.** A per-snapshot byte cap still repeats growing prefixes and multiplies transcript storage. Status transitions and a final flush retain completion evidence without requiring timers or a second delta format.
+**Persisting every output snapshot.** A per-snapshot byte cap still repeats growing prefixes and multiplies transcript storage. Throttling bounds the snapshot rate while status transitions and a final flush retain completion evidence in the existing log format.
 
 ## Consequences
 

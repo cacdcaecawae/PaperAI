@@ -123,6 +123,7 @@ function tightensSandboxMode(before: SandboxMode, after: SandboxMode): boolean {
 }
 
 interface ToolProjection {
+  terminalId?: string
   readonly callId: CallId
   name: string
   title: string
@@ -356,6 +357,10 @@ class AcpTurnProjection {
         path: location.path,
         ...(location.line == null ? {} : { line: location.line }),
       }))
+    // Codex owns these terminals and streams their output through metadata, without client terminal callbacks.
+    const terminalInfo = update._meta?.terminal_info
+    if (typeof terminalInfo === 'object' && terminalInfo !== null && 'terminal_id' in terminalInfo && terminalInfo.terminal_id === id)
+      projected.terminalId = id
     if (update.content != null) {
       display.diffs = update.content.flatMap(content =>
         content.type === 'diff'
@@ -366,11 +371,15 @@ class AcpTurnProjection {
       for (const content of update.content) {
         if (content.type === 'content') blocks.push(...(await this.content(content.content)))
         else if (content.type === 'terminal')
-          blocks.push({ type: 'text', text: this.terminalOutput(content.terminalId) })
+          blocks.push({ type: 'text', text: content.terminalId === projected.terminalId ? display.output : this.terminalOutput(content.terminalId) })
       }
       display.output = blocks.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('\n')
       projected.images = blocks.filter(block => block.type === 'image')
     }
+    const terminalDelta = update._meta?.terminal_output_delta
+    if (typeof terminalDelta === 'object' && terminalDelta !== null
+      && 'terminal_id' in terminalDelta && terminalDelta.terminal_id === id
+      && 'data' in terminalDelta && typeof terminalDelta.data === 'string') display.output += terminalDelta.data
     if (update.rawOutput !== undefined)
       display.output = typeof update.rawOutput === 'string' ? update.rawOutput : errorText(update.rawOutput)
     const output = new TextRetainer({ maxBytes: this.outputBytes, kind: 'tail' })

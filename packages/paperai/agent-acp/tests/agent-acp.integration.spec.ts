@@ -455,13 +455,13 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       .toEqual([expect.objectContaining({ configId: id, value: 'high' })])
   })
 
-  it('flushes throttled tool output before completion and stops its timer after the turn', async () => {
+  it.each(['raw', 'terminal-delta'])('flushes throttled %s output before completion and stops its timer after the turn', async (format) => {
     const harness = await mountHarness({ settingsDocument: {} })
     const gate = join(harness.root, 'stream-gate')
     await writeFile(gate, 'hold')
     await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, {
       toolProgressIntervalMs: 100,
-      providers: { codex: { env: { FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_GATE_FILE: gate } } },
+      providers: { codex: { env: { FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_GATE_FILE: gate, FAKE_ACP_STREAM_FORMAT: format } } },
     })
     const handle = await createAgent(harness, 'throttled-output')
     const running = runTurn(handle, 'Read the running command output')
@@ -471,6 +471,7 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       expect(handle.agent.session.events.some(event => event.type === 'turn/end')).toBe(false)
       expect(JSON.parse(progress().at(-1)!.data.arguments)).toMatchObject({ status: 'in_progress', truncated: true })
       expect(progress().length).toBeLessThan(5)
+      expect(JSON.stringify(handle.agent.session.events)).not.toMatch(/unrelated-output|no longer available/u)
     } finally {
       await rm(gate)
       await running

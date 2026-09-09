@@ -26,6 +26,8 @@ Provider commands appear as /acp-… and retain original arguments. Ordinary pro
 
 Managed installations use private npm generations and publish a validated manifest atomically. Cancellation preserves the current installation; uninstall removes only its active managed generation. Older generations remain for processes that may still own them. SSH requires an explicitly configured POSIX host, Node, and installed adapter. Credentials travel through stdin with strict host-key checking; a private reverse tunnel forwards the revocable PaperAI HTTP MCP endpoint. Remote sessions receive no local filesystem or terminal callbacks. Local adapters without HTTP MCP use the existing MCP SDK’s stdio bridge.
 
+Codex-owned terminal references and terminal_output_delta metadata feed the same bounded progress snapshots. Metadata must name the current tool call; malformed payloads and other call IDs are ignored. Client-owned terminals continue to use the terminal service.
+
 ## Model Experience
 
 ### Codex and Claude ACP sessions

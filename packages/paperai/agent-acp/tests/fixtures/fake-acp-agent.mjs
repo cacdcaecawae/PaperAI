@@ -422,17 +422,26 @@ function makeAgent(connection) {
       }
       const streamTool = process.env.FAKE_ACP_STREAM_TOOL
       if (streamTool !== undefined) {
+        const terminalDelta = process.env.FAKE_ACP_STREAM_FORMAT === 'terminal-delta'
         await connection.sessionUpdate({ sessionId: params.sessionId, update: {
           sessionUpdate: 'tool_call', toolCallId: 'streaming-tool', name: 'terminal', title: 'Streaming output', kind: 'execute', status: 'pending',
+          ...(terminalDelta ? { content: [{ type: 'terminal', terminalId: 'streaming-tool' }], _meta: { terminal_info: { terminal_id: 'streaming-tool' } } } : {}),
         } })
         await connection.sessionUpdate({ sessionId: params.sessionId, update: {
           sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', status: 'in_progress',
         } })
         let output = ''
-        for (let index = 0; index < Number(process.env.FAKE_ACP_STREAM_UPDATES ?? 400); index++) {
-          output += `${String(index).padStart(3, '0')} ${'x'.repeat(250)}\n`
+        if (terminalDelta) for (const delta of [{ terminal_id: 'another-call', data: 'unrelated-output' }, { terminal_id: 'streaming-tool', data: 123 }]) {
           await connection.sessionUpdate({ sessionId: params.sessionId, update: {
-            sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', rawOutput: output,
+            sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', _meta: { terminal_output_delta: delta },
+          } })
+        }
+        for (let index = 0; index < Number(process.env.FAKE_ACP_STREAM_UPDATES ?? 400); index++) {
+          const delta = `${String(index).padStart(3, '0')} ${'x'.repeat(250)}\n`
+          output += delta
+          await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+            sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool',
+            ...(terminalDelta ? { _meta: { terminal_output_delta: { terminal_id: 'streaming-tool', data: delta } } } : { rawOutput: output }),
           } })
         }
         while (process.env.FAKE_ACP_STREAM_GATE_FILE !== undefined && existsSync(process.env.FAKE_ACP_STREAM_GATE_FILE)) {

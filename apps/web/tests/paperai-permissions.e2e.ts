@@ -887,7 +887,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await editor.getByRole('textbox', { name: '默认思考强度', exact: true }).fill('retired-effort')
     await editor.getByRole('textbox', { name: '默认会话选项 · JSON 对象', exact: true }).fill('{"removed-option":true}')
     await editor.getByRole('textbox', { name: '环境变量 · JSON 对象', exact: true }).fill(JSON.stringify({
-      FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_UPDATES: '4', FAKE_ACP_STREAM_GATE_FILE: streamGate,
+      FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_UPDATES: '4', FAKE_ACP_STREAM_GATE_FILE: streamGate, FAKE_ACP_STREAM_FORMAT: 'terminal-delta',
     }))
     await editor.getByRole('button', { name: '保存配置', exact: true }).click()
     await editor.waitFor({ state: 'hidden' })
