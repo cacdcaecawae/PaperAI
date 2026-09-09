@@ -741,7 +741,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.setViewportSize({ width: 1680, height: 1000 })
     await expect.poll(async () => (await preview.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(480)
     await expect.poll(async () => (await page.locator('[class*=sidebarCol]').boundingBox())?.width ?? 0).toBe(280)
-    await expect.poll(async () => (await page.locator('[class*=detailsCol]').boundingBox())?.width ?? 0).toBe(760)
+    await expect.poll(async () => (await page.locator('[class*=detailsCol]').boundingBox())?.width ?? 0).toBe(860)
     const quotedMessage = page.locator('[data-word-selection-message]').last()
     await quotedMessage.waitFor()
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection-message.expected.md'), await quotedMessage.ariaSnapshot(), MODE)
