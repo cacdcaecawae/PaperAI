@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-基于 DSH 插件和 slot 的 PaperAI 浏览器工作台。左侧显示项目和受管理的 Word 文档，中间显示文档，右侧显示 Agent 对话。产品通过 `ctx.layout.configure` 安装 `PAPERAI_LAYOUT_CONFIG`：`detailsPosition: start`、`centerMin: 360`、`detailsMin: 480`、`detailsDefault: 760`、`detailsMax: 1280`，允许当前空白 Session 显示文档，两栏无法并排时聚焦文档。打开 Word 后空白对话采用紧凑布局；引用选区会显示对话，空间足够时文档仍在旁边。
+基于 DSH 插件和 slot 的 PaperAI 浏览器工作台。左侧显示项目和受管理的 Word 文档，中间显示文档，右侧显示 Agent 对话。产品通过 `ctx.layout.configure` 安装 `PAPERAI_LAYOUT_CONFIG`：`detailsPosition: start`、`centerMin: 360`、`detailsMin: 480`、`detailsDefault: 860`、`detailsMax: 1280`，允许当前空白 Session 显示文档，两栏无法并排时聚焦文档。打开 Word 后空白对话采用紧凑布局；引用选区会显示对话，空间足够时文档仍在旁边。
 
 本插件贡献文档列表和项目体检、项目起始页、模板设置页、`paperai` 文档视图，以及 Agent 状态子 slot。Workspace 导航、对话、权限控制和模型选择仍由 DSH 提供。注册通过 `slots.inject()` 跟随 slot 声明者的生命周期。颜色和共享控件来自 DSH。
 

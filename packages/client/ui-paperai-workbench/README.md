@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-PaperAI's browser workbench over DSH plugins and slots. Projects and tracked Word documents occupy the left sidebar, the document occupies the middle column, and the Agent conversation occupies the right. The product installs `PAPERAI_LAYOUT_CONFIG` through `ctx.layout.configure`: `detailsPosition: start`, `centerMin: 360`, `detailsMin: 480`, `detailsDefault: 760`, `detailsMax: 1280`, current-Session visibility, and document focus when both columns cannot fit. Opening Word makes the blank conversation compact; quoting text reveals the conversation while retaining the document beside it when space permits.
+PaperAI's browser workbench over DSH plugins and slots. Projects and tracked Word documents occupy the left sidebar, the document occupies the middle column, and the Agent conversation occupies the right. The product installs `PAPERAI_LAYOUT_CONFIG` through `ctx.layout.configure`: `detailsPosition: start`, `centerMin: 360`, `detailsMin: 480`, `detailsDefault: 860`, `detailsMax: 1280`, current-Session visibility, and document focus when both columns cannot fit. Opening Word makes the blank conversation compact; quoting text reveals the conversation while retaining the document beside it when space permits.
 
 The plugin contributes the document list and Project Doctor, project start page, Templates settings page, `paperai` document view, and Agent-status child slot. It retains DSH Workspace navigation, conversation, permission controls, and model selection. Registrations follow their declaring slots through `slots.inject()`. Colors and shared controls come from DSH.
 

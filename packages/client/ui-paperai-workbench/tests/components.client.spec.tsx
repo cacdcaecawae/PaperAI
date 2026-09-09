@@ -643,23 +643,33 @@ describe('DocumentWorkbench', () => {
     expect(screen.getByRole('alert').textContent).toBe('请先保存或取消正在编辑的段落。')
   })
 
-  it('lists versions as a timeline, marks the picked version\'s changes on the document, and restores it', () => {
+  it('lists versions as a timeline and compares the picked one on the page under a compare bar', () => {
+    const timeline = workbenchProps(workbenchState({ phase: 'ready', panel: 'versions', document: documentSnapshot() }))
+    render(<DocumentWorkbench {...timeline.props} />)
+    const panel = screen.getByRole('complementary', { name: '版本' })
+    expect(within(panel).getByText('Codex · gpt-5.6')).toBeTruthy()
+    expect(within(panel).getByText('当前')).toBeTruthy()
+    expect(within(panel).getByText('初始版本')).toBeTruthy()
+    expect(within(panel).getByText('点一版，在文档上查看它的改动。')).toBeTruthy()
+    fireEvent.click(within(panel).getByRole('button', { name: /Improve the introduction/u }))
+    expect(timeline.showDiff).toHaveBeenCalledWith(documentSnapshot().headCommitId)
+    cleanup()
+
     const b = workbenchProps(workbenchState({
       phase: 'ready', panel: 'versions', document: documentSnapshot(),
       diff: { commitId: COMMIT_0, result: { ...DIFF, commitId: COMMIT_0, parentCommitId: null }, error: null },
     }))
     const view = render(<DocumentWorkbench {...b.props} />)
-    const panel = screen.getByRole('complementary', { name: '版本' })
-    expect(within(panel).getByText('Codex · gpt-5.6')).toBeTruthy()
-    expect(within(panel).getByText('当前')).toBeTruthy()
-    expect(within(panel).getByText('初始版本')).toBeTruthy()
-    expect(within(panel).getByText('2 处变化 · 3 段未变')).toBeTruthy()
-    const rows = within(panel).getAllByRole('button', { pressed: true })
-    expect(rows).toHaveLength(1)
-    fireEvent.click(within(panel).getByRole('button', { name: /Improve the introduction/u }))
-    expect(b.showDiff).toHaveBeenCalledWith(documentSnapshot().headCommitId)
-    fireEvent.click(within(panel).getByRole('button', { name: '恢复到此版本' }))
+    expect(screen.queryByRole('complementary', { name: '版本' })).toBeNull()
+    const bar = screen.getByRole('region', { name: '版本对比' })
+    expect(within(bar).getByText('正在对比：从模板新建：硕士学位论文开题报告')).toBeTruthy()
+    expect(within(bar).getByText('2 处变化 · 3 段未变')).toBeTruthy()
+    fireEvent.click(within(bar).getByRole('button', { name: '恢复到此版本' }))
     expect(b.restore).toHaveBeenCalledWith(COMMIT_0)
+    fireEvent.click(within(bar).getByRole('button', { name: '其他版本' }))
+    expect(b.showDiff).toHaveBeenCalledWith(COMMIT_0)
+    fireEvent.click(within(bar).getByRole('button', { name: '退出对比' }))
+    expect(b.showPanel).toHaveBeenCalledWith(null)
 
     // The document shows the changes in place and offers to walk them.
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!

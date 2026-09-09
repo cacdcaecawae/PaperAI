@@ -42,8 +42,9 @@ const URL_ATTRIBUTES = new Set(['href', 'src', 'xlink:href', 'action', 'formacti
 const PREVIEW_STYLE = `
 :host { display: block; }
 /* The Host renders the document as pages that paint their own white; the ink stays black in both color schemes
-   (the Host sheet says so on body, which never reaches a shadow tree). The pages sit centered on the view's base tone with a hairline edge. */
-.paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); }
+   (the Host sheet says so on body, which never reaches a shadow tree). The pages sit centered on the view's base tone
+   with a hairline edge, zoomed down to fit the column when it is narrower than a page. */
+.paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); zoom: var(--paperai-page-zoom, 1); }
 .paperai-doc .page { outline: 1px solid var(--dsw-alias-border-l2); }
 /* Compare mode: a changed block is tinted with a marker at its left edge; deleted words are struck, inserted words underlaid. */
 [data-paperai-change] { position: relative; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding-left: 12px; padding-right: 12px; background: var(--dsw-alias-state-business-tertiary); }
@@ -196,6 +197,27 @@ export function DocumentPreview({
   useLayoutEffect(() => {
     if (active && host.current !== null) host.current.scrollTop = scrollTop
   }, [active, html, scrollTop])
+
+  // Zoom the pages down when the column is narrower than a page, and follow the column as it resizes.
+  useLayoutEffect(() => {
+    const element = host.current
+    if (element === null) return
+    const fit = (): void => {
+      const pages = element.shadowRoot?.querySelector<HTMLElement>('.paperai-doc')
+      if (pages === undefined || pages === null) return
+      element.style.setProperty('--paperai-page-zoom', '1')
+      const style = getComputedStyle(element)
+      const available = element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const natural = pages.offsetWidth
+      const zoom = natural > 0 && available > 0 && available < natural ? available / natural : 1
+      element.style.setProperty('--paperai-page-zoom', zoom.toFixed(3))
+    }
+    fit()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(fit)
+    observer.observe(element)
+    return () => { observer.disconnect() }
+  }, [html])
 
   // One delegated click on the shadow tree resolves the block under the pointer.
   useEffect(() => {

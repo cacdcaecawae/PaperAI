@@ -290,11 +290,19 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
   )
 }
 
+/** The version a diff is loaded for, once the Host has answered. */
+function comparedVersion(document: PaperAIDocumentSnapshot, state: PaperAIWorkbenchState): PaperAIDocumentVersion | null {
+  const diff = state.diff
+  if (diff === null || diff.result === null) return null
+  return document.versions.find(version => version.commitId === diff.commitId) ?? null
+}
+
 /**
- * Versions panel: the history as a timeline. The picked version shows its
- * changes on the document; changes later versions overwrote are listed here.
+ * Compare bar: while a version's changes show on the document, this strip above
+ * the page names the version, counts the changes, lists the ones later versions
+ * overwrote, and offers restore, the other versions, and a way out.
  */
-export function VersionsPanel({ document, state, unplaced, showDiff, restore, onClose, t }: {
+export function CompareBar({ document, state, unplaced, showDiff, restore, onClose, t }: {
   document: PaperAIDocumentSnapshot
   state: PaperAIWorkbenchState
   unplaced: readonly PaperAIVersionChange[]
@@ -303,16 +311,63 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
   onClose: () => void
   t: Translate
 }): ReactNode {
+  const version = comparedVersion(document, state)
+  const result = state.diff?.result
+  if (version === null || result === null || result === undefined) return null
+  const busy = state.action !== null
+  return (
+    <div className={css.compareBar} role="region" aria-label={t('versions.compareTitle')}>
+      <div className={css.compareMain}>
+        <strong>{t('versions.comparing', { version: version.summary })}</strong>
+        <span>
+          {result.changes.length === 0
+            ? t('versions.diffEmpty')
+            : t('versions.compare', { count: result.changes.length, unchanged: result.unchangedCount })}
+        </span>
+        {unplaced.length > 0 && (
+          <details className={css.unplaced}>
+            <summary>{t('versions.unplaced', { count: unplaced.length })}</summary>
+            <ul>
+              {unplaced.map((change, index) => (
+                <li key={`${change.kind}:${index}`}>
+                  {change.before !== undefined && <del>{change.before === '' ? ' ' : change.before}</del>}
+                  {change.after !== undefined && <ins>{change.after === '' ? ' ' : change.after}</ins>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+      <div className={css.compareActions}>
+        {version.restorable && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => { void restore(version.commitId) }}>
+            {state.action === 'restoring' ? t('versions.restoring') : t('versions.restore')}
+          </Button>
+        )}
+        <Button variant="toolbar" size="sm" disabled={busy} onClick={() => { void showDiff(version.commitId) }}>
+          {t('versions.others')}
+        </Button>
+        <button type="button" className={css.panelClose} aria-label={t('versions.exit')} onClick={onClose}>
+          <IconCloseOutline16 />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Versions panel: the history as a timeline; picking a version compares it on the document. */
+export function VersionsPanel({ document, state, showDiff, onClose, t }: {
+  document: PaperAIDocumentSnapshot
+  state: PaperAIWorkbenchState
+  showDiff: PaperAIDocumentWorkbenchProps['showDiff']
+  onClose: () => void
+  t: Translate
+}): ReactNode {
   const busy = state.action !== null
   const diff = state.diff
-  const picked = diff === null ? null : document.versions.find(version => version.commitId === diff.commitId) ?? null
-  const caption = picked === null
+  const caption = diff === null
     ? t('versions.select')
-    : diff?.result !== null && diff?.result !== undefined
-      ? diff.result.changes.length === 0
-        ? t('versions.diffEmpty')
-        : t('versions.compare', { count: diff.result.changes.length, unchanged: diff.result.unchangedCount })
-      : diff?.error !== null ? t('versions.diffError') : t('versions.diffLoading')
+    : diff.error !== null ? t('versions.diffError') : t('versions.diffLoading')
   return (
     <Panel title={t('versions.title')} onClose={onClose} t={t}>
       {document.versions.length === 0
@@ -320,19 +375,6 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
         : (
           <>
             <p className={css.panelNote} aria-live="polite">{caption}</p>
-            {unplaced.length > 0 && (
-              <div className={css.unplaced}>
-                <span className={css.panelCaption}>{t('versions.unplaced', { count: unplaced.length })}</span>
-                <ul>
-                  {unplaced.map((change, index) => (
-                    <li key={`${change.kind}:${index}`}>
-                      {change.before !== undefined && <del>{change.before === '' ? ' ' : change.before}</del>}
-                      {change.after !== undefined && <ins>{change.after === '' ? ' ' : change.after}</ins>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
             <ol className={css.versionList}>
               {document.versions.map((version) => {
                 const current = version.commitId === document.headCommitId
@@ -360,14 +402,6 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
                 )
               })}
             </ol>
-            {picked?.restorable === true && (
-              <div className={css.versionFooter}>
-                <span className={css.panelCaption}>{t('versions.restoreNote')}</span>
-                <Button variant="outline" disabled={busy} onClick={() => { void restore(picked.commitId) }}>
-                  {state.action === 'restoring' ? t('versions.restoring') : t('versions.restore')}
-                </Button>
-              </div>
-            )}
           </>
         )}
     </Panel>

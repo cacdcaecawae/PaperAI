@@ -55,7 +55,7 @@ export const PAPERAI_TEMPLATES_SECTION_ID = 'paperai-templates'
 export const PAPERAI_LAYOUT_CONFIG: Readonly<LayoutConfig> = Object.freeze({
   centerMin: 360,
   detailsMin: 480,
-  detailsDefault: 760,
+  detailsDefault: 860,
   detailsMax: 1280,
   detailsVisibility: 'current-session',
   detailsNarrowMode: 'focus',

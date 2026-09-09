@@ -9,7 +9,7 @@ import {
 import type { PaperAIDocumentSnapshot, PaperAIExportMode, PaperAIWorkbenchPanel, PaperAIWorkbenchState } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import { DocumentPreview } from './DocumentPreview.tsx'
-import { fixPromptText, GatePanel, TemplatePanel, VersionsPanel } from './panels.tsx'
+import { CompareBar, fixPromptText, GatePanel, TemplatePanel, VersionsPanel } from './panels.tsx'
 import { markDiffHtml } from './preview-html.ts'
 import { TemplateDialog } from './TemplateLibrary.tsx'
 import type { PaperAIWorkbenchKey } from './locales.ts'
@@ -224,6 +224,17 @@ export function DocumentWorkbench({
         <p className={css.actionError} role="status">{t(blockNotice)}</p>
       )}
       <main className={css.body}>
+        {state.phase === 'ready' && document !== null && compare !== null && (
+          <CompareBar
+            document={document}
+            state={state}
+            unplaced={compare.unplaced}
+            showDiff={showDiff}
+            restore={restore}
+            onClose={() => { showPanel(null) }}
+            t={t}
+          />
+        )}
         {state.phase === 'idle' && <p className={css.centerMessage}>{t('workbench.idle')}</p>}
         {state.phase === 'loading' && <p className={css.centerMessage} aria-live="polite">{t('workbench.loading')}</p>}
         {state.phase === 'error' && (
@@ -288,13 +299,11 @@ export function DocumentWorkbench({
             t={t}
           />
         )}
-        {state.phase === 'ready' && document !== null && state.panel === 'versions' && (
+        {state.phase === 'ready' && document !== null && state.panel === 'versions' && compare === null && (
           <VersionsPanel
             document={document}
             state={state}
-            unplaced={compare?.unplaced ?? []}
             showDiff={showDiff}
-            restore={restore}
             onClose={() => { showPanel(null) }}
             t={t}
           />

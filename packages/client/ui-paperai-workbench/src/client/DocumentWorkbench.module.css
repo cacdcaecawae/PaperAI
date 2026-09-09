@@ -666,7 +666,7 @@
   font-style: normal;
 }
 
-/* Changes the current text no longer carries are listed above the timeline. */
+/* Changes the current text no longer carries are listed under the compare bar. */
 .unplaced {
   display: flex;
   flex-direction: column;
@@ -708,21 +708,48 @@
   text-decoration: none;
 }
 
-/* Restore is the picked version's action at the foot of the panel. */
-.versionFooter {
-  position: sticky;
-  bottom: 0;
+/* Comparing replaces the panel with a tinted strip above the page: the version,
+   its change count, and the actions, so the marked page stays in full view. */
+.compareBar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: auto;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-state-business-tertiary);
 }
 
-.versionFooter > button {
-  align-self: stretch;
+.compareMain {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.compareMain strong {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareMain summary {
+  cursor: pointer;
+}
+
+.compareActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
 }
 
 .actorBadge {
