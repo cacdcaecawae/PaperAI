@@ -526,4 +526,23 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: rendered }) })
     await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe(rendered) })
   })
+
+  it('records an outside working edit as a version and reopens the document with the draft kept', async () => {
+    const remote = successfulRemote()
+    const { controller, store } = await openedController(remote)
+    const documentId = store.getSnapshot().document?.documentId
+    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: true })
+    controller.updateDraft(SESSION_ID, 'Unsaved introduction')
+    const capture = vi.spyOn(remote, 'captureExternal')
+    vi.spyOn(remote, 'open').mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    await expect(controller.captureExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(capture).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, documentId }, expect.any(AbortSignal))
+    expect(store.getSnapshot()).toMatchObject({
+      action: null, edit: { draft: 'Unsaved introduction' }, document: { headCommitId: COMMIT_2 },
+    })
+    vi.spyOn(remote, 'captureExternal').mockResolvedValue({ ok: false, error: { code: 'internal', message: 'nothing external to capture', details: {} } })
+    await expect(controller.captureExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'internal: nothing external to capture' })
+    expect(store.getSnapshot().actionError).toBe('internal: nothing external to capture')
+  })
+
 })

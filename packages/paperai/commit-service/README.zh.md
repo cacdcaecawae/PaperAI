@@ -4,7 +4,7 @@
 
 PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperCommits`，是人工或 agent（智能体）修改权威 Working DOCX 的唯一受支持路径。`submit()` 或 `revert()` 成功时，修改已经应用且文档 head 已前移；不要求用户再次确认。
 
-`inspectProject(project)` 只读检查已登记原件、工作文件、当前版本、路径归属和保留快照，返回问题与独立的 `WorkingRecoveryPlan` 候选方案。`recoverMissingWorking(plan)` 与文档提交串行，重新检查当前提交和最新扫描结果，验证快照字节及项目内无符号链接的目标祖先，再原子创建缺失的工作文件，不覆盖已存在目标。过期方案会被拒绝。恢复只是重新实体化已有当前提交，保留历史且不创建内容提交。原件丢失、快照损坏、重复归属和外部修改只报告问题，不自动修复。仅含传输数据的报告和方案类型通过 `/doctor-types` 发布。
+`inspectProject(project)` 只读检查已登记原件、工作文件、当前版本、路径归属和保留快照，返回问题与独立的 `WorkingRecoveryPlan` 候选方案。`recoverMissingWorking(plan)` 与文档提交串行，重新检查当前提交和最新扫描结果，验证快照字节及项目内无符号链接的目标祖先，再原子创建缺失的工作文件，不覆盖已存在目标。过期方案会被拒绝。恢复只是重新实体化已有当前提交，保留历史且不创建内容提交。原件丢失、快照损坏、重复归属和外部修改只报告问题，不自动修复。仅含传输数据的报告和方案类型通过 `/doctor-types` 发布。 `captureExternal(request)` 把与当前版本不一致的工作文件原样记为一个新版本（字节不变），让段落编辑得以继续；工作文件已与当前版本一致时拒绝。
 
 ## 服务：`PaperCommitService`（`ctx.paperCommits`）
 

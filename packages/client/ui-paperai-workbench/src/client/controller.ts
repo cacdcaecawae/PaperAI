@@ -766,12 +766,53 @@ export class PaperAIWorkbenchController {
     if (state.externalUpdate === null) return { ok: false, error: 'no external document update' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
     const pending = state.externalUpdate
-    const edit = state.edit
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'reloading-external'
       draft.actionError = null
     })
+    return await this.reopen(entry, sessionId, target, request, state.edit, pending)
+  }
+
+  /**
+   * Record the Working DOCX, changed outside PaperAI, as a version of its own
+   * and open the document again; an unsaved block draft survives when its
+   * block still reads the same.
+   * @param sessionId - Session showing the document.
+   */
+  async captureExternal(sessionId: SessionId): Promise<PaperAIActionResult> {
+    this.assertLive()
+    const entry = this.workbenchEntry(sessionId)
+    const state = entry.store.getSnapshot()
+    const target = this.targets.get(sessionId)
+    if (state.phase !== 'ready' || state.document === null || target === undefined) {
+      return { ok: false, error: 'no open document' }
+    }
+    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    const documentId = state.document.documentId
+    const request = this.begin(entry)
+    entry.store.update((draft) => {
+      draft.action = 'capturing-external'
+      draft.actionError = null
+    })
+    const captured = await callRemote(() => this.remote.captureExternal({
+      workspaceId: target.workspaceId,
+      documentId,
+    }, request.signal))
+    if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
+    if (!captured.ok) return this.fail(entry.store, remoteError(captured.error))
+    return await this.reopen(entry, sessionId, target, request, state.edit)
+  }
+
+  /** Open the document again after an outside change; a dirty draft is kept when its block still reads the same. */
+  private async reopen(
+    entry: RequestEntry<PaperAIWorkbenchStore>,
+    sessionId: SessionId,
+    target: { readonly workspaceId: WorkspaceId; readonly resourceId: PaperAIResourceId },
+    request: Request,
+    edit: PaperAIBlockEdit | null,
+    consumed?: PaperAIExternalDocumentHead,
+  ): Promise<PaperAIActionResult> {
     const result = await callRemote(() => this.remote.open({
       workspaceId: target.workspaceId,
       sessionId,
@@ -784,7 +825,7 @@ export class PaperAIWorkbenchController {
       || result.value.document.resourceId !== target.resourceId) {
       return this.fail(entry.store, 'paperaiWorkbench returned an invalid external document projection')
     }
-    this.publishOpenResult(entry.store, result.value, pending)
+    this.publishOpenResult(entry.store, result.value, consumed)
     if (edit !== null && edit.draft !== edit.baseText) {
       entry.store.update((draft) => {
         draft.edit = restoreEdit(result.value.document, edit)

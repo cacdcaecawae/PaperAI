@@ -103,17 +103,29 @@ const report: NonNullable<ProjectCheckState['report']> = {
   issues: [{ documentId: DOCUMENT_ID, code: 'missing-working', path: plan.workingPath, detail: 'file does not exist' }],
 }
 
+const capture = vi.fn(() => Promise.resolve())
+
 describe('Project Doctor review and recovery', () => {
+  it('offers to record a Working DOCX changed outside PaperAI as a version', () => {
+    const inspect = vi.fn(() => Promise.resolve())
+    const changed = { ...report, repairs: [], issues: [{ documentId: DOCUMENT_ID, code: 'working-changed' as const, path: plan.workingPath, detail: 'bytes differ' }] }
+    render(<ProjectDoctor state={{ busy: false, report: changed, error: null }} inspect={inspect} capture={capture} t={translate} />)
+    fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
+    expect(screen.getByText(zh['doctor.issue.working-changed'])).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '记为新版本' }))
+    expect(capture).toHaveBeenCalledWith(DOCUMENT_ID)
+  })
+
   it('scans only when opened or explicitly refreshed and preserves cached findings on reopen', () => {
     const inspect = vi.fn(() => Promise.resolve())
-    const view = render(<ProjectDoctor state={undefined} inspect={inspect} t={translate} />)
+    const view = render(<ProjectDoctor state={undefined} inspect={inspect} capture={capture} t={translate} />)
     expect(inspect).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
     expect(inspect).toHaveBeenCalledOnce()
-    view.rerender(<ProjectDoctor state={{ busy: true, report: null, error: null }} inspect={inspect} t={translate} />)
+    view.rerender(<ProjectDoctor state={{ busy: true, report: null, error: null }} inspect={inspect} capture={capture} t={translate} />)
     expect(screen.getByRole('button', { name: '正在检查…' }).hasAttribute('disabled')).toBe(true)
     view.rerender(<ProjectDoctor state={{ busy: false, report: { ...report, issues: [], repairs: [] }, error: null }}
-      inspect={inspect} t={translate} />)
+      inspect={inspect} capture={capture} t={translate} />)
     expect(screen.getByRole('status').textContent).toBe(zh['doctor.healthy'])
     fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
     fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
@@ -124,7 +136,7 @@ describe('Project Doctor review and recovery', () => {
 
   it('requires plan review before recovery, permits dismissal, and sends the exact reviewed head', async () => {
     const inspect = vi.fn(() => Promise.resolve())
-    render(<ProjectDoctor state={{ busy: false, report, error: null }} inspect={inspect} t={translate} />)
+    render(<ProjectDoctor state={{ busy: false, report, error: null }} inspect={inspect} capture={capture} t={translate} />)
     fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
     expect(screen.getByText('C:/paper/working/proposal.docx')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '恢复缺失文件' })).toBeNull()
@@ -142,13 +154,13 @@ describe('Project Doctor review and recovery', () => {
 
   it('clears the reviewed plan before a new scan and exposes a failed inspection', () => {
     const inspect = vi.fn(() => Promise.resolve())
-    const view = render(<ProjectDoctor state={{ busy: false, report, error: null }} inspect={inspect} t={translate} />)
+    const view = render(<ProjectDoctor state={{ busy: false, report, error: null }} inspect={inspect} capture={capture} t={translate} />)
     fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
     fireEvent.click(screen.getByRole('button', { name: '查看恢复方案 · proposal.docx' }))
     fireEvent.click(screen.getByRole('button', { name: '重新扫描' }))
     expect(screen.queryByRole('region', { name: '查看恢复方案' })).toBeNull()
     expect(inspect).toHaveBeenCalledWith()
-    view.rerender(<ProjectDoctor state={{ busy: false, report: null, error: 'Inspection unavailable' }} inspect={inspect} t={translate} />)
+    view.rerender(<ProjectDoctor state={{ busy: false, report: null, error: 'Inspection unavailable' }} inspect={inspect} capture={capture} t={translate} />)
     expect(screen.getByRole('alert').textContent).toBe('Inspection unavailable')
   })
 })

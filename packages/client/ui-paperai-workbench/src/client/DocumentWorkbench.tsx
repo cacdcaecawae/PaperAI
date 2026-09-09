@@ -21,6 +21,7 @@ const EXPORT_MODES: readonly PaperAIExportMode[] = ['draft-export', 'delivery-ex
 
 /** Actionable controller failures have specific guidance; other failures offer a retry. */
 function actionErrorKey(error: string): PaperAIWorkbenchKey {
+  if (error.includes('Working DOCX differs from head')) return 'workbench.workingChanged'
   if (error.startsWith('delivery blocked')) return 'export.blocked'
   if (error.startsWith('block changed externally')) return 'block.conflicted'
   if (error === 'save or cancel the current block first') return 'block.busy'
@@ -135,7 +136,7 @@ function Toolbar({ document, state, panel, showPanel, exportDocument, focusActiv
 export function DocumentWorkbench({
   closeDetails, setDraft, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
   retryOpen, showPanel, selectBlock, updateDraft, cancelEdit, commitEdit, validate, suggestType,
-  applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal,
+  applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal, captureExternal,
   setDetailsFocus, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
 }: PaperAIDocumentWorkbenchProps): ReactNode {
   const state = useWorkbench(value => value)
@@ -228,7 +229,18 @@ export function DocumentWorkbench({
           </div>
         </div>
       )}
-      {state.actionError !== null && (
+      {state.actionError !== null && actionErrorKey(state.actionError) === 'workbench.workingChanged' && (
+        <div className={css.notice} role="alert">
+          <div>
+            <strong>{t('workbench.workingChanged')}</strong>
+            <span>{t('workbench.workingChangedHint')}</span>
+          </div>
+          <Button variant="outline" size="sm" disabled={state.action !== null} onClick={() => { void captureExternal() }}>
+            {state.action === 'capturing-external' ? t('workbench.capturing') : t('workbench.capture')}
+          </Button>
+        </div>
+      )}
+      {state.actionError !== null && actionErrorKey(state.actionError) !== 'workbench.workingChanged' && (
         <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError))}</p>
       )}
       {blockNotice !== null && (

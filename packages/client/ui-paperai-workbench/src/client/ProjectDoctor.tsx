@@ -2,14 +2,15 @@
 
 import { useState } from 'react'
 import type { ProjectCheckState } from './diagnostics-controller.ts'
-import type { PaperAIWorkingRecoveryPlan } from './types.ts'
+import type { PaperAIDocumentId, PaperAIWorkingRecoveryPlan } from './types.ts'
 import type { PaperAIWorkbenchKey } from './locales.ts'
 import css from './Diagnostics.module.css'
 
 /** Render diagnostics only after the user opens the project check. */
-export function ProjectDoctor({ state, inspect, t }: {
+export function ProjectDoctor({ state, inspect, capture, t }: {
   state: ProjectCheckState | undefined
   inspect: (plan?: PaperAIWorkingRecoveryPlan) => Promise<void>
+  capture: (documentId: PaperAIDocumentId) => Promise<void>
   t: (key: PaperAIWorkbenchKey) => string
 }) {
   const [open, setOpen] = useState(false)
@@ -31,6 +32,8 @@ export function ProjectDoctor({ state, inspect, t }: {
           <ul>{state.report.issues.map((issue, index) => <li key={index}>
             <strong>{t(`doctor.issue.${issue.code}`)}</strong>
             <span className={css.path}>{issue.path.replaceAll('\\', '/')}</span>
+            {issue.code === 'working-changed' && <button type="button" className={css.trigger} disabled={state.busy}
+              onClick={() => { void capture(issue.documentId) }}>{t('doctor.capture')}</button>}
           </li>)}</ul>
           {state.report.repairs.map(repair => <button key={repair.documentId} type="button" className={css.trigger}
             disabled={state.busy} onClick={() => { setPlan(repair) }}>{t('doctor.plan')} · {repair.workingPath.split(/[\\/]/u).at(-1)}</button>)}

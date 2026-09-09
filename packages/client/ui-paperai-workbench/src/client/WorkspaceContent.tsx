@@ -42,7 +42,7 @@ function DocumentRow({ row, selected, open, t }: {
 
 /** Render the document list for one project. */
 export function WorkspaceContent({
-  workspaceId, useProjects, useDiagnostics, inspectProject, ensureProject, refreshProject, openDocument, t,
+  workspaceId, useProjects, useDiagnostics, inspectProject, captureExternal, ensureProject, refreshProject, openDocument, t,
 }: PaperAIWorkspaceContentProps): ReactNode {
   const state = useProjects(directory => directory.workspaces[workspaceId] ?? PROJECT_EMPTY)
   const diagnostics = useDiagnostics(value => value.projects[workspaceId])
@@ -91,7 +91,13 @@ export function WorkspaceContent({
           ))}
         </div>
       )}
-      <ProjectDoctor key={workspaceId} state={diagnostics} inspect={plan => inspectProject(workspaceId, plan)} t={t} />
+      <ProjectDoctor
+        key={workspaceId}
+        state={diagnostics}
+        inspect={plan => inspectProject(workspaceId, plan)}
+        capture={documentId => captureExternal(workspaceId, documentId)}
+        t={t}
+      />
     </section>
   )
 }

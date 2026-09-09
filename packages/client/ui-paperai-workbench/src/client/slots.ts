@@ -53,6 +53,8 @@ export interface PaperAILibraryInjected {
 export interface PaperAIWorkspaceContentInjected {
   /** Read project integrity, or apply an explicit recovery plan and read it again. */
   inspectProject: (workspaceId: WorkspaceId, plan?: import('./types.ts').PaperAIWorkingRecoveryPlan) => Promise<void>
+  /** Record one document's Working DOCX, changed outside PaperAI, as a version of its own. */
+  captureExternal: (workspaceId: WorkspaceId, documentId: import('./types.ts').PaperAIDocumentId) => Promise<void>
   hooks: {
     /** Independent diagnostics, scoped by the sidebar's project id. */
     diagnostics: HostObservable<import('./diagnostics-controller.ts').DiagnosticsState>
@@ -149,6 +151,8 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   exportDocument: (mode: PaperAIExportMode) => Promise<PaperAIActionResult>
   /** Replace the current projection with a pending durable head. */
   reloadExternal: () => Promise<PaperAIActionResult>
+  /** Record the open document's Working DOCX, changed outside PaperAI, as a version and reopen it. */
+  captureExternal: () => Promise<PaperAIActionResult>
   /** Demand or release the layout's whole-content-area details focus. */
   setDetailsFocus: (active: boolean) => void
 }

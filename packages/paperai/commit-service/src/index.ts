@@ -48,6 +48,7 @@ import {
   PaperCommitError,
 } from './errors.ts'
 import type {
+  CaptureExternalRequest,
   DocumentCommitHistory,
   PaperDocumentIndexPeer,
   PaperTemplateCommitPeer,
@@ -61,6 +62,7 @@ export {
   PaperCommitError,
 } from './errors.ts'
 export type {
+  CaptureExternalRequest,
   DocumentCommitHistory,
   DocumentIndexRebuildRequest,
   PaperCommitErrorCode,
@@ -239,6 +241,18 @@ export class PaperCommitService extends Service {
   }
 
   /**
+   * Record the Working DOCX as it stands when it no longer matches its head: an
+   * edit made outside PaperAI becomes a version of its own so writing can go
+   * on from it. The bytes stay as they are; a snapshot and a commit are added.
+   * @param request - document, provenance, and optional message.
+   * @returns the new head commit holding the current Working DOCX bytes.
+   * @throws PaperCommitError `INVALID_REQUEST` when the Working DOCX already matches its head.
+   */
+  captureExternal(request: CaptureExternalRequest): Promise<DocumentCommit> {
+    return this.enqueue(request.documentId, request.signal, () => this.captureLocked(request))
+  }
+
+  /**
    * Read one stored commit object by id, including an unreachable recovery object.
    * @param commitId - exact commit identity.
    * @returns an isolated copy, or `undefined` when no object exists.
@@ -395,6 +409,43 @@ export class PaperCommitService extends Service {
         signal: request.signal,
       })
     })
+  }
+
+  private async captureLocked(request: CaptureExternalRequest): Promise<DocumentCommit> {
+    request.signal?.throwIfAborted()
+    const document = this.requireDocument(request.documentId)
+    const project = this.requireProject(document)
+    const paths = resolveCommitFilePaths(project.rootPath, document.workingPath)
+    const original = await readFileImage(paths.workingPath, 'WORKING_COPY_CHANGED', 'Working DOCX')
+    const head = document.headCommitId === undefined
+      ? undefined
+      : this.dependencies.paperRepository.getCommit(document.headCommitId)
+    if (head !== undefined && head.documentSha256 === original.sha256) {
+      throw new PaperCommitError(
+        'INVALID_REQUEST',
+        `document '${document.id}' Working DOCX matches head '${head.id}'; nothing external to capture`,
+      )
+    }
+    const currentNodes = structuredClone(
+      await this.dependencies.paperDocuments.readNodes(document.id),
+    ) as DocumentNode[]
+    return await this.withCandidate(paths, original.bytes, async candidatePath => (
+      await this.prepareAndPublish({
+        document,
+        paths,
+        original,
+        candidatePath,
+        expectedHead: document.headCommitId,
+        message: request.message ?? '载入外部修改',
+        actor: request.actor,
+        operations: [],
+        currentNodes,
+        templateChanged: false,
+        templateId: document.templateId,
+        role: document.role,
+        signal: request.signal,
+      })
+    ))
   }
 
   private async revertLocked(request: ResolvedRevertRequest): Promise<DocumentCommit> {

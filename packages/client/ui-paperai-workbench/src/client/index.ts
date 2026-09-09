@@ -195,6 +195,10 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
         await diagnostics.inspect(workspaceId, plan)
         if (plan !== undefined) controller.refreshLoaded()
       },
+      captureExternal: async (workspaceId, documentId) => {
+        await diagnostics.capture(workspaceId, documentId)
+        controller.refreshLoaded()
+      },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
       refreshProject: workspaceId => controller.loadProject(workspaceId),
       openDocument: async (workspaceId, resourceId) => {
@@ -294,6 +298,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
         restore: commitId => controller.restore(sessionId, commitId),
         exportDocument: mode => controller.exportDocument(sessionId, mode),
         reloadExternal: () => controller.reloadExternal(sessionId),
+        captureExternal: () => controller.captureExternal(sessionId),
         setDetailsFocus: (active) => { ctx.layout.setDetailsFocus(active) },
       }),
     }, DocumentWorkbench))

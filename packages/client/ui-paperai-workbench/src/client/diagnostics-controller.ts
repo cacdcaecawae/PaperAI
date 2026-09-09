@@ -1,7 +1,9 @@
 /** Independent browser observations for Agent readiness and project integrity. */
 
 import { createSnapshotStore, type WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import type { PaperAIAgentDiagnostic, PaperAIProjectIntegrityReport, PaperAIWorkbenchRemote, PaperAIWorkingRecoveryPlan } from './types.ts'
+import type {
+  PaperAIAgentDiagnostic, PaperAIDocumentId, PaperAIProjectIntegrityReport, PaperAIWorkbenchRemote, PaperAIWorkingRecoveryPlan,
+} from './types.ts'
 
 /** Read-only integrity report plus the explicit operation currently in flight. */
 export interface ProjectCheckState {
@@ -77,15 +79,31 @@ export class DiagnosticsController {
    * @param plan - optional exact repair candidate; omission performs only a read.
    */
   async inspect(workspaceId: WorkspaceId, plan?: PaperAIWorkingRecoveryPlan): Promise<void> {
+    await this.report(workspaceId, () => (plan === undefined
+      ? this.remote.inspectProject({ workspaceId })
+      : this.remote.recoverWorking({ workspaceId, plan })))
+  }
+
+  /**
+   * Record one document's Working DOCX, changed outside PaperAI, as a version and read the report again.
+   * @param workspaceId - project owning the document.
+   * @param documentId - the document whose working bytes become a version.
+   */
+  async capture(workspaceId: WorkspaceId, documentId: PaperAIDocumentId): Promise<void> {
+    await this.report(workspaceId, () => this.remote.captureExternal({ workspaceId, documentId }))
+  }
+
+  private async report(
+    workspaceId: WorkspaceId,
+    read: () => ReturnType<PaperAIWorkbenchRemote['inspectProject']>,
+  ): Promise<void> {
     if (this.isDisposed() || this.store.getSnapshot().projects[workspaceId]?.busy === true) return
     const previous = this.store.getSnapshot().projects[workspaceId]
     this.store.update((state) => {
       state.projects = { ...state.projects, [workspaceId]: { busy: true, report: previous?.report ?? null, error: null } }
     })
     try {
-      const result = plan === undefined
-        ? await this.remote.inspectProject({ workspaceId })
-        : await this.remote.recoverWorking({ workspaceId, plan })
+      const result = await read()
       if (this.isDisposed()) return
       this.store.update((state) => {
         state.projects = { ...state.projects, [workspaceId]: {

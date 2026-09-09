@@ -362,6 +362,7 @@ async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
   ctx.provide('paperCommits', {
     inspectProject: vi.fn(async () => ({ checkedAt: '2026-09-05T00:00:00.000Z', documents: 1, issues: [], repairs: [] })),
     recoverMissingWorking: vi.fn(async () => {}),
+    captureExternal: vi.fn(async () => ({ id: 'commit-captured' })),
     listHistory: () => structuredClone(harness.history),
     submit,
     revert,
@@ -1660,4 +1661,15 @@ describe('PaperAiWorkbenchService', () => {
       mode: 'draft-export',
     })).rejects.toMatchObject({ code: 'DESTINATION_INVALID' })
   })
+
+  it('records an outside working edit as a version through the commit service and re-reads the report', async () => {
+    const h = await createHarness()
+    const capture = vi.spyOn(h.ctx.paperCommits, 'captureExternal')
+    await expect(h.service.captureExternal({ workspaceId: WORKSPACE_ID, documentId: DOCUMENT_ID })).resolves.toMatchObject({ documents: 1 })
+    expect(capture).toHaveBeenCalledOnce()
+    expect(capture.mock.calls[0]?.[0]).toMatchObject({ documentId: DOCUMENT_ID, actor: { kind: 'human', client: 'paperai' } })
+    h.document = { ...h.document, projectId: ProjectId('another') }
+    await expect(h.service.captureExternal({ workspaceId: WORKSPACE_ID, documentId: DOCUMENT_ID })).rejects.toThrow(/does not belong/)
+  })
+
 })

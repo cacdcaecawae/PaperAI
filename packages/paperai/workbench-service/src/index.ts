@@ -44,6 +44,7 @@ import type { TemplateLibraryPack, TemplatePackSummary } from '@paperai/template
 import { diffParagraphs } from './diff.ts'
 import type {
   PaperAIAddTemplateFormatRequest,
+  PaperAICaptureExternalRequest,
   PaperAIProbeAgentRequest,
   PaperAIApplyTemplateRequest,
   PaperAICommitDocumentRequest,
@@ -548,6 +549,27 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.plan.documentId)))
     if (document?.projectId !== project.id) throw new Error('recovery document does not belong to this project')
     await this.ctx.paperCommits.recoverMissingWorking(request.plan, signal)
+    return this.ctx.paperCommits.inspectProject(project, signal)
+  }
+
+  /**
+   * Record a Working DOCX changed outside PaperAI as a version of its own, so
+   * block edits can continue from it.
+   * @param request - owning Workspace and the document.
+   * @param signal - optional cancellation before publication.
+   * @returns a fresh integrity report after the capture.
+   * @throws when the Workspace is unknown, the document is not the project's, or nothing external is pending.
+   */
+  @Remote('captureExternal')
+  async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
+    const project = this.existingProject(request.workspaceId)
+    const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.documentId)))
+    if (document?.projectId !== project.id) throw new Error('paperai-workbench: the document does not belong to this project')
+    await this.ctx.paperCommits.captureExternal({
+      documentId: document.id,
+      actor: { kind: 'human', name: '用户', client: 'paperai' },
+      ...(signal === undefined ? {} : { signal }),
+    })
     return this.ctx.paperCommits.inspectProject(project, signal)
   }
 

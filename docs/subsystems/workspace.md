@@ -440,6 +440,16 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 @Remote('recoverWorking') async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>
 
 /**
+ * Record a Working DOCX changed outside PaperAI as a version of its own, so
+ * block edits can continue from it.
+ * @param request - owning Workspace and the document.
+ * @param signal - optional cancellation before publication.
+ * @returns a fresh integrity report after the capture.
+ * @throws when the Workspace is unknown, the document is not the project's, or nothing external is pending.
+ */
+@Remote('captureExternal') async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>
+
+/**
  * Record the template set the project writes against, or the explicit
  * choice to write without one.
  * @param request - Workspace and template set id, or `null` for none.
@@ -625,6 +635,16 @@ submit(request: SubmitDocumentCommitRequest): Promise<DocumentCommit>
  * @returns the new revert commit; the historical target remains unchanged.
  */
 revert(request: RevertDocumentCommitRequest): Promise<DocumentCommit>
+
+/**
+ * Record the Working DOCX as it stands when it no longer matches its head: an
+ * edit made outside PaperAI becomes a version of its own so writing can go
+ * on from it. The bytes stay as they are; a snapshot and a commit are added.
+ * @param request - document, provenance, and optional message.
+ * @returns the new head commit holding the current Working DOCX bytes.
+ * @throws PaperCommitError `INVALID_REQUEST` when the Working DOCX already matches its head.
+ */
+captureExternal(request: CaptureExternalRequest): Promise<DocumentCommit>
 
 /**
  * Read one stored commit object by id, including an unreachable recovery object.

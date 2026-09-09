@@ -14,6 +14,12 @@ export interface PaperAIRecoverWorkingRequest {
   readonly plan: import('@paperai/commit-service/doctor-types').WorkingRecoveryPlan
 }
 
+/** A Working DOCX changed outside PaperAI: the document whose current bytes become a version. */
+export interface PaperAICaptureExternalRequest {
+  readonly workspaceId: WorkspaceId
+  readonly documentId: PaperAIDocumentId
+}
+
 export type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
 
 /** An explicit prompt-free diagnostic request for one configured peer Agent. */

@@ -19,6 +19,7 @@ export type PaperAIWorkbenchRemote = Pick<
   | 'probeAgent'
   | 'inspectProject'
   | 'recoverWorking'
+  | 'captureExternal'
   | 'setProjectTemplate'
   | 'listTemplateLibrary'
   | 'createTemplateSet'
@@ -99,6 +100,7 @@ export type PaperAIWorkbenchAction =
   | 'exporting-draft'
   | 'exporting-delivery'
   | 'reloading-external'
+  | 'capturing-external'
 
 /** The block being edited in place: its node, the text it started from, and the draft. */
 export interface PaperAIBlockEdit {

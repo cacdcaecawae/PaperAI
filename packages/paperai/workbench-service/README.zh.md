@@ -4,7 +4,7 @@
 
 PaperAI 工作台的 Host Remote，作为产品层接入固定版本的 DeepSeek Harness 客户端。它会把所选 DSH 工作区幂等初始化为 PaperAI 项目，描述该项目（选用的模板与被追踪的文档），投影只读 OfficeCLI HTML 及每个语义节点的当前纯文本，并让每次保存、模板变更或回退都经过 `ctx.paperCommits`。
 
-`agentDiagnostics()` 读取可选 ACP provider 的缓存观察，未组装 provider 时返回空名单。`probeAgent()` 请求显式且有时限的初始化，未组装 provider 时失败。`inspectProject()` 只读已登记项目，不创建上下文文件或初始化项目。`recoverWorking()` 验证方案中的文档属于该 Workspace，再交由提交服务处理并返回新扫描。诊断传输类型通过 `/types` 重导出，不将 Host 实现引入浏览器。
+`agentDiagnostics()` 读取可选 ACP provider 的缓存观察，未组装 provider 时返回空名单。`probeAgent()` 请求显式且有时限的初始化，未组装 provider 时失败。`inspectProject()` 只读已登记项目，不创建上下文文件或初始化项目。`recoverWorking()` 验证方案中的文档属于该 Workspace，再交由提交服务处理并返回新扫描。诊断传输类型通过 `/types` 重导出，不将 Host 实现引入浏览器。 `captureExternal()` 把在 PaperAI 之外被修改的工作文件记为一个新版本，并重新读取报告。
 
 `overview()` 描述一个项目：项目名称、模板是否已经选定（`templateDecided`；选择不用模板也算一次决定）、选用的模板及其格式，以及每份被追踪 Word 文档一行，附带其文档类型与所绑定格式的名称。只有领域层追踪的文档会被列出；项目目录里的其他文件从不投影。选用的模板若已不在模板库中，则读作 `null`，而 `templateDecided` 保持为 true，`templatePackId` 保留所选模板的 id。id 为 `null` 表示尚未选择或明确选择自由写作。持久化的 `paperai` `documents` put 引用了确实存在的 head commit 后，Host 会发出 JSON-safe 的 `paperai/document-changed` 事件，其中包含 `documentId`、`headCommitId` 与 `updatedAt`。
 

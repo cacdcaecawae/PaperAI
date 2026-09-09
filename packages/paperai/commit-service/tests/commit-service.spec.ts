@@ -1257,4 +1257,43 @@ describe('PaperCommitService', () => {
     expect(() => harness.ctx.paperCommits.listHistory(harness.documentId))
       .toThrow('references missing commit')
   })
+
+  it('captures a Working DOCX changed outside PaperAI as a version of its own', async () => {
+    const harness = await createHarness()
+    const first = await harness.ctx.paperCommits.submit({
+      documentId: harness.documentId,
+      message: 'First revision',
+      actor: codexActor,
+      mutations: [replaceMutation(harness.nodeId, 'alpha', 'beta')],
+    })
+    await expect(harness.ctx.paperCommits.captureExternal({ documentId: harness.documentId, actor: humanActor }))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+
+    await writeFile(harness.workingPath, 'gamma')
+    await expect(harness.ctx.paperCommits.submit({
+      documentId: harness.documentId,
+      baseCommitId: first.id,
+      message: 'Blocked',
+      actor: humanActor,
+      mutations: [replaceMutation(harness.nodeId, 'beta', 'delta')],
+    })).rejects.toMatchObject({ code: 'WORKING_COPY_CHANGED' })
+
+    const captured = await harness.ctx.paperCommits.captureExternal({ documentId: harness.documentId, actor: humanActor })
+    expect(captured.parentId).toBe(first.id)
+    expect(captured.message).toBe('载入外部修改')
+    expect(captured.operations).toEqual([])
+    expect(captured.documentSha256).not.toBe(first.documentSha256)
+    expect(await readFile(harness.workingPath, 'utf8')).toBe('gamma')
+    expect(harness.ctx.paperCommits.listHistory(harness.documentId).map(commit => commit.id))
+      .toEqual([captured.id, first.id])
+    const next = await harness.ctx.paperCommits.submit({
+      documentId: harness.documentId,
+      baseCommitId: captured.id,
+      message: 'Continues',
+      actor: humanActor,
+      mutations: [replaceMutation(harness.nodeId, 'gamma', 'delta')],
+    })
+    expect(next.parentId).toBe(captured.id)
+  })
+
 })

@@ -69,17 +69,18 @@ function libraryActions() {
   }
 }
 
-function workspaceProps(state: PaperAIProjectState) {
+function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}) {
   const store = createSnapshotStore<PaperAIProjectDirectoryState>({ workspaces: { [WORKSPACE_ID]: state } })
   const ensureProject = vi.fn(async () => {})
   const refreshProject = vi.fn(async () => {})
   const openDocument = vi.fn(async () => {})
+  const captureExternal = vi.fn(async () => {})
   const props = {
     workspaceId: WORKSPACE_ID, path: 'F:/paper', title: 'Paper', active: true,
-    useDiagnostics: bind(createSnapshotStore({ projects: {} })), inspectProject: vi.fn(),
+    useDiagnostics: bind(createSnapshotStore({ projects: diagnostics })), inspectProject: vi.fn(), captureExternal,
     useProjects: bind(store), ensureProject, refreshProject, openDocument, t,
   } as unknown as PaperAIWorkspaceContentProps
-  return { props, store, ensureProject, refreshProject, openDocument }
+  return { props, store, ensureProject, refreshProject, openDocument, captureExternal }
 }
 
 function startProps(state: PaperAIProjectState | null, library = libraryState()) {
@@ -131,6 +132,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
     detachTemplate: vi.fn(async () => ok),
     setProjectTemplate: vi.fn(async () => ok),
     showDiff: vi.fn(async () => ok),
+    captureExternal: vi.fn(async () => ok),
     restore: vi.fn(async () => ok),
     exportDocument: vi.fn(async () => ok),
     reloadExternal: vi.fn(async () => ok),
@@ -157,6 +159,20 @@ describe('WorkspaceContent', () => {
     expect(b.openDocument).toHaveBeenCalledWith(WORKSPACE_ID, RESOURCE_ID)
     expect(screen.queryByText('模板')).toBeNull()
     expect(screen.queryByText('新建文档')).toBeNull()
+  })
+
+  it('offers to record an outside working edit from the project doctor', async () => {
+    const report = {
+      checkedAt: '2026-09-09T00:00:00.000Z', documents: 1, repairs: [],
+      issues: [{ documentId: 'doc-1', code: 'working-changed', path: 'F:\\paper\\working\\a.docx', detail: 'differs' }],
+    }
+    const b = workspaceProps(projectState(), { [WORKSPACE_ID]: { busy: false, report, error: null } })
+    render(<WorkspaceContent {...b.props} />)
+    fireEvent.click(screen.getByRole('button', { name: '项目体检' }))
+    const doctor = await screen.findByRole('region', { name: '项目体检' })
+    expect(within(doctor).getByText('工作文件包含未记录的外部修改')).toBeTruthy()
+    fireEvent.click(within(doctor).getByRole('button', { name: '记为新版本' }))
+    expect(b.captureExternal).toHaveBeenCalledWith(WORKSPACE_ID, 'doc-1')
   })
 
   it('shows loading, an empty hint, and a retryable failure', () => {
@@ -641,6 +657,17 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...editing.props} />)
     expect(screen.getByRole('alert').textContent).toBe('请先保存或取消正在编辑的段落。')
+  })
+
+  it('offers to record a Working DOCX changed outside PaperAI when a commit is refused for it', () => {
+    const changed = workbenchProps(workbenchState({
+      phase: 'ready', document: documentSnapshot(),
+      actionError: "internal: document 'd' Working DOCX differs from head 'c'; capture the external edit as its own version before continuing",
+    }))
+    render(<DocumentWorkbench {...changed.props} />)
+    expect(screen.getByRole('alert').textContent).toContain('文档文件在 PaperAI 之外被修改过')
+    fireEvent.click(screen.getByRole('button', { name: '记为新版本' }))
+    expect(changed.captureExternal).toHaveBeenCalledOnce()
   })
 
   it('lists versions as a timeline in the panel column and compares the picked one on the page', () => {

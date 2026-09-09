@@ -1332,6 +1332,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a fresh integrity report after recovery.',
       },
       {
+        signature: '@Remote(\'captureExternal\') async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>',
+        description: 'Record a Working DOCX changed outside PaperAI as a version of its own, so block edits can continue from it.',
+        parameters: [{ name: 'request', description: 'owning Workspace and the document.' }, { name: 'signal', description: 'optional cancellation before publication.' }],
+        returns: 'a fresh integrity report after the capture.',
+        throws: ['when the Workspace is unknown, the document is not the project\'s, or nothing external is pending.'],
+      },
+      {
         signature: '@Remote(\'setProjectTemplate\') async setProjectTemplate(request: PaperAISetProjectTemplateRequest): Promise<PaperAIProjectOverview>',
         description: 'Record the template set the project writes against, or the explicit choice to write without one.',
         parameters: [{ name: 'request', description: 'Workspace and template set id, or `null` for none.' }],
@@ -1467,6 +1474,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Restore a reachable snapshot and record the restoration as a new commit.',
         parameters: [{ name: 'request', description: 'current head, historical target, provenance, and message.' }],
         returns: 'the new revert commit; the historical target remains unchanged.',
+      },
+      {
+        signature: 'captureExternal(request: CaptureExternalRequest): Promise<DocumentCommit>',
+        description: 'Record the Working DOCX as it stands when it no longer matches its head: an edit made outside PaperAI becomes a version of its own so writing can go on from it. The bytes stay as they are; a snapshot and a commit are added.',
+        parameters: [{ name: 'request', description: 'document, provenance, and optional message.' }],
+        returns: 'the new head commit holding the current Working DOCX bytes.',
+        throws: ['PaperCommitError `INVALID_REQUEST` when the Working DOCX already matches its head.'],
       },
       {
         signature: 'getCommit(commitId: DocumentCommitIdType): DocumentCommit | undefined',
@@ -3945,6 +3959,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CapabilityHealth {\n    status: \'ready\' | \'degraded\' | \'unavailable\';\n    version?: string;\n    detail?: string;\n}',
   },
   {
+    name: 'CaptureExternalRequest',
+    declaration: 'export interface CaptureExternalRequest {\n    readonly documentId: DocumentId;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly message?: string;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
     name: 'ChangeConflict',
     declaration: 'export interface ChangeConflict {\n    id: ChangeConflictId;\n    documentId: DocumentId;\n    nodeId: DocumentNodeId;\n    baseCommitId: DocumentCommitId;\n    headCommitId: DocumentCommitId;\n    baseText: string;\n    currentText: string;\n    incomingText: string;\n    reason: string;\n}',
   },
@@ -4863,6 +4881,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PaperAIApplyTemplateRequest',
     declaration: 'export interface PaperAIApplyTemplateRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly documentType: PaperAIDocumentType;\n}',
+  },
+  {
+    name: 'PaperAICaptureExternalRequest',
+    declaration: 'export interface PaperAICaptureExternalRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly documentId: PaperAIDocumentId;\n}',
   },
   {
     name: 'PaperAICommitDocumentRequest',
