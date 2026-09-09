@@ -81,6 +81,8 @@ export interface PaperAIStartPageInjected extends PaperAILibraryInjected {
   }
   /** Load an unread project or retry its failed read. */
   ensureProject: (workspaceId: WorkspaceId) => Promise<void>
+  /** Open one tracked document of the project in the details view. */
+  openDocument: PaperAIWorkspaceContentInjected['openDocument']
   /** Record the project's template set, or the choice of none. */
   setProjectTemplate: (workspaceId: WorkspaceId, packId: string | null) => Promise<PaperAIActionResult>
   /** Connect the Workspace and start one document of a type from the project template. */

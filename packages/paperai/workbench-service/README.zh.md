@@ -10,7 +10,7 @@ PaperAI 工作台的 Host Remote，作为产品层接入固定版本的 DeepSeek
 
 `listTemplateLibrary()` 列出用户可选的全部模板：先是内置模板，然后是自定义模板——至少含有一份格式的按创建顺序排列，其后是仍为空的。`createTemplateSet()`、`deleteTemplateSet()`、`addTemplateFormat()` 与 `removeTemplateFormat()` 通过 `ctx.paperTemplates` 维护自定义模板并返回刷新后的模板库；一套自定义模板对每种文档类型最多保留一份格式，因此为同一类型再添加格式会替换原来的那份。`setProjectTemplate()` 通过 `ctx.paperProjects.setTemplateChoice()` 记录项目的选择——指向现有模板的 `packId`，或以 `null` 表示不用模板——并返回刷新后的概览。删除一套自定义模板后，选用它的项目在下一次概览中报告模板缺失，而已经从中安装的格式继续有效。
 
-Working DOCX 是唯一正文权威。预览 HTML 只用于显示，任何修改接口都不接受整份 HTML。编辑请求同时携带已观察到的文档 revision 与 head commit；成功后立即返回带人工来源的可恢复版本。
+Working DOCX 是唯一正文权威。预览 HTML 只用于显示，任何修改接口都不接受整份 HTML。编辑请求同时携带已观察到的文档 revision 与 head commit；成功后立即返回带人工来源的可恢复版本。段落提交在预览渲染之前就返回：浏览器先把已提交的文字写进当前预览，再在后台取回正式渲染的预览。
 
 `importDocument()` 把浏览器选择的一份 `.doc` 或 `.docx` 导入为自由写作的文档：不绑定格式，文档类型保持为 `other`，直到用户或 Agent 设置为止。文档导入与根版本创建构成一个工作台操作。如果根提交被拒绝或取消，Host 会等待不可取消的文档回滚完成后再拒绝请求；原始上传文件或模板源保持不变。根提交是提交点：一旦落盘，即使预览无法渲染或调用方在此期间取消，操作也会返回已创建的文档与提交——投影不再使用调用方的取消信号，预览失败会变成空预览并记录原因，重试也不会产生第二份文档。
 

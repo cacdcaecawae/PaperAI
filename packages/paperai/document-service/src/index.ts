@@ -224,7 +224,7 @@ export class PaperDocumentService extends Service {
         project.rootPath, staged, stem, sourceSha256,
         this.listDocuments(project.id).map(document => document.name), signal,
       )
-      await cleanupStagedDocument(staged)
+      await this.discardStaged(staged)
       staged = undefined
       const document: DocumentRecord = {
         id,
@@ -249,8 +249,14 @@ export class PaperDocumentService extends Service {
       }
       throw error
     } finally {
-      if (staged !== undefined) await cleanupStagedDocument(staged)
+      if (staged !== undefined) await this.discardStaged(staged)
     }
+  }
+
+  /** The engine may still hold the staged Working DOCX open; it lets go before the staging directory is removed. */
+  private async discardStaged(staged: StagedDocumentFiles): Promise<void> {
+    await this.ctx.documentEngine.release(staged.workingPath)
+    await cleanupStagedDocument(staged)
   }
 
   /**

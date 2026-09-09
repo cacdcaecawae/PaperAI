@@ -219,6 +219,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       ...libraryInjected,
       hooks: { library: controller.libraryStore(), projects: controller.projectDirectoryStore() },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
+      openDocument: workspaceInjected.openDocument,
       setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
       createFromTemplate: (workspaceId, input) => startDocument(
         workspaceId,

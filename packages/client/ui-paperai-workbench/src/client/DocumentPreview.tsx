@@ -7,9 +7,11 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary } from './types.ts'
-import type { PaperAIWorkbenchKey } from './locales.ts'
+import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import css from './DocumentWorkbench.module.css'
+import { blocksOf, normalize } from './preview-html.ts'
 import type { WordExcerpt } from './selection-context.ts'
 
 /** Props of the in-place block editor and the preview around it. */
@@ -22,23 +24,33 @@ export interface DocumentPreviewProps {
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly title: string
   readonly editing: PaperAIBlockEdit | null
+  /** The HTML carries a version's marked changes; blocks stay read-only and a navigator walks the marks. */
+  readonly comparing?: boolean
   readonly saving: boolean
   /** A block was clicked; `null` reports one that matches no editable node. */
   readonly onSelectBlock: (nodeId: PaperAIDocumentNodeId | null) => void
   readonly onDraft: (value: string) => void
   readonly onSave: () => void
   readonly onCancel: () => void
-  readonly t: (key: PaperAIWorkbenchKey) => string
+  readonly t: PaperAIDocumentWorkbenchProps['t']
 }
 
-const BLOCK_TAGS = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH']
 const DROPPED_ELEMENTS = 'script, iframe, object, embed, link, meta, base, form, input, button, textarea, select, noscript'
 const URL_ATTRIBUTES = new Set(['href', 'src', 'xlink:href', 'action', 'formaction'])
 
 /** Styles the shadow tree needs beyond the document's own: block affordances and the editor. */
 const PREVIEW_STYLE = `
 :host { display: block; }
-.paperai-doc { padding: 24px 32px 48px; }
+/* The Host renders the document as pages that paint their own white; the ink stays black in both color schemes
+   (the Host sheet says so on body, which never reaches a shadow tree). The pages sit centered on the view's base tone with a hairline edge. */
+.paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); }
+.paperai-doc .page { outline: 1px solid var(--dsw-alias-border-l2); }
+/* Compare mode: a changed block is tinted with a marker at its left edge; deleted words are struck, inserted words underlaid. */
+[data-paperai-change] { position: relative; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding-left: 12px; padding-right: 12px; background: var(--dsw-alias-state-business-tertiary); }
+[data-paperai-change]::before { content: ''; position: absolute; top: 6px; bottom: 6px; left: -10px; width: 3px; border-radius: 2px; background: var(--dsw-alias-state-business-primary); }
+[data-paperai-change][data-paperai-current] { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+[data-paperai-change] del { border-radius: 3px; padding: 0 2px; background: var(--dsw-alias-state-error-tertiary, var(--dsw-alias-interactive-bg-hover-danger)); color: var(--dsw-alias-state-error-primary); text-decoration: line-through; }
+[data-paperai-change] ins { border-radius: 3px; padding: 0 2px; background: var(--dsw-alias-state-success-tertiary, var(--dsw-alias-interactive-bg-hover)); color: var(--dsw-alias-state-success-primary); text-decoration: none; }
 [data-paperai-block] { cursor: text; border-radius: 3px; transition: box-shadow 120ms ease; }
 [data-paperai-block]:hover { box-shadow: 0 0 0 2px var(--dsw-alias-state-business-tertiary); }
 [data-paperai-block][data-paperai-editing] { display: none; }
@@ -53,10 +65,6 @@ const PREVIEW_STYLE = `
 .paperai-block-editor button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { [data-paperai-block] { transition: none; } }
 `
-
-function normalize(text: string): string {
-  return text.replace(/\s+/gu, ' ').trim()
-}
 
 /** Drop active content and event handlers from the Host preview before it enters the page. */
 function sanitize(html: string): { readonly styles: string; readonly body: Node[] } {
@@ -74,12 +82,6 @@ function sanitize(html: string): { readonly styles: string; readonly body: Node[
   const styles = [...parsed.querySelectorAll('style')].map(style => style.textContent).join('\n')
   for (const style of parsed.querySelectorAll('style')) style.remove()
   return { styles, body: [...parsed.body.childNodes].map(node => document.importNode(node, true)) }
-}
-
-/** Every text block of the rendered document in reading order; cells hosting paragraphs defer to them. */
-function blocksOf(container: HTMLElement): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>(BLOCK_TAGS.join(','))]
-    .filter(element => !((element.tagName === 'TD' || element.tagName === 'TH') && element.querySelector('p') !== null))
 }
 
 /**
@@ -146,14 +148,17 @@ function BlockEditor({ editing, saving, onDraft, onSave, onCancel, t }: Pick<
 /** Render the preview with block-level editing. */
 export function DocumentPreview({
   html, nodes, title, editing, saving, onSelectBlock, onDraft, onSave, onCancel, t,
-  active = true, scrollTop = 0, onScroll, onQuote,
+  active = true, scrollTop = 0, onScroll, onQuote, comparing = false,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
   const [editorHost, setEditorHost] = useState<HTMLElement | null>(null)
   const select = useRef(onSelectBlock)
   select.current = onSelectBlock
+  const compare = useRef(false)
+  compare.current = comparing
   const [excerpt, setExcerpt] = useState<WordExcerpt | null>(null)
+  const [changes, setChanges] = useState<{ readonly count: number; readonly index: number }>({ count: 0, index: 0 })
 
   // Rebuild the shadow tree whenever the Host sends new HTML or nodes.
   useLayoutEffect(() => {
@@ -172,7 +177,21 @@ export function DocumentPreview({
     shadow.replaceChildren(style, container)
     setEditorHost(null)
     setExcerpt(null)
+    setChanges({ count: container.querySelectorAll('[data-paperai-change]').length, index: 0 })
   }, [html, nodes])
+
+  // The change navigator walks the marked blocks; the current one is outlined and scrolled into view.
+  const goToChange = (step: number): void => {
+    const marked = [...host.current?.shadowRoot?.querySelectorAll<HTMLElement>('[data-paperai-change]') ?? []]
+    if (marked.length === 0) return
+    const index = (changes.index + step + marked.length) % marked.length
+    marked.forEach((block, position) => {
+      if (position === index) block.dataset.paperaiCurrent = ''
+      else delete block.dataset.paperaiCurrent
+    })
+    marked[index]?.scrollIntoView({ block: 'center' })
+    setChanges({ count: marked.length, index })
+  }
 
   useLayoutEffect(() => {
     if (active && host.current !== null) host.current.scrollTop = scrollTop
@@ -199,7 +218,7 @@ export function DocumentPreview({
       return false
     }
     const onClick = (event: Event): void => {
-      if (captureSelection()) return
+      if (captureSelection() || compare.current) return
       const target = event.composedPath().find((node): node is HTMLElement => (
         node instanceof HTMLElement && node.dataset.paperaiBlock !== undefined
       ))
@@ -253,6 +272,17 @@ export function DocumentPreview({
       )}
       <div ref={host} className={css.preview} role="document" aria-label={title}
         onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop) }} />
+      {active && comparing && changes.count > 0 && (
+        <div className={css.changeNav} role="group" aria-label={t('versions.changes')}>
+          <span>{t('versions.changeNav', { index: changes.index + 1, count: changes.count })}</span>
+          <button type="button" aria-label={t('versions.prev')} onClick={() => { goToChange(-1) }}>
+            <IconChevronDownOutline14 className={css.flipped ?? ''} />
+          </button>
+          <button type="button" aria-label={t('versions.next')} onClick={() => { goToChange(1) }}>
+            <IconChevronDownOutline14 />
+          </button>
+        </div>
+      )}
       {active && editorHost === null && editing?.conflicted === true && (
         <BlockEditor editing={editing} saving={saving} onDraft={onDraft} onSave={onSave} onCancel={onCancel} t={t} />
       )}

@@ -773,6 +773,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'structural success and the provider\'s complete validation evidence.',
         throws: ['when cancelled or the provider cannot produce structured validation evidence.'],
       },
+      {
+        signature: 'release(_filePath: string): Promise<void>',
+        description: 'Release state the provider retains for one file (a resident process, a cache) so the next operation observes the bytes on disk. Callers replace or delete the file only after this resolves. Providers that retain nothing keep this no-op.',
+        parameters: [{ name: '_filePath', description: 'canonical DOCX path about to be replaced or removed.' }],
+      },
     ],
   },
   {

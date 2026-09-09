@@ -89,6 +89,7 @@ class FakeDocumentEngine {
   nodes: EngineTextNode[] = []
   previews: string[] = []
   readPaths: string[] = []
+  released: string[] = []
   readFailure: Error | undefined
 
   health(): Promise<CapabilityHealth> {
@@ -116,6 +117,11 @@ class FakeDocumentEngine {
 
   validate(): Promise<EngineValidation> {
     return Promise.resolve({ success: true, details: {} })
+  }
+
+  release(filePath: string): Promise<void> {
+    this.released.push(filePath)
+    return Promise.resolve()
   }
 }
 
@@ -189,6 +195,7 @@ describe('PaperDocumentService', () => {
 
     const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'proposal' })
     imported(result)
+    expect(engine.released).toEqual(engine.readPaths)
     expect(result.document).toMatchObject({
       name: '硕士学位论文开题报告',
       workingPath: join(projectRoot, 'documents', 'working', '硕士学位论文开题报告.docx'),

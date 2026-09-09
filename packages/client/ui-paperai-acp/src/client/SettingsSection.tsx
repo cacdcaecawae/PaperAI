@@ -48,7 +48,6 @@ export function AcpSettingsSection({
   renderSlot,
 }: AcpSettingsProps) {
   const state = useAcp(value => value)
-  const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{
     id: string
@@ -68,481 +67,463 @@ export function AcpSettingsSection({
     void load()
   }, [load])
   const draft = state.draft
-  const entries = state.entries.filter(entry =>
-    `${entry.name} ${entry.id} ${entry.host}`.toLowerCase().includes(query.toLowerCase()),
-  )
-  const inUse = state.entries.filter(entry => entry.connected).length
   return (
-    <section className={css.page} aria-labelledby="paperai-acp-title">
-      <header className={css.heading}>
-        <div>
-          <p className={css.eyebrow}>PAPERAI / AGENTS</p>
-          <h2 id="paperai-acp-title">ACP 渠道</h2>
-          <p>集中管理 Agent、连接方式与会话偏好。</p>
+    <section className={css.page} aria-label="Agent">
+      <div className={css.group}>
+        <div className={css.groupLabel}>
+          <span>Agent</span>
+          <span className={css.actions}>
+            <button
+              type="button"
+              disabled={state.loading}
+              onClick={() => {
+                void load()
+              }}
+            >
+              刷新安装状态
+            </button>
+            <button
+              type="button"
+              disabled={state.busy.length > 0}
+              onClick={() => {
+                void probe()
+              }}
+            >
+              一键检测
+            </button>
+          </span>
         </div>
-      </header>
-      <div className={css.summary}>
-        <label>
-          默认 Agent
-          <select
-            value={state.defaultProvider}
-            disabled={!state.writable}
-            onChange={(event) => {
-              void setDefault(event.target.value)
-            }}
-          >
-            {state.entries
-              .filter(entry => entry.enabled)
-              .map(entry => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-          </select>
-          <span>用于新建会话；当前会话保留自己的配置。</span>
-        </label>
-        <div>
-          <strong>{state.entries.filter(entry => entry.enabled).length}</strong>
-          <span>已启用</span>
-        </div>
-        <div>
-          <strong>{state.usageKnown ? inUse : '—'}</strong>
-          <span>正在使用</span>
-        </div>
-      </div>
-      <div className={css.toolbar}>
-        <input
-          aria-label="搜索 ACP 渠道"
-          placeholder="搜索渠道或主机…"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value)
-          }}
-        />
-        <button
-          type="button"
-          disabled={state.loading}
-          onClick={() => {
-            void load()
-          }}
-        >
-          刷新安装状态
-        </button>
-        <button
-          type="button"
-          disabled={state.busy.length > 0}
-          onClick={() => {
-            void probe()
-          }}
-        >
-          一键检测
-        </button>
-      </div>
-      {state.error !== null && (
-        <p role="alert" className={css.error}>
-          {state.error}
-        </p>
-      )}
-      <p className={css.note}>最近检测与会话使用独立显示。Codex 和 Claude 可在不同会话同时使用。</p>
-      <div className={css.directory}>
-        {entries.map((entry) => {
-          const diagnostic = entry.diagnostic
-          const nextCursor = state.management[entry.id]?.nextCursor
-          const busy = state.busy.includes(entry.id) || entry.busy !== null
-          const missing = entry.source !== 'remote' && entry.adapter === null
-          const status = busy && entry.busy !== 'connecting'
-            ? entry.busy === 'install'
-              ? '安装中'
-              : entry.busy === 'authenticate'
-                ? '认证中'
-                : entry.busy === 'probe'
-                  ? '检测中'
-                  : '处理中'
-            : missing
-              ? '未安装'
-              : diagnostic.status === 'ready'
-                ? '检测通过'
-                : diagnostic.status === 'error'
-                  ? '检测失败'
-                  : '待检测'
-          const usage = !state.usageKnown
-            ? '使用情况未知'
-            : entry.connected
-              ? '正在使用'
-              : entry.startup !== null
-                ? '连接中'
-                : '未使用'
-          return (
-            <article className={css.entry} key={entry.id}>
-              <div className={css.row}>
-                <span className={css.mark} aria-hidden="true">
-                  {renderSlot('paperai.acp.channel.mark', {
-                    presetId: entry.id,
-                    size: 22,
-                  }, { entryKey: entry.id })}
-                </span>
-                <button
-                  type="button"
-                  className={css.identity}
-                  aria-expanded={expanded === entry.id}
-                  onClick={() => {
-                    setExpanded(expanded === entry.id ? null : entry.id)
-                  }}
-                >
-                  <span>
-                    <strong>{entry.name}</strong>
-                    {state.defaultProvider === entry.id && <span className={css.badge}>默认</span>}
-                    {!entry.enabled && <span className={css.badge}>未启用</span>}
+        {state.error !== null && (
+          <p role="alert" className={css.error}>
+            {state.error}
+          </p>
+        )}
+        <div className={css.card}>
+          {state.entries.map((entry) => {
+            const diagnostic = entry.diagnostic
+            const nextCursor = state.management[entry.id]?.nextCursor
+            const busy = state.busy.includes(entry.id) || entry.busy !== null
+            const missing = entry.source !== 'remote' && entry.adapter === null
+            const status = busy && entry.busy !== 'connecting'
+              ? entry.busy === 'install'
+                ? '安装中'
+                : entry.busy === 'authenticate'
+                  ? '认证中'
+                  : entry.busy === 'probe'
+                    ? '检测中'
+                    : '处理中'
+              : missing
+                ? '未安装'
+                : diagnostic.status === 'ready'
+                  ? '检测通过'
+                  : diagnostic.status === 'error'
+                    ? '检测失败'
+                    : '待检测'
+            const usage = !state.usageKnown
+              ? '使用情况未知'
+              : entry.connected
+                ? '正在使用'
+                : entry.startup !== null
+                  ? '连接中'
+                  : '未使用'
+            return (
+              <article key={entry.id}>
+                <div className={css.row}>
+                  <span className={css.mark} aria-hidden="true">
+                    {renderSlot('paperai.acp.channel.mark', {
+                      presetId: entry.id,
+                      size: 20,
+                    }, { entryKey: entry.id })}
                   </span>
-                  <small>
-                    {entry.host} · {entry.command} {entry.args.join(' ')}
-                  </small>
-                </button>
-                <div className={css.channelState}>
-                  <span className={css.status} data-ready={status === '检测通过'} data-error={status === '检测失败'}>
-                    {status}
-                  </span>
-                  <span className={css.status} data-ready={state.usageKnown && entry.connected}>
-                    {usage}
-                  </span>
-                </div>
-                <div className={css.actions}>
-                  {busy ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void cancel(entry.id)
-                      }}
-                    >
-                      取消
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={missing}
-                      onClick={() => {
-                        void probe(entry.id)
-                      }}
-                    >
-                      检测
-                    </button>
-                  )}
                   <button
                     type="button"
-                    disabled={!state.writable}
+                    className={css.identity}
+                    aria-expanded={expanded === entry.id}
                     onClick={() => {
-                      edit(entry.id)
+                      setExpanded(expanded === entry.id ? null : entry.id)
                     }}
                   >
-                    配置
+                    <span>
+                      <strong>{entry.name}</strong>
+                      {state.defaultProvider === entry.id && <span className={css.badge}>默认</span>}
+                      {!entry.enabled && <span className={css.badge}>未启用</span>}
+                    </span>
+                    <small>
+                      {entry.host} · {entry.command} {entry.args.join(' ')}
+                    </small>
                   </button>
-                </div>
-              </div>
-              {expanded === entry.id && (
-                <div className={css.details}>
-                  <dl>
-                    <dt>运行主机</dt>
-                    <dd>{entry.host}</dd>
-                    <dt>CLI</dt>
-                    <dd>{entry.cli ?? (entry.source === 'remote' ? '远程路径未报告' : '未在此主机发现')}</dd>
-                    <dt>检测 / 操作</dt>
-                    <dd>
+                  <div className={css.channelState}>
+                    <span className={css.status} data-ready={status === '检测通过'} data-error={status === '检测失败'}>
                       {status}
-                      {status === '检测通过' && (
-                        <>
-                          {' · '}
-                          {diagnostic.stage === 'prompt' ? '模型请求成功' : diagnostic.stage === 'session' ? '会话已就绪' : '握手通过'}
-                        </>
-                      )}
-                    </dd>
-                    <dt>会话使用</dt>
-                    <dd>正在使用表示有会话已连接此渠道；不同会话可以同时使用不同渠道。</dd>
-                    {entry.startup !== null && (
-                      <>
-                        <dt>连接阶段</dt>
-                        <dd>
-                          {(
-                            {
-                              spawn: '启动进程',
-                              initialize: 'ACP 握手',
-                              load: '恢复会话',
-                              new: '创建会话',
-                              permissions: '同步权限',
-                            } as Record<string, string>
-                          )[entry.startup.stage] ?? entry.startup.stage}{' '}
-                          · {entry.startup.elapsedMs} ms
-                        </dd>
-                      </>
-                    )}
-                    <dt>ACP 适配器</dt>
-                    <dd>{entry.adapter ?? '未发现'}</dd>
-                    <dt>安装来源</dt>
-                    <dd>
-                      {entry.source === 'remote'
-                        ? 'SSH 远程主机'
-                        : entry.source === 'bundled'
-                          ? '随 PaperAI 发布'
-                          : entry.source === 'managed'
-                            ? 'PaperAI 管理'
-                            : '用户已有 / 自定义命令'}
-                    </dd>
-                    <dt>版本</dt>
-                    <dd>
-                      适配器 {diagnostic.adapterVersion ?? '—'} · Agent {diagnostic.agentVersion ?? '—'}
-                    </dd>
-                    <dt>最近检测</dt>
-                    <dd>
-                      {diagnostic.checkedAt === null ? '尚未检测' : new Date(diagnostic.checkedAt).toLocaleString()}
-                      {diagnostic.elapsedMs === null ? '' : ` · ${diagnostic.elapsedMs} ms`}
-                    </dd>
-                    <dt>登录</dt>
-                    <dd>
-                      {entry.login ?? '按渠道文档配置环境变量或登录'}
-                      {entry.documentation !== null && (
-                        <>
-                          {' '}
-                          ·{' '}
-                          <a href={entry.documentation} target="_blank" rel="noreferrer">
-                            渠道文档
-                          </a>
-                        </>
-                      )}
-                    </dd>
-                  </dl>
-                  <p className={css.note}>握手检测不发送模型请求。登录状态、模型访问权限与余额以实际对话为准。</p>
-                  {diagnostic.error !== null && (
-                    <p role="alert" className={css.error}>
-                      {diagnostic.error === 'authentication'
-                        ? '需要登录或检查凭据'
-                        : diagnostic.error === 'timeout'
-                          ? '检测超时，可重试或检查命令'
-                          : diagnostic.error === 'unavailable'
-                            ? '可执行文件不可用'
-                            : 'ACP 协议初始化失败'}
-                    </p>
-                  )}
-                  {diagnostic.models.length > 0 && (
-                    <p>最近会话的模型：{diagnostic.models.map(model => model.name).join('、')}</p>
-                  )}
-                  <div className={css.actions}>
-                    {entry.installable && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setConfirm({ id: entry.id, kind: 'install' })
-                        }}
-                      >
-                        {entry.source === 'managed' ? '更新托管安装' : '安装到 PaperAI'}
-                      </button>
-                    )}
-                    {entry.source === 'managed' && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setConfirm({ id: entry.id, kind: 'uninstall' })
-                        }}
-                      >
-                        卸载托管安装
-                      </button>
-                    )}
-                    {diagnostic.authMethods
-                      ?.filter(method => method.type === 'agent')
-                      .map(method => (
-                        <button
-                          type="button"
-                          key={method.id}
-                          disabled={busy}
-                          title={method.description ?? undefined}
-                          onClick={() => {
-                            void manage(entry.id, { kind: 'authenticate', methodId: method.id })
-                          }}
-                        >
-                          {method.name}
-                        </button>
-                      ))}
-                    {diagnostic.capabilities?.logout && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setConfirm({ id: entry.id, kind: 'logout' })
-                        }}
-                      >
-                        退出渠道登录
-                      </button>
-                    )}
-                    {diagnostic.capabilities?.providers && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          void manage(entry.id, { kind: 'providers' })
-                        }}
-                      >
-                        模型服务商
-                      </button>
-                    )}
+                    </span>
+                    <span className={css.status} data-ready={state.usageKnown && entry.connected}>
+                      {usage}
+                    </span>
                   </div>
-                  {entry.output !== null && (
-                    <details open={busy}>
-                      <summary>操作输出</summary>
-                      <pre>{entry.output}</pre>
-                    </details>
-                  )}
-                  {diagnostic.capabilities?.list && (
-                    <details>
-                      <summary>渠道中的历史会话</summary>
-                      <div className={css.toolbar}>
-                        <input
-                          aria-label={`${entry.name} 历史工作目录`}
-                          value={historyCwd}
-                          onChange={(event) => {
-                            setHistoryCwd(event.target.value)
-                          }}
-                          placeholder="全部目录，或输入此主机上的绝对路径"
-                        />
+                  <div className={css.actions}>
+                    {busy ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void cancel(entry.id)
+                        }}
+                      >
+                        取消
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={missing}
+                        onClick={() => {
+                          void probe(entry.id)
+                        }}
+                      >
+                        检测
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={!state.writable}
+                      onClick={() => {
+                        edit(entry.id)
+                      }}
+                    >
+                      配置
+                    </button>
+                  </div>
+                </div>
+                {expanded === entry.id && (
+                  <div className={css.details}>
+                    <dl>
+                      <dt>运行主机</dt>
+                      <dd>{entry.host}</dd>
+                      <dt>CLI</dt>
+                      <dd>{entry.cli ?? (entry.source === 'remote' ? '远程路径未报告' : '未在此主机发现')}</dd>
+                      <dt>检测 / 操作</dt>
+                      <dd>
+                        {status}
+                        {status === '检测通过' && (
+                          <>
+                            {' · '}
+                            {diagnostic.stage === 'prompt' ? '模型请求成功' : diagnostic.stage === 'session' ? '会话已就绪' : '握手通过'}
+                          </>
+                        )}
+                      </dd>
+                      <dt>会话使用</dt>
+                      <dd>正在使用表示有会话已连接此渠道；不同会话可以同时使用不同渠道。</dd>
+                      {entry.startup !== null && (
+                        <>
+                          <dt>连接阶段</dt>
+                          <dd>
+                            {(
+                              {
+                                spawn: '启动进程',
+                                initialize: 'ACP 握手',
+                                load: '恢复会话',
+                                new: '创建会话',
+                                permissions: '同步权限',
+                              } as Record<string, string>
+                            )[entry.startup.stage] ?? entry.startup.stage}{' '}
+                            · {entry.startup.elapsedMs} ms
+                          </dd>
+                        </>
+                      )}
+                      <dt>ACP 适配器</dt>
+                      <dd>{entry.adapter ?? '未发现'}</dd>
+                      <dt>安装来源</dt>
+                      <dd>
+                        {entry.source === 'remote'
+                          ? 'SSH 远程主机'
+                          : entry.source === 'bundled'
+                            ? '随 PaperAI 发布'
+                            : entry.source === 'managed'
+                              ? 'PaperAI 管理'
+                              : '用户已有 / 自定义命令'}
+                      </dd>
+                      <dt>版本</dt>
+                      <dd>
+                        适配器 {diagnostic.adapterVersion ?? '—'} · Agent {diagnostic.agentVersion ?? '—'}
+                      </dd>
+                      <dt>最近检测</dt>
+                      <dd>
+                        {diagnostic.checkedAt === null ? '尚未检测' : new Date(diagnostic.checkedAt).toLocaleString()}
+                        {diagnostic.elapsedMs === null ? '' : ` · ${diagnostic.elapsedMs} ms`}
+                      </dd>
+                      <dt>登录</dt>
+                      <dd>
+                        {entry.login ?? '按渠道文档配置环境变量或登录'}
+                        {entry.documentation !== null && (
+                          <>
+                            {' '}
+                            ·{' '}
+                            <a href={entry.documentation} target="_blank" rel="noreferrer">
+                              渠道文档
+                            </a>
+                          </>
+                        )}
+                      </dd>
+                    </dl>
+                    <p className={css.note}>握手检测不发送模型请求。登录状态、模型访问权限与余额以实际对话为准。</p>
+                    {diagnostic.error !== null && (
+                      <p role="alert" className={css.error}>
+                        {diagnostic.error === 'authentication'
+                          ? '需要登录或检查凭据'
+                          : diagnostic.error === 'timeout'
+                            ? '检测超时，可重试或检查命令'
+                            : diagnostic.error === 'unavailable'
+                              ? '可执行文件不可用'
+                              : 'ACP 协议初始化失败'}
+                      </p>
+                    )}
+                    {diagnostic.models.length > 0 && (
+                      <p>最近会话的模型：{diagnostic.models.map(model => model.name).join('、')}</p>
+                    )}
+                    <div className={css.actions}>
+                      {entry.installable && (
                         <button
                           type="button"
                           disabled={busy}
                           onClick={() => {
-                            void manage(entry.id, {
-                              kind: 'history',
-                              ...(historyCwd.trim() === '' ? {} : { cwd: historyCwd.trim() }),
-                            })
+                            setConfirm({ id: entry.id, kind: 'install' })
                           }}
                         >
-                          读取历史
+                          {entry.source === 'managed' ? '更新托管安装' : '安装到 PaperAI'}
                         </button>
-                      </div>
-                      {state.management[entry.id]?.sessions?.map(session => (
-                        <div className={css.history} key={session.sessionId}>
-                          <div>
-                            <strong>{session.title ?? session.sessionId}</strong>
-                            <small>
-                              {session.cwd} · {session.updatedAt ?? '时间未报告'}
-                            </small>
-                          </div>
+                      )}
+                      {entry.source === 'managed' && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirm({ id: entry.id, kind: 'uninstall' })
+                          }}
+                        >
+                          卸载托管安装
+                        </button>
+                      )}
+                      {diagnostic.authMethods
+                        ?.filter(method => method.type === 'agent')
+                        .map(method => (
                           <button
                             type="button"
-                            disabled={busy || !entry.enabled || diagnostic.capabilities?.load !== true}
+                            key={method.id}
+                            disabled={busy}
+                            title={method.description ?? undefined}
                             onClick={() => {
-                              void importHistory(entry.id, session).then((opened) => {
-                                if (opened) close()
-                              })
+                              void manage(entry.id, { kind: 'authenticate', methodId: method.id })
                             }}
                           >
-                            导入并打开
+                            {method.name}
                           </button>
-                          {diagnostic.capabilities?.delete && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                setConfirm({ id: entry.id, kind: 'delete', sessionId: session.sessionId })
-                              }}
-                            >
-                              删除外部历史
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      {nextCursor != null && (
+                        ))}
+                      {diagnostic.capabilities?.logout && (
                         <button
                           type="button"
                           disabled={busy}
                           onClick={() => {
-                            void manage(entry.id, {
-                              kind: 'history',
-                              cursor: nextCursor,
-                              ...(historyCwd.trim() === '' ? {} : { cwd: historyCwd.trim() }),
-                            })
+                            setConfirm({ id: entry.id, kind: 'logout' })
                           }}
                         >
-                          加载更多
+                          退出渠道登录
                         </button>
                       )}
-                    </details>
-                  )}
-                  {state.management[entry.id]?.providers?.map(provider => (
-                    <div className={css.history} key={provider.id}>
-                      <div>
-                        <strong>
-                          {provider.id}
-                          {provider.required ? ' · 必需' : ''}
-                        </strong>
-                        <small>
-                          {provider.current === null
-                            ? '未启用'
-                            : `${provider.current.apiType} · ${provider.current.baseUrl}`}
-                        </small>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setRouting({
-                            id: entry.id,
-                            providerId: provider.id,
-                            apiType: provider.current?.apiType ?? provider.supported[0] ?? '',
-                            baseUrl: provider.current?.baseUrl ?? '',
-                            headers: '{}',
-                            error: null,
-                          })
-                        }}
-                      >
-                        设置
-                      </button>
-                      {!provider.required && provider.current !== null && (
+                      {diagnostic.capabilities?.providers && (
                         <button
                           type="button"
                           disabled={busy}
                           onClick={() => {
-                            void manage(entry.id, { kind: 'disable-provider', providerId: provider.id })
+                            void manage(entry.id, { kind: 'providers' })
                           }}
                         >
-                          禁用服务商
+                          模型服务商
                         </button>
                       )}
                     </div>
-                  ))}
-                  {diagnostic.capabilities !== undefined && (
-                    <details>
-                      <summary>协议能力</summary>
-                      <p>
-                        {Object.entries(diagnostic.capabilities)
-                          .filter(([, enabled]) => enabled)
-                          .map(
-                            ([name]) =>
-                              ({
-                                load: '加载历史',
-                                resume: '恢复会话',
-                                list: '历史列表',
-                                fork: '原生分叉',
-                                close: '关闭会话',
-                                delete: '删除历史',
-                                additionalDirectories: '额外目录',
-                                image: '图片输入',
-                                audio: '音频输入',
-                                embeddedContext: '嵌入资源',
-                                mcpHttp: 'MCP HTTP',
-                                mcpSse: 'MCP SSE',
-                                providers: '模型服务商配置',
-                                logout: '退出登录',
-                              })[name] ?? name,
-                          )
-                          .join(' · ') || '仅 ACP 基础会话能力'}
-                      </p>
-                    </details>
-                  )}
-                </div>
-              )}
-            </article>
-          )
-        })}
+                    {entry.output !== null && (
+                      <details open={busy}>
+                        <summary>操作输出</summary>
+                        <pre>{entry.output}</pre>
+                      </details>
+                    )}
+                    {diagnostic.capabilities?.list && (
+                      <details>
+                        <summary>渠道中的历史会话</summary>
+                        <div className={css.toolbar}>
+                          <input
+                            aria-label={`${entry.name} 历史工作目录`}
+                            value={historyCwd}
+                            onChange={(event) => {
+                              setHistoryCwd(event.target.value)
+                            }}
+                            placeholder="全部目录，或输入此主机上的绝对路径"
+                          />
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              void manage(entry.id, {
+                                kind: 'history',
+                                ...(historyCwd.trim() === '' ? {} : { cwd: historyCwd.trim() }),
+                              })
+                            }}
+                          >
+                            读取历史
+                          </button>
+                        </div>
+                        {state.management[entry.id]?.sessions?.map(session => (
+                          <div className={css.history} key={session.sessionId}>
+                            <div>
+                              <strong>{session.title ?? session.sessionId}</strong>
+                              <small>
+                                {session.cwd} · {session.updatedAt ?? '时间未报告'}
+                              </small>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={busy || !entry.enabled || diagnostic.capabilities?.load !== true}
+                              onClick={() => {
+                                void importHistory(entry.id, session).then((opened) => {
+                                  if (opened) close()
+                                })
+                              }}
+                            >
+                              导入并打开
+                            </button>
+                            {diagnostic.capabilities?.delete && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setConfirm({ id: entry.id, kind: 'delete', sessionId: session.sessionId })
+                                }}
+                              >
+                                删除外部历史
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        {nextCursor != null && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              void manage(entry.id, {
+                                kind: 'history',
+                                cursor: nextCursor,
+                                ...(historyCwd.trim() === '' ? {} : { cwd: historyCwd.trim() }),
+                              })
+                            }}
+                          >
+                            加载更多
+                          </button>
+                        )}
+                      </details>
+                    )}
+                    {state.management[entry.id]?.providers?.map(provider => (
+                      <div className={css.history} key={provider.id}>
+                        <div>
+                          <strong>
+                            {provider.id}
+                            {provider.required ? ' · 必需' : ''}
+                          </strong>
+                          <small>
+                            {provider.current === null
+                              ? '未启用'
+                              : `${provider.current.apiType} · ${provider.current.baseUrl}`}
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setRouting({
+                              id: entry.id,
+                              providerId: provider.id,
+                              apiType: provider.current?.apiType ?? provider.supported[0] ?? '',
+                              baseUrl: provider.current?.baseUrl ?? '',
+                              headers: '{}',
+                              error: null,
+                            })
+                          }}
+                        >
+                          设置
+                        </button>
+                        {!provider.required && provider.current !== null && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              void manage(entry.id, { kind: 'disable-provider', providerId: provider.id })
+                            }}
+                          >
+                            禁用服务商
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {diagnostic.capabilities !== undefined && (
+                      <details>
+                        <summary>协议能力</summary>
+                        <p>
+                          {Object.entries(diagnostic.capabilities)
+                            .filter(([, enabled]) => enabled)
+                            .map(
+                              ([name]) =>
+                                ({
+                                  load: '加载历史',
+                                  resume: '恢复会话',
+                                  list: '历史列表',
+                                  fork: '原生分叉',
+                                  close: '关闭会话',
+                                  delete: '删除历史',
+                                  additionalDirectories: '额外目录',
+                                  image: '图片输入',
+                                  audio: '音频输入',
+                                  embeddedContext: '嵌入资源',
+                                  mcpHttp: 'MCP HTTP',
+                                  mcpSse: 'MCP SSE',
+                                  providers: '模型服务商配置',
+                                  logout: '退出登录',
+                                })[name] ?? name,
+                            )
+                            .join(' · ') || '仅 ACP 基础会话能力'}
+                        </p>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </article>
+            )
+          })}
+          {state.entries.length === 0 && <p className={css.note}>{state.loading ? '正在读取渠道…' : '没有可用的 Agent'}</p>}
+        </div>
       </div>
-      {entries.length === 0 && <p className={css.note}>{state.loading ? '正在读取渠道…' : '没有匹配的渠道'}</p>}
+      <div className={css.group}>
+        <div className={css.groupLabel}>新会话默认</div>
+        <div className={css.card}>
+          <label className={css.row}>
+            <span className={css.fact}>
+              <span>默认 Agent</span>
+              <span>用于新建会话；进行中的会话保持它开始时的选择</span>
+            </span>
+            <select
+              value={state.defaultProvider}
+              disabled={!state.writable}
+              onChange={(event) => {
+                void setDefault(event.target.value)
+              }}
+            >
+              {state.entries
+                .filter(entry => entry.enabled)
+                .map(entry => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        </div>
+      </div>
       <Modal
         open={confirm !== null}
         onClose={() => {

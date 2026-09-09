@@ -1217,7 +1217,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const after = this.requireDocument(id)
     this.fenceGateMutation(after.document, baseRevision)
     const project = this.requireProject(after.document.projectId)
-    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal)
+    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal, 'skip')
     return { ...opened, createdCommitId: commit.id }
   }
 
@@ -1333,7 +1333,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     nodes: readonly DocumentNode[],
     sessionId: SessionId,
     signal?: AbortSignal,
-    preview: 'required' | 'best-effort' = 'required',
+    preview: 'required' | 'best-effort' | 'skip' = 'required',
   ): Promise<PaperAIDocumentOpenResult> {
     const previewHtml = await this.previewFor(document.id, signal, preview)
     const history = this.ctx.paperCommits.listHistory(document.id)
@@ -1364,13 +1364,17 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    * Render the read-only preview. After a commit point the projection must
    * still describe the document the caller now owns, so `best-effort` turns a
    * preview failure into an empty preview (the browser shows its unavailable
-   * notice) and logs the cause instead of failing the whole result.
+   * notice) and logs the cause instead of failing the whole result. `skip`
+   * answers a block commit without rendering: the browser keeps the preview it
+   * shows, writes the committed text into it, and opens the document again in
+   * the background for the rendered one.
    */
   private async previewFor(
     documentId: DocumentId,
     signal: AbortSignal | undefined,
-    preview: 'required' | 'best-effort',
+    preview: 'required' | 'best-effort' | 'skip',
   ): Promise<string> {
+    if (preview === 'skip') return ''
     if (preview === 'required') return await this.ctx.paperDocuments.previewHtml(documentId, signal)
     try {
       return await this.ctx.paperDocuments.previewHtml(documentId, signal)

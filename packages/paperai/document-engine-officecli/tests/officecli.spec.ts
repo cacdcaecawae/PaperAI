@@ -81,7 +81,7 @@ describe('OfficeCliDocumentEngine', () => {
     })
   })
 
-  it('parses nested Office paths and closes the resident document handle', async () => {
+  it('parses nested Office paths and leaves the resident document running', async () => {
     const { calls, engine } = fixture(spec => spec.argv.includes('text')
       ? { stdout: '[/document/body/p[1]] 第一段\n[/document/body/tbl[1]/tr[1]/tc[1]/p[1]] 单元格\nnoise' }
       : {})
@@ -89,10 +89,7 @@ describe('OfficeCliDocumentEngine', () => {
       { officePath: '/document/body/p[1]', text: '第一段', kind: 'paragraph' },
       { officePath: '/document/body/tbl[1]/tr[1]/tc[1]/p[1]', text: '单元格', kind: 'table' },
     ])
-    expect(calls.map(call => call.argv.slice(1, 3))).toEqual([
-      ['view', 'D:\\paper.docx'],
-      ['close', 'D:\\paper.docx'],
-    ])
+    expect(calls.map(call => call.argv.slice(1, 3))).toEqual([['view', 'D:\\paper.docx']])
   })
 
   it('ignores malformed text records and classifies non-paragraph nodes', async () => {
@@ -104,7 +101,7 @@ describe('OfficeCliDocumentEngine', () => {
     ])
   })
 
-  it('applies one ordered mutation batch, saves once, then closes', async () => {
+  it('applies one ordered mutation batch and saves once', async () => {
     const { calls, engine } = fixture(() => ({}))
     await engine.applyMutations('D:\\paper.docx', [
       { type: 'replace-text', officePath: '/document/body/p[1]', text: '新文本' },
@@ -116,7 +113,6 @@ describe('OfficeCliDocumentEngine', () => {
       ['add', 'D:\\paper.docx', '/body', '--type', 'paragraph', '--prop', 'text=新增', '--prop', 'style=Heading 1', '--after', '/document/body/p[1]', '--json'],
       ['remove', 'D:\\paper.docx', '/document/body/p[3]', '--json'],
       ['save', 'D:\\paper.docx', '--json'],
-      ['close', 'D:\\paper.docx', '--json'],
     ])
   })
 
@@ -169,6 +165,8 @@ describe('OfficeCliDocumentEngine', () => {
     expect(() => new OfficeCliDocumentEngine(new Context(), { timeoutMs: Number.NaN })).toThrow('timeoutMs must be a positive safe integer')
     expect(() => new OfficeCliDocumentEngine(new Context(), { cleanupTimeoutMs: 0 }))
       .toThrow('cleanupTimeoutMs must be a positive safe integer')
+    expect(() => new OfficeCliDocumentEngine(new Context(), { residentIdleMs: 0 }))
+      .toThrow('residentIdleMs must be a positive safe integer')
   })
 
   it('resolves every supported OfficeCLI manifest bin form', () => {
@@ -319,7 +317,7 @@ describe('OfficeCliDocumentEngine', () => {
     }
   })
 
-  it('closes inspection, mutation, and validation with a fresh signal after caller cancellation', async () => {
+  it('releases a cancelled document with a fresh bounded close signal', async () => {
     const operations = [
       (engine: OfficeCliDocumentEngine, signal: AbortSignal) =>
         engine.inspect('paper.docx', '/document/body/p[1]', 2, signal),
@@ -353,6 +351,7 @@ describe('OfficeCliDocumentEngine', () => {
       })
 
       await expect(operation(engine, controller.signal)).rejects.toThrow('cancelled')
+      await engine.release('paper.docx')
       expect(calls.at(-1)?.argv).toContain('close')
       expect(cleanupSignal).toBeDefined()
       expect(cleanupSignal).not.toBe(controller.signal)
@@ -388,6 +387,7 @@ describe('OfficeCliDocumentEngine', () => {
 
     await expect(engine.inspect('paper.docx', '/document', 1, controller.signal))
       .rejects.toThrow('cancelled')
+    await engine.release('paper.docx')
     expect(cleanupSignal?.aborted).toBe(true)
     expect(warning).toHaveBeenCalledWith(expect.stringContaining('timed out after 1 ms'))
   })
@@ -418,7 +418,35 @@ describe('OfficeCliDocumentEngine', () => {
     const closeFailure = fixture(spec => spec.argv.includes('close') ? { lossy: true } : { stdout: '<p />' })
     const warning = vi.spyOn(closeFailure.ctx.logger, 'warn')
     await expect(closeFailure.engine.previewHtml('paper.docx')).resolves.toBe('<p />')
+    await closeFailure.engine.release('paper.docx')
     expect(warning).toHaveBeenCalledWith(expect.stringContaining('could not close'))
+  })
+
+  it('closes an idle resident after residentIdleMs and never twice for one release', async () => {
+    vi.useFakeTimers()
+    try {
+      const { calls, engine } = fixture(() => ({ stdout: '<p />' }))
+      await engine.previewHtml('paper.docx')
+      expect(calls.map(call => call.argv[1])).toEqual(['view'])
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(calls.map(call => call.argv[1])).toEqual(['view', 'close'])
+      await engine.previewHtml('paper.docx')
+      await engine.release('paper.docx')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(calls.map(call => call.argv[1])).toEqual(['view', 'close', 'view', 'close'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('release without a resident issues no close', async () => {
+    const { calls, engine } = fixture(() => ({ stdout: '<p />' }))
+    await engine.release('paper.docx')
+    expect(calls).toEqual([])
+    await engine.previewHtml('paper.docx')
+    await engine.release('paper.docx')
+    await engine.release('paper.docx')
+    expect(calls.map(call => call.argv[1])).toEqual(['view', 'close'])
   })
 
   it('serializes overlapping operations and releases only the current lease tail', async () => {

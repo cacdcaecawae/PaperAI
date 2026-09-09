@@ -1,13 +1,14 @@
 /**
- * PaperAI occupants for the generic browser-brand slots, plus the product's
- * vocabulary overlay: what DSH calls a workspace is a project here. Colors
- * stay the shipped DSH theme; only the mark and the wordmark are PaperAI's.
+ * PaperAI occupants for the generic browser-brand slots, the product's
+ * vocabulary overlay (what DSH calls a workspace is a project here), and the
+ * ink-and-gold token layer stacked over the shipped DSH palette.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@paperai/ui-workbench/client'
 import type {} from '@paperai/ui-acp/client'
@@ -18,9 +19,13 @@ import {
   PaperAIBrandName,
   DshAgentMark,
 } from './PaperAIBrand.tsx'
+import { PAPERAI_THEME_SOURCE, PAPERAI_TOKENS } from './theme.ts'
 
-/** Required services: the UI slot registry and the locale registry the vocabulary overlay rides. */
-export const inject = ['slots', 'locale']
+/**
+ * Required services: the slot registry, the locale registry the vocabulary
+ * overlay rides, and the theme registry the token layer stacks on.
+ */
+export const inject = ['slots', 'locale', 'theme']
 
 /**
  * The project vocabulary: every shell string that names a workspace, restated
@@ -77,12 +82,14 @@ export const PROJECT_COPY = {
 } as const
 
 /**
- * Fill every shipped brand slot and overlay the project vocabulary.
+ * Fill every shipped brand slot, overlay the project vocabulary, and stack the
+ * ink-and-gold token layer over the active theme.
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.override('workspace', PROJECT_COPY.workspace), 'paperai-brand: project vocabulary')
   ctx.effect(() => ctx.locale.override('conversation', PROJECT_COPY.conversation), 'paperai-brand: hero vocabulary')
+  ctx.effect(() => ctx.theme.overrideTokens(PAPERAI_THEME_SOURCE, PAPERAI_TOKENS), 'paperai-brand: ink-and-gold token layer')
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', () =>
       ctx.slots.inject('conversation.hero.brand.mark', function* () {

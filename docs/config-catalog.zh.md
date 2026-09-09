@@ -3398,8 +3398,10 @@ export interface Config {
   outputMaxBytes?: number
   /** Positive TERM-to-KILL grace delegated to the subprocess Provider. */
   terminateGraceMs?: number
-  /** Positive independent deadline for closing a resident document after an operation. */
+  /** Positive independent deadline for one best-effort `close` of a resident document. */
   cleanupTimeoutMs?: number
+  /** Positive idle time after the last operation before a resident document is closed. */
+  residentIdleMs?: number
   /** PowerShell executable for Word COM conversion; false or an empty string disables legacy `.doc` import. */
   legacyDocPowerShellCommand?: string | false
   /** Positive deadline for one legacy `.doc` conversion. */

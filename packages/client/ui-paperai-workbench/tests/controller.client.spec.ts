@@ -1,7 +1,8 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
-import type { PaperAIDocumentCommitResult, PaperAITemplateLibrary, PaperAIWorkbenchRemote } from '../src/client/types.ts'
+import type { PaperAIDocumentCommitResult, PaperAIDocumentOpenResult, PaperAITemplateLibrary, PaperAIWorkbenchRemote } from '../src/client/types.ts'
 import {
   COMMIT_0, COMMIT_1, COMMIT_2, CUSTOM_PACK_ID, DIFF, DOCUMENT_ID, documentOpenResult, HIT_PACK_ID,
   NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE, OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, successfulRemote,
@@ -493,5 +494,36 @@ describe('PaperAIWorkbenchController documents', () => {
     await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
     expect(remote.commit).not.toHaveBeenCalled()
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'no external document update' })
+  })
+})
+
+describe('PaperAIWorkbenchController deferred previews', () => {
+  it('paints a commit into the current preview and swaps in the rendered one', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async request => ({
+      ok: true,
+      value: {
+        createdCommitId: COMMIT_2,
+        ...documentOpenResult(REVISION_2, {
+          previewHtml: '',
+          nodes: documentOpenResult().document.nodes.map(node => node.nodeId === request.mutations[0]?.nodeId
+            ? { ...node, text: request.mutations[0].nextText, label: request.mutations[0].nextText }
+            : node),
+        }),
+      },
+    }))
+    const { controller, store } = await openedController(remote)
+    let finish!: (value: RemoteResult<PaperAIDocumentOpenResult>) => void
+    remote.open = vi.fn<typeof remote.open>(() => new Promise((resolve) => { finish = resolve }))
+    controller.selectBlock(SESSION_ID, NODE_HEADING)
+    controller.updateDraft(SESSION_ID, 'Rewritten')
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    const patched = store.getSnapshot().document?.previewHtml ?? ''
+    expect(patched).toContain('<h1 data-path="/body/p[1]">Rewritten</h1>')
+    expect(patched).toContain('Research background')
+    expect(remote.open).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, resourceId: RESOURCE_ID })
+    const rendered = '<html><head></head><body><h1 data-path="/body/p[1]">Rewritten</h1></body></html>'
+    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: rendered }) })
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe(rendered) })
   })
 })

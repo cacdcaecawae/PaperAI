@@ -466,6 +466,7 @@ export class PaperCommitService extends Service {
       throw error
     } finally {
       try {
+        await this.dependencies.documentEngine.release(candidatePath)
         await removeCandidateFile(paths, candidatePath)
       } catch (cleanupError) {
         if (failed) {
@@ -797,6 +798,7 @@ export class PaperCommitService extends Service {
     await repository.putCommitPublication(structuredClone(publication))
     try {
       await this.ensurePublicationCommit(publication)
+      await this.dependencies.documentEngine.release(request.paths.workingPath)
       await replaceRegularFile(request.paths.workingPath, candidate.bytes, request.original.mode)
       await this.replaceIndex(currentNodes, nextNodes)
       await repository.updateDocument(request.document.id, (current) => {
@@ -891,6 +893,7 @@ export class PaperCommitService extends Service {
       try {
         if (working.sha256 !== original.sha256
           || (working.mode & 0o777) !== (publication.before.working.mode & 0o777)) {
+          await this.dependencies.documentEngine.release(paths.workingPath)
           await replaceRegularFile(paths.workingPath, original.bytes, publication.before.working.mode)
         }
       } catch (error) {

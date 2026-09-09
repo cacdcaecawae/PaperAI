@@ -83,7 +83,7 @@ export function apply(ctx: ClientContext): void {
         name: 'settings.section',
         id: 'paperai-acp',
         order: -20,
-        label: 'ACP 渠道',
+        label: 'Agent',
         children: { 'paperai.acp.channel.mark': { kind: 'keyed', scope: 'root' } },
         inject: () => injected,
       },

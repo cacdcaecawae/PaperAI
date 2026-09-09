@@ -135,6 +135,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   let scaffold: WebScaffold
   let browser: Browser
   let page: Page
+  /** The sidebar's row for one tracked document; the start page lists the same documents. */
+  const sidebarDocument = (fileName: string) => page.getByRole('region', { name: '文档' })
+    .getByRole('button', { name: `打开 ${fileName}`, exact: true })
   let tripwire: ReturnType<typeof watchConsole>
   let workspaceId: Parameters<WebScaffold['ctx']['paperaiWorkbench']['overview']>[0]['workspaceId']
   let resourceId: Awaited<ReturnType<WebScaffold['ctx']['paperaiWorkbench']['overview']>>['documents'][number]['id']
@@ -250,7 +253,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await page.getByRole('treeitem', { name: /Paper project/ }).click()
     await page.getByRole('treeitem', { name: '新会话', exact: true }).click()
-    const open = page.getByRole('button', { name: '打开 Browser conflict proposal.docx' })
+    const open = sidebarDocument('Browser conflict proposal.docx')
     await open.waitFor({ timeout: 15_000 })
     await open.click()
     await page.getByRole('document', { name: '文档预览' }).waitFor({ timeout: 30_000 })
@@ -320,8 +323,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   it('shows channel diagnostics separately from session usage', async () => {
     await page.getByRole('button', { name: '设置', exact: true }).click()
     const settings = page.getByRole('dialog', { name: '设置', exact: true })
-    await settings.getByRole('button', { name: 'ACP 渠道', exact: true }).click()
-    const directory = settings.getByRole('region', { name: 'ACP 渠道', exact: true })
+    await settings.getByRole('button', { name: 'Agent', exact: true }).click()
+    const directory = settings.getByRole('region', { name: 'Agent', exact: true })
     const codex = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Codex/ }) })
     const claude = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
     await codex.getByText('正在使用', { exact: true }).waitFor()
@@ -591,7 +594,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('keeps block drafts across external versions and prevents overwriting a changed block', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-conflict'))
-    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx' }).click()
+    await sidebarDocument('Browser conflict proposal.docx').click()
     await expect.poll(() => page.locator('[data-phase="active"]').count()).toBeGreaterThan(0)
     const preview = page.getByRole('document', { name: '文档预览' })
     await preview.locator('[data-paperai-block]', { hasText: 'Initial browser paragraph — normalized' }).first().click()
@@ -599,7 +602,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await editor.waitFor({ timeout: 10_000 })
     await editor.fill('浏览器中的本地草稿')
     await expect.poll(() => page.locator('[data-paperai-block-editor]').getByRole('button', { name: '保存', exact: true }).isEnabled()).toBe(true)
-    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx' }).click()
+    await sidebarDocument('Browser conflict proposal.docx').click()
     expect(await editor.inputValue()).toBe('浏览器中的本地草稿')
 
     const externalSessionId = SessionId('paperai-browser-external-writer')
@@ -685,10 +688,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await editor.fill('切换文档保留的草稿')
     await preview.evaluate((element) => { element.scrollTop = 120 })
     await expect.poll(() => preview.evaluate(element => element.scrollTop)).toBe(120)
-    await page.getByRole('button', { name: '打开 Second proposal.docx', exact: true }).click()
+    await sidebarDocument('Second proposal.docx').click()
     await preview.getByText('Initial browser paragraph', { exact: true }).waitFor({ timeout: 20_000 })
     expect(await original.evaluate(element => element.isConnected)).toBe(true)
-    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    await sidebarDocument('Browser conflict proposal.docx').click()
     await expect.poll(() => editor.inputValue()).toBe('切换文档保留的草稿')
     await expect.poll(() => preview.evaluate(element => element.scrollTop)).toBe(120)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'retained-draft.expected.md'),
@@ -704,7 +707,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('menuitem', { name: /^Claude/ }).click()
     await page.getByRole('button', { name: 'Claude', exact: true }).first().waitFor({ timeout: 20_000 })
     await expect.poll(() => page.getByRole('button', { name: 'Claude', exact: true }).first().getAttribute('aria-busy')).not.toBe('true')
-    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    await sidebarDocument('Browser conflict proposal.docx').click()
     const preview = page.getByRole('document', { name: '文档预览' })
     await preview.waitFor({ timeout: 15_000 })
     expect(await page.locator('[data-paperai-start="project"]').count()).toBe(0)
@@ -751,7 +754,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const path = join(scaffold.workspaceCwd, 'paper-project', projection.document.path)
     const bytes = await readFile(path)
     const head = projection.document.headCommitId
-    await rm(path)
+    // The document engine keeps the file resident for a moment after reading it; an outside delete waits that out.
+    await expect.poll(() => rm(path).then(() => true, (error: unknown) => (
+      typeof error === 'object' && error !== null && (error as { code?: string }).code === 'ENOENT'
+    )), { timeout: 15_000 }).toBe(true)
     await page.getByRole('button', { name: '项目体检', exact: true }).click()
     const report = page.getByRole('region', { name: '项目体检', exact: true })
     await report.getByText('工作文件丢失', { exact: true }).waitFor({ timeout: 20_000 })
@@ -773,7 +779,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('button', { name: '关闭文档', exact: true }).click()
     await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
     await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
-    await page.getByRole('button', { name: '打开 Browser conflict proposal.docx', exact: true }).click()
+    await sidebarDocument('Browser conflict proposal.docx').click()
     const preview = page.getByRole('document', { name: '文档预览', exact: true })
     await preview.locator('[data-paperai-block]').first().waitFor({ timeout: 20_000 })
     await page.getByRole('button', { name: '关闭文档', exact: true }).click()
@@ -789,7 +795,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     })
     try {
       const choosing = page.waitForEvent('filechooser')
-      await page.getByRole('button', { name: '导入 Word，自由写', exact: true }).click()
+      await page.getByRole('button', { name: '新建或导入文档' }).click()
+      await page.getByRole('menuitem', { name: '导入 Word，自由写', exact: true }).click()
       await (await choosing).setFiles({
         name: 'Review figures.docx',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -800,7 +807,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       const editor = page.getByRole('textbox', { name: '编辑段落', exact: true })
       await editor.fill('导入期间新写的草稿')
       release.resolve(undefined)
-      await page.getByRole('button', { name: '打开 Review figures.docx', exact: true }).waitFor({ timeout: 20_000 })
+      await sidebarDocument('Review figures.docx').waitFor({ timeout: 20_000 })
       expect(await editor.inputValue()).toBe('导入期间新写的草稿')
       await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'import-draft.expected.md'),
         await captureStableAria(page, '[data-paperai-block-editor]', scaffold.workspaceCwd), MODE)
@@ -813,7 +820,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('loads embedded figures and edits body text without retargeting a matching table cell', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-table-figure'))
-    await page.getByRole('button', { name: '打开 Review figures.docx', exact: true }).click()
+    await sidebarDocument('Review figures.docx').click()
     const preview = page.getByRole('document', { name: '文档预览', exact: true })
     const figure = preview.locator('img')
     await figure.waitFor({ timeout: 20_000 })
@@ -878,7 +885,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await scaffold.ctx.workspaceRegistry.create(projectRoot, 'ACP defaults')
     await page.getByRole('button', { name: '设置', exact: true }).click()
     const settings = page.getByRole('dialog', { name: '设置', exact: true })
-    await settings.getByRole('button', { name: 'ACP 渠道', exact: true }).click()
+    await settings.getByRole('button', { name: 'Agent', exact: true }).click()
     const claude = settings.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
     await claude.getByRole('button', { name: '配置', exact: true }).click()
     const editor = page.getByRole('dialog', { name: '配置 ACP 渠道', exact: true })

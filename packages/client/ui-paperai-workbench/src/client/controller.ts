@@ -5,6 +5,7 @@ import {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { resolvePreviewBudget } from '../config.ts'
+import { patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
@@ -527,7 +528,8 @@ export class PaperAIWorkbenchController {
       baseCommitId: document.headCommitId,
       mutations: [{ type: 'replace-text', nodeId: edit.nodeId, baseText: edit.baseText, nextText: edit.draft }],
     }, request.signal))
-    return this.settleCommit(entry, request, document, result)
+    const cell = document.nodes.find(node => node.nodeId === edit.nodeId)?.kind === 'table-cell'
+    return this.settleCommit(entry, request, document, result, [{ baseText: edit.baseText, nextText: edit.draft, cell }])
   }
 
   /**
@@ -1045,14 +1047,36 @@ export class PaperAIWorkbenchController {
     request: Request,
     document: PaperAIDocumentSnapshot,
     result: RemoteResult<PaperAIDocumentCommitResult>,
+    patches: readonly PreviewTextPatch[] = [],
   ): PaperAIActionResult {
     if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
     if (!result.ok) return this.fail(entry.store, remoteError(result.error))
     if (!commitMatches(result.value, document)) {
       return this.fail(entry.store, 'paperaiWorkbench returned an invalid commit projection')
     }
-    this.publishOpenResult(entry.store, result.value)
+    // The Host defers the preview after a commit: keep the one on screen with the
+    // committed text written in, and swap in the rendered preview when it arrives.
+    const committed = result.value.document
+    const deferred = committed.previewHtml === '' && document.previewHtml !== ''
+    this.publishOpenResult(entry.store, deferred
+      ? { ...result.value, document: { ...committed, previewHtml: patchPreviewHtml(document.previewHtml, patches) } }
+      : result.value)
+    if (deferred) void this.refreshPreview(entry, committed)
     return OK
+  }
+
+  /** Replace the patched preview with the Host's render; a newer revision keeps its own. */
+  private async refreshPreview(entry: RequestEntry<PaperAIWorkbenchStore>, committed: PaperAIDocumentSnapshot): Promise<void> {
+    const result = await callRemote(() => this.remote.open({
+      workspaceId: committed.workspaceId,
+      sessionId: committed.sessionId,
+      resourceId: committed.resourceId,
+    }))
+    if (!result.ok || this.disposed) return
+    entry.store.update((draft) => {
+      if (draft.document?.revision !== committed.revision) return
+      draft.document = { ...draft.document, previewHtml: result.value.document.previewHtml }
+    })
   }
 
   /** Settle a failed action on either store kind: clear the action, keep the reason for the view. */

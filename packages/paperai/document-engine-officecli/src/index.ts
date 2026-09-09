@@ -49,8 +49,10 @@ export interface Config {
   outputMaxBytes?: number
   /** Positive TERM-to-KILL grace delegated to the subprocess Provider. */
   terminateGraceMs?: number
-  /** Positive independent deadline for closing a resident document after an operation. */
+  /** Positive independent deadline for one best-effort `close` of a resident document. */
   cleanupTimeoutMs?: number
+  /** Positive idle time after the last operation before a resident document is closed. */
+  residentIdleMs?: number
   /** PowerShell executable for Word COM conversion; false or an empty string disables legacy `.doc` import. */
   legacyDocPowerShellCommand?: string | false
   /** Positive deadline for one legacy `.doc` conversion. */
@@ -67,6 +69,7 @@ interface ResolvedConfig {
   outputMaxBytes: number
   terminateGraceMs: number
   cleanupTimeoutMs: number
+  residentIdleMs: number
   legacyDocPowerShellCommand: string | false | undefined
   legacyDocTimeoutMs: number
   legacyDocOutputMaxBytes: number
@@ -77,6 +80,7 @@ const DEFAULT_TIMEOUT_MS = 120_000
 const DEFAULT_OUTPUT_MAX_BYTES = 32 * 1024 * 1024
 const DEFAULT_TERMINATE_GRACE_MS = 2_000
 const DEFAULT_CLEANUP_TIMEOUT_MS = 5_000
+const DEFAULT_RESIDENT_IDLE_MS = 2_000
 const DEFAULT_LEGACY_DOC_TIMEOUT_MS = 120_000
 const DEFAULT_LEGACY_DOC_OUTPUT_MAX_BYTES = 1024 * 1024
 const DEFAULT_LEGACY_DOC_TERMINATE_GRACE_MS = 5_000
@@ -117,6 +121,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
     terminateGraceMs: z.number().default(DEFAULT_TERMINATE_GRACE_MS),
     cleanupTimeoutMs: z.number().default(DEFAULT_CLEANUP_TIMEOUT_MS),
+    residentIdleMs: z.number().default(DEFAULT_RESIDENT_IDLE_MS),
     legacyDocPowerShellCommand: z.union([z.const(false), z.string()]),
     legacyDocTimeoutMs: z.number().default(DEFAULT_LEGACY_DOC_TIMEOUT_MS),
     legacyDocOutputMaxBytes: z.number().default(DEFAULT_LEGACY_DOC_OUTPUT_MAX_BYTES),
@@ -125,6 +130,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   private readonly config: ResolvedConfig
   private readonly leases = new Map<string, Promise<void>>()
+  private readonly idle = new Map<string, ReturnType<typeof setTimeout>>()
   private resolvedCommand?: Promise<{ command: string; prefix: string[] }>
 
   constructor(ctx: Context, config: Config) {
@@ -135,6 +141,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       outputMaxBytes: config.outputMaxBytes ?? DEFAULT_OUTPUT_MAX_BYTES,
       terminateGraceMs: config.terminateGraceMs ?? DEFAULT_TERMINATE_GRACE_MS,
       cleanupTimeoutMs: config.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS,
+      residentIdleMs: config.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS,
       legacyDocPowerShellCommand: config.legacyDocPowerShellCommand,
       legacyDocTimeoutMs: config.legacyDocTimeoutMs ?? DEFAULT_LEGACY_DOC_TIMEOUT_MS,
       legacyDocOutputMaxBytes: config.legacyDocOutputMaxBytes ?? DEFAULT_LEGACY_DOC_OUTPUT_MAX_BYTES,
@@ -144,10 +151,12 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     positiveSafeInteger(resolved.outputMaxBytes, 'outputMaxBytes')
     positiveSafeInteger(resolved.terminateGraceMs, 'terminateGraceMs')
     positiveSafeInteger(resolved.cleanupTimeoutMs, 'cleanupTimeoutMs')
+    positiveSafeInteger(resolved.residentIdleMs, 'residentIdleMs')
     positiveSafeInteger(resolved.legacyDocTimeoutMs, 'legacyDocTimeoutMs')
     positiveSafeInteger(resolved.legacyDocOutputMaxBytes, 'legacyDocOutputMaxBytes')
     positiveSafeInteger(resolved.legacyDocTerminateGraceMs, 'legacyDocTerminateGraceMs')
     this.config = resolved
+    ctx.effect(() => () => this.releaseAll(), 'document-engine-officecli: resident documents')
   }
 
   override async health(signal?: AbortSignal): Promise<CapabilityHealth> {
@@ -191,71 +200,49 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   override readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
     return this.withLease(filePath, async () => {
-      try {
-        const result = await this.run(['view', filePath, 'text', '--max-lines', '100000'], signal)
-        return result.stdout.split(/\r?\n/u).flatMap((line): EngineTextNode[] => {
-          const parsed = this.parseTextLine(line)
-          if (parsed === undefined) return []
-          return [{
-            officePath: parsed.officePath,
-            text: parsed.text,
-            kind: parsed.officePath.includes('/tbl[')
-              ? 'table'
-              : parsed.officePath.includes('/p[') ? 'paragraph' : 'unknown',
-          }]
-        })
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+      const result = await this.run(['view', filePath, 'text', '--max-lines', '100000'], signal)
+      return result.stdout.split(/\r?\n/u).flatMap((line): EngineTextNode[] => {
+        const parsed = this.parseTextLine(line)
+        if (parsed === undefined) return []
+        return [{
+          officePath: parsed.officePath,
+          text: parsed.text,
+          kind: parsed.officePath.includes('/tbl[')
+            ? 'table'
+            : parsed.officePath.includes('/p[') ? 'paragraph' : 'unknown',
+        }]
+      })
     })
   }
 
   override previewHtml(filePath: string, signal?: AbortSignal): Promise<string> {
-    return this.withLease(filePath, async () => {
-      try {
-        return (await this.run(['view', filePath, 'html'], signal)).stdout
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
-    })
+    return this.withLease(filePath, async () => (await this.run(['view', filePath, 'html'], signal)).stdout)
   }
 
   override inspect(filePath: string, officePath: string, depth = 2, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.withLease(filePath, async () => {
-      try {
-        const result = await this.run(['get', filePath, officePath, '--depth', String(depth), '--json'], signal)
-        return this.parseEnvelope(result.stdout)
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+      const result = await this.run(['get', filePath, officePath, '--depth', String(depth), '--json'], signal)
+      return this.parseEnvelope(result.stdout)
     })
   }
 
   override applyMutations(filePath: string, mutations: readonly EngineMutation[], signal?: AbortSignal): Promise<void> {
     return this.withLease(filePath, async () => {
-      try {
-        for (const mutation of mutations) {
-          await this.run(this.mutationArgs(filePath, mutation), signal)
-        }
-        await this.run(['save', filePath, '--json'], signal)
-      } finally {
-        await this.closeBestEffort(filePath)
+      for (const mutation of mutations) {
+        await this.run(this.mutationArgs(filePath, mutation), signal)
       }
+      await this.run(['save', filePath, '--json'], signal)
     })
   }
 
   override validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation> {
     return this.withLease(filePath, async () => {
-      try {
-        const result = await this.run(['validate', filePath, '--json'], signal, true)
-        const details = result.stdout.trim() === ''
-          ? { stderr: result.stderr }
-          : this.parseEnvelope(result.stdout)
-        const declared = typeof details.success === 'boolean' ? details.success : undefined
-        return { success: declared ?? result.outcome.exitCode === 0, details }
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+      const result = await this.run(['validate', filePath, '--json'], signal, true)
+      const details = result.stdout.trim() === ''
+        ? { stderr: result.stderr }
+        : this.parseEnvelope(result.stdout)
+      const declared = typeof details.success === 'boolean' ? details.success : undefined
+      return { success: declared ?? result.outcome.exitCode === 0, details }
     })
   }
 
@@ -336,13 +323,40 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     }
   }
 
-  private withLease<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  /**
+   * Close the resident OfficeCLI process for one file so the next operation reads the bytes on disk.
+   * Callers replace or delete the file only after this resolves; without a resident there is nothing to do.
+   * @param filePath - canonical DOCX path about to be replaced or removed.
+   */
+  override release(filePath: string): Promise<void> {
+    if (!this.idle.has(filePath) && !this.leases.has(filePath)) return Promise.resolve()
+    return this.withLease(filePath, () => this.closeBestEffort(filePath), false)
+  }
+
+  private async releaseAll(): Promise<void> {
+    const paths = new Set([...this.idle.keys(), ...this.leases.keys()])
+    await Promise.all([...paths].map(filePath => this.release(filePath)))
+  }
+
+  /**
+   * Serialize operations per file. Every OfficeCLI command leaves a resident process holding the
+   * document in memory, so the lease keeps it running between operations and closes it after
+   * `residentIdleMs` without work; `release` closes it immediately and schedules nothing.
+   */
+  private withLease<T>(filePath: string, operation: () => Promise<T>, retain = true): Promise<T> {
+    clearTimeout(this.idle.get(filePath))
+    this.idle.delete(filePath)
     const prior = this.leases.get(filePath) ?? Promise.resolve()
     const run = prior.then(operation)
     const tail = run.then(() => undefined, () => undefined)
     this.leases.set(filePath, tail)
     return run.finally(() => {
-      if (this.leases.get(filePath) === tail) this.leases.delete(filePath)
+      if (this.leases.get(filePath) !== tail) return
+      this.leases.delete(filePath)
+      if (!retain) return
+      const timer = setTimeout(() => { void this.release(filePath) }, this.config.residentIdleMs)
+      timer.unref()
+      this.idle.set(filePath, timer)
     })
   }
 

@@ -28,8 +28,8 @@ describe('PaperAI DSH-native styling', () => {
     expect(sidebar).toContain('font-size: 14px')
     expect(sidebar).toContain('min-height: 34px')
     expect(sidebar).toContain('var(--dsw-alias-interactive-bg-hover)')
-    expect(start).toContain('grid-template-columns: 34px auto')
-    expect(start).toContain('font-size: 26px')
+    expect(start).toContain('font-size: 20px')
+    expect(start).toContain('height: 44px')
   })
 
   it('paints only through theme tokens, with no drop shadows, literal colors, or product accent overrides', () => {

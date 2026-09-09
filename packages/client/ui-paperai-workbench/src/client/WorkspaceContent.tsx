@@ -6,6 +6,7 @@ import { Button, IconBrowseOutline16, IconRefreshOutline14 } from '@deepseek-ai/
 import type { PaperAIDocumentRow, PaperAIProjectState } from './types.ts'
 import type { PaperAIWorkspaceContentProps } from './slots.ts'
 import { DOCUMENT_TYPE_KEYS } from './locales.ts'
+import { typeAccent } from './type-accent.ts'
 import css from './WorkspaceContent.module.css'
 import { ProjectDoctor } from './ProjectDoctor.tsx'
 
@@ -24,6 +25,7 @@ function DocumentRow({ row, selected, open, t }: {
     <button
       type="button"
       className={clsx(css.row, selected && css.selected)}
+      style={typeAccent(row.documentType)}
       aria-current={selected ? 'true' : undefined}
       aria-label={t('documents.open', { name: row.fileName })}
       title={row.fileName}

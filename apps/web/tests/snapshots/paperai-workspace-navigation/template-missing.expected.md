@@ -1,5 +1,7 @@
-- text: Empty project
+- heading "Empty project" [level=1]
 - paragraph:
-  - text: 本项目的模板已不在模板库中
-  - button "更换…"
-- button "导入 Word，自由写"
+  - button "本项目的模板已不在模板库中"
+  - text: 0 篇文档
+- button "新建或导入文档":
+  - img
+  - text: 新建或导入文档

@@ -90,6 +90,15 @@ export abstract class DocumentEngine extends Service {
    * @throws when cancelled or the provider cannot produce structured validation evidence.
    */
   abstract validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation>
+  /**
+   * Release state the provider retains for one file (a resident process, a cache) so
+   * the next operation observes the bytes on disk. Callers replace or delete the file
+   * only after this resolves. Providers that retain nothing keep this no-op.
+   * @param _filePath - canonical DOCX path about to be replaced or removed.
+   */
+  release(_filePath: string): Promise<void> {
+    return Promise.resolve()
+  }
 }
 
 export default DocumentEngine

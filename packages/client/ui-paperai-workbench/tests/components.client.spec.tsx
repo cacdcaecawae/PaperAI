@@ -92,6 +92,7 @@ function startProps(state: PaperAIProjectState | null, library = libraryState())
   const setProjectTemplate = vi.fn(async () => ok)
   const createFromTemplate = vi.fn(async () => ok)
   const importDocument = vi.fn(async () => ok)
+  const openDocument = vi.fn(async () => {})
   const openWorkspacePicker = vi.fn()
   const renderSlot = vi.fn(() => <svg data-testid="mark" />)
   const props = {
@@ -101,10 +102,10 @@ function startProps(state: PaperAIProjectState | null, library = libraryState())
     useProjects: bind(projects),
     useLibrary: bind(libraryStore),
     renderSlot,
-    ensureProject, setProjectTemplate, createFromTemplate, importDocument, ...actions, t,
+    ensureProject, setProjectTemplate, createFromTemplate, importDocument, openDocument, ...actions, t,
   } as unknown as PaperAIStartPageProps
   return {
-    props, projects, libraryStore, ensureProject, setProjectTemplate, createFromTemplate, importDocument,
+    props, projects, libraryStore, ensureProject, setProjectTemplate, createFromTemplate, importDocument, openDocument,
     openWorkspacePicker, renderSlot, ...actions,
   }
 }
@@ -186,22 +187,31 @@ describe('StartPage', () => {
     expect(screen.getByText('选择一个文件夹。已有项目会保留文档和模板选择。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '新建或打开项目' }))
     expect(b.openWorkspacePicker).toHaveBeenCalledOnce()
-    expect(b.renderSlot).toHaveBeenCalledWith('paperai.start.mark', expect.objectContaining({ size: 34 }), { fallback: null })
+    expect(b.renderSlot).toHaveBeenCalledWith('paperai.start.mark', expect.objectContaining({ size: 40 }), { fallback: null })
   })
 
-  it('shows the project template and one action per format, starting form templates directly', async () => {
+  it('lists the documents with their facts, opens one, and starts formats from the create menu', async () => {
     const b = startProps(projectState())
     const view = render(<StartPage {...b.props} />)
     await waitFor(() => { expect(b.ensureProject).toHaveBeenCalledWith(WORKSPACE_ID) })
-    expect(screen.getByText('Paper')).toBeTruthy()
-    expect(screen.getByText('本项目模板：HIT 硕士模板')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '从本项目模板新建开题报告' }))
+    expect(screen.getByRole('heading', { name: 'Paper', level: 1 })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '本项目模板：HIT 硕士模板' }).textContent).toBe('HIT 硕士模板')
+    expect(screen.getByText('1 篇文档')).toBeTruthy()
+    const row = screen.getByRole('button', { name: '打开 硕士学位论文开题报告.docx' })
+    expect(row.textContent).toContain('开题报告')
+    fireEvent.click(row)
+    expect(b.openDocument).toHaveBeenCalledWith(WORKSPACE_ID, RESOURCE_ID)
+
+    const create = () => { fireEvent.click(screen.getByRole('button', { name: '新建或导入文档' })) }
+    create()
+    fireEvent.click(screen.getByRole('menuitem', { name: '新建开题报告' }))
     expect(b.createFromTemplate).toHaveBeenCalledWith(WORKSPACE_ID, { documentType: 'proposal' })
 
     // A formatting reference asks for the manuscript file first.
     const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
     const click = vi.spyOn(input, 'click')
-    fireEvent.click(screen.getByRole('button', { name: '导入 Word 初稿并套用学位论文格式' }))
+    create()
+    fireEvent.click(screen.getByRole('menuitem', { name: '导入初稿，套学位论文格式' }))
     expect(click).toHaveBeenCalledOnce()
     fireEvent.change(input, { target: { files: [new File(['word'], 'thesis.docx', { type: 'application/zip' })] } })
     await waitFor(() => {
@@ -210,7 +220,8 @@ describe('StartPage', () => {
       })
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '导入 Word，自由写' }))
+    create()
+    fireEvent.click(screen.getByRole('menuitem', { name: '导入 Word，自由写' }))
     fireEvent.change(input, { target: { files: [new File(['word'], 'notes.docx', { type: 'application/zip' })] } })
     await waitFor(() => {
       expect(b.importDocument).toHaveBeenCalledWith(WORKSPACE_ID, { fileName: 'notes.docx', contentBase64: 'd29yZA==' })
@@ -231,8 +242,8 @@ describe('StartPage', () => {
     expect(b.setProjectTemplate).toHaveBeenCalledWith(WORKSPACE_ID, HIT_PACK_ID)
     await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
 
-    // Choosing to write freely is an answer too.
-    fireEvent.click(screen.getByRole('button', { name: '选择…' }))
+    // Choosing to write freely is an answer too; the fact line reopens the dialog.
+    fireEvent.click(screen.getByRole('button', { name: '尚未选择本项目的模板' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '不用模板，自由写' }))
     expect(b.setProjectTemplate).toHaveBeenLastCalledWith(WORKSPACE_ID, null)
   })
@@ -244,7 +255,7 @@ describe('StartPage', () => {
     render(<StartPage {...missing.props} />)
     expect(screen.getByText('本项目的模板已不在模板库中')).toBeTruthy()
     expect(screen.queryByText('本项目不使用模板，自由写作')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '更换…' }))
+    fireEvent.click(screen.getByRole('button', { name: '本项目的模板已不在模板库中' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).queryByText('当前：不用模板')).toBeNull()
     fireEvent.click(within(dialog).getByRole('button', { name: '不用模板，自由写' }))
@@ -632,24 +643,29 @@ describe('DocumentWorkbench', () => {
     expect(screen.getByRole('alert').textContent).toBe('请先保存或取消正在编辑的段落。')
   })
 
-  it('lists versions with author badges, unfolds one version\'s changes, and restores', () => {
+  it('lists versions as a timeline, marks the picked version\'s changes on the document, and restores it', () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready', panel: 'versions', document: documentSnapshot(),
       diff: { commitId: COMMIT_0, result: { ...DIFF, commitId: COMMIT_0, parentCommitId: null }, error: null },
     }))
-    render(<DocumentWorkbench {...b.props} />)
+    const view = render(<DocumentWorkbench {...b.props} />)
     const panel = screen.getByRole('complementary', { name: '版本' })
     expect(within(panel).getByText('Codex · gpt-5.6')).toBeTruthy()
     expect(within(panel).getByText('当前')).toBeTruthy()
     expect(within(panel).getByText('初始版本')).toBeTruthy()
-    expect(within(panel).getByText('Old introduction')).toBeTruthy()
-    expect(within(panel).getByText('3 段未变')).toBeTruthy()
-    fireEvent.click(within(panel).getByRole('button', { name: '收起改动' }))
-    expect(b.showDiff).toHaveBeenCalledWith(COMMIT_0)
-    fireEvent.click(within(panel).getAllByRole('button', { name: '查看改动' })[0]!)
+    expect(within(panel).getByText('2 处变化 · 3 段未变')).toBeTruthy()
+    const rows = within(panel).getAllByRole('button', { pressed: true })
+    expect(rows).toHaveLength(1)
+    fireEvent.click(within(panel).getByRole('button', { name: /Improve the introduction/u }))
     expect(b.showDiff).toHaveBeenCalledWith(documentSnapshot().headCommitId)
     fireEvent.click(within(panel).getByRole('button', { name: '恢复到此版本' }))
     expect(b.restore).toHaveBeenCalledWith(COMMIT_0)
+
+    // The document shows the changes in place and offers to walk them.
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    expect(shadow.querySelectorAll('[data-paperai-change]')).toHaveLength(2)
+    expect(shadow.querySelector('h1')!.innerHTML).toBe('<del>Old introduction</del><ins>Introduction</ins>')
+    expect(screen.getByText('第 1 / 2 处变化')).toBeTruthy()
   })
 
   it('exports through the toolbar menu and shows receipts, blocks, and external updates', () => {
