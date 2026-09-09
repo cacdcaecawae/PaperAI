@@ -24,19 +24,30 @@ export function blocksOf(container: HTMLElement): HTMLElement[] {
     .filter(element => !((element.tagName === 'TD' || element.tagName === 'TH') && element.querySelector('p') !== null))
 }
 
-/** One committed text replacement, keyed by the text the block showed before and whether it is a table cell. */
+/** Provider-addressed blocks whose text matches, in reading order; page bands without an address never take part. */
+function addressed(blocks: readonly HTMLElement[], text: string): HTMLElement[] {
+  const wanted = normalize(text)
+  return blocks.filter(block => block.dataset.path !== undefined && normalize(block.textContent) === wanted)
+}
+
+/**
+ * One committed text replacement, keyed the way the editor maps blocks to
+ * nodes: the text the block showed, whether it is a table cell, and which of
+ * the same-text nodes of that kind it is, in reading order.
+ */
 export interface PreviewTextPatch {
   readonly baseText: string
   readonly nextText: string
   readonly cell: boolean
+  readonly ordinal: number
 }
 
 /**
  * Write committed block texts into the preview the browser already shows, so a
- * commit paints at once while the Host renders the authoritative preview. Like
- * block editing, only provider-addressed blocks take part, and a cell never
- * stands in for a body paragraph with the same text (nor the reverse).
- * ponytail: the first such block wins when texts repeat inside one kind; the Host preview that follows corrects it.
+ * commit paints at once while the Host renders the authoritative preview. The
+ * block is found exactly as the editor maps it: among addressed blocks of the
+ * same kind with the same text, the one at the node's ordinal. A block the
+ * mapping cannot name stays as it was until the rendered preview arrives.
  * @param html - preview currently on screen.
  * @param patches - committed replacements in commit order.
  * @returns the preview with matching blocks retyped; run formatting inside them flattens until the refresh.
@@ -44,12 +55,8 @@ export interface PreviewTextPatch {
 export function patchPreviewHtml(html: string, patches: readonly PreviewTextPatch[]): string {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const blocks = blocksOf(parsed.body)
-  for (const { baseText, nextText, cell } of patches) {
-    const block = blocks.find(candidate => (
-      candidate.dataset.path !== undefined
-      && (candidate.closest('td, th') !== null) === cell
-      && normalize(candidate.textContent) === normalize(baseText)
-    ))
+  for (const { baseText, nextText, cell, ordinal } of patches) {
+    const block = addressed(blocks, baseText).filter(candidate => (candidate.closest('td, th') !== null) === cell)[ordinal]
     if (block !== undefined) block.textContent = nextText
   }
   return parsed.documentElement.outerHTML
@@ -118,12 +125,11 @@ export interface MarkedDiff {
 }
 
 /**
- * Show a version's changes on the current preview: blocks still carrying the
- * changed or added text get their words marked, and a removed paragraph
- * reappears struck through after the previous marked block. Changes the
- * current text no longer carries are returned unplaced for the panel to list.
- * Every marked block carries `data-paperai-change`.
- * ponytail: the Host diff carries no positions, so a removed paragraph follows the previous change and leads nothing.
+ * Show a version's changes on the current preview. A changed or added
+ * paragraph is marked in place only when exactly one addressed body block
+ * still carries its text; removed paragraphs, and changes whose text is gone
+ * or repeated, are returned unplaced for the panel to list rather than guessed
+ * at. Every marked block carries `data-paperai-change`.
  * @param html - preview of the current document.
  * @param changes - the version's paragraph changes in reading order.
  * @returns the marked preview and the changes it could not place.
@@ -132,27 +138,20 @@ export function markDiffHtml(html: string, changes: readonly PaperAIVersionChang
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const blocks = blocksOf(parsed.body)
   const unplaced: PaperAIVersionChange[] = []
-  let anchor: HTMLElement | null = null
   for (const change of changes) {
     const after = change.after
-    const block = after === undefined
-      ? undefined
-      : blocks.find(candidate => candidate.dataset.paperaiChange === undefined && normalize(candidate.textContent) === normalize(after))
-    if (block !== undefined) {
-      block.replaceChildren(...wordDiff(change.before ?? '', after ?? '').map(([kind, text]) => (
-        kind === 'same' ? parsed.createTextNode(text) : run(parsed, kind, text)
-      )))
-      block.dataset.paperaiChange = ''
-      anchor = block
-    } else if (after === undefined && anchor !== null) {
-      const removed = parsed.createElement('p')
-      removed.append(run(parsed, 'del', change.before ?? ''))
-      anchor.after(removed)
-      removed.dataset.paperaiChange = ''
-      anchor = removed
-    } else {
+    const candidates = after === undefined
+      ? []
+      : addressed(blocks, after).filter(candidate => candidate.dataset.paperaiChange === undefined)
+    const block = candidates.length === 1 ? candidates[0] : undefined
+    if (block === undefined) {
       unplaced.push(change)
+      continue
     }
+    block.replaceChildren(...wordDiff(change.before ?? '', after ?? '').map(([kind, text]) => (
+      kind === 'same' ? parsed.createTextNode(text) : run(parsed, kind, text)
+    )))
+    block.dataset.paperaiChange = ''
   }
   return { html: parsed.documentElement.outerHTML, unplaced }
 }

@@ -5,7 +5,7 @@ import {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { resolvePreviewBudget } from '../config.ts'
-import { patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
+import { normalize, patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
@@ -528,8 +528,12 @@ export class PaperAIWorkbenchController {
       baseCommitId: document.headCommitId,
       mutations: [{ type: 'replace-text', nodeId: edit.nodeId, baseText: edit.baseText, nextText: edit.draft }],
     }, request.signal))
+    // The preview patch finds the block the way the editor maps it: same kind, same text, same ordinal among peers.
     const cell = document.nodes.find(node => node.nodeId === edit.nodeId)?.kind === 'table-cell'
-    return this.settleCommit(entry, request, document, result, [{ baseText: edit.baseText, nextText: edit.draft, cell }])
+    const ordinal = document.nodes
+      .filter(node => node.kind !== 'table' && (node.kind === 'table-cell') === cell && normalize(node.text) === normalize(edit.baseText))
+      .findIndex(node => node.nodeId === edit.nodeId)
+    return this.settleCommit(entry, request, document, result, [{ baseText: edit.baseText, nextText: edit.draft, cell, ordinal }])
   }
 
   /**
@@ -1107,7 +1111,12 @@ export class PaperAIWorkbenchController {
     return OK
   }
 
-  /** Replace the patched preview with the Host's render; a newer revision keeps its own. */
+  /**
+   * Replace the patched preview with the Host's render of the same revision.
+   * A render of another revision never enters this projection: when it carries
+   * a newer head, the external-update notice takes over as for any other
+   * session's commit; the workbench itself may also have moved on meanwhile.
+   */
   private async refreshPreview(entry: RequestEntry<PaperAIWorkbenchStore>, committed: PaperAIDocumentSnapshot): Promise<void> {
     const result = await callRemote(() => this.remote.open({
       workspaceId: committed.workspaceId,
@@ -1115,9 +1124,14 @@ export class PaperAIWorkbenchController {
       resourceId: committed.resourceId,
     }))
     if (!result.ok || this.disposed) return
+    const fresh = result.value.document
     entry.store.update((draft) => {
       if (draft.document?.revision !== committed.revision) return
-      draft.document = { ...draft.document, previewHtml: result.value.document.previewHtml }
+      if (fresh.revision === committed.revision) {
+        draft.document = { ...draft.document, previewHtml: fresh.previewHtml }
+      } else if (fresh.headCommitId !== draft.document.headCommitId) {
+        draft.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
+      }
     })
   }
 

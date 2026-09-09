@@ -6,6 +6,7 @@ const HTML = '<html><head></head><body>'
   + '<h1 data-path="/body/p[1]">Introduction</h1><p data-path="/body/p[2]">Research background</p>'
   + '<table><tr><td><p data-path="/body/tbl[1]/tr[1]/tc[1]/p[1]">Research background</p></td></tr></table>'
   + '<div class="doc-header"><p>Closing remarks</p></div><p data-path="/body/p[3]">Closing remarks</p>'
+  + '<p data-path="/body/p[4]">Same</p><p data-path="/body/p[5]">Same</p>'
   + '</body></html>'
 
 describe('wordDiff', () => {
@@ -23,41 +24,45 @@ describe('wordDiff', () => {
 })
 
 describe('markDiffHtml', () => {
-  it('marks changed and added blocks in place, seats removed paragraphs after the previous change, and returns the rest', () => {
+  it('marks a change only where exactly one addressed body block carries its text, and lists the rest', () => {
     const result = markDiffHtml(HTML, [
-      { kind: 'removed', before: 'Nothing to hang this on' },
-      { kind: 'changed', before: 'Old introduction', after: 'Introduction' },
       { kind: 'removed', before: 'A dropped paragraph' },
+      { kind: 'changed', before: 'Old introduction', after: 'Introduction' },
       { kind: 'added', after: 'Closing remarks' },
+      { kind: 'changed', before: 'Different', after: 'Same' },
       { kind: 'changed', before: 'Once here', after: 'Overwritten later' },
     ])
     expect(result.unplaced).toEqual([
-      { kind: 'removed', before: 'Nothing to hang this on' },
+      { kind: 'removed', before: 'A dropped paragraph' },
+      { kind: 'changed', before: 'Different', after: 'Same' },
       { kind: 'changed', before: 'Once here', after: 'Overwritten later' },
     ])
     const marked = new DOMParser().parseFromString(result.html, 'text/html')
     const changes = [...marked.querySelectorAll('[data-paperai-change]')]
-    expect(changes.map(block => block.tagName)).toEqual(['H1', 'P', 'P'])
+    expect(changes.map(block => block.getAttribute('data-path'))).toEqual(['/body/p[1]', '/body/p[3]'])
     expect(changes[0]?.innerHTML).toBe('<del>Old introduction</del><ins>Introduction</ins>')
-    expect(changes[1]?.innerHTML).toBe('<del>A dropped paragraph</del>')
-    expect(changes[1]?.previousElementSibling).toBe(changes[0])
-    expect(changes[2]?.innerHTML).toBe('<ins>Closing remarks</ins>')
-    expect(marked.querySelectorAll('p:not([data-paperai-change])')).toHaveLength(3)
+    expect(changes[1]?.innerHTML).toBe('<ins>Closing remarks</ins>')
+    // The header with the same text is not a body block and stays as it was.
+    expect(marked.querySelector('.doc-header p')?.innerHTML).toBe('Closing remarks')
   })
 })
 
 describe('patchPreviewHtml', () => {
-  it('retypes the addressed block of the committed kind and leaves same-text cells and page bands alone', () => {
+  it('retypes the block the editor mapping names: same kind, same text, same ordinal', () => {
     const patched = new DOMParser().parseFromString(patchPreviewHtml(HTML, [
-      { baseText: 'Research background', nextText: 'Research context', cell: false },
-      { baseText: 'Closing remarks', nextText: 'Closing words', cell: false },
+      { baseText: 'Research background', nextText: 'Research context', cell: false, ordinal: 0 },
+      { baseText: 'Closing remarks', nextText: 'Closing words', cell: false, ordinal: 0 },
+      { baseText: 'Same', nextText: 'Second same', cell: false, ordinal: 1 },
+      { baseText: 'Same', nextText: 'Nowhere', cell: false, ordinal: 5 },
     ]), 'text/html')
     expect(patched.querySelector('[data-path="/body/p[2]"]')?.textContent).toBe('Research context')
     expect(patched.querySelector('td')?.textContent).toBe('Research background')
     expect(patched.querySelector('.doc-header')?.textContent).toBe('Closing remarks')
     expect(patched.querySelector('[data-path="/body/p[3]"]')?.textContent).toBe('Closing words')
+    expect(patched.querySelector('[data-path="/body/p[4]"]')?.textContent).toBe('Same')
+    expect(patched.querySelector('[data-path="/body/p[5]"]')?.textContent).toBe('Second same')
     const cellPatched = new DOMParser().parseFromString(patchPreviewHtml(HTML, [
-      { baseText: 'Research background', nextText: 'Cell context', cell: true },
+      { baseText: 'Research background', nextText: 'Cell context', cell: true, ordinal: 0 },
     ]), 'text/html')
     expect(cellPatched.querySelector('td')?.textContent).toBe('Cell context')
     expect(cellPatched.querySelector('[data-path="/body/p[2]"]')?.textContent).toBe('Research background')

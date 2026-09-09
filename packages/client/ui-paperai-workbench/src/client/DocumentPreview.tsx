@@ -55,12 +55,15 @@ const PREVIEW_STYLE = `
 [data-paperai-block] { cursor: text; border-radius: 3px; transition: box-shadow 120ms ease; }
 [data-paperai-block]:hover { box-shadow: 0 0 0 2px var(--dsw-alias-state-business-tertiary); }
 [data-paperai-block][data-paperai-editing] { display: none; }
-.paperai-editor-host { margin: 4px 0; }
-.paperai-block-editor { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--dsw-alias-state-business-primary); border-radius: 8px; padding: 8px; background: var(--dsw-alias-bg-base); }
-.paperai-block-editor textarea { box-sizing: border-box; width: 100%; min-height: 72px; resize: vertical; border: 0; padding: 4px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; line-height: 1.7; outline: none; }
-.paperai-block-editor .paperai-editor-actions { display: flex; align-items: center; gap: 6px; }
-.paperai-block-editor .paperai-editor-label { flex: 1; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
-.paperai-block-editor button { height: 28px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px; padding: 0 12px; background: transparent; color: var(--dsw-alias-label-primary); cursor: pointer; font: inherit; font-size: 12px; line-height: 18px; }
+/* Editing happens in the paragraph's own place and type: the seat copies the block's typography and margins,
+   the textarea inherits them and grows with the text, and the chrome is one gold marker plus two small buttons. */
+.paperai-editor-host { position: relative; display: block; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding: 0 12px; background: var(--dsw-alias-state-business-tertiary); }
+.paperai-editor-host::before { content: ''; position: absolute; top: 6px; bottom: 6px; left: -10px; width: 3px; border-radius: 2px; background: var(--dsw-alias-state-business-primary); }
+.paperai-block-editor { display: flex; flex-direction: column; gap: 2px; }
+.paperai-block-editor textarea { box-sizing: border-box; display: block; width: 100%; min-height: 1lh; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; line-height: inherit; text-align: inherit; text-indent: inherit; resize: none; outline: none; field-sizing: content; }
+.paperai-block-editor .paperai-editor-actions { display: flex; align-items: center; gap: 6px; padding: 2px 0 6px; color: var(--dsw-alias-label-tertiary); font: 12px/18px system-ui, sans-serif; text-align: left; text-indent: 0; }
+.paperai-block-editor .paperai-editor-label { flex: 1; }
+.paperai-block-editor button { height: 26px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 0 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); cursor: pointer; font: inherit; }
 .paperai-block-editor button[data-primary] { border-color: transparent; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
 .paperai-block-editor button:disabled { cursor: default; opacity: 0.4; }
 .paperai-block-editor button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
@@ -271,6 +274,14 @@ export function DocumentPreview({
     }
     const seat = document.createElement('div')
     seat.className = 'paperai-editor-host'
+    // The seat stands in for the block, so it takes the block's type and rhythm; the textarea inherits them.
+    const type = getComputedStyle(block)
+    for (const property of [
+      'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing', 'line-height',
+      'text-align', 'text-indent', 'color', 'margin-top', 'margin-bottom',
+    ] as const) {
+      seat.style.setProperty(property, type.getPropertyValue(property))
+    }
     block.after(seat)
     block.dataset.paperaiEditing = ''
     setEditorHost(seat)

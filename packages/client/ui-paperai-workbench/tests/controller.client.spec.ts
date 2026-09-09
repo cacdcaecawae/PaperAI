@@ -5,7 +5,7 @@ import { PaperAIWorkbenchController } from '../src/client/controller.ts'
 import type { PaperAIDocumentCommitResult, PaperAIDocumentOpenResult, PaperAITemplateLibrary, PaperAIWorkbenchRemote } from '../src/client/types.ts'
 import {
   COMMIT_0, COMMIT_1, COMMIT_2, CUSTOM_PACK_ID, DIFF, DOCUMENT_ID, documentOpenResult, HIT_PACK_ID,
-  NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE, OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, successfulRemote,
+  NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE, OVERVIEW, RESOURCE_ID, REVISION_1, REVISION_2, SESSION_ID, successfulRemote,
   WORKSPACE_ID,
 } from './fixtures.client.ts'
 
@@ -543,6 +543,26 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     vi.spyOn(remote, 'captureExternal').mockResolvedValue({ ok: false, error: { code: 'internal', message: 'nothing external to capture', details: {} } })
     await expect(controller.captureExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'internal: nothing external to capture' })
     expect(store.getSnapshot().actionError).toBe('internal: nothing external to capture')
+  })
+
+
+  it('keeps the painted preview and raises the external-update notice when the render belongs to another version', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true,
+      value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    remote.open = vi.fn<typeof remote.open>(async () => ({
+      ok: true,
+      value: documentOpenResult(REVISION_1, { previewHtml: '<html><head></head><body><p data-path="/body/p[2]">Elsewhere</p></body></html>' }),
+    }))
+    controller.selectBlock(SESSION_ID, NODE_HEADING)
+    controller.updateDraft(SESSION_ID, 'Rewritten')
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    await vi.waitFor(() => { expect(store.getSnapshot().externalUpdate).toMatchObject({ headCommitId: COMMIT_1 }) })
+    expect(store.getSnapshot().document?.previewHtml).toContain('Rewritten')
+    expect(store.getSnapshot().document?.previewHtml).not.toContain('Elsewhere')
   })
 
 })
