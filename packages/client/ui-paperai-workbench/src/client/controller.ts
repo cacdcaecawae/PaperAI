@@ -779,6 +779,7 @@ export class PaperAIWorkbenchController {
    * and open the document again; an unsaved block draft survives when its
    * block still reads the same.
    * @param sessionId - Session showing the document.
+   * @returns ok once the version is recorded and the document reopened; otherwise the displayable failure.
    */
   async captureExternal(sessionId: SessionId): Promise<PaperAIActionResult> {
     this.assertLive()
