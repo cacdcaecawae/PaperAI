@@ -10,6 +10,7 @@ const logPath = process.env.FAKE_ACP_LOG
 const label = process.env.FAKE_ACP_LABEL ?? 'fake'
 let currentModel = process.env.FAKE_ACP_MODEL ?? 'fake-alpha'
 let currentEffort = 'medium'
+const effortId = process.env.FAKE_ACP_EFFORT_ID ?? 'effort'
 let fastMode = false
 /** Comma-separated config values whose `session/set_config_option` is rejected. */
 const rejectedConfigValues = new Set(
@@ -47,10 +48,10 @@ function modelOptions() {
     // The shape both pinned adapters advertise: a `thought_level` select for
     // the current model and a boolean fast-mode switch (`model_config`).
     type: 'select',
-    id: 'effort',
+    id: effortId,
     name: 'Effort',
     description: 'Available effort levels for this model',
-    category: 'thought_level',
+    ...(process.env.FAKE_ACP_EFFORT_ID === undefined ? { category: 'thought_level' } : {}),
     currentValue: currentEffort,
     options: [
       { value: 'low', name: 'Low' },
@@ -236,7 +237,7 @@ function makeAgent(connection) {
       if (rejectedConfigValues.has(String(params.value))) {
         throw new Error(`scripted ACP set-config rejection for value ${String(params.value)}`)
       }
-      if (params.configId === 'effort') {
+      if (params.configId === effortId) {
         currentEffort = String(params.value)
       } else if (params.configId === 'fast') {
         fastMode = params.value === true
@@ -433,6 +434,9 @@ function makeAgent(connection) {
           await connection.sessionUpdate({ sessionId: params.sessionId, update: {
             sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', rawOutput: output,
           } })
+        }
+        while (process.env.FAKE_ACP_STREAM_GATE_FILE !== undefined && existsSync(process.env.FAKE_ACP_STREAM_GATE_FILE)) {
+          await new Promise(resolve => setTimeout(resolve, 10))
         }
         if (streamTool === 'completed') await connection.sessionUpdate({ sessionId: params.sessionId, update: {
           sessionUpdate: 'tool_call_update', toolCallId: 'streaming-tool', status: 'completed',

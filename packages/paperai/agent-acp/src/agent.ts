@@ -178,6 +178,8 @@ class AcpTurnProjection {
   private nextIndex = 0
   private pending = Promise.resolve()
   private failure: Error | undefined
+  private progressTimer: ReturnType<typeof setTimeout> | undefined
+  private finishing = false
 
   constructor(
     private readonly session: Session,
@@ -188,12 +190,17 @@ class AcpTurnProjection {
     private readonly outputBytes: number,
     private readonly terminalOutput: (id: string) => string,
     private readonly content: (content: AcpContentBlock) => Promise<ContentBlock[]>,
+    private readonly progressIntervalMs?: number,
   ) {}
 
   update(update: SessionUpdate): void {
+    this.enqueue(() => this.apply(update))
+  }
+
+  private enqueue(operation: () => void | Promise<void>): void {
     this.pending = this.pending
       .then(async () => {
-        if (this.failure === undefined) await this.apply(update)
+        if (this.failure === undefined) await operation()
       })
       .catch((error: unknown) => {
         this.failure = error instanceof Error ? error : new Error('ACP content projection failed', { cause: error })
@@ -239,8 +246,10 @@ class AcpTurnProjection {
   }
 
   async finish(response: PromptResponse, interrupted: boolean): Promise<void> {
+    this.finishing = true
+    clearTimeout(this.progressTimer)
     await this.pending
-    for (const tool of this.tools.values()) if (tool.progressPending) this.writeToolProgress(tool, false)
+    this.flushToolProgress()
     interrupted ||= this.failure !== undefined
     for (const state of this.text) {
       const block: ContentBlock = { type: state.type, text: state.value }
@@ -372,6 +381,12 @@ class AcpTurnProjection {
       retained.truncated || (update.rawOutput === undefined && update.content == null && display.truncated)
     projected.progressPending = true
     if (first || previousStatus !== display.status) this.writeToolProgress(projected, first)
+    else if (!this.finishing && this.progressTimer === undefined && this.progressIntervalMs !== undefined) {
+      this.progressTimer = setTimeout(() => {
+        this.progressTimer = undefined
+        this.enqueue(() => { this.flushToolProgress() })
+      }, this.progressIntervalMs)
+    }
     if (projected.resultWritten || (update.status !== 'completed' && update.status !== 'failed')) return
     projected.resultWritten = true
     const isError = update.status === 'failed'
@@ -397,6 +412,10 @@ class AcpTurnProjection {
       },
       { surfaceOp: 'append' },
     )
+  }
+
+  private flushToolProgress(): void {
+    for (const tool of this.tools.values()) if (tool.progressPending) this.writeToolProgress(tool, false)
   }
 
   private writeToolProgress(tool: ToolProjection, first: boolean): void {
@@ -1072,6 +1091,7 @@ export class AcpAgent implements Agent {
         this.runtimeOptions.terminalLimits?.outputBytes ?? 65_536,
         id => runtime.terminalOutput(id),
         content => projectAcpContent(this.hostCtx, this.session, this.provider.id, content),
+        this.runtimeOptions.toolProgressIntervalMs,
       ))
       let response: PromptResponse | undefined
       try {

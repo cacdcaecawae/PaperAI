@@ -347,7 +347,8 @@ export class AcpSettingsController {
     // This namespace's Host schema owns these fields; secret fields are absent in its wire view.
     const config = view?.value as AcpConfig | undefined
     const entry = this.store.getSnapshot().entries.find(row => row.id === id)
-    const value: AcpProviderConfig = config?.providers?.[id] ?? {}
+    const legacy = id === 'codex' || id === 'claude' ? config?.[id] : undefined
+    const value: AcpProviderConfig = { ...legacy, ...config?.providers?.[id] }
     this.store.update((state) => {
       state.draftError = null
       state.draft = {
@@ -490,6 +491,8 @@ export class AcpSettingsController {
       if (draft.clearEnv) ops.push({ op: 'unset', path: ['providers', draft.id, 'env'] })
       else if (draft.env !== '')
         ops.push({ op: 'set', path: ['providers', draft.id, 'env'], value: jsonRecord(draft.env, '环境变量') })
+      // Clear legacy copies atomically so a failed migration cannot restore an edited field or cleared secret.
+      ops.push(...ops.map(({ path }) => ({ op: 'unset' as const, path: path.slice(1) })))
       if (!draft.enabled && this.store.getSnapshot().defaultProvider === draft.id)
         throw new Error('请先更换默认 Agent，再停用此渠道')
       await this.mutate(NS, ops)

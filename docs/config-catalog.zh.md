@@ -3304,6 +3304,8 @@ export interface AcpConfig {
   readonly terminalLimit?: number
   /** Maximum retained bytes per terminal or tool output. */
   readonly terminalOutputBytes?: number
+  /** Minimum interval between live tool output snapshots; status changes and turn completion flush immediately. */
+  readonly toolProgressIntervalMs?: number
   /** Process-tree graceful shutdown duration in milliseconds. */
   readonly processGraceMs?: number
   /** Maximum duration of an isolated management operation in milliseconds. */
@@ -3377,7 +3379,7 @@ export interface AcpSshConfig {
 }
 ```
 
-来源： [`packages/paperai/agent-acp/src/index.ts:63`](../packages/paperai/agent-acp/src/index.ts)
+来源： [`packages/paperai/agent-acp/src/index.ts:64`](../packages/paperai/agent-acp/src/index.ts)
 
 <a id="paperaidocument-engine-officecli"></a>
 

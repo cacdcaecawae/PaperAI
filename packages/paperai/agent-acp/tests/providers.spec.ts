@@ -12,12 +12,13 @@ describe('ACP channel configuration', () => {
     expect(providers[1]?.env).not.toHaveProperty('OPENAI_API_KEY')
   })
 
-  it('rejects other channels, identity substitutions, blank commands and incomplete SSH settings', () => {
+  it('rejects invalid channels, launch settings and progress intervals', () => {
     expect(() => resolveProviders({ providers: { other: { command: 'other' } } })).toThrow('only Codex and Claude')
     expect(() => resolveProviders({ providers: { codex: { template: 'claude' } } })).toThrow('identity')
     expect(() => resolveProviders({ providers: { codex: { command: ' ' } } })).toThrow('non-empty')
     expect(() => z.resolve({ providers: { claude: { ssh: {} } } }, Config, {})).toThrow('host')
     expect(() => resolveProviders({ providers: { claude: { ssh: { host: '-oProxyCommand=bad', cwd: '/repo' } } } })).toThrow('SSH requires')
+    for (const toolProgressIntervalMs of [0, 1.5]) expect(() => Config({ toolProgressIntervalMs })).toThrow()
   })
 
   it('reads legacy launch settings, preserves canonical overrides, and redacts both formats', () => {

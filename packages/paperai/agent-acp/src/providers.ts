@@ -59,6 +59,8 @@ export interface AcpConfig {
   readonly terminalLimit?: number
   /** Maximum retained bytes per terminal or tool output. */
   readonly terminalOutputBytes?: number
+  /** Minimum interval between live tool output snapshots; status changes and turn completion flush immediately. */
+  readonly toolProgressIntervalMs?: number
   /** Process-tree graceful shutdown duration in milliseconds. */
   readonly processGraceMs?: number
   /** Maximum duration of an isolated management operation in milliseconds. */

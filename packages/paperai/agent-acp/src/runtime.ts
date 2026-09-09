@@ -189,6 +189,8 @@ export const ISOLATED_ACP_CALLBACKS: AcpRuntimeCallbacks = {
 export interface AcpRuntimeOptions {
   readonly mcpServers?: readonly McpServer[]
   readonly terminalLimits?: AcpTerminalLimits
+  /** Live tool snapshot interval in milliseconds; omission flushes only at status changes and turn completion. */
+  readonly toolProgressIntervalMs?: number
   readonly promptSucceeded?: () => void
   readonly processGraceMs?: number
   readonly startupStage?: (stage: 'spawn' | 'initialize' | 'load' | 'new' | 'permissions') => void

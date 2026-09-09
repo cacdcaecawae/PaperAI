@@ -6,6 +6,8 @@ ACP settings and conversation controls for PaperAI. The directory exposes Codex 
 
 The **一键检测** button runs channel diagnostics in parallel without sending a model prompt. Channel logos come from the keyed `paperai.acp.channel.mark` slot, supplied by the product's brand plugin.
 
+Saving edited fields also removes their legacy copies atomically, so a pending migration cannot restore cleared credentials. Unedited credentials remain untouched.
+
 The settings section supports per-channel launch configuration, write-only credentials, default Agent/model, proxy, personal instructions, model favorites, explicit probes, and managed installation actions. Available account, provider-routing, and external-history operations follow the adapter's advertised capabilities. Import opens an existing local association or creates a separate conversation; failure preserves the currently selected conversation and its draft.
 
 The conversation header exposes the connected adapter's current model and other session options. Model search and favorites do not change the live catalog. An explicit custom model ID is sent to the provider for validation. Permission-owned options remain under the existing permission selector.

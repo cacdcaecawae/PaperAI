@@ -37,6 +37,15 @@ export interface AcpModelState {
 const EFFORT_OPTION_IDS = new Set(['effort', 'reasoning_effort', 'reasoning-effort'])
 
 /**
+ * Find the semantic effort option, preferring its category over recognized id aliases.
+ * @param options - advertised options or their settings projections.
+ * @returns The effort selector, when advertised.
+ */
+export function findAcpEffortOption<T extends Pick<SessionConfigOption, 'id' | 'category'>>(options: readonly T[]): T | undefined {
+  return options.find(option => option.category === 'thought_level') ?? options.find(option => EFFORT_OPTION_IDS.has(option.id))
+}
+
+/**
  * Identify native permission controls that remain owned by the DSH permission selector.
  * @param option - provider-advertised config option.
  * @returns whether general session controls must leave this option read-only.
@@ -112,9 +121,7 @@ export function modelStateFromConfigOptions(
       enabled: option.currentValue,
     })
   }
-  const effortSelect =
-    selectors.find(option => option.category === 'thought_level') ??
-    selectors.find(option => EFFORT_OPTION_IDS.has(option.id))
+  const effortSelect = findAcpEffortOption(selectors)
   const effort = effortSelect === undefined ? undefined : effortState(effortSelect)
   const model =
     selectors.find(option => option.category === 'model') ?? selectors.find(option => option.id === 'model')

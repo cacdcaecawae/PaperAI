@@ -26,6 +26,7 @@ import { SessionPreparation, type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { AcpAgent } from './agent.ts'
+import { findAcpEffortOption } from './catalog.ts'
 import { AcpDiagnostics } from './diagnostics.ts'
 import type {
   AcpCatalogEntry,
@@ -71,6 +72,7 @@ export const Config: z<Config> = z.object({
   probeConcurrency: z.number().min(1).max(8).step(1).default(2),
   terminalLimit: z.number().min(1).step(1).default(16),
   terminalOutputBytes: z.number().min(1).step(1).default(65_536),
+  toolProgressIntervalMs: z.number().min(1).step(1).default(1_000),
   processGraceMs: z.number().min(1).step(1).default(2_000),
   managementTimeoutMs: z.number().min(1).default(300_000),
   installTimeoutMs: z.number().min(1).default(600_000),
@@ -233,27 +235,31 @@ export class PaperAiAcpAgents extends Service {
       onChange: () => {
         this.syncRoutes()
         this.syncPresets()
+        void this.migrateSettings()
       },
       validate: (value) => {
         resolveProviders(value)
       },
     })
-    ctx.inject(['settings'], async (sctx) => {
-      const descriptor = sctx.settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)
-      // Registration has validated this raw document through Config; keep defaults out of the persisted user layer.
-      const user = descriptor?.user as Config | undefined
-      if (user === undefined || (user.codex === undefined && user.claude === undefined)) return
-      if (!sctx.settings.writable) {
-        sctx.logger.warn('ACP legacy settings are readable; writable settings are required to persist their migration')
-        return
-      }
-      try {
-        await sctx.settings.replace(ACP_AGENT_SETTINGS_NAMESPACE, migrateProviders(user), descriptor?.revision)
-      } catch {
-        // A failed or concurrent settings write leaves the legacy document readable and its secrets intact.
-        sctx.logger.warn('ACP settings migration was not saved; legacy settings remain active until the next settings reload')
-      }
-    })
+  }
+
+  private async migrateSettings(): Promise<void> {
+    const settings = this.ctx.get('settings')
+    if (!this.accepting || settings === undefined) return
+    const descriptor = settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)
+    // Registration validates this raw document; persist only the user layer, without deployment defaults.
+    const user = descriptor?.user as Config | undefined
+    if (user === undefined || (user.codex === undefined && user.claude === undefined)) return
+    if (!settings.writable) {
+      this.ctx.logger.warn('ACP legacy settings are readable; writable settings are required to persist their migration')
+      return
+    }
+    try {
+      await settings.replace(ACP_AGENT_SETTINGS_NAMESPACE, migrateProviders(user), descriptor?.revision)
+    } catch {
+      // Failed or concurrent writes retain readable credentials; subsequent settings changes retry migration.
+      this.ctx.logger.warn('ACP settings migration was not saved; the next settings change will retry')
+    }
   }
 
   private syncRoutes(): void {
@@ -750,6 +756,7 @@ export class PaperAiAcpAgents extends Service {
       const runtimeOptions: AcpRuntimeOptions = {
         mcpServers: [mcpLease.descriptor],
         processGraceMs: this.configSource().processGraceMs ?? 2_000,
+        toolProgressIntervalMs: this.configSource().toolProgressIntervalMs ?? 1_000,
         startupStage: (stage) => {
           if (this.starting.get(id) !== startup) return
           startup.stage = stage
@@ -835,7 +842,7 @@ export class PaperAiAcpAgents extends Service {
     if (defaults.model !== undefined)
       await apply(agent.details().options.find(option => option.category === 'model')?.id, defaults.model, 'model')
     if (defaults.reasoningEffort !== undefined)
-      await apply(agent.details().options.find(option => option.category === 'thought_level')?.id, defaults.reasoningEffort, 'reasoning effort')
+      await apply(findAcpEffortOption(agent.details().options)?.id, defaults.reasoningEffort, 'reasoning effort')
     for (const [key, value] of Object.entries(defaults.switches ?? {})) await apply(key, value, 'switch')
     for (const [key, value] of Object.entries(defaults.configOptions ?? {})) await apply(key, value, 'session option')
   }

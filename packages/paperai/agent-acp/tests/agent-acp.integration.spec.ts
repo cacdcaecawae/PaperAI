@@ -128,11 +128,12 @@ class TestPersistence extends SessionPersistence {
 
 class TestSettings extends SettingsProvider {
   private readonly storedDocument: Record<string, unknown>
+  persistCalls = 0
 
   constructor(ctx: Context, private readonly options: {
     readonly document: Record<string, unknown>
     readonly writable: boolean
-    readonly failWrites: boolean
+    readonly failWrites: boolean | number
   }) {
     super(ctx)
     this.storedDocument = structuredClone(options.document)
@@ -147,7 +148,9 @@ class TestSettings extends SettingsProvider {
   }
 
   protected override persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
-    if (this.options.failWrites) return Promise.reject(new Error('Settings storage unavailable'))
+    this.persistCalls++
+    if (this.options.failWrites === true || (typeof this.options.failWrites === 'number' && this.persistCalls <= this.options.failWrites))
+      return Promise.reject(new Error('Settings storage unavailable'))
     this.storedDocument[ns] = structuredClone(section)
     return Promise.resolve()
   }
@@ -232,7 +235,7 @@ async function mountHarness(options: {
   readonly records?: Map<string, StoredSession>
   readonly settingsDocument?: Record<string, unknown>
   readonly settingsWritable?: boolean
-  readonly settingsFailWrites?: boolean
+  readonly settingsFailWrites?: boolean | number
   readonly writePath?: (workspaceRoot: string, fallbackRoot: string) => string
 } = {}): Promise<Harness> {
   const scratchRoot = await mkdtemp(join(homedir(), 'paperai-agent-acp-'))
@@ -415,6 +418,71 @@ async function runLifecycleProbe(action: 'dispose' | 'startup-rollback'): Promis
 }
 
 describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
+  it.each(['edit', 'clear'])('retries failed migration after settings attach late and a successful %s', async (action) => {
+    const harness = await mountHarness()
+    await harness.ctx.plugin(TestSettings, { writable: true, failWrites: 1, document: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { codex: { apiKey: 'old-key', env: { LEGACY_SECRET: 'old-env' } } },
+    } })
+    const settings = harness.ctx.settings as TestSettings
+    await expect.poll(() => settings.persistCalls).toBe(1)
+    expect(harness.ctx.paperAiAcpAgents.providers()[0]?.env).toHaveProperty('OPENAI_API_KEY', 'old-key')
+    if (action === 'clear') await settings.mutate(ACP_AGENT_SETTINGS_NAMESPACE, [
+      { op: 'unset', path: ['providers', 'codex', 'apiKey'] },
+      { op: 'unset', path: ['providers', 'codex', 'env'] },
+      { op: 'unset', path: ['codex', 'apiKey'] },
+      { op: 'unset', path: ['codex', 'env'] },
+    ])
+    else await settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { language: '中文' } } })
+    const descriptor = () => settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)!
+    await expect.poll(() => descriptor().user).toEqual({ providers: { codex: action === 'clear' ? {} : {
+      apiKey: 'old-key', env: { LEGACY_SECRET: 'old-env' }, language: '中文',
+    } } })
+    const restarted = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: descriptor().user } })
+    const env = restarted.ctx.paperAiAcpAgents.providers()[0]?.env
+    if (action === 'clear') {
+      expect(env).not.toHaveProperty('OPENAI_API_KEY')
+      expect(env).not.toHaveProperty('LEGACY_SECRET')
+    } else expect(env).toHaveProperty('OPENAI_API_KEY', 'old-key')
+  })
+
+  it.each(['effort', 'reasoning_effort', 'reasoning-effort'])('applies default effort through the advertised %s alias', async (id) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_EFFORT_ID: id }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { reasoningEffort: 'high' } } },
+    } })
+    const handle = await createAgent(harness, `default-${id}`)
+    expect(handle.agent.modelController?.currentReasoningEffort).toBe('high')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option'))
+      .toEqual([expect.objectContaining({ configId: id, value: 'high' })])
+  })
+
+  it('flushes throttled tool output before completion and stops its timer after the turn', async () => {
+    const harness = await mountHarness({ settingsDocument: {} })
+    const gate = join(harness.root, 'stream-gate')
+    await writeFile(gate, 'hold')
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, {
+      toolProgressIntervalMs: 100,
+      providers: { codex: { env: { FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_GATE_FILE: gate } } },
+    })
+    const handle = await createAgent(harness, 'throttled-output')
+    const running = runTurn(handle, 'Read the running command output')
+    const progress = () => handle.agent.session.events.filter(event => event.type === 'tool/progress')
+    try {
+      await expect.poll(() => progress().some(event => event.data.arguments.includes('399 '))).toBe(true)
+      expect(handle.agent.session.events.some(event => event.type === 'turn/end')).toBe(false)
+      expect(JSON.parse(progress().at(-1)!.data.arguments)).toMatchObject({ status: 'in_progress', truncated: true })
+      expect(progress().length).toBeLessThan(5)
+    } finally {
+      await rm(gate)
+      await running
+    }
+    const final = JSON.parse(progress().at(-1)!.data.arguments) as { status: string; output: string }
+    expect(final.status).toBe('completed')
+    expect(final.output).toContain('399 ')
+    const count = handle.agent.session.events.length
+    await new Promise(resolve => setTimeout(resolve, 150))
+    expect(handle.agent.session.events).toHaveLength(count)
+  })
+
   it('migrates stored legacy credentials before editing and never resurrects cleared values', async () => {
     const harness = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: {
       codex: { apiKey: 'old-codex-key', env: { LEGACY_SECRET: 'old-env' }, baseURL: 'https://legacy.example' },

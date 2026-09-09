@@ -869,10 +869,12 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'header-footer.expected.md'), await preview.ariaSnapshot(), MODE)
   }, 90_000)
 
-  it('starts from migrated credentials with optional defaults and renders coalesced tool progress', async () => {
+  it('starts from migrated credentials with optional defaults and renders throttled tool progress', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-acp-defaults'))
     const projectRoot = join(scaffold.workspaceCwd, 'acp-defaults')
     await mkdir(projectRoot)
+    const streamGate = join(projectRoot, 'stream-gate')
+    await writeFile(streamGate, 'hold')
     await scaffold.ctx.workspaceRegistry.create(projectRoot, 'ACP defaults')
     await page.getByRole('button', { name: '设置', exact: true }).click()
     const settings = page.getByRole('dialog', { name: '设置', exact: true })
@@ -884,7 +886,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await editor.getByText('高级设置', { exact: true }).click()
     await editor.getByRole('textbox', { name: '默认思考强度', exact: true }).fill('retired-effort')
     await editor.getByRole('textbox', { name: '默认会话选项 · JSON 对象', exact: true }).fill('{"removed-option":true}')
-    await editor.getByRole('textbox', { name: '环境变量 · JSON 对象', exact: true }).fill('{"FAKE_ACP_STREAM_TOOL":"completed","FAKE_ACP_STREAM_UPDATES":"4"}')
+    await editor.getByRole('textbox', { name: '环境变量 · JSON 对象', exact: true }).fill(JSON.stringify({
+      FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_UPDATES: '4', FAKE_ACP_STREAM_GATE_FILE: streamGate,
+    }))
     await editor.getByRole('button', { name: '保存配置', exact: true }).click()
     await editor.waitFor({ state: 'hidden' })
     await settings.getByRole('combobox', { name: '默认 Agent' }).selectOption('claude')
@@ -902,14 +906,22 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(() => model.getAttribute('aria-label'), { timeout: 20_000 }).toContain('custom-browser-model')
     const eventStart = sessionEvents.length
     const settled = scaffold.whenTurnSettled(60_000)
-    await page.locator('textarea:enabled').last().fill('显示工具的最终输出。')
+    await page.locator('textarea:enabled').last().fill('显示工具运行中的输出。')
     await page.getByRole('button', { name: '发送消息', exact: true }).click()
-    await settled
     const tool = page.locator('[data-chat-call-id="streaming-tool"]')
-    await tool.waitFor({ timeout: 15_000 })
-    await tool.locator('[data-disclosure-row]').click()
-    await expect.poll(() => tool.innerText()).toContain(`003 ${'x'.repeat(250)}`)
-    expect(sessionEvents.slice(eventStart).filter(event => event.type === 'tool/progress')).toHaveLength(2)
+    try {
+      await tool.waitFor({ timeout: 15_000 })
+      await tool.locator('[data-disclosure-row]').click()
+      await expect.poll(() => tool.innerText(), { timeout: 10_000 }).toContain(`003 ${'x'.repeat(250)}`)
+      expect(sessionEvents.slice(eventStart).some(event => event.type === 'turn/end')).toBe(false)
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-running-output.expected.md'),
+        await captureStableAria(page, '[data-chat-call-id="streaming-tool"]', scaffold.workspaceCwd), MODE)
+    } finally {
+      await rm(streamGate)
+      await settled
+    }
+    await expect.poll(() => tool.innerText()).toContain('已完成')
+    expect(sessionEvents.slice(eventStart).filter(event => event.type === 'tool/progress')).toHaveLength(3)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-migrated-defaults.expected.md'), [
       await model.ariaSnapshot(),
       await captureStableAria(page, '[data-chat-call-id="streaming-tool"]', scaffold.workspaceCwd),
@@ -924,6 +936,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'agent-connecting.expected.md',
       'acp-connection-status.expected.md',
       'acp-migrated-defaults.expected.md',
+      'acp-running-output.expected.md',
       'agent-diagnostics.expected.md',
       'block-conflict.expected.md',
       'block-editor.expected.md',

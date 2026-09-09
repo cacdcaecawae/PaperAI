@@ -179,7 +179,7 @@ it('preserves unseen credentials, keeps channel identity fixed and validates def
   b.controller.updateDraft({ id: 'custom', template: 'claude', name: 'My Codex' })
   await b.controller.save()
   const ops = b.mutate.mock.calls[0]![0].ops as Array<{ path: string[] }>
-  expect(ops.every(op => op.path[1] === 'codex')).toBe(true)
+  expect(ops.every(op => op.path[0] === 'providers' ? op.path[1] === 'codex' : op.path[0] === 'codex')).toBe(true)
   expect(ops.some(op => op.path.includes('apiKey') || op.path.includes('env'))).toBe(false)
   b.mutate.mockClear()
   b.controller.edit('codex')
@@ -187,6 +187,26 @@ it('preserves unseen credentials, keeps channel identity fixed and validates def
   await b.controller.save()
   expect(b.mutate).not.toHaveBeenCalled()
   expect(b.controller.store.getSnapshot().draftError).toContain('更换默认')
+})
+
+it('edits legacy values and clears their copies atomically while migration is pending', async () => {
+  const b = await bench()
+  b.mirror.acceptView({ ...namespace, value: {
+    codex: { baseURL: 'https://legacy.example', model: 'legacy-model' },
+    providers: { codex: { model: 'canonical-model' } },
+  } })
+  b.controller.edit('codex')
+  expect(b.controller.store.getSnapshot().draft).toMatchObject({ baseURL: 'https://legacy.example', model: 'canonical-model' })
+  b.controller.updateDraft({ clearKey: true, clearEnv: true, baseURL: '' })
+  await b.controller.save()
+  expect(b.mutate.mock.lastCall?.[0].ops).toEqual(expect.arrayContaining([
+    { op: 'unset', path: ['providers', 'codex', 'apiKey'] },
+    { op: 'unset', path: ['codex', 'apiKey'] },
+    { op: 'unset', path: ['providers', 'codex', 'env'] },
+    { op: 'unset', path: ['codex', 'env'] },
+    { op: 'unset', path: ['providers', 'codex', 'baseURL'] },
+    { op: 'unset', path: ['codex', 'baseURL'] },
+  ]))
 })
 
 it('clears connection claims immediately and discards a stale catalog response', async () => {
