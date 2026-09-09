@@ -12,6 +12,7 @@ import type { Workspace } from '@deepseek-ai/dsh-workspace/types'
 import type {} from '@paperai/commit-service'
 import type {} from '@paperai/agent-acp'
 import type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
+import type { AcpCatalogEntry, AcpManagementRequest, AcpManagementResult, AcpSessionDetails } from '@paperai/agent-acp/diagnostic-types'
 import type { ProjectIntegrityReport as PaperAIProjectIntegrityReport } from '@paperai/commit-service/doctor-types'
 import type {} from '@paperai/document-engine'
 import type {} from '@paperai/document-service'
@@ -372,7 +373,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   private readonly gateCache = new Map<DocumentId, GateCacheSlot>()
   private readonly maxUploadBytes: number
-  private acp: Pick<Context['paperAiAcpAgents'], 'diagnosticStatus' | 'probe'> | undefined
+  private acp: Pick<Context['paperAiAcpAgents'], 'diagnosticStatus' | 'probe' | 'catalog' | 'cancelOperation' | 'manage' | 'install' | 'sessionDetails' | 'selectOption' | 'linkedSession' | 'importHistory'> | undefined
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'paperaiWorkbench')
@@ -425,6 +426,90 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   @Remote('agentDiagnostics')
   agentDiagnostics(): readonly PaperAIAgentDiagnostic[] {
     return this.acp?.diagnosticStatus() ?? []
+  }
+
+  /**
+   * Inspect all configured ACP channels on this Host without a provider prompt.
+   * @param signal - optional cancellation for executable discovery.
+   * @returns built-in and custom channels with installation and cached protocol state.
+   */
+  @Remote('acpCatalog')
+  async acpCatalog(signal?: AbortSignal): Promise<readonly AcpCatalogEntry[]> {
+    return await this.acp?.catalog(signal) ?? []
+  }
+
+  /**
+   * Cancel queued or running ACP channel management work.
+   * @param request - channel owning the operation.
+   */
+  @Remote('acpCancel')
+  acpCancel(request: { provider: string }): void { this.acp?.cancelOperation(request.provider) }
+
+  /**
+   * Apply a capability-gated ACP account, routing, or external-history operation.
+   * @param request - instance id and explicit action.
+   * @param signal - caller cancellation.
+   * @returns declared non-secret history or routing fields.
+   */
+  @Remote('acpManage')
+  async acpManage(request: { provider: string; action: AcpManagementRequest }, signal?: AbortSignal): Promise<AcpManagementResult> {
+    if (this.acp === undefined) throw new Error('ACP Agent provider is not configured')
+    return await this.acp.manage(request.provider, request.action, signal)
+  }
+
+  /**
+   * Change only the selected channel's PaperAI-managed installation.
+   * @param request - channel and install or uninstall action.
+   * @param signal - cancellation including process-tree cleanup.
+   */
+  @Remote('acpInstall')
+  async acpInstall(request: { provider: string; action: 'install' | 'uninstall' }, signal?: AbortSignal): Promise<void> {
+    if (this.acp === undefined) throw new Error('ACP Agent provider is not configured')
+    await this.acp.install(request.provider, request.action, signal)
+  }
+
+  /**
+   * Read the active ACP conversation's options and provider-owned status.
+   * @param request - PaperAI session identity.
+   * @returns runtime-declared controls, or null for a non-ACP Agent.
+   */
+  @Remote('acpSession')
+  acpSession(request: { sessionId: SessionId }): AcpSessionDetails | null { return this.acp?.sessionDetails(request.sessionId) ?? null }
+
+  /**
+   * Resolve an already imported provider history without opening another connection.
+   * @param request - provider channel and external id.
+   * @param signal - lookup cancellation.
+   * @returns known local conversation, or null.
+   */
+  @Remote('acpLinkedSession')
+  async acpLinkedSession(request: { provider: string; externalSessionId: string }, signal?: AbortSignal): Promise<SessionId | null> {
+    if (this.acp === undefined) throw new Error('ACP Agent provider is not configured')
+    return await this.acp.linkedSession(request.provider, request.externalSessionId, signal)
+  }
+
+  /**
+   * Import selected provider history into an unused local conversation.
+   * @param request - target local session and provider history identity/directory.
+   * @param signal - caller cancellation.
+   * @returns the local conversation owning the imported history.
+   */
+  @Remote('acpImportHistory')
+  async acpImportHistory(
+    request: { sessionId: SessionId; externalSessionId: string; cwd: string }, signal?: AbortSignal,
+  ): Promise<SessionId> {
+    if (this.acp === undefined) throw new Error('ACP Agent provider is not configured')
+    return await this.acp.importHistory(request.sessionId, request.externalSessionId, request.cwd, signal)
+  }
+
+  /**
+   * Change one provider-declared option without changing the DSH sandbox policy.
+   * @param request - exact session, option id, and selected value.
+   */
+  @Remote('acpSelectOption')
+  async acpSelectOption(request: { sessionId: SessionId; option: string; value: string | boolean }): Promise<void> {
+    if (this.acp === undefined) throw new Error('ACP Agent provider is not configured')
+    await this.acp.selectOption(request.sessionId, request.option, request.value)
   }
 
   /**

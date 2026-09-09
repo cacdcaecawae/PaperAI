@@ -76,7 +76,8 @@
     "@paperai/workbench-service": "workspace:*",
     "@deepseek-ai/dsh-storage-sqlite": "workspace:^",
     "@paperai/ui-brand": "workspace:*",
-    "@paperai/ui-workbench": "workspace:*"
+    "@paperai/ui-workbench": "workspace:*",
+    "@paperai/ui-acp": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",

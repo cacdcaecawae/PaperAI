@@ -14,7 +14,7 @@ The document view renders sanitized, derived HTML in a shadow root, retaining em
 
 Selecting mapped Word text exposes “Ask Agent.” The gesture inserts a removable composer reference with document id, path, revision, head commit, block ids, and exact text. Its serialized value freezes before asynchronous submission; changing documents cannot retarget it. The existing reference codec handles clipboard persistence, removal, and message serialization. Selection alone never sends a message.
 
-Agent status reads installation and cached model metadata separately from the live model selector. Explicit detection launches a bounded, prompt-free probe without replacing the conversation process. Project Doctor opens a read-only scan. The recovery preview identifies the missing working file and exact version before the user restores it. [Commit-service recovery](../../paperai/commit-service/README.md) owns validation and publication.
+The Agent selector reports diagnostic results and startup progress separately from the live model selector. Another conversation using the provider does not establish a connection for this selector. Explicit detection launches a bounded, prompt-free probe without replacing the conversation process. Project Doctor opens a read-only scan. The recovery preview identifies the missing working file and exact version before the user restores it. [Commit-service recovery](../../paperai/commit-service/README.md) owns validation and publication.
 
 The plugin mounts the generated `@paperai/workbench-service/remote` descriptor before registering UI. Transport types come from `@paperai/workbench-service/types`. React-free controllers own browser state, reject stale replies, and release subscriptions and pending reads on disposal.
 

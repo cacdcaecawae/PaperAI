@@ -62,6 +62,7 @@ async function bench(mountError?: Error) {
   ctx.provide('conversationDetails', { open: openDetails, close: closeDetails })
   ctx.provide('layout', { configure: configureLayout, setDetailsFocus, revealConversation } as never)
   ctx.provide('modelsOnboarding', { configure: configureOnboarding } as never)
+  ctx.provide('connection', { hostDescription: createSnapshotStore<unknown>({}) } as never)
   const remote = successfulRemote()
   const remoteListeners = new Map<string, Set<(payload: unknown) => void>>()
   const onRemote = vi.fn((event: string, listener: (payload: unknown) => void) => {
@@ -148,7 +149,7 @@ describe('PaperAI workbench browser plugin', () => {
   it('requires the generated Remote mount instead of a guessed namespace', () => {
     expect(inject).toEqual([
       'slots', 'locale', 'sessions', 'workspaces', 'conversationDetails', 'layout',
-      'modelsOnboarding', 'remote', 'conversation', 'inputTriggers',
+      'modelsOnboarding', 'remote', 'connection', 'conversation', 'inputTriggers',
     ])
     expect(inject).not.toContain('remote.paperaiWorkbench')
   })

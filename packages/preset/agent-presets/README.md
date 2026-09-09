@@ -6,6 +6,9 @@ Per-preset agent composition. A **preset** is a directory holding one `agent.cor
 
 The mechanism is two seams. Entry contexts chain to the context a subtree was plugged into, and both [`dsh-tools`](../../core/tools/README.md) and [`dsh-system-prompt`](../../core/system-prompt/README.md) file registrations into the calling context's scope layer — so the standing mount's contributions land in the PRESET's layer. What carries them to each session is `dsh-scope`'s parent chain: an agent's views resolve `agent → preset → global` (nearest shadowing farthest), and the mount's listeners are admitted for every agent parented under it while a sibling preset's stay deaf.
 
+
+Plugins can contribute presets with exact factory routes through register(). Contributions take precedence over file discovery and disappear with their disposer; consumers receive agent-presets/changed. A contributed route cannot be copied into an ordinary file preset, because its composition alone does not reproduce the external Agent factory.
+
 ## Service: `AgentPresets` (ctx key: `agentPresets`)
 
 Discovery is unmemoized: `list()` and `resolve()` re-read the roots on every call, so a preset authored while the process runs is visible immediately and a deleted one disappears from the next read. Discovery also owns preset **health**: a directory whose composition is missing or unloadable (unparsable YAML — checked with the loader's own dialect, `!!js` included — or not a list of named plugin rows) is listed with a `broken` reason rather than skipped, because a skipped directory would still occupy its id on disk while every surface shows nothing to delete. A directory whose name is not a usable preset id (`[a-z0-9][a-z0-9-]*`) is skipped outright: no copy could ever claim it.

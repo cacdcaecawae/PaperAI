@@ -1,8 +1,4 @@
-import type {
-  SessionConfigOption,
-  SessionConfigSelectGroup,
-  SessionConfigSelectOption,
-} from '@agentclientprotocol/sdk'
+import type { SessionConfigOption, SessionConfigSelectGroup, SessionConfigSelectOption } from '@agentclientprotocol/sdk'
 import type { AgentDriverModel, AgentDriverReasoningEffort } from '@deepseek-ai/dsh-agent'
 
 /** ACP's semantic reasoning-effort selector (`thought_level`) for the current model. */
@@ -40,14 +36,30 @@ export interface AcpModelState {
 
 const EFFORT_OPTION_IDS = new Set(['effort', 'reasoning_effort', 'reasoning-effort'])
 
+/**
+ * Find the semantic effort option, preferring its category over recognized id aliases.
+ * @param options - advertised options or their settings projections.
+ * @returns The effort selector, when advertised.
+ */
+export function findAcpEffortOption<T extends Pick<SessionConfigOption, 'id' | 'category'>>(options: readonly T[]): T | undefined {
+  return options.find(option => option.category === 'thought_level') ?? options.find(option => EFFORT_OPTION_IDS.has(option.id))
+}
+
+/**
+ * Identify native permission controls that remain owned by the DSH permission selector.
+ * @param option - provider-advertised config option.
+ * @returns whether general session controls must leave this option read-only.
+ */
+export function isAcpPermissionOption(option: SessionConfigOption): boolean {
+  return option.category === 'mode' || option.id === 'mode' || /permission|sandbox|approval/iu.test(option.id)
+}
+
 function text(value: string | null | undefined): string | undefined {
   const clean = value?.trim()
   return clean === '' ? undefined : clean
 }
 
-function isGroup(
-  option: SessionConfigSelectOption | SessionConfigSelectGroup,
-): option is SessionConfigSelectGroup {
+function isGroup(option: SessionConfigSelectOption | SessionConfigSelectGroup): option is SessionConfigSelectGroup {
   return 'options' in option && Array.isArray(option.options)
 }
 
@@ -74,14 +86,14 @@ function effortState(select: SelectOption): AcpEffortState | undefined {
     if (id === undefined || seen.has(id)) continue
     seen.add(id)
     const description = text(option.description)
-    efforts.push({ id, name: text(option.name) ?? id, ...description === undefined ? {} : { description } })
+    efforts.push({ id, name: text(option.name) ?? id, ...(description === undefined ? {} : { description }) })
   }
   if (efforts.length === 0) return undefined
   const current = text(select.currentValue)
   return {
     configId: select.id,
     efforts,
-    ...current !== undefined && seen.has(current) ? { current } : {},
+    ...(current !== undefined && seen.has(current) ? { current } : {}),
   }
 }
 
@@ -105,20 +117,20 @@ export function modelStateFromConfigOptions(
     switches.push({
       configId: option.id,
       name: text(option.name) ?? option.id,
-      ...description === undefined ? {} : { description },
+      ...(description === undefined ? {} : { description }),
       enabled: option.currentValue,
     })
   }
-  const effortSelect = selectors.find(option => option.category === 'thought_level')
-    ?? selectors.find(option => EFFORT_OPTION_IDS.has(option.id))
+  const effortSelect = findAcpEffortOption(selectors)
   const effort = effortSelect === undefined ? undefined : effortState(effortSelect)
-  const model = selectors.find(option => option.category === 'model')
-    ?? selectors.find(option => option.id === 'model')
-  if (model === undefined) return { models: [], ...effort === undefined ? {} : { effort }, switches }
+  const model =
+    selectors.find(option => option.category === 'model') ?? selectors.find(option => option.id === 'model')
+  if (model === undefined) return { models: [], ...(effort === undefined ? {} : { effort }), switches }
 
-  const reasoning = effort === undefined
-    ? undefined
-    : { efforts: effort.efforts, ...effort.current === undefined ? {} : { defaultEffort: effort.current } }
+  const reasoning =
+    effort === undefined
+      ? undefined
+      : { efforts: effort.efforts, ...(effort.current === undefined ? {} : { defaultEffort: effort.current }) }
   const models: AgentDriverModel[] = []
   const seen = new Set<string>()
   for (const { option, group } of flatten(model)) {
@@ -129,17 +141,19 @@ export function modelStateFromConfigOptions(
     models.push({
       id,
       name: text(option.name) ?? id,
-      ...description === undefined ? {} : { description },
-      ...group === undefined ? {} : { group },
-      ...reasoning === undefined ? {} : { reasoning },
+      ...(description === undefined ? {} : { description }),
+      ...(group === undefined ? {} : { group }),
+      ...(reasoning === undefined ? {} : { reasoning }),
     })
   }
   const currentModel = text(model.currentValue)
+  if (currentModel !== undefined && !seen.has(currentModel))
+    models.push({ id: currentModel, name: currentModel, ...(reasoning === undefined ? {} : { reasoning }) })
   return {
     configId: model.id,
     models,
-    ...currentModel === undefined ? {} : { currentModel },
-    ...effort === undefined ? {} : { effort },
+    ...(currentModel === undefined ? {} : { currentModel }),
+    ...(effort === undefined ? {} : { effort }),
     switches,
   }
 }

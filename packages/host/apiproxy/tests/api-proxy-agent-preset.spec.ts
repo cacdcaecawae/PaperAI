@@ -50,6 +50,7 @@ function roster(ids: readonly string[], userIds: readonly string[] = []): unknow
     ({ id, trust: trustOf(id), path: `/presets/${id}/agent.cordis.yml` })
   return {
     defaultId: ids[0],
+    factoryRoute: (id: string) => id === 'codex' || id === 'claude' ? id : undefined,
     list: () => Promise.resolve(ids.map(presetOf)),
     resolve: (id?: string) => {
       const wanted = id ?? ids[0] ?? ''

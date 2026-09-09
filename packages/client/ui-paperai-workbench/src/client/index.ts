@@ -1,7 +1,7 @@
 /** DSH-native PaperAI plugin: sidebar documents, project start page, template library, and document view. */
 
 import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Config as LayoutConfig } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -65,7 +65,7 @@ export const PAPERAI_LAYOUT_CONFIG: Readonly<LayoutConfig> = Object.freeze({
 /** Required DSH services, including the generated Remote contribution mount. */
 export const inject = [
   'slots', 'locale', 'sessions', 'workspaces', 'conversationDetails', 'layout',
-  'modelsOnboarding', 'remote',
+  'modelsOnboarding', 'remote', 'connection',
   'conversation', 'inputTriggers',
 ]
 
@@ -121,7 +121,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       inject: () => ({
         hooks: { diagnostics: diagnostics.store },
         loadAgents: () => diagnostics.loadAgents(),
-        probe: (provider: 'codex' | 'claude', force: boolean) => diagnostics.probe(provider, force),
+        probe: (provider: string, force: boolean) => diagnostics.probe(provider, force),
       }),
     }, AgentDiagnostics))
     const t = ctx.locale.bind(NS)
@@ -140,7 +140,12 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       'paperai-ui-workbench: eager project initialization',
     )
     initializeWorkspaces()
-    ctx.on('connection/reset', () => { controller.refreshLoaded() })
+    ctx.on('connection/reset', () => { controller.refreshLoaded(); void diagnostics.loadAgents() })
+    const connection = ctx.get('connection') as ConnectionHandle
+    ctx.effect(() => connection.hostDescription.subscribe(() => {
+      if (connection.hostDescription.getSnapshot() === undefined) diagnostics.disconnected()
+    }), 'paperai-ui-workbench: Host connection loss')
+    ctx.effect(() => ctx.remote.$on('paperai/acp-changed', () => { void diagnostics.loadAgents() }), 'paperai-ui-workbench: ACP connection status')
     ctx.effect(
       () => ctx.remote.$on('paperai/document-changed', (change) => {
         controller.handleDocumentChanged(change)

@@ -126,6 +126,15 @@ describe('DeepSeekHarness', () => {
     await harness.close()
   })
 
+  it('preserves external tool progress arguments in the collected session log', async () => {
+    const harness = harnessWith({ FAKE_TOOL_PROGRESS: '1' })
+    const result = await harness.run('observe progress')
+    expect(result.events.filter(event => event.type === 'tool/progress').map(event => event.data)).toEqual([
+      { turn: 0, step: 0, callId: 'external-tool', name: 'paperai_acp_tool', arguments: '{"output":"partial"}' },
+    ])
+    await harness.close()
+  })
+
   it('keeps events root-scoped while streaming notifications for the session tree', async () => {
     const harness = harnessWith({ FAKE_SUBAGENT: '1' })
     const seen: HarnessNotification[] = []

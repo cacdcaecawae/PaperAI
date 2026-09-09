@@ -185,7 +185,7 @@ export class TestSessions implements ISessions {
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
     method: 'open' | 'openSubagent' | 'setSubagentCatalogOpen' | 'refreshSubagents'
-      | 'clear' | 'search' | 'fork'
+      | 'clear' | 'search' | 'fork' | 'create'
     args: unknown[]
   }[] = []
 
@@ -256,6 +256,15 @@ export class TestSessions implements ISessions {
       })
     })
     return id
+  }
+
+  async create(opts: { cwd?: string; sessionId?: SessionId; agentPreset?: string } = {}): Promise<SessionId> {
+    this.calls.push({ method: 'create', args: [opts] })
+    return this.add({ id: opts.sessionId ?? `created-${this.records.size + 1}`, summary: {
+      blank: true,
+      ...opts.cwd === undefined ? {} : { cwd: opts.cwd },
+      ...opts.agentPreset === undefined ? {} : { agentPreset: opts.agentPreset },
+    } }, { current: false })
   }
 
   /**

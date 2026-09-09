@@ -18,7 +18,7 @@ export type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp
 
 /** An explicit prompt-free diagnostic request for one configured peer Agent. */
 export interface PaperAIProbeAgentRequest {
-  readonly provider: 'codex' | 'claude'
+  readonly provider: string
   readonly force: boolean
 }
 

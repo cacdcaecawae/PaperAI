@@ -502,6 +502,28 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `paperai/*`
 
+<a id="paperaiacpanswer--log-only"></a>
+
+#### `paperai/acp/answer` — log-only
+
+```ts persistence-catalog
+/** Human input returned to an ACP request, retained for model-request reconstruction. */
+'paperai/acp/answer': { provider: string; request: string; response: string }
+```
+
+来源： [`packages/paperai/agent-acp/src/agent.ts:97`](../packages/paperai/agent-acp/src/agent.ts)
+
+<a id="paperaiacpclient-request--log-only"></a>
+
+#### `paperai/acp/client-request` — log-only
+
+```ts persistence-catalog
+/** Filesystem and terminal exchanges returned to the provider's model loop. */
+'paperai/acp/client-request': { provider: string; method: string; request: string; response: string }
+```
+
+来源： [`packages/paperai/agent-acp/src/agent.ts:99`](../packages/paperai/agent-acp/src/agent.ts)
+
 <a id="paperaiacpconfig--log-only"></a>
 
 #### `paperai/acp/config` — log-only
@@ -514,14 +536,37 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
  * alone. Log-only: not a surface event.
  */
 'paperai/acp/config': {
-  provider: 'codex' | 'claude'
+  provider: string
   model: string
   reasoningEffort?: string
   switches?: Record<string, boolean>
+  configOptions?: Record<string, string | boolean>
 }
 ```
 
-来源：[`packages/paperai/agent-acp/src/agent.ts:60`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:87`](../packages/paperai/agent-acp/src/agent.ts)
+
+<a id="paperaiacpcontent--log-only"></a>
+
+#### `paperai/acp/content` — log-only
+
+```ts persistence-catalog
+/** Original provider content for media without a canonical DSH content block. */
+'paperai/acp/content': { provider: string; content: AcpContentBlock }
+```
+
+来源： [`packages/paperai/agent-acp/src/content.ts:12`](../packages/paperai/agent-acp/src/content.ts)
+
+<a id="paperaiacpcontext--log-only"></a>
+
+#### `paperai/acp/context` — log-only
+
+```ts persistence-catalog
+/** Exact extra text supplied to an ACP prompt after the durable user inputs. */
+'paperai/acp/context': { provider: string; content: string[] }
+```
+
+来源： [`packages/paperai/agent-acp/src/agent.ts:95`](../packages/paperai/agent-acp/src/agent.ts)
 
 <a id="paperaiacpsession--log-only"></a>
 
@@ -530,13 +575,25 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```ts persistence-catalog
 /** Durable link from one DSH session lifecycle to its provider-owned ACP session. */
 'paperai/acp/session': {
-  provider: 'codex' | 'claude'
+  provider: string
   externalSessionId: string
   resumed: boolean
+  host?: string
 }
 ```
 
-来源：[`packages/paperai/agent-acp/src/agent.ts:49`](../packages/paperai/agent-acp/src/agent.ts)
+来源： [`packages/paperai/agent-acp/src/agent.ts:75`](../packages/paperai/agent-acp/src/agent.ts)
+
+<a id="paperaiacpstate--log-only"></a>
+
+#### `paperai/acp/state` — log-only
+
+```ts persistence-catalog
+/** Provider-owned status retained independently of DSH's local history and compaction. */
+'paperai/acp/state': { provider: string; state: AcpSessionState }
+```
+
+来源： [`packages/paperai/agent-acp/src/agent.ts:101`](../packages/paperai/agent-acp/src/agent.ts)
 
 ### `permission/*`
 
@@ -839,9 +896,9 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/call': { turn: number; step: number; callId: CallId; name: string; arguments: string }
 ```
 
-类型：[CallId](subsystems/core.zh.md)
+Types: [CallId](subsystems/core.zh.md)
 
-来源：[`packages/core/session/src/types.ts:283`](../packages/core/session/src/types.ts)
+来源： [`packages/core/session/src/types.ts:283`](../packages/core/session/src/types.ts)
 
 <a id="toolcode-dispatch--log-only"></a>
 
@@ -866,7 +923,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/code-dispatch': CodeDispatchEventData
 ```
 
-来源：[`packages/core/tools/src/types.ts:56`](../packages/core/tools/src/types.ts)
+来源： [`packages/core/tools/src/types.ts:56`](../packages/core/tools/src/types.ts)
 
 <a id="toolcode-dispatch-start--log-only"></a>
 
@@ -889,7 +946,20 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/code-dispatch-start': CodeDispatchStartEventData
 ```
 
-来源：[`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types.ts)
+来源： [`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types.ts)
+
+<a id="toolprogress--log-only"></a>
+
+#### `tool/progress` — log-only
+
+```ts persistence-catalog
+/** Complete current arguments for an existing tool call; does not open another call or settle its result. */
+'tool/progress': { turn: number; step: number; callId: CallId; name: string; arguments: string }
+```
+
+Types: [CallId](subsystems/core.zh.md)
+
+来源： [`packages/core/session/src/types.ts:285`](../packages/core/session/src/types.ts)
 
 <a id="toolresult--surface"></a>
 
@@ -916,7 +986,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/core/session/src/types.ts:295`](../packages/core/session/src/types.ts)
+来源： [`packages/core/session/src/types.ts:297`](../packages/core/session/src/types.ts)
 
 ### `tool-workflow/*`
 

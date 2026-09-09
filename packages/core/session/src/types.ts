@@ -281,6 +281,8 @@ export interface SessionEventMap {
    * call with its `tool/result`.
    */
   'tool/call': { turn: number; step: number; callId: CallId; name: string; arguments: string }
+  /** Complete current arguments for an existing tool call; does not open another call or settle its result. */
+  'tool/progress': { turn: number; step: number; callId: CallId; name: string; arguments: string }
   /**
    * A completed tool call's model-facing result, optional internal failure
    * identity, and optional tool-private `meta` presentation payload. `meta` is

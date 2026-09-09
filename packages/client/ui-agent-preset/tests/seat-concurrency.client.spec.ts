@@ -20,6 +20,28 @@ function bench() {
 }
 
 describe('pending Agent selection', () => {
+  it('aborts an in-flight replacement and keeps the current session bound until cancellation settles', async () => {
+    const release = vi.fn()
+    const select = vi.fn((_request: unknown, signal: AbortSignal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => { reject(new Error('selection cancelled', { cause: signal.reason })) }, { once: true })
+    }))
+    const recovered = Promise.withResolvers<unknown>()
+    const models = vi.fn(() => recovered.promise)
+    const seat = new AgentPresetSeatController({ agentPresets: { select }, sessions: { models } } as unknown as IApiClient,
+      () => ({ id: 'same' as SessionId, blank: true, agentPreset: 'codex' }), undefined, () => release)
+    const selecting = seat.select('claude')
+    expect(seat.store.getSnapshot()).toMatchObject({ current: 'claude', busy: true })
+    seat.cancel()
+    expect(select.mock.calls[0]![1].aborted).toBe(true)
+    await vi.waitFor(() => { expect(models).toHaveBeenCalledOnce() })
+    expect(release).not.toHaveBeenCalled()
+    expect(seat.store.getSnapshot().busy).toBe(true)
+    recovered.resolve({ result: { ok: true, value: {} } })
+    await selecting
+    expect(seat.store.getSnapshot()).toMatchObject({ current: 'codex', busy: false })
+    expect(release).toHaveBeenCalledOnce()
+    seat.dispose()
+  })
   it('collapses intermediate picks to the latest intent and restores the last accepted route after failure', async () => {
     const b = bench()
     const first = b.seat.select('claude')

@@ -8,6 +8,7 @@
  *
  * Script vocabulary (all optional):
  * - `FAKE_TEXT`: assistant text for each turn (default `hello from fake runtime`).
+ * - `FAKE_TOOL_PROGRESS`: include an external tool call and complete progress arguments.
  * - `FAKE_STATUS`: the `session.finished` status (default `ok`).
  * - `FAKE_REASON_KIND`: the `session.finished` reason kind (default `completed`; `none` omits the reason).
  * - `FAKE_SUBAGENT`: also emit a child session (subagent.started + child event + subagent.finished).
@@ -95,6 +96,10 @@ function runTurn(sessionId: string): void {
     return
   }
   event(sessionId, 'turn/start', { turn: 0 })
+  if (env.FAKE_TOOL_PROGRESS !== undefined) {
+    event(sessionId, 'tool/call', { turn: 0, step: 0, callId: 'external-tool', name: 'paperai_acp_tool', arguments: '{}' })
+    event(sessionId, 'tool/progress', { turn: 0, step: 0, callId: 'external-tool', name: 'paperai_acp_tool', arguments: '{"output":"partial"}' })
+  }
   event(sessionId, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text } })
   if (env.FAKE_MALFORMED_MESSAGE !== undefined) {
     event(sessionId, 'assistant/message', {

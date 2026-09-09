@@ -47,11 +47,9 @@ const PAPERAI_PRESET_ROOT = join(
 /**
  * Preset roots supplied by this app for one profile.
  *
- * PaperAI offers only its product-owned root: one PaperAI writing agent per
- * engine — the built-in DSH loop (`dsh`), local Codex, and local Claude — so
- * the shared DSH root, whose presets carry no document capability, stays out
- * of the product roster. Other profiles retain the complete shipped DSH root.
- * The roster still appends its normal user-authoring root.
+ * PaperAI exposes Codex and Claude from its product-owned root. Other
+ * profiles retain the complete shipped DSH root. Deployment configuration
+ * controls whether the registry also admits user-authored presets.
  * @param name - the profile name.
  * @returns roots in discovery precedence order.
  */
@@ -61,7 +59,7 @@ export function profilePresetRoots(name: string): Array<{
   ids?: string[]
 }> {
   if (name !== 'paperai') return [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }]
-  return [{ path: PAPERAI_PRESET_ROOT, trust: 'system' }]
+  return [{ path: PAPERAI_PRESET_ROOT, trust: 'system', ids: ['codex', 'claude'] }]
 }
 
 const NAME = 'dsh'

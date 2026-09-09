@@ -33,6 +33,8 @@ export interface AgentPresetSeatInjected {
   load: () => Promise<void>
   /** Stage one preset for the next session. */
   select: (id: string) => Promise<void>
+  /** Cancel connection and restore the previous selection. */
+  cancel: () => void
   /** Clear the one-shot introduce cue once the chip has played it. */
   introduced: () => void
 }
@@ -71,7 +73,7 @@ export type AgentPresetSeatProps =
  * @returns the chip, or null when the deployment composes no presets.
  */
 export function AgentPresetSeat({
-  load, select, introduced, useAgentPresetSeat, renderSlot, t,
+  load, select, cancel, introduced, useAgentPresetSeat, renderSlot, t,
 }: AgentPresetSeatProps) {
   const state = useAgentPresetSeat(snapshot => snapshot)
   const [open, setOpen] = useState(false)
@@ -191,6 +193,7 @@ export function AgentPresetSeat({
           </button>
         )}
       />
+      {state.busy && <button type="button" onClick={cancel}>{t('cancelConnection')}</button>}
       {renderSlot('conversation.hero.agentPreset.status', { presetId: state.current, connecting: state.busy })}
       {state.error !== null && <span role="alert">{state.error}</span>}
     </span>

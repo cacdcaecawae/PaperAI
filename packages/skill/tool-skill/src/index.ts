@@ -415,7 +415,7 @@ const SKILL_GESTURE = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
  * @param messages - the step's claimed batch.
  * @returns candidate skill names, unvalidated against the registry.
  */
-function invokedSkillNames(messages: readonly UserMessage[]): string[] {
+export function invokedSkillNames(messages: readonly UserMessage[]): string[] {
   const names: string[] = []
   for (const message of messages) {
     if ((message.source as { kind?: unknown }).kind !== 'user') continue

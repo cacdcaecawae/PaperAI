@@ -822,6 +822,29 @@ export class ToolRuntime extends Service {
    * transport is stateless beyond its closures over `this`.
    */
   private codeTransport: ToolDefinition | undefined
+  private readonly externalPresenters = new Map<string, Pick<ToolDefinition, 'presentCall' | 'presentResult'>>()
+
+  /**
+   * Register pure presenters for a tool executed by an external Agent driver, without publishing a callable schema.
+   * @param name - driver-owned tool name.
+   * @param presenter - call and result projections from durable arguments and results.
+   * @returns disposer that removes this exact registration.
+   */
+  registerPresenter(name: string, presenter: Pick<ToolDefinition, 'presentCall' | 'presentResult'>): () => void {
+    if (this.externalPresenters.has(name)) throw new Error(`tool presenter already registered: ${name}`)
+    this.externalPresenters.set(name, presenter)
+    return () => { if (this.externalPresenters.get(name) === presenter) this.externalPresenters.delete(name) }
+  }
+
+  /**
+   * Resolve a callable tool's presenters or a driver-owned presentation-only registration.
+   * @param name - durable tool name.
+   * @param scope - viewing scope for ordinary callable definitions.
+   * @returns available pure presenters, without implying execution support.
+   */
+  presenter(name: string, scope?: ScopeKey): Pick<ToolDefinition, 'presentCall' | 'presentResult'> | undefined {
+    return this.get(name, scope) ?? this.externalPresenters.get(name)
+  }
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')

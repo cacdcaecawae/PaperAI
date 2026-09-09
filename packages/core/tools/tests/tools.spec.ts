@@ -34,6 +34,19 @@ const echoTool = defineTool({
 })
 
 describe('ToolRuntime', () => {
+  it('presents an external call without making it executable or adding a model tool', async () => {
+    const ctx = await setup()
+    const presenter = { presentCall: () => ({ card: 'generic' as const, title: 'External tool' }) }
+    const dispose = ctx.tools.registerPresenter('external', presenter)
+    expect(ctx.tools.presenter('external')).toBe(presenter)
+    expect(ctx.tools.get('external')).toBeUndefined()
+    expect(ctx.tools.schemas()).toEqual([])
+    expect(() => ctx.tools.registerPresenter('external', presenter)).toThrow('already registered')
+    dispose()
+    expect(ctx.tools.presenter('external')).toBeUndefined()
+    await ctx.fiber.dispose()
+  })
+
   it('registers tools, exposes schemas, and feeds the system-prompt assembly', async () => {
     const ctx = await setup()
     ctx.tools.register(echoTool)

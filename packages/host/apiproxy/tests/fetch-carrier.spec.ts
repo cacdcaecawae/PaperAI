@@ -389,6 +389,30 @@ describe('unary round trip (handler ⇄ client, no network)', () => {
     expect((await c.agentPresets.remove({ agentPreset: 'mine' })).result).toEqual({ ok: true, value: {} })
   })
 
+  it('forwards cancellation of an Agent switch to the Host before settling the carrier response', async () => {
+    const api = fakeApi()
+    const started = Promise.withResolvers<AbortSignal>()
+    api.agentPresets.select = async (request, signal) => {
+      if (signal === undefined) throw new Error('The fetch carrier did not forward cancellation')
+      started.resolve(signal)
+      if (!signal.aborted) await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => { resolve() }, { once: true })
+      })
+      return { rpcId: request.rpcId, result: { ok: false, error: { code: 'cancelled', message: 'Switch cancelled', details: {} } } }
+    }
+    const controller = new AbortController()
+    const request = new Request('http://localhost/api/agentPreset.select', {
+      method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'switch', method: 'agentPreset.select',
+        payload: { sessionId: 's', agentPreset: 'claude' } }),
+    })
+    const response = toFetchHandler(api).fetch(request)
+    const signal = await started.promise
+    controller.abort()
+    expect(signal.aborted).toBe(true)
+    expect(await (await response).json()).toMatchObject({ rpcId: 'switch', result: { ok: false, error: { code: 'cancelled' } } })
+  })
+
   it('round-trips the native picker without the default unary timeout', async () => {
     const api = fakeApi()
     api.host.pickDirectory = async (request) => {

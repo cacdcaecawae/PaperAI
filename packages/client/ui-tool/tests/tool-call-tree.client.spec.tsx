@@ -2,6 +2,7 @@
 /** ToolCallTree-owned root/subcall markers and selection projection. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { HostDescription } from '@deepseek-ai/dsh-client-connection/client'
 import type { ConversationSnapshot, ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -52,6 +53,18 @@ function props(
 }
 
 describe('ToolCallTree', () => {
+  it('renders durable tool images through the conversation image slot alongside structured results', () => {
+    const attachment = { attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`), mediaType: 'image/png' as const,
+      bytes: 68, width: 1, height: 1, name: 'chart.png' }
+    const block = root('image-tool', { name: 'external_tool', argsRaw: '{}' })
+    block.content = [{ type: 'image', attachment }]
+    block.resultView = { card: 'terminal', title: 'Render chart', output: 'done' }
+    const renderMessageImages: ToolTreeProps['renderMessageImages'] = vi.fn(() => <span>Chart preview</span>)
+    const view = render(<ToolCallTree {...props(block)} renderMessageImages={renderMessageImages} />)
+    expect(renderMessageImages).toHaveBeenCalledWith({ images: [{ type: 'image', attachment }], align: 'start' })
+    expect(view.getByText('Chart preview')).toBeTruthy()
+  })
+
   it('owns the root marker, generic fallback, and selected state for a window-truncated call', () => {
     const block = root('w1', null)
     const view = render(<ToolCallTree {...props(block, 'w1')} />)

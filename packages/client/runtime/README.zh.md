@@ -10,6 +10,9 @@
 
 <a id="slot-declaration-injection"></a>
 
+
+ISessions.create() 创建由 Host 持有的会话，可显式传入 agentPreset，并在返回前发布列表行。需要先创建再打开会话的功能可直接使用该既有所有者，无需等待另一条远端列表通知。
+
 ## Slot 声明注入
 
 `ctx.slots.inject(name, callback)` 将完整的 `SlotMap` key 作为贡献项的依赖，适用于贡献方插件可独立于声明条目激活的情形。声明存在时，它会同步运行 `callback`，否则等待；声明折叠会 dispose（资源释放）回调 effect，重新声明则会再次运行回调。控制器归调用方的插件 fiber 所有，因此卸载贡献方会取消等待或移除其活跃注册项。直接调用 `slots.register()` 向未声明 slot 注册仍会抛出异常。

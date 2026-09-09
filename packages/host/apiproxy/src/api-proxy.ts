@@ -699,9 +699,9 @@ function viewFor(
   scope?: ScopeKey,
 ): ToolEventView | undefined {
   try {
-    if (event.type === 'tool/call') {
+    if (event.type === 'tool/call' || event.type === 'tool/progress') {
       const { name, arguments: raw } = event.data as ToolCallData
-      const view = ctx.tools.get(name, scope)?.presentCall?.(JSON.parse(raw))
+      const view = ctx.tools.presenter(name, scope)?.presentCall?.(JSON.parse(raw))
       return view === undefined ? undefined : { for: 'call', view }
     }
     if (event.type === 'tool/result') {
@@ -710,7 +710,7 @@ function viewFor(
       const callId = message.source.callId
       const call = argsFor(callId) as { name: string; args: unknown } | undefined
       if (call === undefined) return undefined
-      const view = ctx.tools.get(call.name, scope)?.presentResult?.(call.args, {
+      const view = ctx.tools.presenter(call.name, scope)?.presentResult?.(call.args, {
         content: result.content,
         isError: result.isError === true,
         ...meta === undefined ? {} : { meta },
@@ -734,7 +734,7 @@ function viewFor(
 function backscanArgs(events: readonly SessionEvent[], callId: string): { name: string; args: unknown } | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i] as SessionEvent
-    if (event.type !== 'tool/call') continue
+    if (event.type !== 'tool/call' && event.type !== 'tool/progress') continue
     const data = event.data as ToolCallData
     if (data.callId !== callId) continue
     try {
@@ -1177,8 +1177,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
   /** Resolve a preset's exact peer driver without falling back to the DSH loop. */
   function factoryRouteForPreset(presetId: string): string | undefined {
-    if (ctx.agents.hasFactoryRoute(presetId)) return presetId
-    if (REQUIRED_AGENT_FACTORY_ROUTES.has(presetId)) {
+    const required = ctx.get('agentPresets')?.factoryRoute(presetId)
+    const route = required ?? presetId
+    if (ctx.agents.hasFactoryRoute(route)) return route
+    if (required !== undefined || REQUIRED_AGENT_FACTORY_ROUTES.has(presetId)) {
       throw new Error(
         `agent preset "${presetId}" requires factory route "${presetId}", but that route is not registered`,
       )
@@ -3133,7 +3135,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // conversation's history was produced under its preset's tools. A
       // same-driver switch recomposes the live scope; a peer-driver switch
       // checkpoints the Session and replaces the Agent around that identity.
-      async select(request) {
+      async select(request, signal) {
         const { sessionId, agentPreset } = request.payload
         const presets = ctx.get('agentPresets')
         if (presets === undefined) {
@@ -3144,6 +3146,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
         }
         return serializeSessionAdmission(sessionId, async () => {
+          signal?.throwIfAborted()
           const found = await agentFor(sessionId)
           if ('error' in found) return err(request, found.error)
           const { agent } = found
@@ -3156,6 +3159,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           try {
             const target = await composeAgent(agentPreset)
+            signal?.throwIfAborted()
             if (target.agentPreset === undefined) {
               throw new Error(`agent preset "${agentPreset}" resolved without a preset id`)
             }
@@ -3190,6 +3194,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               current: agent,
               replacement: {
                 resumeSessionId: sessionId,
+                ...signal === undefined ? {} : { signal },
                 ...target.factoryRoute === undefined ? {} : { factoryRoute: target.factoryRoute },
                 agentOptions: agentOptions(target.factoryRoute),
                 setup: target.setup,
@@ -3553,7 +3558,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const openCalls = new Map<SessionId, Map<string, { name: string; args: unknown }>>()
         const disposers = [
           ctx.on('session/event', (session: Session, event: SessionEvent) => {
-            if (event.type === 'tool/call') {
+            if (event.type === 'tool/call' || event.type === 'tool/progress') {
               const data = event.data as ToolCallData
               try {
                 let table = openCalls.get(session.id)

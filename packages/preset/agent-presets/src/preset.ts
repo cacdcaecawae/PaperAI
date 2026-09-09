@@ -38,6 +38,8 @@ export interface AgentPreset {
    * up front with this reason instead of failing deep inside the loader.
    */
   readonly broken?: string
+  /** Exact registered Agent factory required by a plugin-contributed preset. */
+  readonly factoryRoute?: string
 }
 
 /** One deployment-owned directory scanned for preset subdirectories. */

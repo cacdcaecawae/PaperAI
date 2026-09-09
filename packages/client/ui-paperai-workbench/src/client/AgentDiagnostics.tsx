@@ -10,7 +10,7 @@ import css from './Diagnostics.module.css'
 export interface AgentDiagnosticsInjected {
   hooks: { diagnostics: HostObservable<DiagnosticsState> }
   loadAgents: () => Promise<void>
-  probe: (provider: 'codex' | 'claude', force: boolean) => Promise<void>
+  probe: (provider: string, force: boolean) => Promise<void>
 }
 
 /** Slot-derived readiness props. */
@@ -26,10 +26,14 @@ export function AgentDiagnostics({ presetId, connecting, useDiagnostics, loadAge
   if (provider === undefined) return null
   const metadata = state.agents.find(agent => agent.provider === provider)
   const probing = state.probing.includes(provider)
+  const status = connecting ? 'agent.connecting'
+    : probing ? 'agent.probing'
+      : metadata?.status === 'ready' ? 'agent.checked'
+        : metadata?.status === 'error' ? 'agent.checkFailed' : 'agent.unchecked'
   return (
     <span className={css.agent}>
-      <button type="button" className={css.trigger} aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
-        {t('agent.details')}
+      <button type="button" className={css.trigger} aria-label={t('agent.details')} aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
+        {t(status)}
       </button>
       {open && <span className={css.popover} role="region" aria-label={t('agent.details')}>
         <strong>{provider === 'codex' ? 'Codex' : 'Claude'}</strong>

@@ -1,6 +1,5 @@
 - menu:
-  - menuitem "DSH 标准 PaperAI 论文智能体，由内置 DSH 标准循环驱动：标准模式全部能力加文档工具、写作规程与门禁自检，修改与 Codex/Claude 记入同一版本账本。"
-  - menuitem "Codex PaperAI 论文智能体，由本地 Codex ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。":
-    - text: Codex PaperAI 论文智能体，由本地 Codex ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。
+  - menuitem "Codex 暂无描述。":
+    - text: Codex 暂无描述。
     - img
-  - menuitem "Claude PaperAI 论文智能体，由本地 Claude ACP 运行时驱动：读取项目写作规程，经 MCP 使用文档工具与门禁，修改记入同一版本账本。"
+  - menuitem "Claude 暂无描述。"

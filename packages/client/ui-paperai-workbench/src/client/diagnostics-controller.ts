@@ -27,6 +27,12 @@ export class DiagnosticsController {
 
   constructor(private readonly remote: PaperAIWorkbenchRemote) {}
 
+  /** Invalidate pending observations immediately when the Host disconnects. */
+  disconnected(): void {
+    this.agentRead += 1
+    this.store.update((state) => { state.agents = state.agents.map(agent => ({ ...agent, connected: false })) })
+  }
+
   /** Read cached metadata without launching a provider process. */
   async loadAgents(): Promise<void> {
     const generation = ++this.agentRead
@@ -35,10 +41,13 @@ export class DiagnosticsController {
       if (this.isDisposed() || generation !== this.agentRead) return
       this.store.update((state) => {
         if (result.ok) { state.agents = result.value; state.agentError = null }
-        else state.agentError = result.error.message
+        else { state.agentError = result.error.message; state.agents = state.agents.map(agent => ({ ...agent, connected: false })) }
       })
     } catch (error) {
-      if (!this.isDisposed() && generation === this.agentRead) this.store.update((state) => { state.agentError = String(error) })
+      if (!this.isDisposed() && generation === this.agentRead) this.store.update((state) => {
+        state.agentError = String(error)
+        state.agents = state.agents.map(agent => ({ ...agent, connected: false }))
+      })
     }
   }
 
@@ -47,7 +56,7 @@ export class DiagnosticsController {
    * @param provider - selected peer provider.
    * @param force - bypass failure cooldown only for an explicit retry.
    */
-  async probe(provider: 'codex' | 'claude', force: boolean): Promise<void> {
+  async probe(provider: string, force: boolean): Promise<void> {
     if (this.isDisposed() || this.store.getSnapshot().probing.includes(provider)) return
     this.store.update((state) => { state.probing = [...state.probing, provider]; state.agentError = null })
     try {

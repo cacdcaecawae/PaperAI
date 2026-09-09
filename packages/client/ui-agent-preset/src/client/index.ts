@@ -83,6 +83,7 @@ export function apply(ctx: ClientContext): void {
       if (section.store.getSnapshot().status !== 'idle') void section.load()
     }
     const disposers = [
+      ctx.remote.$on('agent-presets/changed', refresh),
       ctx.remote.$on('settings/document-updated', (ns) => {
         if (ns !== AGENT_PRESET_SETTINGS_NS) return
         refresh()
@@ -128,6 +129,7 @@ export function apply(ctx: ClientContext): void {
       load: () => seat.load(),
       select: (id: string) => seat.select(id),
       introduced: () => { seat.introduced() },
+      cancel: () => { seat.cancel() },
     })
 
     const labelInjected = (): AgentPresetLabelInjected => ({
@@ -158,6 +160,7 @@ export function apply(ctx: ClientContext): void {
         if (ns !== AGENT_PRESET_SETTINGS_NS) return
         void seat.load()
       })
+      const rosterMoved = scope.remote.$on('agent-presets/changed', () => { void seat.load() })
       // Every tab folds the committed preset into the shared session row; the
       // initiating tab may already have applied the RPC echo, which is idempotent.
       const presetSelected = scope.remote.$on('agent-preset/selected', (sessionId, agentPreset) => {
@@ -200,6 +203,7 @@ export function apply(ctx: ClientContext): void {
         seat.dispose()
         stop()
         settingsMoved()
+        rosterMoved()
         presetSelected()
         rosterReaders.delete(readRoster)
         creatorDraft = undefined

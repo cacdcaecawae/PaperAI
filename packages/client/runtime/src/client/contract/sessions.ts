@@ -35,6 +35,12 @@ export interface ISessions {
    */
   readonly searchResultLimit: number
   /**
+   * Create a conversation and publish its list row before resolving.
+   * @param opts - working directory, preset, and optional client-allocated identity.
+   * @returns a session id that can immediately be opened.
+   */
+  create(opts?: { cwd?: string; sessionId?: SessionId; agentPreset?: string }): Promise<SessionId>
+  /**
    * Select a session as current.
    * @param id - session id (must exist in the list; unknown ids fail loud).
    */

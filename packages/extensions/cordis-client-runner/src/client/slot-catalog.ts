@@ -1182,6 +1182,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [
       'client-ui-agent-preset AgentPresetLabel id \'agent-preset\'',
       'client-ui-jobs JobListAction id \'job-list\'',
+      '@paperai/ui-acp AcpSessionControls id \'paperai-acp-options\'',
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.session.header.actions\', () => ctx.slots.register(\n      { name: \'conversation.session.header.actions\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
@@ -1351,6 +1352,42 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'details\', () => ctx.slots.register(\n      { name: \'details\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
     source: 'packages/client/ui-layout/src/client/index.ts:76',
+  },
+  {
+    key: 'paperai.acp.channel.mark',
+    kind: 'keyed',
+    scope: 'root',
+    summary: 'Decorative channel mark; the adjacent channel name supplies its accessible label.',
+    doc: 'Decorative channel mark; the adjacent channel name supplies its accessible label.',
+    registerOptions: [
+      {
+        name: 'key',
+        requirement: 'required',
+        type: 'string',
+        doc: 'Your cell key: the entry renders where the owner dispatches this exact key. Registering an already-occupied key replaces that occupant.',
+      },
+    ],
+    ownerProps: [
+      '/** Presentation requested from an ACP channel mark occupant. */\nexport interface AcpChannelMarkOwnerProps {\n  /** Agent preset id corresponding to the channel\'s registration key. */\n  presetId: string\n  /** Requested square edge in pixels. */\n  size: number\n}',
+    ],
+    ownerPropsReferences: [
+      'Agent',
+    ],
+    standardProps: [
+      'useSessions: SnapshotSelectorHook<SessionListState>',
+      'useWorkspaces: SnapshotSelectorHook<import(\'./workspaces/service.ts\').WorkspaceListState>',
+    ],
+    keyDomain: 'open: any string the owner dispatches (no compile-time key set), already taken: claude, codex',
+    hookContext: '',
+    slotInject: '',
+    declaredBy: 'an entry in \'settings.section\' (@paperai/ui-acp), so it exists while that entry is mounted',
+    occupants: [
+      '@paperai/ui-brand CodexAgentMark key \'codex\'',
+      '@paperai/ui-brand ClaudeAgentMark key \'claude\'',
+    ],
+    replaceRisk: 'shadows-shipped-ui',
+    example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'paperai.acp.channel.mark\', () => ctx.slots.register(\n      { name: \'paperai.acp.channel.mark\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
+    source: 'packages/client/ui-paperai-acp/src/client/brand-slot.ts:6',
   },
   {
     key: 'paperai.start.mark',
@@ -1717,6 +1754,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     declaredBy: 'an entry in \'sidebar.settings\' (client-ui-settings-general), so it exists while that entry is mounted',
     occupants: [
       'client-ui-agent-preset AgentPresetSection id \'agent-presets\'',
+      '@paperai/ui-acp AcpSettingsSection id \'paperai-acp\'',
       '@paperai/ui-workbench TemplatesSection',
       'client-ui-settings-general GeneralSection id \'general\'',
       'client-ui-settings-models ModelsSection id \'models\'',

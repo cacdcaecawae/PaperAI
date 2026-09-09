@@ -30,6 +30,26 @@ const result = (over?: Partial<ToolResultNode>): ToolResultNode => ({
 })
 
 describe('tool-call-model', () => {
+  it('uses generic presenter input, live progress, and final output without exposing driver metadata', () => {
+    const pending = running({ name: 'external_tool', argsRaw: '{"internal":"driver state"}', callView: {
+      card: 'generic', title: 'Read introduction', rawInput: { section: 'introduction' },
+      content: [{ type: 'text', text: 'Reading paragraph 1' }],
+    } })
+    expect(toolRowModel('external_tool', pending)).toMatchObject({
+      summary: 'Read introduction', body: '{\n  "section": "introduction"\n}', output: 'Reading paragraph 1', state: 'running',
+    })
+    const completed = result({ callView: pending.callView, content: [{ type: 'text', text: 'provider data' }],
+      resultView: { card: 'generic', title: 'Read 1 paragraph', content: [{ type: 'text', text: 'Introduction' }] },
+    })
+    expect(toolRowModel('external_tool', completed)).toMatchObject({
+      summary: 'Read 1 paragraph', output: 'Introduction', state: 'ok',
+    })
+    expect(resultText(completed)).toBe('Introduction')
+    expect(toolRowModel('external_tool', running({ callView: { card: 'generic', title: 'Waiting' } })).body).toBeNull()
+    expect(toolRowModel('external_tool', running({ callView: { card: 'generic', title: 'Read', rawInput: 'paper.txt' } })).body)
+      .toBe('paper.txt')
+  })
+
   it('classifies known tools and falls back to others', () => {
     expect(classifyTool('bash')).toBe('bash')
     expect(classifyTool('pwsh')).toBe('bash')

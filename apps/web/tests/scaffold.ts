@@ -289,8 +289,10 @@ export interface LaunchOptions {
   }
   /** Override the PaperAI ACP launcher row after the PaperAI overlay inserts it. */
   paperAiAcp?: {
-    codex?: { command?: string; args?: string[]; env?: Record<string, string> }
-    claude?: { command?: string; args?: string[]; env?: Record<string, string> }
+    providers: {
+      codex?: { command?: string; args?: string[]; env?: Record<string, string> }
+      claude?: { command?: string; args?: string[]; env?: Record<string, string> }
+    }
   }
   /**
    * Mount the shipped telemetry row in FULL mode against this exporter URL

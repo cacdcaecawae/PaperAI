@@ -10,13 +10,15 @@ The three brand occupants install as one declaration-aware registration set thro
 
 A PaperAI product profile must disable `@deepseek-ai/dsh-client-ui-brand-official` before mounting this package because both plugins own the same single-occupant slots.
 
+The ACP directory's keyed `paperai.acp.channel.mark` slot reuses the Codex and Claude preset marks. Its registrations follow the ACP settings declaration and leave with it.
+
 ## Model Experience
 
 ### Browser brand presentation
 
 #### What the model sees
 
-Nothing; the package only occupies `sidebar.brand.mark`, `sidebar.brand.name`, `conversation.hero.brand.mark`, `paperai.start.mark`, and `conversation.hero.agentPreset.mark` in the browser and restates shell copy.
+Nothing; the package only occupies `sidebar.brand.mark`, `sidebar.brand.name`, `conversation.hero.brand.mark`, `paperai.start.mark`, `conversation.hero.agentPreset.mark`, and `paperai.acp.channel.mark` in the browser and restates shell copy.
 
 #### Token effect
 

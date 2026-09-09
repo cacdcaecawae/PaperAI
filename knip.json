@@ -136,7 +136,8 @@
         "@paperai/tool-document",
         "@paperai/ui-brand",
         "@paperai/ui-workbench",
-        "@paperai/workbench-service"
+        "@paperai/workbench-service",
+        "@paperai/ui-acp"
       ]
     },
     "packages/client/ui-primitives": {
@@ -699,6 +700,15 @@
     "packages/bundle/web-app": {
       "ignoreDependencies": [
         "@deepseek-ai/.+"
+      ]
+    },
+    "packages/client/ui-paperai-acp": {
+      "entry": [
+        "tests/**/*.spec.tsx"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "tests/**/*.tsx"
       ]
     }
   }

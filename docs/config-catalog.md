@@ -206,7 +206,7 @@ export interface UserPresetRoot {
 }
 ```
 
-Source: [`packages/preset/agent-presets/src/preset.ts:65`](../packages/preset/agent-presets/src/preset.ts)
+Source: [`packages/preset/agent-presets/src/preset.ts:67`](../packages/preset/agent-presets/src/preset.ts)
 
 <a id="deepseek-aidsh-agent-spine-demo"></a>
 
@@ -3285,34 +3285,99 @@ Source: [`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages
 Requires: `agents` · `sessions` · `subprocess` · `fs` · `sandboxPolicy` · `paperMcp`
 
 ```ts config-catalog
-/** PaperAI ACP Agent plugin configuration. */
-export interface Config {
-  /** Maximum duration of an independent prompt-free ACP diagnostic. */
+/** ACP instance directory and deployment limits. */
+export type Config = AcpConfig
+
+/** Deployment limits and the settings-backed ACP instance directory. */
+export interface AcpConfig {
+  /** Maximum isolated handshake duration in milliseconds. */
   readonly probeTimeoutMs?: number
-  /** Failed automatic diagnostics wait this long before another process can start. */
+  /** Milliseconds before an automatic retry after a failed probe. */
   readonly failureCooldownMs?: number
-  /** Local Codex ACP launch overrides. */
-  readonly codex?: AcpProviderConfig
-  /** Local Claude ACP launch overrides. */
-  readonly claude?: AcpProviderConfig
+  /** Maximum conversation startup duration in milliseconds. */
+  readonly startupTimeoutMs?: number
+  /** Maximum number of simultaneous isolated channel probes. */
+  readonly probeConcurrency?: number
+  /** Maximum active terminals and retained released outputs per runtime. */
+  readonly terminalLimit?: number
+  /** Maximum retained bytes per terminal or tool output. */
+  readonly terminalOutputBytes?: number
+  /** Minimum interval between live tool output snapshots; status changes and turn completion flush immediately. */
+  readonly toolProgressIntervalMs?: number
+  /** Process-tree graceful shutdown duration in milliseconds. */
+  readonly processGraceMs?: number
+  /** Maximum duration of an isolated management operation in milliseconds. */
+  readonly managementTimeoutMs?: number
+  /** Maximum managed npm installation duration in milliseconds. */
+  readonly installTimeoutMs?: number
+  /** Managed adapter root; omission selects paperai/acp under DSH_HOME. */
+  readonly installationDirectory?: string
+  /** Channel overrides keyed only by codex or claude. */
+  readonly providers?: Record<string, AcpProviderConfig>
+  /** Legacy launch settings, migrated into providers.codex when user settings are writable. */
+  readonly codex?: AcpProviderConfig | null
+  /** Legacy launch settings, migrated into providers.claude when user settings are writable. */
+  readonly claude?: AcpProviderConfig | null
 }
 
-/** Optional launch override for one pinned local ACP adapter. */
+/** Launch and defaults for one separately configured ACP instance. */
 export interface AcpProviderConfig {
-  /** Executable override; defaults to the pinned adapter's discovered binary. */
+  /** Channel identity; must match the containing codex or claude key. */
+  readonly template?: string
+  /** Display name in the directory and preset picker. */
+  readonly name?: string
+  /** Whether new conversations may select this channel. */
+  readonly enabled?: boolean
+  /** ACP executable override; omission selects the managed or bundled adapter. */
   readonly command?: string
-  /** Additional command-line arguments passed to the local ACP adapter. */
+  /** Executable arguments, passed without a shell. */
   readonly args?: string[]
-  /** Provider-specific environment additions; values stay secret on wire surfaces. */
+  /** Secret process environment overrides. */
   readonly env?: Record<string, string>
-  /** Optional provider credential injected only into the adapter process. */
+  /** Secret credential mapped to the channel's native environment variable. */
   readonly apiKey?: string
-  /** Optional provider API endpoint override consumed by the adapter. */
+  /** Provider API endpoint override. */
   readonly baseURL?: string
+  /** Proxy URL applied to HTTP, HTTPS, and ALL_PROXY. */
+  readonly proxy?: string
+  /** Preferred model for new sessions; custom ids are validated by the provider. */
+  readonly model?: string
+  /** Preferred reasoning level; unavailable defaults warn and retain the provider selection. */
+  readonly reasoningEffort?: string
+  /** Preferred boolean driver options; unavailable defaults warn and are skipped. */
+  readonly switches?: Record<string, boolean>
+  /** Preferred session options; unavailable values and standing permission modes warn and are skipped. */
+  readonly configOptions?: Record<string, string | boolean>
+  /** Model ids promoted in this channel's model picker. */
+  readonly favoriteModels?: string[]
+  /** Native ACP mode ids keyed by DSH sandbox mode. */
+  readonly permissionModes?: Record<string, string>
+  /** User instructions appended to ordinary prompts and logged. */
+  readonly personalPrompt?: string
+  /** Requested response language appended to ordinary prompts and logged. */
+  readonly language?: string
+  /** Remote POSIX execution; omission uses the current Host. */
+  readonly ssh?: AcpSshConfig
+}
+
+/** Remote execution settings; credentials remain in OpenSSH's existing key/agent configuration. */
+export interface AcpSshConfig {
+  /** Trusted hostname or existing SSH config alias. */
+  readonly host: string
+  /** Absolute POSIX workspace path on the remote host. */
+  readonly cwd: string
+  /** Optional remote login name. */
+  readonly user?: string
+  /** Optional TCP port overriding SSH configuration. */
+  readonly port?: number
+  /** Local private-key path passed to OpenSSH. */
+  readonly identityFile?: string
+  /** Remote Node executable; omission uses node on PATH. */
+  readonly node?: string
 }
 ```
 
-Source: [`packages/paperai/agent-acp/src/index.ts:51`](../packages/paperai/agent-acp/src/index.ts)
+Source: [`packages/paperai/agent-acp/src/index.ts:64`](../packages/paperai/agent-acp/src/index.ts)
 
 <a id="paperaidocument-engine-officecli"></a>
 
@@ -3486,7 +3551,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/workbench-service/src/index.ts:279`](../packages/paperai/workbench-service/src/index.ts)
+Source: [`packages/paperai/workbench-service/src/index.ts:280`](../packages/paperai/workbench-service/src/index.ts)
 
 ## Loadable plugins with no config
 
@@ -3564,6 +3629,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@paperai/document-service` — requires `paperRepository` · `documentEngine` ([`packages/paperai/document-service/src/index.ts`](../packages/paperai/document-service/src/index.ts))
 - `@paperai/repository` — requires `storageDomain` ([`packages/paperai/repository/src/index.ts`](../packages/paperai/repository/src/index.ts))
 - `@paperai/template-pack-hit` — requires `paperTemplates` ([`packages/paperai/template-pack-hit/src/index.ts`](../packages/paperai/template-pack-hit/src/index.ts))
+- `@paperai/ui-acp` ([`packages/client/ui-paperai-acp/src/index.ts`](../packages/client/ui-paperai-acp/src/index.ts))
 - `@paperai/ui-brand` ([`packages/client/ui-paperai-brand/src/index.ts`](../packages/client/ui-paperai-brand/src/index.ts))
 
 ## Seam packages (not directly loadable)

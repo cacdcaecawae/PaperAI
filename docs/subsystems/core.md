@@ -400,6 +400,20 @@ Discovery is unmemoized: `list()` and `resolve()` re-read the roots on every cal
 async list(): Promise<AgentPreset[]>
 
 /**
+ * Contribute a plugin-owned preset, overriding a discovered directory with the same id.
+ * @param preset - stable id, composition file, and optional exact factory route.
+ * @returns disposer withdrawing this contribution without interrupting existing sessions.
+ */
+register(preset: AgentPreset): () => void
+
+/**
+ * Read a contributed preset's required factory before resuming a stored session.
+ * @param id - recorded preset identity.
+ * @returns the exact driver route, or undefined for file-based DSH compositions.
+ */
+factoryRoute(id: string): string | undefined
+
+/**
  * Resolve one preset by id.
  *
  * A broken preset resolves — deleting one, reading one, and reporting one
@@ -1107,6 +1121,26 @@ One session committed a different agent preset to its durable log. Consumers inv
  * @param agentPreset - the preset recorded by the committed selection.
  */
 'agent-preset/selected'(sessionId: SessionId, agentPreset: string): void
+```
+
+Source: [`packages/preset/agent-presets/src/types.ts`](../../packages/preset/agent-presets/src/types.ts)
+
+<a id="agent-presets-events"></a>
+
+### `agent-presets/*` events
+
+<a id="agent-presetschanged--emit"></a>
+
+#### `agent-presets/changed` — emit
+
+Plugin-contributed preset availability changed.
+
+```ts cordis-catalog
+/**
+ * Plugin-contributed preset availability changed.
+ * @mode emit
+ */
+'agent-presets/changed'(): void
 ```
 
 Source: [`packages/preset/agent-presets/src/types.ts`](../../packages/preset/agent-presets/src/types.ts)

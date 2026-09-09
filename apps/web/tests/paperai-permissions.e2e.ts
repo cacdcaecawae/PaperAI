@@ -154,35 +154,44 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     rejectModePath = join(acpFixtureRoot, 'reject-set-mode')
     rejectModelPath = join(acpFixtureRoot, 'reject-set-config')
     startupGatePath = join(acpFixtureRoot, 'startup-gate')
+    const harnessHome = join(acpFixtureRoot, 'home')
+    await mkdir(harnessHome)
+    await writeFile(join(harnessHome, 'settings.yaml'), JSON.stringify({
+      'paperai-acp-agents': { codex: { apiKey: 'browser-old-codex' }, claude: { apiKey: 'browser-old-claude' } },
+    }))
     scaffold = await launchWebScaffold({
+      harnessHome,
       extraOverlayPath: PAPERAI_OVERLAY,
       agentPresets: {
         default: 'codex',
         roots: [
-          { path: PAPERAI_PRESETS, trust: 'system' },
+          { path: PAPERAI_PRESETS, trust: 'system', ids: ['codex', 'claude'] },
         ],
       },
       paperAiAcp: {
-        codex: {
-          command: process.execPath,
-          args: [FAKE_ACP_AGENT],
-          env: {
-            FAKE_ACP_LABEL: 'codex',
-            FAKE_ACP_LOG: acpLogPath,
-            FAKE_ACP_REJECT_SET_MODE: 'read-only',
-            FAKE_ACP_REJECT_SET_MODE_FILE: rejectModePath,
-            FAKE_ACP_REJECT_SET_CONFIG_FILE: rejectModelPath,
-            FAKE_ACP_CANCEL_FINAL_TOOL: '1',
+        providers: {
+          codex: {
+            command: process.execPath,
+            args: [FAKE_ACP_AGENT],
+            env: {
+              FAKE_ACP_LABEL: 'codex',
+              FAKE_ACP_LOG: acpLogPath,
+              FAKE_ACP_REJECT_SET_MODE: 'read-only',
+              FAKE_ACP_REJECT_SET_MODE_FILE: rejectModePath,
+              FAKE_ACP_REJECT_SET_CONFIG_FILE: rejectModelPath,
+              FAKE_ACP_CANCEL_FINAL_TOOL: '1',
+              FAKE_ACP_TOOL_IMAGE: '1',
+            },
           },
-        },
-        claude: {
-          command: process.execPath,
-          args: [FAKE_ACP_AGENT],
-          env: {
-            FAKE_ACP_LABEL: 'claude',
-            FAKE_ACP_STARTUP_GATE_FILE: startupGatePath,
-            FAKE_ACP_MODEL: 'fake-beta',
-            FAKE_ACP_LOG: acpLogPath,
+          claude: {
+            command: process.execPath,
+            args: [FAKE_ACP_AGENT],
+            env: {
+              FAKE_ACP_LABEL: 'claude',
+              FAKE_ACP_STARTUP_GATE_FILE: startupGatePath,
+              FAKE_ACP_MODEL: 'fake-beta',
+              FAKE_ACP_LOG: acpLogPath,
+            },
           },
         },
       },
@@ -270,12 +279,14 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('offers exactly the PaperAI product Agent presets', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-agent-presets'))
+    await expect.poll(() => scaffold.ctx.settings.describe().find(entry => entry.ns === 'paperai-acp-agents')?.user)
+      .toEqual({ providers: { codex: { apiKey: 'browser-old-codex' }, claude: { apiKey: 'browser-old-claude' } } })
     const trigger = page.getByRole('button', { name: 'Codex' }).first()
     await trigger.waitFor({ timeout: 10_000 })
     await trigger.click()
     const menu = page.getByRole('menu')
     await menu.waitFor({ timeout: 10_000 })
-    expect(await menu.getByRole('menuitem').allTextContents()).toHaveLength(3)
+    expect(await menu.getByRole('menuitem').allTextContents()).toHaveLength(2)
     await compareOrRefreshGolden(AGENT_PRESETS_EXPECTED, await menu.ariaSnapshot(), MODE)
     await page.keyboard.press('Escape')
   }, 60_000)
@@ -294,7 +305,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-connecting.expected.md'), await pending.ariaSnapshot(), MODE)
       await pending.click()
       await page.getByRole('menuitem', { name: /^Codex/ }).click()
-      expect(await page.locator('button[aria-busy="true"]').filter({ hasText: 'Codex' }).isEnabled()).toBe(true)
+      expect(await page.getByRole('button', { name: 'Codex', exact: true }).first().isEnabled()).toBe(true)
       expect(await input.inputValue()).toBe('连接期间继续写作')
     } finally {
       await rm(startupGatePath, { force: true })
@@ -304,6 +315,37 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const input = page.locator('textarea:enabled').last()
     expect(await input.inputValue()).toBe('连接期间继续写作')
     await input.fill('')
+  }, 60_000)
+
+  it('shows channel diagnostics separately from session usage', async () => {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '设置', exact: true })
+    await settings.getByRole('button', { name: 'ACP 渠道', exact: true }).click()
+    const directory = settings.getByRole('region', { name: 'ACP 渠道', exact: true })
+    const codex = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Codex/ }) })
+    const claude = directory.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
+    await codex.getByText('正在使用', { exact: true }).waitFor()
+    await claude.getByText('未使用', { exact: true }).waitFor()
+    expect(await directory.getByRole('article').count()).toBe(2)
+    expect(await directory.getByRole('combobox', { name: '默认 Agent' }).locator('option').allTextContents()).toEqual(['Codex', 'Claude'])
+    expect(await codex.locator('svg[aria-hidden="true"]').count()).toBe(1)
+    expect(await claude.locator('svg[aria-hidden="true"]').count()).toBe(1)
+    const detectAll = directory.getByRole('button', { name: '一键检测', exact: true })
+    await detectAll.click()
+    await expect.poll(() => detectAll.isEnabled()).toBe(true)
+    await codex.getByText('检测通过', { exact: true }).waitFor()
+    await claude.getByText('检测通过', { exact: true }).waitFor()
+    expect(await claude.getByText('未使用', { exact: true }).isVisible()).toBe(true)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-connection-status.expected.md'), [
+      await detectAll.ariaSnapshot(),
+      await codex.getByText('检测通过', { exact: true }).ariaSnapshot(),
+      await codex.getByText('正在使用', { exact: true }).ariaSnapshot(),
+      await claude.getByText('检测通过', { exact: true }).ariaSnapshot(),
+      await claude.getByText('未使用', { exact: true }).ariaSnapshot(),
+      await directory.getByRole('combobox', { name: '默认 Agent' }).ariaSnapshot(),
+    ].join('\n'), MODE)
+    await page.keyboard.press('Escape')
+    await settings.waitFor({ state: 'hidden' })
   }, 60_000)
 
   it('inspects cached Agent metadata and explicitly probes without submitting a prompt', async () => {
@@ -319,10 +361,12 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(async () => (await readAcpLog(acpLogPath)).filter(entry => entry.event === 'initialize').length)
       .toBeGreaterThan(before.filter(entry => entry.event === 'initialize').length)
     await details.getByRole('button', { name: '检测 / 重试', exact: true }).waitFor()
+    const diagnostic = page.getByRole('button', { name: 'Agent 状态', exact: true })
+    await expect.poll(() => diagnostic.textContent()).toBe('检测通过')
     expect(await model.getAttribute('aria-label')).toBe(selected)
     expect((await readAcpLog(acpLogPath)).slice(before.length).filter(entry => entry.event === 'prompt')).toEqual([])
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-diagnostics.expected.md'),
-      await details.getByText('历史模型预览 · 连接完成后再选择', { exact: true }).ariaSnapshot(), MODE)
+      [await diagnostic.ariaSnapshot(), await details.getByText('历史模型预览 · 连接完成后再选择', { exact: true }).ariaSnapshot()].join('\n'), MODE)
     await page.getByRole('button', { name: 'Agent 状态', exact: true }).click()
   }, 60_000)
 
@@ -425,11 +469,14 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(async () => (
       (await readAcpLog(acpLogPath)).some(entry => entry.event === 'cancel-tool-finished')
     ), { timeout: 10_000 }).toBe(true)
-    const finalTool = page.locator('[data-tool="paperai.edit"]')
+    const finalTool = page.locator('[data-tool="paperai_acp_tool"]')
     await finalTool.waitFor({ timeout: 15_000 })
     await finalTool.locator('[data-disclosure-row]').click()
-    await finalTool.getByText('changedParagraphs', { exact: false }).waitFor({ timeout: 10_000 })
-    const snapshot = await captureStableAria(page, '[data-tool="paperai.edit"]', scaffold.workspaceCwd)
+    await finalTool.getByText('{"changedParagraphs":1}', { exact: true }).waitFor({ timeout: 10_000 })
+    const toolRow = page.locator('[data-chat-call-id="cancel-edit"]')
+    const image = toolRow.getByRole('img', { name: '图片', exact: true })
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth), { timeout: 10_000 }).toBe(1)
+    const snapshot = await captureStableAria(page, '[data-chat-call-id="cancel-edit"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(CANCEL_FINAL_TOOL_EXPECTED, snapshot, MODE)
   }, 60_000)
 
@@ -822,12 +869,74 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'header-footer.expected.md'), await preview.ariaSnapshot(), MODE)
   }, 90_000)
 
+  it('starts from migrated credentials with optional defaults and renders throttled tool progress', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-acp-defaults'))
+    const projectRoot = join(scaffold.workspaceCwd, 'acp-defaults')
+    await mkdir(projectRoot)
+    const streamGate = join(projectRoot, 'stream-gate')
+    await writeFile(streamGate, 'hold')
+    await scaffold.ctx.workspaceRegistry.create(projectRoot, 'ACP defaults')
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '设置', exact: true })
+    await settings.getByRole('button', { name: 'ACP 渠道', exact: true }).click()
+    const claude = settings.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
+    await claude.getByRole('button', { name: '配置', exact: true }).click()
+    const editor = page.getByRole('dialog', { name: '配置 ACP 渠道', exact: true })
+    await editor.getByLabel('默认模型', { exact: true }).fill('custom-browser-model')
+    await editor.getByText('高级设置', { exact: true }).click()
+    await editor.getByRole('textbox', { name: '默认思考强度', exact: true }).fill('retired-effort')
+    await editor.getByRole('textbox', { name: '默认会话选项 · JSON 对象', exact: true }).fill('{"removed-option":true}')
+    await editor.getByRole('textbox', { name: '环境变量 · JSON 对象', exact: true }).fill(JSON.stringify({
+      FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_UPDATES: '4', FAKE_ACP_STREAM_GATE_FILE: streamGate, FAKE_ACP_STREAM_FORMAT: 'terminal-delta',
+    }))
+    await editor.getByRole('button', { name: '保存配置', exact: true }).click()
+    await editor.waitFor({ state: 'hidden' })
+    await settings.getByRole('combobox', { name: '默认 Agent' }).selectOption('claude')
+    await expect.poll(() => scaffold.ctx.settings.describe().find(entry => entry.ns === 'agent-presets')?.value)
+      .toMatchObject({ default: 'claude' })
+    await page.keyboard.press('Escape')
+    await settings.waitFor({ state: 'hidden' })
+    await page.getByRole('button', { name: '返回项目列表', exact: true }).click()
+    await page.getByRole('treeitem', { name: /ACP defaults/ }).click()
+    await page.getByRole('button', { name: '在“ACP defaults”中新建会话', exact: true }).click()
+    await page.getByRole('button', { name: '不用模板，自由写', exact: true }).click()
+    await page.getByRole('dialog', { name: '本项目用哪套模板？', exact: true }).waitFor({ state: 'hidden' })
+    await page.getByRole('button', { name: 'Claude', exact: true }).first().waitFor()
+    const model = page.locator('button[aria-label^="选择模型"]').first()
+    await expect.poll(() => model.getAttribute('aria-label'), { timeout: 20_000 }).toContain('custom-browser-model')
+    const eventStart = sessionEvents.length
+    const settled = scaffold.whenTurnSettled(60_000)
+    await page.locator('textarea:enabled').last().fill('显示工具运行中的输出。')
+    await page.getByRole('button', { name: '发送消息', exact: true }).click()
+    const tool = page.locator('[data-chat-call-id="streaming-tool"]')
+    try {
+      await tool.waitFor({ timeout: 15_000 })
+      await tool.locator('[data-disclosure-row]').click()
+      await expect.poll(() => tool.innerText(), { timeout: 10_000 }).toContain(`003 ${'x'.repeat(250)}`)
+      expect(sessionEvents.slice(eventStart).some(event => event.type === 'turn/end')).toBe(false)
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-running-output.expected.md'),
+        await captureStableAria(page, '[data-chat-call-id="streaming-tool"]', scaffold.workspaceCwd), MODE)
+    } finally {
+      await rm(streamGate)
+      await settled
+    }
+    await expect.poll(() => tool.innerText()).toContain('已完成')
+    expect(sessionEvents.slice(eventStart).filter(event => event.type === 'tool/progress')).toHaveLength(3)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'acp-migrated-defaults.expected.md'), [
+      await model.ariaSnapshot(),
+      await captureStableAria(page, '[data-chat-call-id="streaming-tool"]', scaffold.workspaceCwd),
+    ].join('\n'), MODE)
+  }, 90_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
       'agent-connecting.expected.md',
+      'acp-connection-status.expected.md',
+      'acp-migrated-defaults.expected.md',
+      'acp-running-output.expected.md',
       'agent-diagnostics.expected.md',
       'block-conflict.expected.md',
       'block-editor.expected.md',

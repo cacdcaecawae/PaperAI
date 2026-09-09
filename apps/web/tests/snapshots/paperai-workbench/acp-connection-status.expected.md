@@ -1,0 +1,8 @@
+- button "一键检测"
+- text: 检测通过
+- text: 正在使用
+- text: 检测通过
+- text: 未使用
+- combobox "默认 Agent 用于新建会话；当前会话保留自己的配置。":
+  - option "Codex" [selected]
+  - option "Claude"

@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentHandle } from '@deepseek-ai/dsh-agent'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import AgentPresets from '@deepseek-ai/dsh-agent-presets'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -124,14 +128,19 @@ class TestPersistence extends SessionPersistence {
 
 class TestSettings extends SettingsProvider {
   private readonly storedDocument: Record<string, unknown>
+  persistCalls = 0
 
-  constructor(ctx: Context, options: { readonly document: Record<string, unknown> }) {
+  constructor(ctx: Context, private readonly options: {
+    readonly document: Record<string, unknown>
+    readonly writable: boolean
+    readonly failWrites: boolean | number
+  }) {
     super(ctx)
     this.storedDocument = structuredClone(options.document)
   }
 
   override get writable(): boolean {
-    return true
+    return this.options.writable
   }
 
   protected override load(): Promise<Record<string, unknown>> {
@@ -139,6 +148,9 @@ class TestSettings extends SettingsProvider {
   }
 
   protected override persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
+    this.persistCalls++
+    if (this.options.failWrites === true || (typeof this.options.failWrites === 'number' && this.persistCalls <= this.options.failWrites))
+      return Promise.reject(new Error('Settings storage unavailable'))
     this.storedDocument[ns] = structuredClone(section)
     return Promise.resolve()
   }
@@ -222,6 +234,8 @@ async function mountHarness(options: {
   readonly approvalOutcome?: ApprovalOutcome
   readonly records?: Map<string, StoredSession>
   readonly settingsDocument?: Record<string, unknown>
+  readonly settingsWritable?: boolean
+  readonly settingsFailWrites?: boolean | number
   readonly writePath?: (workspaceRoot: string, fallbackRoot: string) => string
 } = {}): Promise<Harness> {
   const scratchRoot = await mkdtemp(join(homedir(), 'paperai-agent-acp-'))
@@ -270,7 +284,11 @@ async function mountHarness(options: {
     })
   }
   if (options.settingsDocument !== undefined) {
-    await ctx.plugin(TestSettings, { document: options.settingsDocument })
+    await ctx.plugin(TestSettings, {
+      document: options.settingsDocument,
+      writable: options.settingsWritable ?? true,
+      failWrites: options.settingsFailWrites ?? false,
+    })
   }
   const commonEnv = {
     FAKE_ACP_LOG: logPath,
@@ -295,15 +313,17 @@ async function mountHarness(options: {
     ...options.env,
   }
   const acpFiber = await ctx.plugin(PaperAiAcpAgents, {
-    codex: {
-      command: process.execPath,
-      args: [fakeAgentPath],
-      env: { ...commonEnv, FAKE_ACP_LABEL: 'codex' },
-    },
-    claude: {
-      command: process.execPath,
-      args: [fakeAgentPath],
-      env: { ...commonEnv, FAKE_ACP_LABEL: 'claude' },
+    providers: {
+      codex: {
+        command: process.execPath,
+        args: [fakeAgentPath],
+        env: { ...commonEnv, FAKE_ACP_LABEL: 'codex' },
+      },
+      claude: {
+        command: process.execPath,
+        args: [fakeAgentPath],
+        env: { ...commonEnv, FAKE_ACP_LABEL: 'claude' },
+      },
     },
   })
   return {
@@ -398,6 +418,202 @@ async function runLifecycleProbe(action: 'dispose' | 'startup-rollback'): Promis
 }
 
 describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
+  it.each(['edit', 'clear'])('retries failed migration after settings attach late and a successful %s', async (action) => {
+    const harness = await mountHarness()
+    await harness.ctx.plugin(TestSettings, { writable: true, failWrites: 1, document: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { codex: { apiKey: 'old-key', env: { LEGACY_SECRET: 'old-env' } } },
+    } })
+    const settings = harness.ctx.settings as TestSettings
+    await expect.poll(() => settings.persistCalls).toBe(1)
+    expect(harness.ctx.paperAiAcpAgents.providers()[0]?.env).toHaveProperty('OPENAI_API_KEY', 'old-key')
+    if (action === 'clear') await settings.mutate(ACP_AGENT_SETTINGS_NAMESPACE, [
+      { op: 'unset', path: ['providers', 'codex', 'apiKey'] },
+      { op: 'unset', path: ['providers', 'codex', 'env'] },
+      { op: 'unset', path: ['codex', 'apiKey'] },
+      { op: 'unset', path: ['codex', 'env'] },
+    ])
+    else await settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { language: '中文' } } })
+    const descriptor = () => settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)!
+    await expect.poll(() => descriptor().user).toEqual({ providers: { codex: action === 'clear' ? {} : {
+      apiKey: 'old-key', env: { LEGACY_SECRET: 'old-env' }, language: '中文',
+    } } })
+    const restarted = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: descriptor().user } })
+    const env = restarted.ctx.paperAiAcpAgents.providers()[0]?.env
+    if (action === 'clear') {
+      expect(env).not.toHaveProperty('OPENAI_API_KEY')
+      expect(env).not.toHaveProperty('LEGACY_SECRET')
+    } else expect(env).toHaveProperty('OPENAI_API_KEY', 'old-key')
+  })
+
+  it.each(['effort', 'reasoning_effort', 'reasoning-effort'])('applies default effort through the advertised %s alias', async (id) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_EFFORT_ID: id }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { reasoningEffort: 'high' } } },
+    } })
+    const handle = await createAgent(harness, `default-${id}`)
+    expect(handle.agent.modelController?.currentReasoningEffort).toBe('high')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option'))
+      .toEqual([expect.objectContaining({ configId: id, value: 'high' })])
+  })
+
+  it.each(['raw', 'terminal-delta'])('flushes throttled %s output before completion and stops its timer after the turn', async (format) => {
+    const harness = await mountHarness({ settingsDocument: {} })
+    const gate = join(harness.root, 'stream-gate')
+    await writeFile(gate, 'hold')
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, {
+      toolProgressIntervalMs: 100,
+      providers: { codex: { env: { FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_GATE_FILE: gate, FAKE_ACP_STREAM_FORMAT: format } } },
+    })
+    const handle = await createAgent(harness, 'throttled-output')
+    const running = runTurn(handle, 'Read the running command output')
+    const progress = () => handle.agent.session.events.filter(event => event.type === 'tool/progress')
+    try {
+      await expect.poll(() => progress().some(event => event.data.arguments.includes('399 '))).toBe(true)
+      expect(handle.agent.session.events.some(event => event.type === 'turn/end')).toBe(false)
+      expect(JSON.parse(progress().at(-1)!.data.arguments)).toMatchObject({ status: 'in_progress', truncated: true })
+      expect(progress().length).toBeLessThan(5)
+      expect(JSON.stringify(handle.agent.session.events)).not.toMatch(/unrelated-output|no longer available/u)
+    } finally {
+      await rm(gate)
+      await running
+    }
+    const final = JSON.parse(progress().at(-1)!.data.arguments) as { status: string; output: string }
+    expect(final.status).toBe('completed')
+    expect(final.output).toContain('399 ')
+    const count = handle.agent.session.events.length
+    await new Promise(resolve => setTimeout(resolve, 150))
+    expect(handle.agent.session.events).toHaveLength(count)
+  })
+
+  it('migrates stored legacy credentials before editing and never resurrects cleared values', async () => {
+    const harness = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: {
+      codex: { apiKey: 'old-codex-key', env: { LEGACY_SECRET: 'old-env' }, baseURL: 'https://legacy.example' },
+      claude: { apiKey: 'old-claude-key' },
+      providers: { codex: { apiKey: 'new-codex-key' } },
+    } } })
+    const descriptor = () => harness.ctx.settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)!
+    await expect.poll(() => descriptor().user).toEqual({ providers: {
+      codex: { apiKey: 'new-codex-key', env: { LEGACY_SECRET: 'old-env' }, baseURL: 'https://legacy.example' },
+      claude: { apiKey: 'old-claude-key' },
+    } })
+    await Promise.all([createAgent(harness, 'migrated-codex'), createAgent(harness, 'migrated-claude', 'claude')])
+    const initialized = (await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')
+    expect(initialized.find(entry => entry.label === 'codex')?.environment).toMatchObject({ openAiApiKey: 'new-codex-key' })
+    expect(initialized.find(entry => entry.label === 'claude')?.environment).toMatchObject({ anthropicApiKey: 'old-claude-key' })
+    const wire = JSON.stringify(harness.ctx.settings.describe({ redactSecrets: true }))
+    for (const secret of ['old-codex-key', 'new-codex-key', 'old-claude-key', 'old-env']) expect(wire).not.toContain(secret)
+    await harness.ctx.settings.mutate(ACP_AGENT_SETTINGS_NAMESPACE, [
+      { op: 'unset', path: ['providers', 'codex', 'apiKey'] },
+      { op: 'unset', path: ['providers', 'codex', 'env'] },
+    ])
+    const restarted = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: descriptor().user } })
+    const provider = restarted.ctx.paperAiAcpAgents.providers().find(entry => entry.id === 'codex')!
+    expect(provider.env).not.toHaveProperty('OPENAI_API_KEY')
+    expect(provider.env).not.toHaveProperty('LEGACY_SECRET')
+    expect(provider.env).toHaveProperty('OPENAI_BASE_URL', 'https://legacy.example')
+  })
+
+  it('starts with custom model defaults and skips obsolete effort, switch and session preferences', async () => {
+    const harness = await mountHarness({ settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: {
+      model: 'private-model', reasoningEffort: 'obsolete', switches: { removed: true, fast: true },
+      configOptions: { removed: 'old', effort: 'high', mode: 'agent-full-access' },
+    } } } } })
+    const handle = await createAgent(harness, 'optional-defaults')
+    expect(handle.agent.modelController).toMatchObject({ currentModel: 'private-model', currentReasoningEffort: 'high' })
+    expect(handle.agent.modelController?.switches).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fast', enabled: true })]))
+    const writes = (await readLog(harness.logPath)).filter(entry => entry.event === 'set-config-option')
+    expect(writes.map(entry => [entry.configId, entry.value])).toEqual([['model', 'private-model'], ['fast', true], ['effort', 'high']])
+    await runTurn(handle, 'Use the custom provider model')
+    expect(handle.agent.session.events.findLast(event => event.type === 'turn/end')?.data.reason).toEqual({ kind: 'completed' })
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+  })
+
+  it.each(['read-only', 'write-failure'])('keeps legacy credentials usable and redacted with %s settings', async (mode) => {
+    const harness = await mountHarness({
+      settingsWritable: mode !== 'read-only', settingsFailWrites: mode === 'write-failure',
+      settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: { codex: { apiKey: 'retained-legacy-key' } } },
+    })
+    const handle = await createAgent(harness, `legacy-${mode}`)
+    expect(harness.ctx.paperAiAcpAgents.providers()[0]?.env).toHaveProperty('OPENAI_API_KEY', 'retained-legacy-key')
+    expect(harness.ctx.settings.describe().find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)?.user)
+      .toEqual({ codex: { apiKey: 'retained-legacy-key' } })
+    expect(JSON.stringify(harness.ctx.settings.describe({ redactSecrets: true }))).not.toContain('retained-legacy-key')
+    await runTurn(handle, 'Continue the configured account')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+  })
+
+  it('settles cancellation while an optional startup model request is pending', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_NEVER_SET_CONFIG: 'pending-default' }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { model: 'pending-default' } } },
+    } })
+    const signal = new AbortController()
+    const creating = expect(harness.ctx.agents.create({
+      sessionId: SessionId('cancel-default'), factoryRoute: 'codex', meta: { cwd: harness.root }, signal: signal.signal,
+    })).rejects.toThrow('Cancel optional default')
+    await expect.poll(async () => (await readLog(harness.logPath)).some(entry => entry.event === 'set-config-option')).toBe(true)
+    signal.abort(new Error('Cancel optional default'))
+    await expectResolvesWithin(creating, 5_000)
+    expect(harness.ctx.agents.get(SessionId('cancel-default'))).toBeUndefined()
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()[0]?.connected).toBe(false)
+  })
+
+  it('keeps a usable session when the provider rejects a default and restores its selection', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'retired-model' }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { model: 'retired-model', reasoningEffort: 'high' } } },
+    } })
+    const handle = await createAgent(harness, 'rejected-default')
+    expect(handle.agent.modelController).toMatchObject({ currentModel: 'fake-alpha', currentReasoningEffort: 'high' })
+    await runTurn(handle, 'Continue with the available model')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(1)
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+  })
+
+  it('refuses startup when a rejected preference cannot restore the provider configuration', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high,medium' }, settingsDocument: {
+      [ACP_AGENT_SETTINGS_NAMESPACE]: { providers: { codex: { reasoningEffort: 'high' } } },
+    } })
+    await expect(createAgent(harness, 'broken-default-rollback')).rejects.toMatchObject({ restored: false })
+    expect(harness.ctx.agents.get(SessionId('broken-default-rollback'))).toBeUndefined()
+  })
+
+  it.each(['completed', 'cancelled'])('bounds streaming tool progress and retains the final output when %s', async (outcome) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_STREAM_TOOL: outcome, FAKE_ACP_STOP_REASON: outcome === 'cancelled' ? 'cancelled' : 'end_turn' } })
+    const handle = await createAgent(harness, `streaming-${outcome}`)
+    await runTurn(handle, 'Read a long terminal output')
+    const progress = handle.agent.session.events.filter(event => event.type === 'tool/progress')
+    expect(progress).toHaveLength(2)
+    expect(progress.map(event => JSON.parse(event.data.arguments) as { status: string })).toMatchObject([
+      { status: 'in_progress' }, { status: outcome === 'completed' ? 'completed' : 'in_progress' },
+    ])
+    const last = JSON.parse(progress.at(-1)!.data.arguments) as { output: string; truncated: boolean }
+    expect(last.output).toContain(`399 ${'x'.repeat(250)}\n`)
+    expect(last.truncated).toBe(true)
+    expect(Buffer.byteLength(last.output)).toBeLessThanOrEqual(65_536)
+    expect(Buffer.byteLength(JSON.stringify(handle.agent.session.events))).toBeLessThan(180_000)
+    if (outcome === 'completed') expect(handle.agent.session.events.find(event => event.type === 'tool/result')?.data.message.content)
+      .toMatchObject([{ type: 'tool-result', content: [{ type: 'text', text: last.output }] }])
+  })
+
+  it('keeps startup and diagnostics across prompt preferences but cancels for launch changes', async () => {
+    const harness = await mountHarness({ settingsDocument: {} })
+    const gate = join(harness.root, 'startup-gate')
+    await writeFile(gate, 'hold')
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { env: { FAKE_ACP_STARTUP_GATE_FILE: gate } } } })
+    const creating = Promise.allSettled([createAgent(harness, 'preference-startup')])
+    await expect.poll(async () => (await readLog(harness.logPath)).some(entry => entry.event === 'new-session')).toBe(true)
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { language: '中文', personalPrompt: 'Be concise.', name: 'My Codex' } } })
+    await expect.poll(() => harness.ctx.paperAiAcpAgents.providers()[0]?.language).toBe('中文')
+    await rm(gate)
+    const [created] = await creating
+    expect(created?.status).toBe('fulfilled')
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()[0]?.status).toBe('ready')
+    await writeFile(gate, 'hold')
+    const cancelled = expect(createAgent(harness, 'launch-changed')).rejects.toThrow()
+    await expect.poll(async () => (await readLog(harness.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(2)
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { codex: { apiKey: 'replacement-key' } } })
+    await cancelled
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()[0]?.status).toBe('discovered')
+  })
+
   it('creates through an exact route and selects only an advertised provider model', async () => {
     const harness = await mountHarness()
     expect(harness.ctx.agents.hasFactoryRoute('codex')).toBe(true)
@@ -424,7 +640,7 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
     expect(harness.ctx.agents.get(SessionId('routed-create'))).toBe(handle.agent)
     expect(harness.ctx.sessions.get(SessionId('routed-create'))).toBe(handle.agent.session)
     expect(handle.agent.session.events.find(event => event.type === 'paperai/acp/session')?.data)
-      .toEqual({ provider: 'codex', externalSessionId: 'external-paper-session', resumed: false })
+      .toEqual({ provider: 'codex', externalSessionId: 'external-paper-session', resumed: false, host: 'local' })
     expect((await readLog(harness.logPath)).find(entry => entry.event === 'set-config-option'))
       .toMatchObject({ configId: 'model', value: 'fake-beta', label: 'codex' })
     const createdLog = (await readLog(harness.logPath)).find(entry => entry.event === 'new-session')
@@ -698,7 +914,7 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
     })
     expect(resumed.agent.session.events.slice(0, persistedEvents.length)).toEqual(persistedEvents)
     expect(resumed.agent.session.events.slice(persistedEvents.length).map(event => event.type))
-      .toEqual(['session/end-seed'])
+      .toEqual(['session/end-seed', 'paperai/acp/state'])
     expect(resumed.agent.session.events.filter(event => event.type === 'paperai/acp/session')).toHaveLength(1)
     expect(resumed.agent.session.events.some(event => (
       event.type === 'assistant/message'
@@ -734,8 +950,8 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       event.type === 'paperai/acp/session' ? [event.data] : []
     ))
     expect(links).toEqual([
-      { provider: 'codex', externalSessionId: 'external-paper-session-old', resumed: false },
-      { provider: 'codex', externalSessionId: 'external-paper-session-new', resumed: false },
+      { provider: 'codex', externalSessionId: 'external-paper-session-old', resumed: false, host: 'local' },
+      { provider: 'codex', externalSessionId: 'external-paper-session-new', resumed: false, host: 'local' },
     ])
     await expect(resumed.agent.modelController?.listModels()).resolves.toMatchObject([
       {
@@ -776,6 +992,63 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
     })).rejects.toThrow('Codex ACP failed to start: Internal error')
     expect((await readLog(resumeHarness.logPath)).map(entry => entry.event))
       .not.toContain('new-session')
+  }, 20_000)
+
+  it('refuses a historical fork instead of loading the parent provider identity', async () => {
+    const harness = await mountHarness()
+    const parent = await createAgent(harness, 'fork-parent')
+    await runTurn(parent, 'Keep the parent conversation separate')
+    const seed = structuredClone(parent.agent.session.events)
+    await expect(harness.ctx.agents.create({
+      sessionId: SessionId('fork-child'),
+      factoryRoute: 'codex',
+      seed,
+      meta: { cwd: harness.root, parentSession: parent.agent.session.id, seedLength: seed.length },
+    })).rejects.toThrow('parent ACP session must remain isolated')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'load-session')).toHaveLength(0)
+    await runTurn(parent, 'The rejected fork leaves the parent usable')
+  }, 20_000)
+
+  it.each([false, true])('requires restoration capability for nonblank history (resume: %s)', async (resume) => {
+    const records = new Map<string, StoredSession>()
+    const source = await mountHarness({ records })
+    const parent = await createAgent(source, 'restore-capability')
+    await runTurn(parent, 'Remember this conversation')
+    source.persistence.capture(parent.agent.session)
+    await parent.dispose()
+    const target = await mountHarness({ records, env: {
+      FAKE_ACP_NO_LOAD: '1',
+      FAKE_ACP_RESUME: resume ? '1' : '0',
+    } })
+    const operation = target.ctx.agents.resume({ resumeSessionId: SessionId('restore-capability'), factoryRoute: 'codex' })
+    if (resume) {
+      const restored = await operation
+      expect((await readLog(target.logPath)).find(entry => entry.event === 'resume-session'))
+        .toMatchObject({ sessionId: 'external-paper-session' })
+      await restored.dispose()
+    } else {
+      await expect(operation).rejects.toThrow('cannot resume or load this conversation')
+    }
+    expect((await readLog(target.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(0)
+  }, 20_000)
+
+  it.each([
+    { content: 'first\nsecond\nthird\n', line: '2', limit: '1', expected: 'second' },
+    { content: 'first\r\nsecond\r\nthird', line: '2', limit: '1', expected: 'second' },
+    { content: 'first\nsecond\nthird', line: '3', expected: 'third' },
+    { content: 'first\nsecond', line: '9', limit: '1', expected: '' },
+    { content: 'first\nsecond', limit: '1', expected: 'first' },
+    { content: 'first\r\nsecond\r\n', expected: 'first\r\nsecond\r\n' },
+  ])('reads the requested file range: $line / $limit', async ({ content, line, limit, expected }) => {
+    const harness = await mountHarness({ env: {
+      FAKE_ACP_READ_PATH: 'range.txt',
+      ...line === undefined ? {} : { FAKE_ACP_READ_LINE: line },
+      ...limit === undefined ? {} : { FAKE_ACP_READ_LIMIT: limit },
+    } })
+    await writeFile(join(harness.root, 'range.txt'), content, 'utf8')
+    const handle = await createAgent(harness, 'read-range')
+    await runTurn(handle, 'Read the selected lines')
+    expect((await readLog(harness.logPath)).find(entry => entry.event === 'read-text-file')?.content).toBe(expected)
   }, 20_000)
 
   it('tears down the Agent and Session through the public handle without hanging', async () => {
@@ -1643,8 +1916,9 @@ describe('ACP update transcript projection', { concurrent: false }, () => {
       role: 'assistant',
       source: { kind: 'model', provider: 'codex', model: 'fake-alpha' },
       content: [
-        { type: 'text', text: 'Revised introduction.' },
+        { type: 'text', text: 'Revised ' },
         { type: 'reasoning', text: 'Checking evidence.' },
+        { type: 'text', text: 'introduction.' },
       ],
     })
     expect(assistant?.data.usage).toEqual({
@@ -1656,9 +1930,9 @@ describe('ACP update transcript projection', { concurrent: false }, () => {
     })
     expect(events.find(event => event.type === 'tool/call')?.data).toMatchObject({
       callId: 'edit-1',
-      name: 'paperai.edit',
-      arguments: '{"section":"introduction"}',
+      name: 'paperai_acp_tool',
     })
+    expect(JSON.parse(events.find(event => event.type === 'tool/call')!.data.arguments)).toMatchObject({ name: 'paperai.edit', input: { section: 'introduction' } })
     const toolResult = events.find(event => event.type === 'tool/result')
     expect(toolResult?.data).toMatchObject({
       message: {
@@ -1735,26 +2009,233 @@ describe('ACP update transcript projection', { concurrent: false }, () => {
 })
 
 describe('ACP Agent settings and secret handling', { concurrent: false }, () => {
+  it('changes advertised session options, permits a manual model id and rejects invalid or busy changes', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high', FAKE_ACP_PERMISSION_OPTION: '1' }, promptBarrier: true })
+    const handle = await createAgent(harness, 'session-options')
+    const id = handle.agent.session.id
+    const service = harness.ctx.paperAiAcpAgents
+    expect(service.sessionDetails(id)?.options.find(option => option.id === 'mode')?.editable).toBe(false)
+    await expect(service.selectOption(id, 'mode', 'agent-full-access')).rejects.toThrow('permission selector')
+    expect((await readLog(harness.logPath)).filter(event => event.event === 'set-config-option' && event.configId === 'mode'))
+      .toEqual([])
+    await service.selectOption(id, 'fast', true)
+    expect(service.sessionDetails(id)?.options.find(option => option.id === 'fast')?.value).toBe(true)
+    await expect(service.selectOption(id, 'effort', 'high')).rejects.toThrow()
+    expect(service.sessionDetails(id)?.options.find(option => option.id === 'effort')?.value).toBe('medium')
+    await service.selectOption(id, 'effort', 'low')
+    expect(service.sessionDetails(id)?.options.find(option => option.id === 'effort')?.value).toBe('low')
+    await service.selectOption(id, 'model', 'custom-model')
+    expect(service.sessionDetails(id)?.options.find(option => option.id === 'model')?.value).toBe('custom-model')
+    await expect(service.selectOption(id, 'missing', 'value')).rejects.toThrow('unavailable')
+    await expect(service.selectOption(id, 'fast', 'true')).rejects.toThrow('did not advertise')
+    await expect(service.selectOption(id, 'effort', 'ultra')).rejects.toThrow('did not advertise')
+    const turn = runTurn(handle, 'Pending turn')
+    await expect.poll(async () => (await readLog(harness.logPath)).some(event => event.event === 'prompt')).toBe(true)
+    await expect(service.selectOption(id, 'fast', false)).rejects.toThrow('等待本轮结束')
+    await writeFile(harness.promptReleasePath, 'release')
+    await turn
+    await handle.dispose()
+    await expect(service.selectOption(id, 'fast', false)).rejects.toThrow('没有活动 ACP 连接')
+  })
+
+  it('logs terminal replies and form answers, retaining released output in the shared tool cards', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_TERMINAL: '1', FAKE_ACP_ELICITATION: '1' } })
+    const ask = vi.fn().mockResolvedValue({ answers: [{ id: 'style', selected: [], custom: 'Concise' }] })
+    harness.ctx.provide('userQuestions', { ask } as never)
+    await harness.ctx.plugin(SystemPrompt, { persona: '' })
+    const tools = harness.ctx.plugin(ToolRuntime)
+    await tools
+    const handle = await createAgentWithSandboxMode(harness, 'terminal-form', 'codex', 'danger-full-access')
+    await runTurn(handle, 'Read terminal evidence')
+    const log = await readLog(harness.logPath)
+    expect(log.find(event => event.event === 'terminal-result')).toMatchObject({
+      exited: { exitCode: 0 }, output: { output: 'terminal evidence stderr', truncated: false },
+    })
+    expect(log.find(event => event.event === 'form-answer')).toMatchObject({
+      response: { action: 'accept', content: { style: 'Concise' } },
+    })
+    expect(ask).toHaveBeenCalledOnce()
+    const events = handle.agent.session.events
+    expect(events.filter(event => event.type === 'paperai/acp/client-request').map(event => event.data.method))
+      .toEqual(expect.arrayContaining(['terminal/create', 'terminal/output', 'terminal/wait_for_exit', 'terminal/kill', 'terminal/release']))
+    expect(events.find(event => event.type === 'paperai/acp/answer')?.data.response).toContain('Concise')
+    const calls = events.filter(event => event.type === 'tool/call')
+    const terminal = calls.find(event => event.data.callId === 'terminal-call')!.data
+    const diff = calls.find(event => event.data.callId === 'diff-call')!.data
+    const presenter = harness.ctx.tools.presenter(terminal.name)!
+    expect(presenter.presentCall?.(JSON.parse(terminal.arguments))).toMatchObject({ title: 'Read evidence', locations: [{ path: '/paper', line: 2 }] })
+    expect(presenter.presentResult?.(JSON.parse(terminal.arguments), { content: [], isError: false }))
+      .toMatchObject({ card: 'terminal', output: 'terminal evidence stderr' })
+    expect(presenter.presentCall?.(JSON.parse(diff.arguments))).toMatchObject({ card: 'diff', diffs: [{ path: '/paper', oldText: 'old', newText: 'new' }] })
+    await tools.dispose()
+  })
+
+  it('projects title, costs, multiple plans and compaction status while preserving a user title', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_EXTENDED_STATE: '1' } })
+    const handle = await createAgent(harness, 'extended-status')
+    await runTurn(handle, 'Read the paper')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.state).toMatchObject({
+      title: 'Provider title', usage: { used: 12, size: 100, cost: { amount: 0.05, currency: 'USD' } },
+      plans: [{ id: 'outline', text: '# Outline' }, { id: 'tasks', entries: [{ content: 'Read', status: 'pending' }] }],
+      compactions: [{ id: 'compact', status: 'completed', summary: 'Final summary' }, { id: 'failed', error: 'Provider failed' }],
+    })
+    const session = handle.agent.session
+    expect(session.events.find(event => event.type === 'session/title')?.data.title).toBe('Provider title')
+    session.append('session/title', { title: 'My paper', source: { kind: 'user' }, messageSeqs: [] })
+    await runTurn(handle, 'Continue')
+    expect(session.events.findLast(event => event.type === 'session/title')?.data.title).toBe('My paper')
+  })
+
+  it('keeps preset contributions synchronized with enabled channels and releases them on plugin teardown', async () => {
+    const harness = await mountHarness({ settingsDocument: {} })
+    await harness.ctx.plugin(Loader)
+    await harness.ctx.plugin(AgentPresets, { roots: [], includeUserRoot: false, default: 'codex' })
+    await expect.poll(async () => (await harness.ctx.agentPresets.list()).map(preset => preset.id)).toEqual(['codex', 'claude'])
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { claude: { enabled: false, name: 'Research Claude' } } })
+    await expect.poll(async () => (await harness.ctx.agentPresets.list()).find(preset => preset.id === 'claude')?.name)
+      .toBe('Research Claude')
+    expect((await harness.ctx.agentPresets.list()).find(preset => preset.id === 'claude')?.broken).toEqual(expect.any(String))
+    expect(harness.ctx.agents.hasFactoryRoute('claude')).toBe(false)
+    expect(harness.ctx.agents.hasFactoryRoute('codex')).toBe(true)
+    await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, { providers: { claude: { enabled: true } } })
+    await expect.poll(() => harness.ctx.agents.hasFactoryRoute('claude')).toBe(true)
+    await harness.acpFiber.dispose()
+    await expect.poll(() => harness.ctx.agentPresets.list()).toEqual([])
+  })
+  it('registers early native commands once and forwards their exact arguments without the context envelope', async () => {
+    const harness = await mountHarness({ mountPermissionPresets: true, env: { FAKE_ACP_COMMANDS: '1' } })
+    const handle = await createAgent(harness, 'native-commands')
+    const commands = harness.ctx.commands.list(handle.agent).filter(command => command.name.startsWith('acp-'))
+    expect(commands).toMatchObject([{ name: 'acp-plan' }, { name: 'acp-review', input: { hint: '参数' } }])
+    expect(commands[0]).not.toHaveProperty('input')
+    await harness.ctx.commands.execute(handle.agent, '/acp-review  exact\targuments', [], new AbortController().signal)
+    await handle.agent.whenIdle()
+    expect((await readLog(harness.logPath)).find(event => event.event === 'prompt')).toMatchObject({ prompt: [{ type: 'text', text: '/review  exact\targuments' }] })
+    expect(handle.agent.session.events.some(event => event.type === 'paperai/acp/context')).toBe(false)
+  })
+
+  it('imports a provider transcript once, preserves ordering and continues the imported identity', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_HISTORY: '1' } })
+    const handle = await createAgent(harness, 'history-import')
+    const service = harness.ctx.paperAiAcpAgents
+    const seedMarkers = handle.agent.session.events.filter(event => event.type === 'session/end-seed').length
+    expect(await service.importHistory(handle.agent.session.id, 'history-one', harness.root)).toBe(handle.agent.session.id)
+    expect(handle.agent.session.events.filter(event => event.type === 'user/message').map(event => event.data.content)).toEqual([[{ type: 'text', text: 'Original question' }]])
+    expect(handle.agent.session.events.filter(event => event.type === 'assistant/message').map(event => event.data.message.content)).toEqual([[{ type: 'text', text: 'replayed provider history' }]])
+    expect(handle.agent.session.events.filter(event => event.type === 'session/end-seed')).toHaveLength(seedMarkers)
+    const imported = handle.agent.session.events.find(event => event.type === 'assistant/message')!
+    expect(imported.sourceEventSeqs?.length).toBeGreaterThan(0)
+    expect(imported.sourceEventSeqs?.every(seq => handle.agent.session.events[seq]?.type === 'assistant/chunk')).toBe(true)
+    const second = await createAgent(harness, 'history-duplicate')
+    expect(await service.importHistory(second.agent.session.id, 'history-one', harness.root)).toBe(handle.agent.session.id)
+    expect(second.agent.session.events.some(event => event.type === 'user/message')).toBe(false)
+    await runTurn(handle, 'Continue the paper')
+    const log = await readLog(harness.logPath)
+    expect(log.filter(event => event.event === 'load-session')).toHaveLength(1)
+    expect(log.find(event => event.event === 'load-session')).toMatchObject({ additionalDirectories: [] })
+    expect(log.find(event => event.event === 'close-session')).toMatchObject({ sessionId: 'external-paper-session' })
+    expect(log.find(event => event.event === 'prompt')).toMatchObject({ sessionId: 'history-one' })
+    expect(handle.agent.session.events.filter(event => event.type === 'turn/start').map(event => event.data.turn)).toEqual([1, 2])
+  })
+
+  it('discards a failed replay and refuses imports into active local histories or another directory', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_HISTORY: '1' } })
+    const handle = await createAgent(harness, 'history-failed')
+    const service = harness.ctx.paperAiAcpAgents
+    await expect(service.importHistory(handle.agent.session.id, 'history-one', harness.fallbackRoot)).rejects.toThrow('工作目录')
+    await expect(service.importHistory(handle.agent.session.id, 'replay-then-fail', harness.root)).rejects.toThrow('Internal error')
+    expect(handle.agent.session.events.some(event => event.type === 'user/message' || event.type === 'assistant/message')).toBe(false)
+    await runTurn(handle, 'New local draft')
+    expect((await readLog(harness.logPath)).find(event => event.event === 'prompt')).toMatchObject({ sessionId: 'external-paper-session' })
+    await expect(service.importHistory(handle.agent.session.id, 'history-one', harness.root)).rejects.toThrow('尚未开始')
+  })
+
+  it('preserves new input queued while an external history is loading', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_HISTORY: '1', FAKE_ACP_LOAD_GATE: '1' } })
+    const handle = await createAgent(harness, 'history-concurrent-input')
+    const gate = `${harness.logPath}.load-gate`
+    await writeFile(gate, 'hold')
+    const importing = expect(harness.ctx.paperAiAcpAgents.importHistory(handle.agent.session.id, 'history-one', harness.root))
+      .rejects.toThrow('导入期间本地会话已改变')
+    try {
+      await expect.poll(async () => (await readLog(harness.logPath)).some(event => event.event === 'load-session')).toBe(true)
+      handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'My new draft' }], source: { kind: 'user' } }))
+    } finally { await rm(gate, { force: true }) }
+    await importing
+    await handle.agent.whenIdle()
+    expect(handle.agent.session.events.filter(event => event.type === 'user/message').map(event => event.data.content))
+      .toEqual([[{ type: 'text', text: 'My new draft' }]])
+    expect((await readLog(harness.logPath)).find(event => event.event === 'prompt')).toMatchObject({ sessionId: 'external-paper-session' })
+  })
+
+  it('releases an external conversation on close and refuses deleting it while locally active', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_HISTORY: '1' } })
+    const handle = await createAgent(harness, 'history-close')
+    await expect(harness.ctx.paperAiAcpAgents.manage('codex', { kind: 'delete', sessionId: 'external-paper-session' })).rejects.toThrow('活动会话')
+    await handle.dispose()
+    await harness.ctx.paperAiAcpAgents.manage('codex', { kind: 'delete', sessionId: 'external-paper-session' })
+    const log = await readLog(harness.logPath)
+    expect(log.find(event => event.event === 'close-session')).toMatchObject({ sessionId: 'external-paper-session' })
+    expect(log.find(event => event.event === 'delete-session')).toMatchObject({ sessionId: 'external-paper-session' })
+  })
+  it('opens only Codex and Claude and reports live connections separately from cached probes', async () => {
+    const harness = await mountHarness()
+    expect(harness.ctx.paperAiAcpAgents.providers().map(provider => provider.id)).toEqual(['codex', 'claude'])
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().every(entry => entry.connected === false)).toBe(true)
+    await harness.ctx.paperAiAcpAgents.probe('codex', true)
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().find(entry => entry.provider === 'codex')).toMatchObject({ status: 'ready', connected: false })
+    const handle = await createAgent(harness, 'connection-status')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)).toMatchObject({ connected: true })
+    expect((await harness.ctx.paperAiAcpAgents.catalog()).find(entry => entry.id === 'codex')).toMatchObject({ connected: true })
+    await handle.dispose()
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().find(entry => entry.provider === 'codex')).toMatchObject({ status: 'ready', connected: false })
+  })
+
+  it('uses Codex and Claude concurrently and releases either channel independently', async () => {
+    const harness = await mountHarness()
+    const [codex, claude] = await Promise.all([
+      createAgent(harness, 'parallel-codex', 'codex'),
+      createAgent(harness, 'parallel-claude', 'claude'),
+    ])
+    expect((await harness.ctx.paperAiAcpAgents.catalog()).map(entry => [entry.id, entry.connected]))
+      .toEqual([['codex', true], ['claude', true]])
+    await Promise.all([runTurn(codex, 'Codex conversation'), runTurn(claude, 'Claude conversation')])
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'prompt').map(entry => entry.label).sort())
+      .toEqual(['claude', 'codex'])
+    await codex.dispose()
+    expect((await harness.ctx.paperAiAcpAgents.catalog()).map(entry => [entry.id, entry.connected]))
+      .toEqual([['codex', false], ['claude', true]])
+    await runTurn(claude, 'Continue Claude independently')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'prompt' && entry.label === 'claude')).toHaveLength(2)
+  })
+
+  it('clears connected status after the provider process exits unexpectedly', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_CRASH_ON_PROMPT: '1' } })
+    const handle = await createAgent(harness, 'crashed-connection')
+    const changed = vi.fn()
+    harness.ctx.on('paperai/acp-changed', changed)
+    await runTurn(handle, 'Crash this test process')
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().find(entry => entry.provider === 'codex')?.connected).toBe(false)
+    expect(changed).toHaveBeenCalledWith(handle.agent.session.id)
+  })
+
   it('discovers and probes both configured adapters without creating an Agent or granting project access', async () => {
     const harness = await mountHarness({
       settingsDocument: { [ACP_AGENT_SETTINGS_NAMESPACE]: { probeTimeoutMs: 5000, failureCooldownMs: 60_000 } },
     })
-    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()).toMatchObject([
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus()).toEqual(expect.arrayContaining([
       { provider: 'codex', status: 'discovered', models: [] },
       { provider: 'claude', status: 'discovered', models: [] },
-    ])
+    ].map((row): unknown => expect.objectContaining(row))))
     expect(await readLog(harness.logPath)).toEqual([])
     for (const provider of ['codex', 'claude'] as const) {
       expect(await harness.ctx.paperAiAcpAgents.probe(provider, false)).toMatchObject({ provider, status: 'ready' })
     }
-    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().every(provider => provider.status === 'ready')).toBe(true)
+    expect(harness.ctx.paperAiAcpAgents.diagnosticStatus().filter(provider => provider.status === 'ready')).toHaveLength(2)
     expect(harness.mcp.leases).toEqual([])
     expect(harness.approvalRequests()).toBe(0)
     const events = await readLog(harness.logPath)
-    expect(events.filter(event => event.event === 'new-session')).toEqual([
-      expect.objectContaining({ label: 'codex', mcpServers: [] }),
-      expect.objectContaining({ label: 'claude', mcpServers: [] }),
-    ])
+    expect(events.filter(event => event.event === 'new-session')).toEqual([])
     expect(events.some(event => event.event === 'prompt')).toBe(false)
   })
 
@@ -1769,8 +2250,10 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     const harness = await mountHarness({
       settingsDocument: {
         [ACP_AGENT_SETTINGS_NAMESPACE]: {
-          codex: { apiKey: 'openai-secret-value', baseURL: 'https://openai.example' },
-          claude: { apiKey: 'anthropic-secret-value', baseURL: 'https://anthropic.example' },
+          providers: {
+            codex: { apiKey: 'openai-secret-value', baseURL: 'https://openai.example' },
+            claude: { apiKey: 'anthropic-secret-value', baseURL: 'https://anthropic.example' },
+          },
         },
       },
     })
@@ -1778,18 +2261,20 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     const descriptor = harness.ctx.settings.describe({ redactSecrets: true })
       .find(entry => entry.ns === ACP_AGENT_SETTINGS_NAMESPACE)
     expect(descriptor?.secrets).toEqual(expect.arrayContaining([
-      { path: ['codex', 'env'], set: true },
-      { path: ['codex', 'apiKey'], set: true },
-      { path: ['claude', 'env'], set: true },
-      { path: ['claude', 'apiKey'], set: true },
+      { path: ['providers', 'codex', 'env'], set: true },
+      { path: ['providers', 'codex', 'apiKey'], set: true },
+      { path: ['providers', 'claude', 'env'], set: true },
+      { path: ['providers', 'claude', 'apiKey'], set: true },
     ]))
     const serialized = JSON.stringify(descriptor)
     expect(serialized).not.toContain('openai-secret-value')
     expect(serialized).not.toContain('anthropic-secret-value')
     expect(serialized).not.toContain(harness.logPath)
     expect(descriptor?.value).toMatchObject({
-      codex: { baseURL: 'https://openai.example' },
-      claude: { baseURL: 'https://anthropic.example' },
+      providers: {
+        codex: { baseURL: 'https://openai.example' },
+        claude: { baseURL: 'https://anthropic.example' },
+      },
     })
   })
 
@@ -1797,15 +2282,17 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     const harness = await mountHarness({
       settingsDocument: {
         [ACP_AGENT_SETTINGS_NAMESPACE]: {
-          codex: { apiKey: 'codex-key-v1', baseURL: 'https://openai.v1' },
-          claude: { apiKey: 'claude-key-v1', baseURL: 'https://anthropic.v1' },
+          providers: {
+            codex: { apiKey: 'codex-key-v1', baseURL: 'https://openai.v1' },
+            claude: { apiKey: 'claude-key-v1', baseURL: 'https://anthropic.v1' },
+          },
         },
       },
     })
     await createAgent(harness, 'settings-codex-v1', 'codex')
 
     await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, {
-      codex: { apiKey: 'codex-key-v2', baseURL: 'https://openai.v2' },
+      providers: { codex: { apiKey: 'codex-key-v2', baseURL: 'https://openai.v2' } },
     })
     await vi.waitFor(() => {
       expect(harness.ctx.paperAiAcpAgents.resolveProvider(codexDefinition).env).toMatchObject({
