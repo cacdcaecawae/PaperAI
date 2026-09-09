@@ -1,6 +1,6 @@
 /** The document view: the document itself, a toolbar of secondary entries, and one open panel. */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   Button, DetailsViewShell, IconBranchOutline16, IconChevronDownOutline14, IconDownloadOutline16,
@@ -9,7 +9,7 @@ import {
 import type { PaperAIDocumentSnapshot, PaperAIExportMode, PaperAIWorkbenchPanel, PaperAIWorkbenchState } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import { DocumentPreview } from './DocumentPreview.tsx'
-import { CompareBar, fixPromptText, GatePanel, TemplatePanel, VersionsPanel } from './panels.tsx'
+import { fixPromptText, GatePanel, TemplatePanel, VersionsPanel } from './panels.tsx'
 import { markDiffHtml } from './preview-html.ts'
 import { TemplateDialog } from './TemplateLibrary.tsx'
 import type { PaperAIWorkbenchKey } from './locales.ts'
@@ -155,6 +155,17 @@ export function DocumentWorkbench({
   )
   // Unmount releases a still-active focus demand so the split returns.
   useEffect(() => () => { setDetailsFocus(false) }, [setDetailsFocus])
+  // An open panel takes the conversation's place: the document column claims the
+  // whole content area and the panel stands beside the page. Closing the panel
+  // gives the conversation back unless the writer asked for focus themselves.
+  const panelOpen = state.phase === 'ready' && document !== null && state.panel !== null
+  const manualFocus = useRef(focusActive)
+  manualFocus.current = focusActive
+  useEffect(() => {
+    if (!panelOpen) return
+    setDetailsFocus(true)
+    return () => { setDetailsFocus(manualFocus.current) }
+  }, [panelOpen, setDetailsFocus])
   // A block notice answers one click. Once the workbench moves on — another
   // block opened or closed, an action settled, a new revision arrives — the
   // reason it named is gone, so the line goes with it.
@@ -223,18 +234,7 @@ export function DocumentWorkbench({
       {blockNotice !== null && (
         <p className={css.actionError} role="status">{t(blockNotice)}</p>
       )}
-      <main className={css.body}>
-        {state.phase === 'ready' && document !== null && compare !== null && (
-          <CompareBar
-            document={document}
-            state={state}
-            unplaced={compare.unplaced}
-            showDiff={showDiff}
-            restore={restore}
-            onClose={() => { showPanel(null) }}
-            t={t}
-          />
-        )}
+      <main className={css.body} data-panel={panelOpen || undefined}>
         {state.phase === 'idle' && <p className={css.centerMessage}>{t('workbench.idle')}</p>}
         {state.phase === 'loading' && <p className={css.centerMessage} aria-live="polite">{t('workbench.loading')}</p>}
         {state.phase === 'error' && (
@@ -299,11 +299,13 @@ export function DocumentWorkbench({
             t={t}
           />
         )}
-        {state.phase === 'ready' && document !== null && state.panel === 'versions' && compare === null && (
+        {state.phase === 'ready' && document !== null && state.panel === 'versions' && (
           <VersionsPanel
             document={document}
             state={state}
+            unplaced={compare?.unplaced ?? []}
             showDiff={showDiff}
+            restore={restore}
             onClose={() => { showPanel(null) }}
             t={t}
           />

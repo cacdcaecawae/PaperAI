@@ -1,8 +1,9 @@
 /* The document view keeps the DSH details-shell chrome and adds one quiet row
    above the document: the facts (template, gate, versions) as 12px text
    entries on the left, the actions on the right with export as the one filled
-   button. The document is a page on the base tone; panels open inside the
-   column, over the document, on the right. */
+   button. The document is a page on the base tone. An open panel takes the
+   conversation's place: the column claims the whole content area and the panel
+   stands beside the page; only a narrow column lays it over the page. */
 
 .root {
   container-name: paperai-workbench;
@@ -174,6 +175,10 @@
   flex-direction: column;
 }
 
+.body[data-panel] {
+  flex-direction: row;
+}
+
 .preview {
   min-width: 0;
   min-height: 0;
@@ -267,15 +272,13 @@
   line-height: 20px;
 }
 
-/* Panels sit over the document's right edge, inside the column, with the
-   same hairline and layer tone as the details header. */
+/* The panel is a column of its own beside the page, with the same hairline
+   and layer tone as the details header. */
 .panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
   display: flex;
-  width: min(380px, 100%);
+  width: 420px;
+  min-height: 0;
+  flex: none;
   flex-direction: column;
   border-left: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-base);
@@ -666,7 +669,7 @@
   font-style: normal;
 }
 
-/* Changes the current text no longer carries are listed under the compare bar. */
+/* Changes the current text no longer carries are listed above the timeline. */
 .unplaced {
   display: flex;
   flex-direction: column;
@@ -708,48 +711,21 @@
   text-decoration: none;
 }
 
-/* Comparing replaces the panel with a tinted strip above the page: the version,
-   its change count, and the actions, so the marked page stays in full view. */
-.compareBar {
+/* Restore is the picked version's action at the foot of the panel. */
+.versionFooter {
+  position: sticky;
+  bottom: 0;
   display: flex;
-  flex: none;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px 8px 16px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-state-business-tertiary);
-}
-
-.compareMain {
-  display: flex;
-  min-width: 0;
   flex-direction: column;
-  gap: 2px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 18px;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
 }
 
-.compareMain strong {
-  overflow: hidden;
-  color: var(--dsw-alias-label-primary);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.compareMain summary {
-  cursor: pointer;
-}
-
-.compareActions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
+.versionFooter > button {
+  align-self: stretch;
 }
 
 .actorBadge {
@@ -785,8 +761,17 @@
     padding: 0;
   }
 
+  /* A narrow column cannot seat the panel beside the page; it lays over it. */
+  .body[data-panel] {
+    flex-direction: column;
+  }
+
   .panel {
-    width: 100%;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(380px, 100%);
   }
 }
 
