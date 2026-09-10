@@ -385,10 +385,10 @@ describe('DocumentWorkbench', () => {
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     expect(shadow.querySelector(`.${band} p`)?.hasAttribute('contenteditable')).toBe(false)
     const body = shadow.querySelector<HTMLElement>('.page-body p')!
-    expect(body.getAttribute('contenteditable')).toBe('plaintext-only')
+    expect(body.getAttribute('contenteditable')).toBe('true')
     body.textContent = 'Rewritten background'
     fireEvent.input(body)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, 'Rewritten background')
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
   })
 
   it('does not consume body matches for unaddressed preview content', () => {
@@ -402,7 +402,7 @@ describe('DocumentWorkbench', () => {
     for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.hasAttribute('contenteditable')).toBe(false)
     paragraphs[3]!.textContent = 'Changed'
     fireEvent.input(paragraphs[3]!)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, 'Changed')
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Changed' })
   })
 
   it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
@@ -425,7 +425,7 @@ describe('DocumentWorkbench', () => {
     expect(cellBlock.hasAttribute('contenteditable')).toBe(cell === 'editable')
     cellBlock.textContent = 'Cell retyped'
     fireEvent.input(cellBlock)
-    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, 'Cell retyped')
+    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, { text: 'Cell retyped' })
     else expect(b.updateDraft).not.toHaveBeenCalled()
     b.updateDraft.mockClear()
     const paragraphs = [...shadow.querySelectorAll('p')].filter(element => element.closest('td') === null)
@@ -433,7 +433,8 @@ describe('DocumentWorkbench', () => {
       paragraph.textContent = `${paragraph.textContent} retyped`
       fireEvent.input(paragraph)
     }
-    expect(b.updateDraft.mock.calls).toEqual([[NODE_PARAGRAPH, 'Research background retyped'], [NODE_HEADING, 'Research background retyped']])
+    expect(b.updateDraft.mock.calls)
+      .toEqual([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
   })
 
   it('retains embedded raster figures while removing executable data URLs and handlers', () => {
@@ -508,14 +509,14 @@ describe('DocumentWorkbench', () => {
     // The table cell has no editable node and stays as rendered; the paragraph is written into directly.
     expect(shadow.querySelector('td')?.hasAttribute('contenteditable')).toBe(false)
     const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
-    expect(paragraph.getAttribute('contenteditable')).toBe('plaintext-only')
+    expect(paragraph.getAttribute('contenteditable')).toBe('true')
     paragraph.textContent = 'Rewritten background'
     fireEvent.input(paragraph)
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, 'Rewritten background')
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
     fireEvent.keyDown(paragraph, { key: 'Enter', ctrlKey: true })
     expect(b.commitEdit).toHaveBeenCalledOnce()
     fireEvent.keyDown(paragraph, { key: 'Escape' })
-    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, 'Research background')
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, null)
     expect(screen.queryByRole('group', { name: '已修改 1 段' })).toBeNull()
 
     act(() => {
@@ -535,6 +536,101 @@ describe('DocumentWorkbench', () => {
     expect(paragraph.textContent).toBe('Research background')
     expect(paragraph.hasAttribute('data-paperai-changed')).toBe(false)
     expect(screen.queryByRole('group', { name: '已修改 1 段' })).toBeNull()
+  })
+
+  it('formats the selected text in place and reports the block as runs', () => {
+    const snapshot = documentSnapshot()
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
+    const range = document.createRange()
+    range.setStart(paragraph.firstChild!, 0)
+    range.setEnd(paragraph.firstChild!, 8)
+    // jsdom does not expose ShadowRoot.getSelection; its Range still resolves real shadow nodes.
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+    }) })
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+
+    const bold = screen.getByRole('button', { name: '加粗' })
+    expect(bold.getAttribute('aria-pressed')).toBe('false')
+    expect(fireEvent.mouseDown(bold)).toBe(false)
+    fireEvent.click(bold)
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
+      text: 'Research background',
+      runs: [{ text: 'Research', bold: true }, { text: ' background' }],
+    })
+    expect(screen.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('true')
+
+    // The size control states a size over the block's own, and 默认 takes it back.
+    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '16pt' } })
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
+      text: 'Research background',
+      runs: [{ text: 'Research', bold: true, size: '16pt' }, { text: ' background' }],
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '' } })
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
+      text: 'Research background',
+      runs: [{ text: 'Research', bold: true }, { text: ' background' }],
+    })
+  })
+
+  it('slopes and underlines the same selection, and keeps a paste to its plain text', () => {
+    const snapshot = documentSnapshot()
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
+    const range = document.createRange()
+    range.setStart(paragraph.firstChild!, 0)
+    range.setEnd(paragraph.firstChild!, 8)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+    }) })
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+
+    fireEvent.click(screen.getByRole('button', { name: '斜体' }))
+    fireEvent.click(screen.getByRole('button', { name: '下划线' }))
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
+      text: 'Research background',
+      runs: [{ text: 'Research', italic: true, underline: true }, { text: ' background' }],
+    })
+
+    // Clicking away collapses the selection, and the controls go with it.
+    range.collapse(true)
+    fireEvent.click(paragraph)
+    expect(screen.queryByRole('button', { name: '斜体' })).toBeNull()
+
+    // Word text arrives as markup; a block is one paragraph, so only its text enters.
+    b.updateDraft.mockClear()
+    range.selectNodeContents(paragraph)
+    fireEvent.paste(paragraph, { clipboardData: { getData: () => '<b>粘贴</b>' } })
+    expect(paragraph.textContent).toBe('<b>粘贴</b>')
+    expect(paragraph.querySelector('b')).toBeNull()
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: '<b>粘贴</b>' })
+  })
+
+  it('writes a retained draft back into a block as the runs it kept', () => {
+    const snapshot = documentSnapshot()
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
+    act(() => {
+      b.store.set(workbenchState({
+        phase: 'ready',
+        document: snapshot,
+        edits: [{
+          nodeId: NODE_PARAGRAPH,
+          baseText: 'Research background',
+          draft: 'Kept background',
+          runs: [{ text: 'Kept', bold: true }, { text: ' background' }],
+        }],
+      }))
+    })
+    expect(paragraph.innerHTML).toBe('<span style="font-weight: bold;">Kept</span><span> background</span>')
+    expect(paragraph.hasAttribute('data-paperai-changed')).toBe(true)
   })
 
   it('opens the template, gate, and versions panels from the toolbar and drafts an agent fix', () => {

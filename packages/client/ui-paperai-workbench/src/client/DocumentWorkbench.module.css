@@ -159,6 +159,36 @@
   color: var(--dsw-alias-state-success-primary);
 }
 
+/* Formatting sits with the other selection actions: quiet chips and a native size control. */
+.format {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.format .chip[aria-pressed='true'] {
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.size {
+  height: 28px;
+  margin-left: 4px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  padding: 0 4px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.size:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
 .actionError {
   margin: 0;
   padding: 7px 16px;

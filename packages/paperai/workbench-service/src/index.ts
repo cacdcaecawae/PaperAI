@@ -48,6 +48,7 @@ import type {
   PaperAIProbeAgentRequest,
   PaperAIApplyTemplateRequest,
   PaperAICommitDocumentRequest,
+  PaperAIDocumentMutation,
   PaperAICreateFromTemplateRequest,
   PaperAICreateTemplateSetRequest,
   PaperAIDeleteTemplateSetRequest,
@@ -200,6 +201,14 @@ function compactLabel(text: string, fallback: string): string {
   const compact = text.replace(/\s+/gu, ' ').trim()
   if (compact.length === 0) return fallback
   return compact.length <= 56 ? compact : `${compact.slice(0, 55)}…`
+}
+
+/** Name one browser commit by what it changed: a block's text, its formatting alone, or several blocks. */
+function commitMessage(mutations: readonly PaperAIDocumentMutation[]): string {
+  const first = mutations[0]
+  const formatting = mutations.every(mutation => mutation.nextText === mutation.baseText)
+  if (mutations.length > 1) return `${formatting ? '排版' : '修改'} ${mutations.length} 个段落`
+  return `${formatting ? '排版' : '修改'}：${compactLabel(first?.nextText ?? '', '段落')}`
 }
 
 function nodeSummary(node: DocumentNode): PaperAIDocumentNodeSummary {
@@ -987,9 +996,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const commit = await this.ctx.paperCommits.submit({
       documentId: id,
       ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
-      message: request.mutations.length === 1
-        ? `修改：${compactLabel(firstMutation.nextText, '段落')}`
-        : `修改 ${request.mutations.length} 个段落`,
+      message: commitMessage(request.mutations),
       actor: {
         kind: 'human',
         name: '用户',
@@ -1001,6 +1008,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         nodeId: DocumentNodeId(String(mutation.nodeId)),
         baseText: mutation.baseText,
         nextText: mutation.nextText,
+        ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
       })),
       ...(signal === undefined ? {} : { signal }),
     })

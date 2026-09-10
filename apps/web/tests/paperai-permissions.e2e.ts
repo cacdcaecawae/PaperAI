@@ -846,6 +846,24 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'header-footer.expected.md'), await preview.ariaSnapshot(), MODE)
   }, 90_000)
 
+  it('carries bold and a font size from the page into the saved document', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-formatting'))
+    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const body = preview.locator('.page-body p[data-path="/body/p[1]"]')
+    await body.click()
+    await page.keyboard.press('Control+A')
+    const selection = page.getByRole('region', { name: '选中的文字', exact: true })
+    await selection.getByRole('button', { name: '加粗', exact: true }).click()
+    await selection.getByRole('combobox', { name: '字号', exact: true }).selectOption('16pt')
+    await pending().getByRole('button', { name: '保存', exact: true }).click()
+    await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+    // The Host re-renders the preview from the DOCX, so its spans are the run properties Word now stores.
+    await expect.poll(() => body.locator('span').first().getAttribute('style'), { timeout: 30_000 })
+      .toMatch(/font-weight:s*bold/u)
+    expect(await body.locator('span').first().getAttribute('style')).toMatch(/font-size:s*16pt/u)
+    expect(await body.textContent()).toBe('Body edited; header unchanged')
+  }, 90_000)
+
   it('starts from migrated credentials with optional defaults and renders throttled tool progress', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-acp-defaults'))
     const projectRoot = join(scaffold.workspaceCwd, 'acp-defaults')

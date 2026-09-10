@@ -285,7 +285,7 @@ describe('PaperAI workbench browser plugin', () => {
     expect(details.hooks.projects.getSnapshot().workspaces[WORKSPACE_ID]).toMatchObject({ selected: RESOURCE_ID })
     details.showPanel('versions')
     expect(details.hooks.workbench.getSnapshot().panel).toBe('versions')
-    details.updateDraft(NODE_HEADING, 'Local draft')
+    details.updateDraft(NODE_HEADING, { text: 'Local draft' })
     expect(details.hooks.workbench.getSnapshot().edits).toHaveLength(1)
     details.cancelEdit()
     await expect(details.commitEdit()).resolves.toEqual({ ok: false, error: 'no block has changes' })

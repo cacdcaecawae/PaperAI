@@ -566,10 +566,21 @@ export class PaperCommitService extends Service {
               `node '${node.id}' text changed since the mutation was prepared`,
             )
           }
-          if (mutation.nextText === mutation.baseText) {
+          if (mutation.nextText === mutation.baseText && mutation.runs === undefined) {
             throw new PaperCommitError('INVALID_REQUEST', `replace-text for node '${node.id}' is a no-op`)
           }
-          engineMutations.push({ type: 'replace-text', officePath: node.officePath, text: mutation.nextText })
+          if (mutation.runs !== undefined && mutation.runs.map(run => run.text).join('') !== mutation.nextText) {
+            throw new PaperCommitError(
+              'INVALID_REQUEST',
+              `replace-text runs for node '${node.id}' do not spell its text`,
+            )
+          }
+          engineMutations.push({
+            type: 'replace-text',
+            officePath: node.officePath,
+            text: mutation.nextText,
+            ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
+          })
           operations.push({
             type: mutation.type,
             nodeId: node.id,

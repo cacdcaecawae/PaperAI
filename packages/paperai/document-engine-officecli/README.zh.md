@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`ctx.documentEngine` 的 OfficeCLI Service Provider。它解析固定版本 `@officecli/officecli` launcher（或显式命令），通过 DSH `ctx.subprocess` 运行所有进程，限制执行时间和捕获输出，关闭 OfficeCLI 自动更新，并让 OfficeCLI 为每条命令启动的常驻文档进程在 lease 之间继续存活，同一文件的连续操作因此免去冷启动。常驻进程在 `residentIdleMs` 无操作后关闭，在 `release(filePath)` 时立即关闭（提交服务在替换或删除文件前调用它），Provider 销毁时也会关闭。关闭清理使用独立 signal 和单独的短超时，因此调用方取消操作也不会跳过清理。
+`ctx.documentEngine` 的 OfficeCLI Service Provider。带 runs 的 `replace-text` 会重建该段落——先设置段落文字，再声明第一个 run 的覆盖，然后依次追加其余 run——并作为一次 `batch` 调用发出，而不是每个操作一次进程往返；纯文本仍是单条 `set`。它解析固定版本 `@officecli/officecli` launcher（或显式命令），通过 DSH `ctx.subprocess` 运行所有进程，限制执行时间和捕获输出，关闭 OfficeCLI 自动更新，并让 OfficeCLI 为每条命令启动的常驻文档进程在 lease 之间继续存活，同一文件的连续操作因此免去冷启动。常驻进程在 `residentIdleMs` 无操作后关闭，在 `release(filePath)` 时立即关闭（提交服务在替换或删除文件前调用它），Provider 销毁时也会关闭。关闭清理使用独立 signal 和单独的短超时，因此调用方取消操作也不会跳过清理。
 
 每次调用均设置固定版本二进制识别的更新检查禁用选项 `OFFICECLI_SKIP_UPDATE=1`，使文档操作独立于后台二进制替换和已安装技能的刷新。
 

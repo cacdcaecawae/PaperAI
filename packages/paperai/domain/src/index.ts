@@ -143,9 +143,25 @@ export interface DocumentNode {
   updatedAt: string
 }
 
+/**
+ * Character formatting of one run of a block's text. Only properties that
+ * override the block's own formatting are carried, so a run that reads as its
+ * paragraph does carries nothing but its text.
+ */
+export interface DocumentTextRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  /** Font size in points, for example `14pt`. */
+  size?: string
+  /** Text color as `#RRGGBB`. */
+  color?: string
+}
+
 /** Operations accepted by the single document-commit path. */
 export type DocumentMutation =
-  | { type: 'replace-text'; nodeId: DocumentNodeId; baseText: string; nextText: string }
+  | { type: 'replace-text'; nodeId: DocumentNodeId; baseText: string; nextText: string; runs?: readonly DocumentTextRun[] }
   | { type: 'insert-node'; text: string; afterNodeId?: DocumentNodeId; beforeNodeId?: DocumentNodeId; style?: string }
   | { type: 'delete-node'; nodeId: DocumentNodeId; baseText?: string }
   | { type: 'set-style'; nodeId: DocumentNodeId; patch: Record<string, unknown> }

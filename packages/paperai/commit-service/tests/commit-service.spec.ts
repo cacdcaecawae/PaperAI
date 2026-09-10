@@ -838,6 +838,22 @@ describe('PaperCommitService', () => {
       .rejects.toMatchObject({ code: 'NODE_TEXT_CONFLICT' })
     await expect(compile(harness, [replaceMutation(harness.nodeId, 'alpha', 'alpha')]))
       .rejects.toThrow('no-op')
+
+    // Runs carry the block's character formatting, so its text alone may stay as it is.
+    const formatted = await compile(harness, [{
+      ...replaceMutation(harness.nodeId, 'alpha', 'alpha'),
+      runs: [{ text: 'al', bold: true }, { text: 'pha' }],
+    }])
+    expect(formatted.engineMutations).toEqual([{
+      type: 'replace-text',
+      officePath: '/body/p[1]',
+      text: 'alpha',
+      runs: [{ text: 'al', bold: true }, { text: 'pha' }],
+    }])
+    await expect(compile(harness, [{
+      ...replaceMutation(harness.nodeId, 'alpha', 'beta'),
+      runs: [{ text: 'other' }],
+    }])).rejects.toThrow('do not spell its text')
     await expect(compile(harness, [{ type: 'delete-node', nodeId: harness.nodeId, baseText: 'stale' }]))
       .rejects.toMatchObject({ code: 'NODE_TEXT_CONFLICT' })
     await expect(compile(harness, [{ type: 'milestone', label: ' ' }]))

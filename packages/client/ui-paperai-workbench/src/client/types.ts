@@ -4,7 +4,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@paperai/workbench-service/remote'
 import type {
-  PaperAIDocumentNodeId, PaperAIDocumentSnapshot, PaperAIDocumentType,
+  PaperAIDocumentNodeId, PaperAIDocumentSnapshot, PaperAIDocumentTextRun, PaperAIDocumentType,
   PaperAIDocumentTypeSuggestion, PaperAIExportMode, PaperAIProjectOverview, PaperAIResourceId,
   PaperAITemplateLibrary, PaperAIVersionDiff,
 } from '@paperai/workbench-service/types'
@@ -100,11 +100,19 @@ export type PaperAIWorkbenchAction =
   | 'reloading-external'
   | 'capturing-external'
 
+/** What one block now reads: its plain text, and its runs when character formatting is part of the change. */
+export interface PaperAIBlockDraft {
+  readonly text: string
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+}
+
 /** The block being edited in place: its node, the text it started from, and the draft. */
 export interface PaperAIBlockEdit {
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
   readonly draft: string
+  /** The block's runs, present when its character formatting differs from the document's. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
   /** The current document changed this block; retain the draft for copying or discarding. */
   readonly conflicted?: boolean
 }

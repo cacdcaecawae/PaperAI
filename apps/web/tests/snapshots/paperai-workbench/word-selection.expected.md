@@ -1,4 +1,18 @@
 - region "选中的文字":
   - text: 浏览器合并后的最终文本
+  - group "格式":
+    - button "加粗"
+    - button "斜体"
+    - button "下划线"
+    - combobox "字号":
+      - option "默认" [selected]
+      - option "9"
+      - option "10.5"
+      - option "12"
+      - option "14"
+      - option "15"
+      - option "16"
+      - option "18"
+      - option "22"
   - button "交给 Agent"
   - button "取消选区"

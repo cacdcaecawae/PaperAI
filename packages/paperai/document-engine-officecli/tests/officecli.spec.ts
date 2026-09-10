@@ -116,6 +116,27 @@ describe('OfficeCliDocumentEngine', () => {
     ])
   })
 
+  it('rebuilds a paragraph from its runs in one batch and leaves plain text one command', async () => {
+    const { calls, engine } = fixture(() => ({}))
+    await engine.applyMutations('D:\\paper.docx', [
+      { type: 'replace-text', officePath: '/body/p[1]', text: '普通' },
+      {
+        type: 'replace-text',
+        officePath: '/body/p[2]',
+        text: '加粗其余',
+        runs: [{ text: '加粗', bold: true, size: '16pt' }, { text: '其余' }],
+      },
+    ])
+    const [plain, formatted] = calls.map(call => call.argv.slice(1))
+    expect(plain).toEqual(['set', 'D:\\paper.docx', '/body/p[1]', '--prop', 'text=普通', '--json'])
+    expect(formatted?.slice(0, 3)).toEqual(['batch', 'D:\\paper.docx', '--commands'])
+    expect(JSON.parse(String(formatted?.[3]))).toEqual([
+      { command: 'set', path: '/body/p[2]', props: { text: '加粗' } },
+      { command: 'set', path: '/body/p[2]/r[1]', props: { text: '加粗', bold: 'true', size: '16pt', 'size.cs': '16pt' } },
+      { command: 'add', parent: '/body/p[2]', type: 'run', props: { text: '其余' } },
+    ])
+  })
+
   it('parses preview, inspection, and validation envelopes', async () => {
     const { engine } = fixture((spec) => {
       if (spec.argv.includes('html')) return { stdout: '<article>论文</article>' }

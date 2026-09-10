@@ -10,7 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import { DocumentEngine } from '@paperai/document-engine'
-import type { EngineMutation, EngineTextNode, EngineValidation } from '@paperai/document-engine'
+import type { EngineMutation, EngineTextNode, EngineTextRun, EngineValidation } from '@paperai/document-engine'
 import type { CapabilityHealth } from '@paperai/domain'
 import {
   convertLegacyDocument,
@@ -113,6 +113,38 @@ function packagedCommand(): { command: string; prefix: string[] } {
 }
 
 /** OfficeCLI-backed Word engine with one FIFO lease per exact file path. */
+/** OfficeCLI `--prop` values for one run; Word writes the Latin and complex-script sizes together, so both travel. */
+function runProps(run: EngineTextRun): Record<string, string> {
+  return {
+    text: run.text,
+    ...(run.bold === undefined ? {} : { bold: String(run.bold) }),
+    ...(run.italic === undefined ? {} : { italic: String(run.italic) }),
+    ...(run.underline === undefined ? {} : { underline: run.underline ? 'single' : 'none' }),
+    ...(run.size === undefined ? {} : { size: run.size, 'size.cs': run.size }),
+    ...(run.color === undefined ? {} : { color: run.color }),
+  }
+}
+
+/**
+ * Rebuild one paragraph from its runs. Setting the paragraph's text leaves a
+ * single run carrying the first run's text and the paragraph's own formatting;
+ * that run then takes the first run's overrides and the rest are appended in
+ * order.
+ * @param officePath - paragraph or cell paragraph being rebuilt.
+ * @param runs - the block's runs in reading order.
+ * @returns OfficeCLI batch items in application order.
+ */
+function runBatch(officePath: string, runs: readonly EngineTextRun[]): Record<string, unknown>[] {
+  const [first, ...rest] = runs
+  const firstProps = first === undefined ? { text: '' } : runProps(first)
+  return [
+    { command: 'set', path: officePath, props: { text: firstProps.text } },
+    ...(Object.keys(firstProps).length > 1 ? [{ command: 'set', path: `${officePath}/r[1]`, props: firstProps }] : []),
+    ...rest.map(run => ({ command: 'add', parent: officePath, type: 'run', props: runProps(run) })),
+  ]
+}
+
+/** OfficeCLI-backed `ctx.documentEngine`: every operation runs through the pinned launcher under one per-file lease. */
 export class OfficeCliDocumentEngine extends DocumentEngine {
   static inject = ['subprocess']
   static Config: z<Config> = z.object({
@@ -248,7 +280,13 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   private mutationArgs(filePath: string, mutation: EngineMutation): string[] {
     if (mutation.type === 'replace-text') {
-      return ['set', filePath, mutation.officePath, '--prop', `text=${mutation.text}`, '--json']
+      // Plain text stays one command. Runs rebuild the paragraph, which takes
+      // several OfficeCLI operations, so they travel as one batch: the resident
+      // applies them in a single pass instead of one process round trip each.
+      if (mutation.runs === undefined || mutation.runs.length === 0) {
+        return ['set', filePath, mutation.officePath, '--prop', `text=${mutation.text}`, '--json']
+      }
+      return ['batch', filePath, '--commands', JSON.stringify(runBatch(mutation.officePath, mutation.runs)), '--json']
     }
     if (mutation.type === 'remove') return ['remove', filePath, mutation.officePath, '--json']
     const args = ['add', filePath, '/body', '--type', 'paragraph', '--prop', `text=${mutation.text}`]

@@ -12,7 +12,8 @@ import type {
   PaperAIDocumentType, PaperAIExportMode, PaperAIExternalDocumentHead, PaperAIImportDocumentResult, PaperAILibraryAction,
   PaperAILibraryState, PaperAILibraryStore, PaperAIProjectAction, PaperAIProjectDirectoryState,
   PaperAIProjectDirectoryStore, PaperAIProjectOverview, PaperAIProjectState, PaperAIProjectStore,
-  PaperAIResourceId, PaperAIRetainedView, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput, PaperAIWorkbenchAction,
+  PaperAIResourceId, PaperAIRetainedView, PaperAIBlockDraft, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput,
+  PaperAIWorkbenchAction,
   PaperAIWorkbenchPanel, PaperAIWorkbenchRemote, PaperAIWorkbenchState, PaperAIWorkbenchStore,
 } from './types.ts'
 
@@ -449,18 +450,22 @@ export class PaperAIWorkbenchController {
   }
 
   /**
-   * Record what one block now reads in the page. Its original text drops the draft again.
+   * Record what one block now reads in the page. The page owns the comparison,
+   * because a block can differ from the document by its formatting alone;
+   * `null` says the block reads as the document has it.
    * @param sessionId - Session owning the open workbench.
-   * @param nodeId - block retyped in the document view.
-   * @param value - current plain text of the block.
+   * @param nodeId - block written into in the document view.
+   * @param draft - the block's text and runs, or `null` to drop its draft.
    */
-  updateDraft(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, value: string): void {
+  updateDraft(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null): void {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
       const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
       if (state.phase !== 'ready' || state.action !== null || node === undefined || !node.editable) return
       const others = state.edits.filter(edit => edit.nodeId !== nodeId)
-      state.edits = normalize(value) === normalize(node.text) ? others : [...others, { nodeId, baseText: node.text, draft: value }]
+      state.edits = draft === null
+        ? others
+        : [...others, { nodeId, baseText: node.text, draft: draft.text, ...(draft.runs === undefined ? {} : { runs: draft.runs }) }]
       state.actionError = null
     })
   }
@@ -505,7 +510,13 @@ export class PaperAIWorkbenchController {
       documentId: document.documentId,
       baseRevision: document.revision,
       baseCommitId: document.headCommitId,
-      mutations: edits.map(edit => ({ type: 'replace-text' as const, nodeId: edit.nodeId, baseText: edit.baseText, nextText: edit.draft })),
+      mutations: edits.map(edit => ({
+        type: 'replace-text' as const,
+        nodeId: edit.nodeId,
+        baseText: edit.baseText,
+        nextText: edit.draft,
+        ...(edit.runs === undefined ? {} : { runs: edit.runs }),
+      })),
     }, request.signal))
     // The preview patch finds each block the way the page maps it: same kind, same text, same ordinal among peers.
     const patches = edits.map((edit) => {
@@ -513,7 +524,7 @@ export class PaperAIWorkbenchController {
       const ordinal = document.nodes
         .filter(node => node.kind !== 'table' && (node.kind === 'table-cell') === cell && normalize(node.text) === normalize(edit.baseText))
         .findIndex(node => node.nodeId === edit.nodeId)
-      return { baseText: edit.baseText, nextText: edit.draft, cell, ordinal }
+      return { baseText: edit.baseText, nextText: edit.draft, cell, ordinal, ...(edit.runs === undefined ? {} : { runs: edit.runs }) }
     })
     return this.settleCommit(entry, request, document, result, patches)
   }

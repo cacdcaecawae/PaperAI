@@ -17,7 +17,7 @@ The service requires `paperRepository`, `documentEngine`, and `paperDocuments`.
 
 `submit()` requires a non-blank message and at least one mutation. `baseCommitId` must equal the current head; omission is valid only before the first commit. `revert()` requires the caller's current head and a different target reachable from that head.
 
-Compiled mutations cover `replace-text`, `insert-node`, `delete-node`, `bind-template`, `unbind-template`, `set-document-type`, and `milestone`. `bind-template` runs `paperTemplates.validateAssociation()` with the document type the same commit switches to; `unbind-template` fails on a document with no bound template; `set-document-type` fails when the type is unchanged and, unless the same commit binds another template, records an `unbind-template` operation first because a bound format applies to one type. The published `DocumentRecord` carries the resulting type and template binding.
+Compiled mutations cover `replace-text`, `insert-node`, `delete-node`, `bind-template`, `unbind-template`, `set-document-type`, and `milestone`. `replace-text` may carry the block's `runs`, which must spell exactly its `nextText`; with runs the block's character formatting is part of the change, so its text alone may stay as it is. `bind-template` runs `paperTemplates.validateAssociation()` with the document type the same commit switches to; `unbind-template` fails on a document with no bound template; `set-document-type` fails when the type is unchanged and, unless the same commit binds another template, records an `unbind-template` operation first because a bound format applies to one type. The published `DocumentRecord` carries the resulting type and template binding.
 
 ## Publication and Recovery
 

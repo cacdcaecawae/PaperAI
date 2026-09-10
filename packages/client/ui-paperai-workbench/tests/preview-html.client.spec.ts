@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { markDiffHtml, patchPreviewHtml, wordDiff } from '../src/client/preview-html.ts'
+import { applyRuns, markDiffHtml, patchPreviewHtml, runsOf, sameRuns, wordDiff } from '../src/client/preview-html.ts'
 
 const HTML = '<html><head></head><body>'
   + '<h1 data-path="/body/p[1]">Introduction</h1><p data-path="/body/p[2]">Research background</p>'
@@ -66,5 +66,64 @@ describe('patchPreviewHtml', () => {
     ]), 'text/html')
     expect(cellPatched.querySelector('td')?.textContent).toBe('Cell context')
     expect(cellPatched.querySelector('[data-path="/body/p[2]"]')?.textContent).toBe('Research background')
+  })
+})
+
+describe('block runs', () => {
+  function block(html: string, style = 'font-size: 12pt'): HTMLElement {
+    const element = document.createElement('p')
+    element.setAttribute('style', style)
+    element.innerHTML = html
+    document.body.replaceChildren(element)
+    return element
+  }
+
+  it('reads a block as the runs Word stores, stating only what overrides the block', () => {
+    expect(runsOf(block('<span>plain </span><span style="font-weight:bold">bold</span>'
+      + '<span style="font-weight:bold">er</span><span style="font-size:16pt">big</span>'))).toEqual([
+      { text: 'plain ' },
+      { text: 'bolder', bold: true },
+      { text: 'big', size: '16pt' },
+    ])
+  })
+
+  it('reads italic, underline, and color, and states nothing for a run that reads as its block', () => {
+    expect(runsOf(block('<span style="font-style:italic">sloped</span>'
+      + '<span style="text-decoration:underline">lined</span>'
+      + '<span style="color:rgb(255,0,0)">red</span><span style="font-size:12pt">same</span>'))).toEqual([
+      { text: 'sloped', italic: true },
+      { text: 'lined', underline: true },
+      { text: 'red', color: '#FF0000' },
+      { text: 'same' },
+    ])
+  })
+
+  it('states a run that turns the block own formatting off', () => {
+    expect(runsOf(block('<span style="font-weight:normal">quiet</span>', 'font-size: 12pt; font-weight: bold')))
+      .toEqual([{ text: 'quiet', bold: false }])
+  })
+
+  it('compares runs by text and formatting so an untouched block keeps no draft', () => {
+    const runs = runsOf(block('<span style="font-weight:bold">bold</span>'))
+    expect(sameRuns(runs, [{ text: 'bold', bold: true }])).toBe(true)
+    expect(sameRuns(runs, [{ text: 'bold' }])).toBe(false)
+    expect(sameRuns(runs, [{ text: 'bold', bold: true }, { text: '!' }])).toBe(false)
+  })
+
+  it('writes runs back as spans carrying their overrides', () => {
+    const element = block('<span>before</span>')
+    applyRuns(element, [{ text: 'plain' }, { text: 'loud', bold: true, size: '16pt', color: '#FF0000' }])
+    expect(element.innerHTML)
+      .toBe('<span>plain</span><span style="font-weight: bold; font-size: 16pt; color: rgb(255, 0, 0);">loud</span>')
+    expect(runsOf(element)).toEqual([{ text: 'plain' }, { text: 'loud', bold: true, size: '16pt', color: '#FF0000' }])
+  })
+
+  it('paints a commit that carried formatting into the preview already on screen', () => {
+    const patched = patchPreviewHtml(HTML, [{
+      baseText: 'Introduction', nextText: 'Bold introduction', cell: false, ordinal: 0,
+      runs: [{ text: 'Bold ' }, { text: 'introduction', bold: true }],
+    }])
+    expect(patched).toContain('<span style="font-weight: bold;">introduction</span>')
+    expect(patched).not.toContain('>Introduction<')
   })
 })

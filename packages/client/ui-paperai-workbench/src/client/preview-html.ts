@@ -1,6 +1,6 @@
 /** Block-level reading of the Host's preview HTML: the rendered preview, the commit patch, and the version diff. */
 
-import type { PaperAIVersionChange } from './types.ts'
+import type { PaperAIDocumentTextRun, PaperAIVersionChange } from './types.ts'
 
 /** Tags whose text maps back to one semantic node. */
 export const BLOCK_TAGS = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH']
@@ -24,6 +24,122 @@ export function blocksOf(container: HTMLElement): HTMLElement[] {
     .filter(element => !((element.tagName === 'TD' || element.tagName === 'TH') && element.querySelector('p') !== null))
 }
 
+/** Word stores font sizes in points; the preview renders one point as 4/3 of a CSS pixel. */
+const PIXELS_PER_POINT = 4 / 3
+
+/**
+ * Whether a rendered element reads bold, so 'bold' and a numeric weight agree.
+ * @param style - resolved style of a block or one of its runs.
+ * @returns whether Word would store the run as bold.
+ */
+export function boldOf(style: CSSStyleDeclaration): boolean {
+  const weight = style.fontWeight
+  return weight === 'bold' || Number(weight) >= 600
+}
+
+/**
+ * Whether a rendered element reads underlined, from either the longhand or the shorthand.
+ * @param style - resolved style of a block or one of its runs.
+ * @returns whether Word would store the run as underlined.
+ */
+export function underlineOf(style: CSSStyleDeclaration): boolean {
+  return `${style.textDecorationLine} ${style.textDecoration}`.includes('underline')
+}
+
+/**
+ * Rendered font size in points, rounded to the half point Word offers.
+ * @param style - resolved style of a block or one of its runs.
+ * @returns the size in points, or NaN when the style states none.
+ */
+export function pointsOf(style: CSSStyleDeclaration): number {
+  const value = parseFloat(style.fontSize)
+  return Math.round((style.fontSize.endsWith('pt') ? value : value / PIXELS_PER_POINT) * 2) / 2
+}
+
+/** Rendered color as the '#RRGGBB' Word stores, or the value itself when it is not an rgb() triple. */
+function hexOf(color: string): string {
+  const channels = /^rgba?\((?<r>\d+),\s*(?<g>\d+),\s*(?<b>\d+)/u.exec(color)?.groups
+  if (channels === undefined) return color
+  return `#${['r', 'g', 'b'].map(key => Number(channels[key]).toString(16).padStart(2, '0')).join('').toUpperCase()}`
+}
+
+/** The character formatting one run states over its block's own; matching the block states nothing. */
+function overridesOf(run: CSSStyleDeclaration, block: CSSStyleDeclaration): Omit<PaperAIDocumentTextRun, 'text'> {
+  const bold = boldOf(run)
+  const italic = run.fontStyle === 'italic'
+  const underline = underlineOf(run)
+  const size = pointsOf(run)
+  return {
+    ...(bold === boldOf(block) ? {} : { bold }),
+    ...(italic === (block.fontStyle === 'italic') ? {} : { italic }),
+    ...(underline === underlineOf(block) ? {} : { underline }),
+    ...(!Number.isFinite(size) || size === pointsOf(block) ? {} : { size: `${size}pt` }),
+    ...(run.color === block.color ? {} : { color: hexOf(run.color) }),
+  }
+}
+
+/** Two runs carry the same formatting when every stated override matches. */
+function sameFormat(left: PaperAIDocumentTextRun, right: PaperAIDocumentTextRun): boolean {
+  return (['bold', 'italic', 'underline', 'size', 'color'] as const).every(key => left[key] === right[key])
+}
+
+/**
+ * Compare two run lists, so a block that reads as the document has it drops its draft.
+ * @param left - runs to compare.
+ * @param right - runs to compare against.
+ * @returns whether both spell the same text with the same formatting.
+ */
+export function sameRuns(left: readonly PaperAIDocumentTextRun[], right: readonly PaperAIDocumentTextRun[]): boolean {
+  return left.length === right.length
+    && left.every((run, index) => run.text === right[index]?.text && sameFormat(run, right[index]))
+}
+
+/**
+ * Read one rendered block as the runs Word stores: its text split where the
+ * character formatting changes, each run stating only what it overrides. Runs
+ * that read alike merge, so an unformatted block is one run and a commit for it
+ * stays one engine operation.
+ * @param block - rendered block, attached to a document so its style resolves.
+ * @returns the block's runs in reading order.
+ */
+export function runsOf(block: HTMLElement): PaperAIDocumentTextRun[] {
+  const view = block.ownerDocument.defaultView
+  if (view === null) return [{ text: block.textContent }]
+  const base = view.getComputedStyle(block)
+  const walker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+  const runs: PaperAIDocumentTextRun[] = []
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node.nodeValue ?? ''
+    const parent = node.parentElement
+    if (text === '' || parent === null) continue
+    const run = { text, ...(parent === block ? {} : overridesOf(view.getComputedStyle(parent), base)) }
+    const last = runs.at(-1)
+    if (last !== undefined && sameFormat(last, run)) runs[runs.length - 1] = { ...last, text: last.text + text }
+    else runs.push(run)
+  }
+  return runs
+}
+
+/**
+ * Write runs into a block as spans carrying their overrides. The rendered
+ * preview from the Host replaces this shortly after a commit; until it arrives
+ * a rebuilt run shows in the block's own typeface rather than its original one.
+ * @param block - block whose contents are replaced.
+ * @param runs - runs in reading order.
+ */
+export function applyRuns(block: HTMLElement, runs: readonly PaperAIDocumentTextRun[]): void {
+  block.replaceChildren(...runs.map((run) => {
+    const span = block.ownerDocument.createElement('span')
+    if (run.bold !== undefined) span.style.fontWeight = run.bold ? 'bold' : 'normal'
+    if (run.italic !== undefined) span.style.fontStyle = run.italic ? 'italic' : 'normal'
+    if (run.underline !== undefined) span.style.textDecoration = run.underline ? 'underline' : 'none'
+    if (run.size !== undefined) span.style.fontSize = run.size
+    if (run.color !== undefined) span.style.color = run.color
+    span.textContent = run.text
+    return span
+  }))
+}
+
 /** Provider-addressed blocks whose text matches, in reading order; page bands without an address never take part. */
 function addressed(blocks: readonly HTMLElement[], text: string): HTMLElement[] {
   const wanted = normalize(text)
@@ -38,6 +154,8 @@ function addressed(blocks: readonly HTMLElement[], text: string): HTMLElement[] 
 export interface PreviewTextPatch {
   readonly baseText: string
   readonly nextText: string
+  /** The block's runs, when its character formatting was part of the commit. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
   readonly cell: boolean
   readonly ordinal: number
 }
@@ -58,7 +176,11 @@ export function patchPreviewHtml(html: string, patches: readonly PreviewTextPatc
   // Every block is located against the text the edits started from before any of them is rewritten.
   const located = patches.map(patch => [patch, addressed(blocks, patch.baseText)
     .filter(candidate => (candidate.closest('td, th') !== null) === patch.cell)[patch.ordinal]] as const)
-  for (const [patch, block] of located) if (block !== undefined) block.textContent = patch.nextText
+  for (const [patch, block] of located) {
+    if (block === undefined) continue
+    if (patch.runs === undefined) block.textContent = patch.nextText
+    else applyRuns(block, patch.runs)
+  }
   return parsed.documentElement.outerHTML
 }
 

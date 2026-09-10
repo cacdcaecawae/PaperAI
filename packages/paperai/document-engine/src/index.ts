@@ -15,9 +15,21 @@ export interface EngineTextNode {
   kind: 'paragraph' | 'table' | 'unknown'
 }
 
+/** Character formatting of one run of a block's text; only overrides of the block's own formatting are carried. */
+export interface EngineTextRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  /** Font size in points, for example `14pt`. */
+  size?: string
+  /** Text color as `#RRGGBB`. */
+  color?: string
+}
+
 /** Office-path mutation applied atomically inside one engine document lease. */
 export type EngineMutation =
-  | { type: 'replace-text'; officePath: string; text: string }
+  | { type: 'replace-text'; officePath: string; text: string; runs?: readonly EngineTextRun[] }
   | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; index?: number }
   | { type: 'remove'; officePath: string }
 

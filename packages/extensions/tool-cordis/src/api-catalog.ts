@@ -4248,7 +4248,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DocumentMutation',
-    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'unbind-template\';\n} | {\n    type: \'set-document-type\';\n    documentType: DocumentRole;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
+    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n    runs?: readonly DocumentTextRun[];\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'unbind-template\';\n} | {\n    type: \'set-document-type\';\n    documentType: DocumentRole;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
   },
   {
     name: 'DocumentNode',
@@ -4273,6 +4273,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DocumentRole',
     declaration: 'export type DocumentRole = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
+  },
+  {
+    name: 'DocumentTextRun',
+    declaration: 'export interface DocumentTextRun {\n    text: string;\n    bold?: boolean;\n    italic?: boolean;\n    underline?: boolean;\n    size?: string;\n    color?: string;\n}',
   },
   {
     name: 'Domain',
@@ -4356,11 +4360,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineMutation',
-    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    text: string;\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n};',
+    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    text: string;\n    runs?: readonly EngineTextRun[];\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n};',
   },
   {
     name: 'EngineTextNode',
     declaration: 'export interface EngineTextNode {\n    officePath: string;\n    text: string;\n    kind: \'paragraph\' | \'table\' | \'unknown\';\n}',
+  },
+  {
+    name: 'EngineTextRun',
+    declaration: 'export interface EngineTextRun {\n    text: string;\n    bold?: boolean;\n    italic?: boolean;\n    underline?: boolean;\n    size?: string;\n    color?: string;\n}',
   },
   {
     name: 'EngineValidation',
@@ -4959,6 +4967,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIDocumentSnapshot {\n    readonly documentId: PaperAIDocumentId;\n    readonly resourceId: PaperAIResourceId;\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly title: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly path: string;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly previewHtml: string;\n    readonly nodes: readonly PaperAIDocumentNodeSummary[];\n    readonly versions: readonly PaperAIDocumentVersion[];\n    readonly template: PaperAITemplateSummary | null;\n    readonly projectFormatAvailable: boolean;\n    readonly gate: PaperAITemplateGateReport;\n}',
   },
   {
+    name: 'PaperAIDocumentTextRun',
+    declaration: 'export interface PaperAIDocumentTextRun {\n    readonly text: string;\n    readonly bold?: boolean;\n    readonly italic?: boolean;\n    readonly underline?: boolean;\n    readonly size?: string;\n    readonly color?: string;\n}',
+  },
+  {
     name: 'PaperAIDocumentType',
     declaration: 'export type PaperAIDocumentType = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
   },
@@ -5040,7 +5052,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIReplaceTextMutation',
-    declaration: 'export interface PaperAIReplaceTextMutation {\n    readonly type: \'replace-text\';\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly baseText: string;\n    readonly nextText: string;\n}',
+    declaration: 'export interface PaperAIReplaceTextMutation {\n    readonly type: \'replace-text\';\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly baseText: string;\n    readonly nextText: string;\n    readonly runs?: readonly PaperAIDocumentTextRun[];\n}',
   },
   {
     name: 'PaperAIResourceId',

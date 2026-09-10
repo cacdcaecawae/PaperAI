@@ -2,19 +2,22 @@
  * The document itself: the Host's preview rendered in a shadow tree so its own
  * stylesheet stays inside, with every addressed paragraph, heading, list item,
  * and table cell mapped back to a semantic node. Mapped blocks are typed into
- * directly, as in Word; each retyped block carries a marker until the drafts
- * are saved together as one version.
+ * directly, as in Word, and selected text takes bold, italic, underline, and a
+ * font size; each changed block carries a marker until the drafts are saved
+ * together as one version.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary } from './types.ts'
+import type {
+  PaperAIBlockDraft, PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary, PaperAIDocumentTextRun,
+} from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import css from './DocumentWorkbench.module.css'
-import { blocksOf, normalize } from './preview-html.ts'
+import { applyRuns, blocksOf, boldOf, normalize, pointsOf, runsOf, sameRuns, underlineOf } from './preview-html.ts'
 import type { WordExcerpt } from './selection-context.ts'
 
-/** Props of the editable preview and the save bar under it. */
+/** Props of the editable preview, its formatting controls, and the save bar under it. */
 export interface DocumentPreviewProps {
   readonly active?: boolean
   readonly scrollTop?: number
@@ -23,13 +26,13 @@ export interface DocumentPreviewProps {
   readonly html: string
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly title: string
-  /** Blocks retyped and not yet saved. */
+  /** Blocks written into and not yet saved. */
   readonly edits: readonly PaperAIBlockEdit[]
   /** The HTML carries a version's marked changes; blocks stay read-only and a navigator walks the marks. */
   readonly comparing?: boolean
   readonly saving: boolean
-  /** A mapped block now reads `value`; its original text drops the draft again. */
-  readonly onDraft: (nodeId: PaperAIDocumentNodeId, value: string) => void
+  /** A mapped block now reads this; `null` says it reads as the document has it. */
+  readonly onDraft: (nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null) => void
   readonly onSave: () => void
   readonly onCancel: () => void
   readonly t: PaperAIDocumentWorkbenchProps['t']
@@ -38,6 +41,17 @@ export interface DocumentPreviewProps {
 const DROPPED_ELEMENTS = 'script, iframe, object, embed, link, meta, base, form, input, button, textarea, select, noscript'
 const URL_ATTRIBUTES = new Set(['href', 'src', 'xlink:href', 'action', 'formaction'])
 const EDITABLE = 'contenteditable'
+/** Point sizes the size control offers: the run of Chinese manuscript sizes from 五号 to 二号. */
+const SIZES = [9, 10.5, 12, 14, 15, 16, 18, 22] as const
+
+/** What the current selection reads, so the controls show what is on and what a click would change. */
+interface CaretFormat {
+  readonly bold: boolean
+  readonly italic: boolean
+  readonly underline: boolean
+  /** The size stated over the block's own, or `''` when the selection reads as its block. */
+  readonly size: string
+}
 
 /** Styles the shadow tree needs beyond the document's own: block affordances and change marks. */
 const PREVIEW_STYLE = `
@@ -47,7 +61,7 @@ const PREVIEW_STYLE = `
    with a hairline edge, zoomed down to fit the column when it is narrower than a page. */
 .paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); zoom: var(--paperai-page-zoom, 1); }
 .paperai-doc .page { outline: 1px solid var(--dsw-alias-border-l2); }
-/* A compared change and a retyped block read alike: tinted, with a marker at the left edge. A retyped block whose
+/* A compared change and a written-into block read alike: tinted, with a marker at the left edge. A block whose
    text changed elsewhere turns the marker red. Deleted words are struck, inserted words underlaid. */
 [data-paperai-change], [data-paperai-changed] { position: relative; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding-left: 12px; padding-right: 12px; background: var(--dsw-alias-state-business-tertiary); }
 [data-paperai-change]::before, [data-paperai-changed]::before { content: ''; position: absolute; top: 6px; bottom: 6px; left: -10px; width: 3px; border-radius: 2px; background: var(--dsw-alias-state-business-primary); }
@@ -107,6 +121,31 @@ function mapBlocks(
   return mapping
 }
 
+/** A paste event, recognized by what it carries rather than by its constructor. */
+function carriesClipboard(event: Event): event is ClipboardEvent {
+  return 'clipboardData' in event
+}
+
+/** The element a range sits in, so its rendered formatting can be read. */
+function elementOf(range: Range): Element | null {
+  const node = range.commonAncestorContainer
+  return node instanceof Element ? node : node.parentElement
+}
+
+/** Read what a selection shows: absolutely for the toggles, and as an override for the size control. */
+function caretOf(element: Element, block: HTMLElement): CaretFormat | null {
+  const view = block.ownerDocument.defaultView
+  if (view === null) return null
+  const style = view.getComputedStyle(element)
+  const size = pointsOf(style)
+  return {
+    bold: boldOf(style),
+    italic: style.fontStyle === 'italic',
+    underline: underlineOf(style),
+    size: !Number.isFinite(size) || size === pointsOf(view.getComputedStyle(block)) ? '' : `${size}pt`,
+  }
+}
+
 /** Render the preview with blocks written in place. */
 export function DocumentPreview({
   html, nodes, title, edits, saving, onDraft, onSave, onCancel, t,
@@ -114,12 +153,17 @@ export function DocumentPreview({
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
-  // Each mapped block as the Host rendered it, so a discarded draft brings its runs back.
-  const originals = useRef(new Map<HTMLElement, Node>())
-  const callbacks = useRef({ onDraft, onSave, nodes })
-  callbacks.current = { onDraft, onSave, nodes }
+  // Each mapped block as the Host rendered it: the nodes that restore a dropped draft, and the runs to
+  // compare against, read while the block is attached because a detached clone has no rendered style.
+  const originals = useRef(new Map<HTMLElement, { node: Node; runs: readonly PaperAIDocumentTextRun[] }>())
+  const callbacks = useRef({ onDraft, onSave })
+  callbacks.current = { onDraft, onSave }
+  // The live selection the formatting controls act on, kept out of state because a Range is mutable.
+  const target = useRef<{ range: Range; block: HTMLElement; nodeId: PaperAIDocumentNodeId } | null>(null)
   const [excerpt, setExcerpt] = useState<WordExcerpt | null>(null)
+  const [caret, setCaret] = useState<CaretFormat | null>(null)
   const [changes, setChanges] = useState<{ readonly count: number; readonly index: number }>({ count: 0, index: 0 })
+  const editable = !comparing && !saving
 
   // Rebuild the shadow tree whenever the Host sends new HTML or nodes.
   useLayoutEffect(() => {
@@ -135,29 +179,36 @@ export function DocumentPreview({
     const blocks = blocksOf(container)
     blocks.forEach((block, index) => { block.dataset.paperaiBlock = String(index) })
     mapping.current = mapBlocks(blocks, nodes)
-    originals.current = new Map([...mapping.current.keys()].map(block => [block, block.cloneNode(true)]))
     shadow.replaceChildren(style, container)
+    originals.current = new Map([...mapping.current.keys()]
+      .map(block => [block, { node: block.cloneNode(true), runs: runsOf(block) }]))
     setExcerpt(null)
+    setCaret(null)
+    target.current = null
     setChanges({ count: container.querySelectorAll('[data-paperai-change]').length, index: 0 })
   }, [html, nodes])
 
-  // Mapped blocks show their drafts and carry a marker until saved; a dropped draft restores the Host's rendering.
-  // A block being typed into already reads as its draft, so its caret is left alone.
+  // Mapped blocks show their drafts and carry a marker until saved; a dropped draft restores the Host's
+  // rendering. The block being written into owns its own contents, so its caret is left alone.
   useLayoutEffect(() => {
     const drafts = new Map(edits.map(edit => [edit.nodeId, edit]))
-    const editable = !comparing && !saving
+    const focused = host.current?.shadowRoot?.activeElement
     for (const [block, nodeId] of mapping.current) {
       const edit = drafts.get(nodeId)
-      if (edit !== undefined && block.textContent !== edit.draft) block.textContent = edit.draft
-      if (edit === undefined && block.textContent !== originals.current.get(block)?.textContent) {
-        block.replaceChildren(...[...originals.current.get(block)?.childNodes ?? []].map(node => node.cloneNode(true)))
+      const original = originals.current.get(block)
+      if (block !== focused) {
+        if (edit?.runs !== undefined && !sameRuns(runsOf(block), edit.runs)) applyRuns(block, edit.runs)
+        else if (edit !== undefined && block.textContent !== edit.draft) block.textContent = edit.draft
+        else if (edit === undefined && original !== undefined && block.hasAttribute('data-paperai-changed')) {
+          block.replaceChildren(...[...original.node.childNodes].map(node => node.cloneNode(true)))
+        }
       }
       block.toggleAttribute('data-paperai-changed', edit !== undefined)
       block.toggleAttribute('data-paperai-conflicted', edit?.conflicted === true)
-      if (editable && block.getAttribute(EDITABLE) === null) block.setAttribute(EDITABLE, 'plaintext-only')
+      if (editable && block.getAttribute(EDITABLE) === null) block.setAttribute(EDITABLE, 'true')
       if (!editable) block.removeAttribute(EDITABLE)
     }
-  }, [edits, comparing, saving, html, nodes])
+  }, [edits, editable, html, nodes])
 
   // The change navigator walks the marked blocks; the current one is outlined and scrolled into view.
   const goToChange = (step: number): void => {
@@ -197,66 +248,173 @@ export function DocumentPreview({
     return () => { observer.disconnect() }
   }, [html])
 
-  // Delegated listeners on the shadow tree: typing reports the block's text, keys revert or save, a selection quotes.
+  // Report what a block now reads. A block spelling its original text with its original runs has no draft.
+  const report = (block: HTMLElement, nodeId: PaperAIDocumentNodeId): void => {
+    const original = originals.current.get(block)
+    const runs = runsOf(block)
+    const text = block.textContent
+    const unchanged = original !== undefined
+      && normalize(text) === normalize(original.node.textContent ?? '')
+      && sameRuns(runs, original.runs)
+    // Runs travel only when they state formatting; a plain block commits as one engine operation.
+    const formatted = runs.some(run => Object.keys(run).length > 1)
+    callbacks.current.onDraft(nodeId, unchanged ? null : { text, ...(formatted ? { runs } : {}) })
+  }
+
+  /**
+   * Wrap the selection in a span stating the given declarations, clearing the
+   * same declarations inside it so the new value is the one that reads.
+   */
+  const format = (patch: Readonly<Record<string, string>>): void => {
+    const hit = target.current
+    if (hit === null || !editable) return
+    // A repeated change acts on the wrapper the last one left, so its own declarations clear first.
+    const covered = hit.range.commonAncestorContainer
+    if (covered instanceof HTMLElement && covered !== hit.block
+      && hit.range.startOffset === 0 && hit.range.endOffset === covered.childNodes.length) {
+      for (const property of Object.keys(patch)) covered.style.removeProperty(property)
+    }
+    const fragment = hit.range.extractContents()
+    for (const element of fragment.querySelectorAll<HTMLElement>('*')) {
+      for (const property of Object.keys(patch)) element.style.removeProperty(property)
+    }
+    const span = hit.block.ownerDocument.createElement('span')
+    for (const [property, value] of Object.entries(patch)) if (value !== '') span.style.setProperty(property, value)
+    span.append(fragment)
+    hit.range.insertNode(span)
+    const range = hit.block.ownerDocument.createRange()
+    range.selectNodeContents(span)
+    target.current = { ...hit, range }
+    setCaret(caretOf(span, hit.block))
+    report(hit.block, hit.nodeId)
+  }
+
+  const toggle = (key: string): void => {
+    const hit = target.current
+    const element = hit === null ? null : elementOf(hit.range)
+    const now = element === null || hit === null ? null : caretOf(element, hit.block)
+    if (now === null) return
+    if (key === 'b') format({ 'font-weight': now.bold ? 'normal' : 'bold' })
+    if (key === 'i') format({ 'font-style': now.italic ? 'normal' : 'italic' })
+    if (key === 'u') format({ 'text-decoration': now.underline ? 'none' : 'underline' })
+  }
+
+  // Delegated listeners on the shadow tree: typing reports the block, keys revert, save, or format,
+  // a paste stays plain text, and a selection offers quoting and the formatting controls.
   useEffect(() => {
     const shadow = host.current?.shadowRoot
     if (shadow === null || shadow === undefined) return
     const blockOf = (event: Event): readonly [HTMLElement, PaperAIDocumentNodeId] | undefined => {
-      const target = event.composedPath().find((node): node is HTMLElement => (
+      const found = event.composedPath().find((node): node is HTMLElement => (
         node instanceof HTMLElement && node.dataset.paperaiBlock !== undefined
       ))
-      const nodeId = target === undefined ? undefined : mapping.current.get(target)
-      return target !== undefined && nodeId !== undefined ? [target, nodeId] : undefined
+      const nodeId = found === undefined ? undefined : mapping.current.get(found)
+      return found !== undefined && nodeId !== undefined ? [found, nodeId] : undefined
+    }
+    const rangeNow = (): Range | null => {
+      const selection = (shadow as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()
+        ?? window.getSelection()
+      return selection === null || selection.rangeCount === 0 ? null : selection.getRangeAt(0)
     }
     const onInput = (event: Event): void => {
       const hit = blockOf(event)
-      if (hit !== undefined) callbacks.current.onDraft(hit[1], hit[0].textContent)
+      if (hit !== undefined) report(hit[0], hit[1])
+    }
+    const onPaste = (event: Event): void => {
+      const hit = blockOf(event)
+      if (hit === undefined || !carriesClipboard(event)) return
+      // A block is one paragraph of the document, so pasted markup enters as its text alone.
+      event.preventDefault()
+      const range = rangeNow()
+      if (range === null) return
+      range.deleteContents()
+      range.insertNode(hit[0].ownerDocument.createTextNode(event.clipboardData?.getData('text/plain') ?? ''))
+      range.collapse(false)
+      report(hit[0], hit[1])
     }
     const onKeyDown = (event: Event): void => {
       const hit = blockOf(event)
       if (hit === undefined || !(event instanceof KeyboardEvent)) return
-      // A block is one paragraph: Enter saves with a modifier and otherwise does nothing; Escape drops the block's draft.
+      const command = event.metaKey || event.ctrlKey
+      // A block is one paragraph: Enter saves with a modifier and otherwise does nothing; Escape drops the draft.
       if (event.key === 'Enter') {
         event.preventDefault()
-        if (event.metaKey || event.ctrlKey) callbacks.current.onSave()
+        if (command) callbacks.current.onSave()
       } else if (event.key === 'Escape') {
-        callbacks.current.onDraft(hit[1], callbacks.current.nodes.find(node => node.nodeId === hit[1])?.text ?? '')
+        callbacks.current.onDraft(hit[1], null)
         hit[0].blur()
+      } else if (command && 'biu'.includes(event.key.toLowerCase())) {
+        event.preventDefault()
+        toggle(event.key.toLowerCase())
       }
     }
     const captureSelection = (): void => {
-      const selection = (shadow as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()
-        ?? window.getSelection()
-      if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return
-      const range = selection.getRangeAt(0)
-      const nodeIds = [...mapping.current.entries()]
-        .filter(([block]) => range.intersectsNode(block))
-        .map(([, nodeId]) => nodeId)
-      const text = selection.toString()
-      if (nodeIds.length > 0 && text.trim() !== '') setExcerpt({ nodeIds, text })
+      const range = rangeNow()
+      // A collapsed selection leaves nothing to format; the controls go before they can act on stale text.
+      if (range === null || range.collapsed) {
+        target.current = null
+        setCaret(null)
+        return
+      }
+      const entries = [...mapping.current.entries()].filter(([block]) => range.intersectsNode(block))
+      const text = range.toString()
+      if (entries.length === 0 || text.trim() === '') return
+      setExcerpt({ nodeIds: entries.map(([, nodeId]) => nodeId), text })
+      // Formatting rewrites the selected text in place, so it acts within one block.
+      const single = entries.length === 1 ? entries[0] : undefined
+      const element = elementOf(range)
+      const inside = single !== undefined && element !== null && single[0].contains(element) ? { single, element } : null
+      target.current = inside === null
+        ? null
+        : { range: range.cloneRange(), block: inside.single[0], nodeId: inside.single[1] }
+      setCaret(inside === null || !editable ? null : caretOf(inside.element, inside.single[0]))
     }
     shadow.addEventListener('input', onInput)
+    shadow.addEventListener('paste', onPaste)
     shadow.addEventListener('keydown', onKeyDown)
     shadow.addEventListener('click', captureSelection)
     shadow.addEventListener('keyup', captureSelection)
     return () => {
       shadow.removeEventListener('input', onInput)
+      shadow.removeEventListener('paste', onPaste)
       shadow.removeEventListener('keydown', onKeyDown)
       shadow.removeEventListener('click', captureSelection)
       shadow.removeEventListener('keyup', captureSelection)
     }
-  }, [])
+  })
 
+  // A size the document already uses joins the offered ones, so the control never misreads it as the block's own.
+  const sizes = [...new Set([...SIZES, ...(caret === null || caret.size === '' ? [] : [parseFloat(caret.size)])])]
+    .sort((left, right) => left - right)
   const conflicted = edits.some(edit => edit.conflicted === true)
+  const toggles = [['b', 'block.bold', caret?.bold], ['i', 'block.italic', caret?.italic],
+    ['u', 'block.underline', caret?.underline]] as const
   return (
     <div className={css.previewSeat} hidden={!active} aria-hidden={!active || undefined}>
-      {active && excerpt !== null && onQuote !== undefined && (
+      {active && excerpt !== null && (
         <div className={css.notice} role="region" aria-label={t('selection.title')}>
           <span title={excerpt.text}>{excerpt.text}</span>
-          <button className={css.chip} type="button" onMouseDown={(event) => { event.preventDefault() }} onClick={() => {
-            onQuote(excerpt)
-            setExcerpt(null)
-          }}>{t('selection.ask')}</button>
+          {caret !== null && (
+            <div className={css.format} role="group" aria-label={t('block.format')}>
+              {toggles.map(([key, label, on]) => (
+                <button key={key} className={css.chip} type="button" aria-pressed={on === true} data-format={key}
+                  onMouseDown={(event) => { event.preventDefault() }} onClick={() => { toggle(key) }}>
+                  {t(label)}
+                </button>
+              ))}
+              <select className={css.size} aria-label={t('block.size')} value={caret.size}
+                onChange={(event) => { format({ 'font-size': event.target.value }) }}>
+                <option value="">{t('block.sizeInherit')}</option>
+                {sizes.map(size => <option key={size} value={`${size}pt`}>{size}</option>)}
+              </select>
+            </div>
+          )}
+          {onQuote !== undefined && (
+            <button className={css.chip} type="button" onMouseDown={(event) => { event.preventDefault() }} onClick={() => {
+              onQuote(excerpt)
+              setExcerpt(null)
+            }}>{t('selection.ask')}</button>
+          )}
           <button className={css.chip} type="button" onClick={() => { setExcerpt(null) }}>{t('selection.dismiss')}</button>
         </div>
       )}

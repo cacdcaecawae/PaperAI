@@ -270,7 +270,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
           if (accepted) ctx.layout.revealConversation()
         },
         showPanel: (panel) => { controller.showPanel(sessionId, panel) },
-        updateDraft: (nodeId, value) => { controller.updateDraft(sessionId, nodeId, value) },
+        updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
         cancelEdit: () => { controller.cancelEdit(sessionId) },
         commitEdit: () => controller.commitEdit(sessionId),
         validate: () => controller.validate(sessionId),

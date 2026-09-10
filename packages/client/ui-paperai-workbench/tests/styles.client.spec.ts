@@ -51,7 +51,8 @@ describe('PaperAI DSH-native styling', () => {
     expect(preview).not.toContain('dangerouslySetInnerHTML')
     expect(preview).not.toContain('innerHTML')
     // Blocks are written into in place, as plain text, and the Host may not pre-declare any of them editable.
-    expect(preview).toContain("setAttribute(EDITABLE, 'plaintext-only')")
+    expect(preview).toContain("setAttribute(EDITABLE, 'true')")
+    expect(preview).toContain("getData('text/plain')")
     expect(preview).toContain('name === EDITABLE) element.removeAttribute')
   })
 

@@ -17,7 +17,7 @@ PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperC
 
 `submit()` 要求非空消息和至少一项修改。`baseCommitId` 必须等于当前 head；只有首次提交前可以省略。`revert()` 要求调用方提供当前 head，并指定一个不同且从该 head 可达的目标。
 
-编译的修改覆盖 `replace-text`、`insert-node`、`delete-node`、`bind-template`、`unbind-template`、`set-document-type` 与 `milestone`。`bind-template` 会以同一提交要切换到的文档类型调用 `paperTemplates.validateAssociation()`；`unbind-template` 在文档没有绑定模板时失败；`set-document-type` 在类型未变化时失败，并且除非同一提交绑定了另一模板，否则会先记录一条 `unbind-template` 操作，因为一份绑定的格式只适用于一种类型。发布的 `DocumentRecord` 携带最终的类型与模板绑定。
+编译的修改覆盖 `replace-text`、`insert-node`、`delete-node`、`bind-template`、`unbind-template`、`set-document-type` 与 `milestone`。`replace-text` 可携带该块的 `runs`，其文字拼接必须与 `nextText` 完全一致；带 runs 时块的字符格式属于本次修改，因此文字本身可以保持不变。`bind-template` 会以同一提交要切换到的文档类型调用 `paperTemplates.validateAssociation()`；`unbind-template` 在文档没有绑定模板时失败；`set-document-type` 在类型未变化时失败，并且除非同一提交绑定了另一模板，否则会先记录一条 `unbind-template` 操作，因为一份绑定的格式只适用于一种类型。发布的 `DocumentRecord` 携带最终的类型与模板绑定。
 
 ## 发布与恢复
 

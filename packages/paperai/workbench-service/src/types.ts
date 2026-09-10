@@ -181,6 +181,20 @@ export interface PaperAIReplaceTextMutation {
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
   readonly nextText: string
+  /** The block's runs in reading order, present when its character formatting is part of the change. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+}
+
+/** One run of a block's text, carrying only the character formatting that overrides the block's own. */
+export interface PaperAIDocumentTextRun {
+  readonly text: string
+  readonly bold?: boolean
+  readonly italic?: boolean
+  readonly underline?: boolean
+  /** Font size in points, for example `14pt`. */
+  readonly size?: string
+  /** Text color as `#RRGGBB`. */
+  readonly color?: string
 }
 
 /** Only node-addressed text mutations are admitted by the browser workbench. */
