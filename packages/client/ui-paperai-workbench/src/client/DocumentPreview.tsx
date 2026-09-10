@@ -14,7 +14,9 @@ import type {
 } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import css from './DocumentWorkbench.module.css'
-import { applyRuns, blocksOf, boldOf, normalize, pointsOf, runsOf, sameRuns, underlineOf } from './preview-html.ts'
+import {
+  applyRuns, blocksOf, boldOf, normalize, pointsOf, restateCleared, runsOf, sameRuns, underlinedWithin,
+} from './preview-html.ts'
 import type { WordExcerpt } from './selection-context.ts'
 
 /** Props of the editable preview, its formatting controls, and the save bar under it. */
@@ -126,10 +128,19 @@ function carriesClipboard(event: Event): event is ClipboardEvent {
   return 'clipboardData' in event
 }
 
-/** The element a range sits in, so its rendered formatting can be read. */
+/**
+ * The element whose formatting a selection shows: the one holding the first
+ * text it covers, because a selection over a whole block sits on the block
+ * while the formatting it shows lives on the runs inside it.
+ */
 function elementOf(range: Range): Element | null {
-  const node = range.commonAncestorContainer
-  return node instanceof Element ? node : node.parentElement
+  const root = range.commonAncestorContainer
+  if (!(root instanceof Element)) return root.parentElement
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if ((node.nodeValue ?? '') !== '' && range.intersectsNode(node)) return node.parentElement
+  }
+  return root
 }
 
 /** Read what a selection shows: absolutely for the toggles, and as an override for the size control. */
@@ -141,7 +152,7 @@ function caretOf(element: Element, block: HTMLElement): CaretFormat | null {
   return {
     bold: boldOf(style),
     italic: style.fontStyle === 'italic',
-    underline: underlineOf(style),
+    underline: underlinedWithin(element, block),
     size: !Number.isFinite(size) || size === pointsOf(view.getComputedStyle(block)) ? '' : `${size}pt`,
   }
 }
@@ -256,23 +267,50 @@ export function DocumentPreview({
     const unchanged = original !== undefined
       && normalize(text) === normalize(original.node.textContent ?? '')
       && sameRuns(runs, original.runs)
-    // Runs travel only when they state formatting; a plain block commits as one engine operation.
-    const formatted = runs.some(run => Object.keys(run).length > 1)
-    callbacks.current.onDraft(nodeId, unchanged ? null : { text, ...(formatted ? { runs } : {}) })
+    // Runs travel when formatting is part of the change, which includes clearing the last of it:
+    // its text has not moved, so nothing else would tell the Host what changed.
+    const stated = (list: readonly PaperAIDocumentTextRun[]): boolean => list.some(run => Object.keys(run).length > 1)
+    const formatted = stated(runs) || (original !== undefined && stated(original.runs))
+    const stating = original === undefined ? runs : restateCleared(runs, original.runs, block)
+    callbacks.current.onDraft(nodeId, unchanged ? null : { text, ...(formatted ? { runs: stating } : {}) })
   }
 
   /**
-   * Wrap the selection in a span stating the given declarations, clearing the
-   * same declarations inside it so the new value is the one that reads.
+   * Take one declaration off an element above the selection, keeping it on the
+   * text to either side. A declaration stated above the selection cannot be
+   * turned off from inside it — text decoration draws onto descendants without
+   * inheriting at all — so it has to come down to the text that keeps it.
+   */
+  const detach = (element: HTMLElement, range: Range, property: string, value: string): void => {
+    element.style.removeProperty(property)
+    // The later side moves first, so the earlier side's boundaries still hold.
+    for (const side of ['after', 'before'] as const) {
+      const part = element.ownerDocument.createRange()
+      part.selectNodeContents(element)
+      if (side === 'after') part.setStart(range.endContainer, range.endOffset)
+      else part.setEnd(range.startContainer, range.startOffset)
+      if (part.toString() === '') continue
+      const span = element.ownerDocument.createElement('span')
+      span.style.setProperty(property, value)
+      span.append(part.extractContents())
+      part.insertNode(span)
+    }
+  }
+
+  /**
+   * State the given declarations over the selection: take them off everything
+   * that states them between the block and the selected text, then wrap the
+   * selection in a span stating them, so the new value is the one that reads.
    */
   const format = (patch: Readonly<Record<string, string>>): void => {
     const hit = target.current
     if (hit === null || !editable) return
-    // A repeated change acts on the wrapper the last one left, so its own declarations clear first.
-    const covered = hit.range.commonAncestorContainer
-    if (covered instanceof HTMLElement && covered !== hit.block
-      && hit.range.startOffset === 0 && hit.range.endOffset === covered.childNodes.length) {
-      for (const property of Object.keys(patch)) covered.style.removeProperty(property)
+    for (let element = elementOf(hit.range); element !== null && element !== hit.block; element = element.parentElement) {
+      if (!(element instanceof HTMLElement)) continue
+      for (const [property, value] of Object.entries(patch)) {
+        const stated = element.style.getPropertyValue(property)
+        if (stated !== '' && stated !== value) detach(element, hit.range, property, stated)
+      }
     }
     const fragment = hit.range.extractContents()
     for (const element of fragment.querySelectorAll<HTMLElement>('*')) {

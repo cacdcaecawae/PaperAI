@@ -37,13 +37,27 @@ export function boldOf(style: CSSStyleDeclaration): boolean {
   return weight === 'bold' || Number(weight) >= 600
 }
 
-/**
- * Whether a rendered element reads underlined, from either the longhand or the shorthand.
- * @param style - resolved style of a block or one of its runs.
- * @returns whether Word would store the run as underlined.
- */
-export function underlineOf(style: CSSStyleDeclaration): boolean {
+/** Whether a resolved style states an underline, from either the longhand or the shorthand. */
+function underlineOf(style: CSSStyleDeclaration): boolean {
   return `${style.textDecorationLine} ${style.textDecoration}`.includes('underline')
+}
+
+/**
+ * Whether a rendered element reads underlined. Text decoration draws onto
+ * descendants without inheriting, so an underline stated on a span above the
+ * run is invisible to the run's own style and has to be looked for.
+ * @param element - run element, or the block itself for its own reading.
+ * @param block - block the search stops at.
+ * @returns whether Word would store the text as underlined.
+ */
+export function underlinedWithin(element: Element, block: HTMLElement): boolean {
+  const view = block.ownerDocument.defaultView
+  if (view === null) return false
+  for (let node: Element | null = element; node !== null; node = node.parentElement) {
+    if (underlineOf(view.getComputedStyle(node))) return true
+    if (node === block) break
+  }
+  return false
 }
 
 /**
@@ -64,17 +78,20 @@ function hexOf(color: string): string {
 }
 
 /** The character formatting one run states over its block's own; matching the block states nothing. */
-function overridesOf(run: CSSStyleDeclaration, block: CSSStyleDeclaration): Omit<PaperAIDocumentTextRun, 'text'> {
+function overridesOf(element: Element, block: HTMLElement, base: CSSStyleDeclaration): Omit<PaperAIDocumentTextRun, 'text'> {
+  const view = block.ownerDocument.defaultView
+  if (view === null) return {}
+  const run = view.getComputedStyle(element)
   const bold = boldOf(run)
   const italic = run.fontStyle === 'italic'
-  const underline = underlineOf(run)
+  const underline = underlinedWithin(element, block)
   const size = pointsOf(run)
   return {
-    ...(bold === boldOf(block) ? {} : { bold }),
-    ...(italic === (block.fontStyle === 'italic') ? {} : { italic }),
-    ...(underline === underlineOf(block) ? {} : { underline }),
-    ...(!Number.isFinite(size) || size === pointsOf(block) ? {} : { size: `${size}pt` }),
-    ...(run.color === block.color ? {} : { color: hexOf(run.color) }),
+    ...(bold === boldOf(base) ? {} : { bold }),
+    ...(italic === (base.fontStyle === 'italic') ? {} : { italic }),
+    ...(underline === underlinedWithin(block, block) ? {} : { underline }),
+    ...(!Number.isFinite(size) || size === pointsOf(base) ? {} : { size: `${size}pt` }),
+    ...(run.color === base.color ? {} : { color: hexOf(run.color) }),
   }
 }
 
@@ -112,12 +129,59 @@ export function runsOf(block: HTMLElement): PaperAIDocumentTextRun[] {
     const text = node.nodeValue ?? ''
     const parent = node.parentElement
     if (text === '' || parent === null) continue
-    const run = { text, ...(parent === block ? {} : overridesOf(view.getComputedStyle(parent), base)) }
+    const run = { text, ...(parent === block ? {} : overridesOf(parent, block, base)) }
     const last = runs.at(-1)
     if (last !== undefined && sameFormat(last, run)) runs[runs.length - 1] = { ...last, text: last.text + text }
     else runs.push(run)
   }
   return runs
+}
+
+/**
+ * The block's own character formatting, stated absolutely.
+ * @param block - rendered block, attached to a document so its style resolves.
+ * @returns what every property of the block reads as.
+ */
+function readingOf(block: HTMLElement): Required<Omit<PaperAIDocumentTextRun, 'text'>> {
+  const view = block.ownerDocument.defaultView
+  const style = view === null ? null : view.getComputedStyle(block)
+  const size = style === null ? Number.NaN : pointsOf(style)
+  return {
+    bold: style !== null && boldOf(style),
+    italic: style?.fontStyle === 'italic',
+    underline: style !== null && underlinedWithin(block, block),
+    size: Number.isFinite(size) ? `${size}pt` : '',
+    color: style === null ? '' : hexOf(style.color),
+  }
+}
+
+/**
+ * State on the first run whatever it used to state and no longer does. Setting
+ * a paragraph's text leaves its first run in place carrying the properties it
+ * had, so a property the run has stopped stating would survive the rebuild
+ * instead of going back to the block's own reading.
+ * @param runs - the block's runs as it reads now.
+ * @param previous - the block's runs as the document has them.
+ * @param block - the block, whose own reading replaces what is no longer stated.
+ * @returns the runs with the first one stating everything it must.
+ */
+export function restateCleared(
+  runs: readonly PaperAIDocumentTextRun[],
+  previous: readonly PaperAIDocumentTextRun[],
+  block: HTMLElement,
+): PaperAIDocumentTextRun[] {
+  const [first, ...rest] = runs
+  const was = previous[0]
+  if (first === undefined || was === undefined) return [...runs]
+  const own = readingOf(block)
+  return [{
+    ...first,
+    ...(was.bold !== undefined && first.bold === undefined ? { bold: own.bold } : {}),
+    ...(was.italic !== undefined && first.italic === undefined ? { italic: own.italic } : {}),
+    ...(was.underline !== undefined && first.underline === undefined ? { underline: own.underline } : {}),
+    ...(was.size !== undefined && first.size === undefined && own.size !== '' ? { size: own.size } : {}),
+    ...(was.color !== undefined && first.color === undefined && own.color !== '' ? { color: own.color } : {}),
+  }, ...rest]
 }
 
 /**

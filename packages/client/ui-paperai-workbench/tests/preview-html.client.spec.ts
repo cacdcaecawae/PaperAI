@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { applyRuns, markDiffHtml, patchPreviewHtml, runsOf, sameRuns, wordDiff } from '../src/client/preview-html.ts'
+import {
+  applyRuns, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, wordDiff,
+} from '../src/client/preview-html.ts'
 
 const HTML = '<html><head></head><body>'
   + '<h1 data-path="/body/p[1]">Introduction</h1><p data-path="/body/p[2]">Research background</p>'
@@ -8,6 +10,15 @@ const HTML = '<html><head></head><body>'
   + '<div class="doc-header"><p>Closing remarks</p></div><p data-path="/body/p[3]">Closing remarks</p>'
   + '<p data-path="/body/p[4]">Same</p><p data-path="/body/p[5]">Same</p>'
   + '</body></html>'
+
+/** One rendered block with the given runs inside it, attached so its style resolves. */
+function block(html: string, style = 'font-size: 12pt'): HTMLElement {
+  const element = document.createElement('p')
+  element.setAttribute('style', style)
+  element.innerHTML = html
+  document.body.replaceChildren(element)
+  return element
+}
 
 describe('wordDiff', () => {
   it('keeps common words and marks the rest, deletions first, one CJK character at a time', () => {
@@ -70,14 +81,6 @@ describe('patchPreviewHtml', () => {
 })
 
 describe('block runs', () => {
-  function block(html: string, style = 'font-size: 12pt'): HTMLElement {
-    const element = document.createElement('p')
-    element.setAttribute('style', style)
-    element.innerHTML = html
-    document.body.replaceChildren(element)
-    return element
-  }
-
   it('reads a block as the runs Word stores, stating only what overrides the block', () => {
     expect(runsOf(block('<span>plain </span><span style="font-weight:bold">bold</span>'
       + '<span style="font-weight:bold">er</span><span style="font-size:16pt">big</span>'))).toEqual([
@@ -103,6 +106,19 @@ describe('block runs', () => {
       .toEqual([{ text: 'quiet', bold: false }])
   })
 
+  it('keeps an underline stated by an ancestor of the run', () => {
+    expect(runsOf(block('<span style="text-decoration:underline">under'
+      + '<span style="font-weight:bold">bold</span></span>'))).toEqual([
+      { text: 'under', underline: true },
+      { text: 'bold', underline: true, bold: true },
+    ])
+  })
+
+  it('states nothing for a run inside a block that is underlined itself', () => {
+    expect(runsOf(block('<span style="font-weight:bold">bold</span>', 'font-size: 12pt; text-decoration: underline')))
+      .toEqual([{ text: 'bold', bold: true }])
+  })
+
   it('compares runs by text and formatting so an untouched block keeps no draft', () => {
     const runs = runsOf(block('<span style="font-weight:bold">bold</span>'))
     expect(sameRuns(runs, [{ text: 'bold', bold: true }])).toBe(true)
@@ -125,5 +141,19 @@ describe('block runs', () => {
     }])
     expect(patched).toContain('<span style="font-weight: bold;">introduction</span>')
     expect(patched).not.toContain('>Introduction<')
+  })
+})
+
+describe('clearing a run', () => {
+  it('states on the first run what it stopped stating, so the rebuild cannot keep it', () => {
+    const element = block('plain')
+    expect(restateCleared([{ text: 'plain' }], [{ text: 'bold', bold: true, size: '16pt' }], element))
+      .toEqual([{ text: 'plain', bold: false, size: '12pt' }])
+  })
+
+  it('leaves a run that still states what it stated, and runs after the first', () => {
+    const element = block('<span style="font-weight:bold">bold</span>plain')
+    const runs = runsOf(element)
+    expect(restateCleared(runs, [{ text: 'bold', bold: true }, { text: 'x', italic: true }], element)).toEqual(runs)
   })
 })

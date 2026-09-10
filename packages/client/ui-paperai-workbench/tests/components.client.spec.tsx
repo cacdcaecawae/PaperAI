@@ -633,6 +633,80 @@ describe('DocumentWorkbench', () => {
     expect(paragraph.hasAttribute('data-paperai-changed')).toBe(true)
   })
 
+  it('reports the runs that clear a block last formatting', () => {
+    const snapshot = documentSnapshot(undefined, {
+      previewHtml: '<p data-path="/body/p[2]"><span style="font-weight:bold">Research background</span></p>',
+    })
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraph = shadow.querySelector('p')!
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+    }) })
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+    // The whole block is bold, so the control reads the run inside it rather than the block.
+    expect(screen.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('true')
+
+    // Turning the last formatting off leaves the text alone, so only the runs can carry the change,
+    // and the first run has to say the bold is gone or the rebuild would keep it.
+    paragraph.replaceChildren(paragraph.ownerDocument.createTextNode('Research background'))
+    fireEvent.input(paragraph)
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
+      text: 'Research background',
+      runs: [{ text: 'Research background', bold: false }],
+    })
+  })
+
+  it('takes an underline off part of a run and leaves the rest wearing it', () => {
+    const snapshot = documentSnapshot(undefined, {
+      previewHtml: '<p data-path="/body/p[2]"><span style="text-decoration:underline">Research background</span></p>',
+    })
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraph = shadow.querySelector('p')!
+    const range = document.createRange()
+    const text = paragraph.querySelector('span')!.firstChild!
+    range.setStart(text, 0)
+    range.setEnd(text, 8)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+    }) })
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+    expect(screen.getByRole('button', { name: '下划线' }).getAttribute('aria-pressed')).toBe('true')
+
+    // Text decoration draws onto descendants without inheriting, so it has to come off the run above.
+    fireEvent.click(screen.getByRole('button', { name: '下划线' }))
+    expect(paragraph.innerHTML).toBe('<span style="">'
+      + '<span style="text-decoration: none;">Research</span>'
+      + '<span style="text-decoration: underline;"> background</span></span>')
+  })
+
+  it('takes a size back to the block through the wrappers a change left behind', () => {
+    const snapshot = documentSnapshot(undefined, { previewHtml: '<p data-path="/body/p[2]">Research background</p>' })
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const paragraph = shadow.querySelector('p')!
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+    }) })
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '16pt' } })
+    fireEvent.click(screen.getByRole('button', { name: '加粗' }))
+    expect(paragraph.textContent).toBe('Research background')
+    expect(paragraph.innerHTML).toContain('font-size: 16pt')
+
+    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '' } })
+    expect(paragraph.innerHTML).not.toContain('font-size')
+    expect(paragraph.innerHTML).toContain('font-weight: bold')
+  })
+
   it('opens the template, gate, and versions panels from the toolbar and drafts an agent fix', () => {
     const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot() }))
     render(<DocumentWorkbench {...b.props} />)
