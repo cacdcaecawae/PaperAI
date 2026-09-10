@@ -22,7 +22,7 @@ PaperAI 客户端长出了一套用户读不懂的层级。每个 Workspace 下�
 
 **文档视图。** `conversation.details.view` 条目 `paperai` 先净化 Host 预览，再把它渲染进一个开放的 shadow root：丢弃 `script`、`iframe`、`object`、`embed`、`link`、`meta`、`base`、表单控件和 `noscript`，剥除 `on*` 属性和可执行 URL；`img src` 保留 base64 编码的 PNG、JPEG、GIF、WebP、BMP 与 AVIF 数据，文档自带的 `style` 元素移入 shadow 树，使其排版留在内部。只有带有提供方 `data-path` 的段落、标题、列表项和单元格才按归一化文字及单元格归属配对索引节点，重复文字按阅读顺序消耗，且只允许编辑 Host 标记为可编辑的节点。没有地址的页眉和页脚不会消耗正文匹配项。地址用于判断参与资格：OfficeCLI HTML 使用位置路径，而索引可能使用稳定段落 ID；点击一个块，原位换成一个 textarea，"保存"通过既有提交路径把一次 `replace-text` 变更提交为一个版本，Escape 取消，未能配对的块会提示只能交给 Agent 修改。工具栏带有"模板"、"门禁"（附未通过数）、"版本"（附数量）三个 chip、一个"导出"菜单（草稿或正式版），以及基于 `ctx.layout.setDetailsFocus` 的专注开关；三个 chip 每次只打开一个侧面板，取代标签页。模板面板显示已绑定的格式及其要求，用 Host 的猜测（`suggestDocumentType`：先看标题，再看开头段落）询问文档类型并等待确认，按类型套用项目格式，解除绑定，并打开项目模板对话框。只有已绑定的模板套成员及其来源版本都与项目所选格式相同时，套用按钮才会禁用；切换模板套或替换其中一项格式后，仍可按文档当前类型重新套用。门禁面板列出带位置的发现项，执行"检查"，"让 Agent 修复"通过 ui-conversation 的 `setDraft` 把发现项起草进输入框。版本面板是一条带作者徽标和"当前"标记的时间线；一次展开一个版本，通过 `diffVersion` 显示段落级改动，可恢复的版本提供"恢复到此版本"。针对已打开文档的 `paperai/document-changed` 事件，在没有任何草稿偏离其基准文本时立即重新加载；否则显示一条横幅提供"刷新"，刷新时若被编辑的块文字未变则保留草稿，否则丢弃草稿并提示。布局配置为 centerMin 560、detailsMin 420、detailsDefault 760。
 
-**品牌。** `ui-paperai-brand` 不再安装任何主题 token 层：所有交互色都是 DSH 的，PaperAI 的行沿用 DSH 的行高、圆角和字号。标志是从用户提供的 logo 描摹出的路径数据（机器人头、笔尖和一本压成黄金矩形的打开的书），以 `brand-paths.ts` 入库，并以 `currentColor` 的内联 SVG 渲染；字标是与 DSH 字标等高的"PaperAI"轮廓。描述语和 DSH 的空白会话文案都已移除。
+**品牌。** `ui-paperai-brand` 当时不贡献任何主题 token 层：所有交互色都是 DSH 的，PaperAI 的行沿用 DSH 的行高、圆角和字号。这一半已被[极简工作台笔记](2026-09-09-paperai-minimal-workbench-and-outside-edits.zh.md)中的墨金 token 层取代——用户读完这版产品后认为它像生成的而不像设计过的；下面关于标志与字标的部分仍然有效。标志是从用户提供的 logo 描摹出的路径数据（机器人头、笔尖和一本压成黄金矩形的打开的书），以 `brand-paths.ts` 入库，并以 `currentColor` 的内联 SVG 渲染；字标是与 DSH 字标等高的"PaperAI"轮廓。描述语和 DSH 的空白会话文案都已移除。
 
 **Host。** `@paperai/workbench-service` 暴露 `overview`（项目名、模板决定、文档行）、`setProjectTemplate`、`listTemplateLibrary`、`createTemplateSet`、`deleteTemplateSet`、`addTemplateFormat`、`removeTemplateFormat`、`importDocument`（类型为 `other` 的自由写作文档，不询问类型）、`createFromTemplate`（由项目模板套装和文档类型解析格式；表单模板成为文档本身，排版参考约束上传的初稿）、`applyTemplate`（一次提交，类型变化时携带 `set-document-type`，并携带 `bind-template`）、`detachTemplate`（`unbind-template`）、`suggestDocumentType`、`diffVersion`（经文档引擎读取两份不可变快照）、`exportDocument`、`open`、`commit`、`validate` 和 `restore`。`@paperai/template-service` 新增 `TemplateLibrary`，通过原子的临时文件写入把自定义套装持久化到 `<storageRoot>/library/library.json`，其 Word 文件存放在内容寻址的资源存储中；`listPacks` 报告内置与自定义两种类别。`@paperai/project-service` 用 `setTemplateChoice` 记录选择，在 `ProjectRecord` 上写入 `templatePackId` 和 `templateDecidedAt`（`null` 记录"自由写作"的选择）。`@paperai/domain` 新增 `unbind-template` 和 `set-document-type` 两种变更；`@paperai/commit-service` 按同一次提交所设置的文档类型校验绑定；MCP 服务器和原生 `paperai_commit_document` 工具都接受这两种变更，因此 Agent 可以按类型重新绑定文档。
 
@@ -38,7 +38,7 @@ PaperAI 客户端长出了一套用户读不懂的层级。每个 Workspace 下�
 
 **在预览 HTML 之上做富文本编辑器。** HTML 是生成的展示层，Working DOCX 才是权威，可编辑的 DOM 需要第二套文档模型并往返回写 Word。每个块一个 textarea 让每次修改都保持为针对已知节点的语义变更。
 
-**PaperAI 专属的强调色层。** 松绿色覆盖正是让产品看起来与 DSH 撕裂的原因；用户要求使用 DSH 的颜色，因此品牌只贡献标志和字标。
+**PaperAI 专属的强调色层。** 松绿色覆盖正是让产品看起来与 DSH 撕裂的原因；用户要求使用 DSH 的颜色，因此品牌当时只贡献标志和字标。这条替代方案后来以另一种理由被采纳：[极简工作台笔记](2026-09-09-paperai-minimal-workbench-and-outside-edits.zh.md)通过 `ctx.theme.overrideTokens` 叠加墨金层，声明的是语义 token，而不是覆盖某一个交互色。
 
 **为"项目"一词 fork `ui-workspace` 和 `ui-conversation` 的词典。** 为几个词 fork 会复制全部键；locale 覆盖 seam 只改产品需要改名的键，所有者的词典保持原样。
 
