@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 PaperAI's browser workbench over DSH plugins and slots. Projects and tracked Word documents occupy the left sidebar, the document occupies the middle column, and the Agent conversation occupies the right. The product installs `PAPERAI_LAYOUT_CONFIG` through `ctx.layout.configure`: `detailsPosition: start`, `centerMin: 360`, `detailsMin: 480`, `detailsDefault: 860`, `detailsMax: 1280`, current-Session visibility, and document focus when both columns cannot fit. Opening Word makes the blank conversation compact; quoting text reveals the conversation while retaining the document beside it when space permits.
 
-The plugin contributes the document list and Project Doctor, project start page, Templates settings page, `paperai` document view, and Agent-status child slot. It retains DSH Workspace navigation, conversation, permission controls, and model selection. Registrations follow their declaring slots through `slots.inject()`. Colors and shared controls come from DSH.
+The plugin contributes the document list and Project Doctor, project start page, Templates settings page, and `paperai` document view. It retains DSH Workspace navigation, conversation, permission controls, and model selection. Registrations follow their declaring slots through `slots.inject()`. Colors and shared controls come from DSH.
 
 The start page creates or opens a project directory, names the project with its template, document count, and last edit, lists the tracked documents with their types, and creates or imports a document from one menu of the project's template formats plus free Word import. The template dialog and settings page share one library store. Unanswered template choices open the dialog once per visit. The [Host service](../../paperai/workbench-service/README.md) owns import limits, template semantics, and document operations.
 
@@ -14,7 +14,7 @@ The document view renders sanitized, derived HTML in a shadow root, retaining em
 
 Selecting mapped Word text exposes “Ask Agent.” The gesture inserts a removable composer reference with document id, path, revision, head commit, block ids, and exact text. Its serialized value freezes before asynchronous submission; changing documents cannot retarget it. The existing reference codec handles clipboard persistence, removal, and message serialization. Selection alone never sends a message.
 
-The Agent selector reports diagnostic results and startup progress separately from the live model selector. Another conversation using the provider does not establish a connection for this selector. Explicit detection launches a bounded, prompt-free probe without replacing the conversation process. Project Doctor opens a read-only scan. The recovery preview identifies the missing working file and exact version before the user restores it. [Commit-service recovery](../../paperai/commit-service/README.md) owns validation and publication.
+Project Doctor opens a read-only scan. The recovery preview identifies the missing working file and exact version before the user restores it. [Commit-service recovery](../../paperai/commit-service/README.md) owns validation and publication.
 
 The plugin mounts the generated `@paperai/workbench-service/remote` descriptor before registering UI. Transport types come from `@paperai/workbench-service/types`. React-free controllers own browser state, reject stale replies, and release subscriptions and pending reads on disposal.
 

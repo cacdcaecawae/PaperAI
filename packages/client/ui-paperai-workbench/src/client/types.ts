@@ -15,8 +15,6 @@ export type * from '@paperai/workbench-service/types'
 export type PaperAIWorkbenchRemote = Pick<
   TypertClientRemote['paperaiWorkbench'],
   | 'overview'
-  | 'agentDiagnostics'
-  | 'probeAgent'
   | 'inspectProject'
   | 'recoverWorking'
   | 'captureExternal'
@@ -136,7 +134,8 @@ export interface PaperAIWorkbenchState {
   scrollTop: number
   phase: PaperAIWorkbenchPhase
   document: PaperAIDocumentSnapshot | null
-  edit: PaperAIBlockEdit | null
+  /** Blocks retyped in the page and not yet saved, each with the text it started from. */
+  edits: readonly PaperAIBlockEdit[]
   action: PaperAIWorkbenchAction | null
   panel: PaperAIWorkbenchPanel | null
   diff: PaperAIVersionDiffState | null

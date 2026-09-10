@@ -125,13 +125,11 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   retryOpen: () => Promise<void>
   /** Open one secondary panel, or close it when it is already open. */
   showPanel: (panel: PaperAIWorkbenchPanel | null) => void
-  /** Start editing one block in place. */
-  selectBlock: (nodeId: PaperAIDocumentNodeId) => PaperAIActionResult
-  /** Replace the block draft. */
-  updateDraft: (value: string) => void
-  /** Discard the block draft. */
+  /** Record what one block now reads in the page; its original text drops the draft again. */
+  updateDraft: (nodeId: PaperAIDocumentNodeId, value: string) => void
+  /** Discard every block draft. */
   cancelEdit: () => void
-  /** Save the block draft as one version. */
+  /** Save every block draft as one version. */
   commitEdit: () => Promise<PaperAIActionResult>
   /** Run the template gate. */
   validate: () => Promise<PaperAIActionResult>

@@ -100,7 +100,8 @@
 }
 
 /* Export is the one filled action in the column. */
-.chip[data-kind='export'] {
+.chip[data-kind='export'],
+.chip[data-kind='save'] {
   padding: 0 12px;
   background: var(--dsw-alias-button-primary-fill);
   color: var(--dsw-alias-label-primary-foreground);
@@ -109,7 +110,8 @@
   line-height: 20px;
 }
 
-.chip[data-kind='export']:hover:not(:disabled) {
+.chip[data-kind='export']:hover:not(:disabled),
+.chip[data-kind='save']:hover:not(:disabled) {
   background: var(--dsw-alias-button-primary-fill-hover, var(--dsw-alias-button-primary-fill));
   color: var(--dsw-alias-label-primary-foreground);
 }
@@ -245,6 +247,34 @@
 
 .flipped {
   transform: rotate(180deg);
+}
+
+/* Retyped blocks wait in one bar at the foot of the page: how many, discard, save. */
+.pending {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  display: flex;
+  max-width: calc(100% - 48px);
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 20px;
+  padding: 4px 6px 4px 14px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+}
+
+.pending > span:first-child {
+  white-space: nowrap;
+}
+
+.pending [role='alert'] {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .previewSeat[hidden] {

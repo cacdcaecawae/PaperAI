@@ -1,8 +1,8 @@
-/** Independent browser observations for Agent readiness and project integrity. */
+/** Independent browser observations of project integrity. */
 
 import { createSnapshotStore, type WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
-  PaperAIAgentDiagnostic, PaperAIDocumentId, PaperAIProjectIntegrityReport, PaperAIWorkbenchRemote, PaperAIWorkingRecoveryPlan,
+  PaperAIDocumentId, PaperAIProjectIntegrityReport, PaperAIWorkbenchRemote, PaperAIWorkingRecoveryPlan,
 } from './types.ts'
 
 /** Read-only integrity report plus the explicit operation currently in flight. */
@@ -12,66 +12,18 @@ export interface ProjectCheckState {
   readonly error: string | null
 }
 
-/** Shared diagnostic observations; these never drive live Agent model selection. */
+/** Project integrity observations by Workspace. */
 export interface DiagnosticsState {
-  agents: readonly PaperAIAgentDiagnostic[]
-  probing: readonly string[]
-  agentError: string | null
   projects: Readonly<Record<string, ProjectCheckState>>
 }
 
 /** Per-workbench controller for bounded diagnostic requests and explicit repairs. */
 export class DiagnosticsController {
-  /** Browser observations shared by the Agent status and project check surfaces. */
-  readonly store = createSnapshotStore<DiagnosticsState>({ agents: [], probing: [], agentError: null, projects: {} })
+  /** Browser observations shared by the project check surfaces. */
+  readonly store = createSnapshotStore<DiagnosticsState>({ projects: {} })
   private disposed = false
-  private agentRead = 0
 
   constructor(private readonly remote: PaperAIWorkbenchRemote) {}
-
-  /** Invalidate pending observations immediately when the Host disconnects. */
-  disconnected(): void {
-    this.agentRead += 1
-    this.store.update((state) => { state.agents = state.agents.map(agent => ({ ...agent, connected: false })) })
-  }
-
-  /** Read cached metadata without launching a provider process. */
-  async loadAgents(): Promise<void> {
-    const generation = ++this.agentRead
-    try {
-      const result = await this.remote.agentDiagnostics()
-      if (this.isDisposed() || generation !== this.agentRead) return
-      this.store.update((state) => {
-        if (result.ok) { state.agents = result.value; state.agentError = null }
-        else { state.agentError = result.error.message; state.agents = state.agents.map(agent => ({ ...agent, connected: false })) }
-      })
-    } catch (error) {
-      if (!this.isDisposed() && generation === this.agentRead) this.store.update((state) => {
-        state.agentError = String(error)
-        state.agents = state.agents.map(agent => ({ ...agent, connected: false }))
-      })
-    }
-  }
-
-  /**
-   * Run an explicit prompt-free Agent diagnostic, deduplicated until it settles.
-   * @param provider - selected peer provider.
-   * @param force - bypass failure cooldown only for an explicit retry.
-   */
-  async probe(provider: string, force: boolean): Promise<void> {
-    if (this.isDisposed() || this.store.getSnapshot().probing.includes(provider)) return
-    this.store.update((state) => { state.probing = [...state.probing, provider]; state.agentError = null })
-    try {
-      const result = await this.remote.probeAgent({ provider, force })
-      if (this.isDisposed()) return
-      if (!result.ok) this.store.update((state) => { state.agentError = result.error.message })
-      else await this.loadAgents()
-    } catch (error) {
-      if (!this.isDisposed()) this.store.update((state) => { state.agentError = String(error) })
-    } finally {
-      if (!this.isDisposed()) this.store.update((state) => { state.probing = state.probing.filter(id => id !== provider) })
-    }
-  }
 
   /**
    * Scan a project, or apply one explicit scan-bound recovery and read the result.
@@ -119,6 +71,6 @@ export class DiagnosticsController {
   }
 
   /** Discard stale replies after the owning plugin stops. */
-  dispose(): void { this.disposed = true; this.agentRead += 1 }
+  dispose(): void { this.disposed = true }
   private isDisposed(): boolean { return this.disposed }
 }

@@ -4,7 +4,7 @@
 
 基于 DSH 插件和 slot 的 PaperAI 浏览器工作台。左侧显示项目和受管理的 Word 文档，中间显示文档，右侧显示 Agent 对话。产品通过 `ctx.layout.configure` 安装 `PAPERAI_LAYOUT_CONFIG`：`detailsPosition: start`、`centerMin: 360`、`detailsMin: 480`、`detailsDefault: 860`、`detailsMax: 1280`，允许当前空白 Session 显示文档，两栏无法并排时聚焦文档。打开 Word 后空白对话采用紧凑布局；引用选区会显示对话，空间足够时文档仍在旁边。
 
-本插件贡献文档列表和项目体检、项目起始页、模板设置页、`paperai` 文档视图，以及 Agent 状态子 slot。Workspace 导航、对话、权限控制和模型选择仍由 DSH 提供。注册通过 `slots.inject()` 跟随 slot 声明者的生命周期。颜色和共享控件来自 DSH。
+本插件贡献文档列表和项目体检、项目起始页、模板设置页和 `paperai` 文档视图。Workspace 导航、对话、权限控制和模型选择仍由 DSH 提供。注册通过 `slots.inject()` 跟随 slot 声明者的生命周期。颜色和共享控件来自 DSH。
 
 起始页创建或打开项目目录，以模板、文档数和最近编辑时间标识项目，列出已追踪文档及其类型，并通过一个菜单从项目模板格式新建或自由导入 Word。项目模板对话框与设置页共用模板库存储。尚未回答的模板选择会在每次访问时弹出一次对话框。[Host 服务](../../paperai/workbench-service/README.zh.md)拥有导入限制、模板语义和文档操作。
 
@@ -14,7 +14,7 @@
 
 选择 Word 中已映射的文字会显示“交给 Agent”。点击后插入可移除输入引用，包含文档 id、路径、revision、当前提交、块 id 和精确文字。序列化内容在异步发送前冻结，切换文档不会改变引用对象。既有引用 codec 处理剪贴板持久化、移除和消息序列化。仅选择文字不会发送消息。
 
-Agent 选择器展示检测结果和启动进度，不替代当前模型选择器。其他会话使用该渠道，不代表当前选择器已经建立会话连接。显式检测启动有时限且不发送提示词的探测，不替换对话进程。项目体检首先执行只读扫描；用户恢复前，方案预览明确显示缺失的工作文件和准确版本。[提交服务恢复流程](../../paperai/commit-service/README.zh.md)负责校验和发布。
+项目体检首先执行只读扫描；用户恢复前，方案预览明确显示缺失的工作文件和准确版本。[提交服务恢复流程](../../paperai/commit-service/README.zh.md)负责校验和发布。
 
 插件先挂载生成的 `@paperai/workbench-service/remote` descriptor，再注册 UI。传输类型来自 `@paperai/workbench-service/types`。不依赖 React 的控制器拥有浏览器状态、拒绝过期回执，并在卸载时释放订阅和未完成的读取。
 

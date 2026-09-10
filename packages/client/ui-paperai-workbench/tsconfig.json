@@ -52,9 +52,6 @@
     },
     {
       "path": "../ui-input-trigger"
-    },
-    {
-      "path": "../ui-agent-preset"
     }
   ]
 }

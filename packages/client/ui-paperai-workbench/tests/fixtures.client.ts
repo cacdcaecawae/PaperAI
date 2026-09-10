@@ -186,8 +186,6 @@ export const DIFF: PaperAIVersionDiff = {
 
 export function successfulRemote(): PaperAIWorkbenchRemote {
   return {
-    agentDiagnostics: async () => ({ ok: true, value: [] }),
-    probeAgent: async request => ({ ok: true, value: { provider: request.provider, status: 'discovered', executable: 'node', adapterVersion: null, agentVersion: null, checkedAt: null, retryAt: null, elapsedMs: null, error: null, models: [] } }),
     inspectProject: async () => ({ ok: true, value: { checkedAt: '2026-09-05T00:00:00Z', documents: 1, issues: [], repairs: [] } }),
     recoverWorking: async () => ({ ok: true, value: { checkedAt: '2026-09-05T00:00:00Z', documents: 1, issues: [], repairs: [] } }),
     captureExternal: async () => ({ ok: true, value: { checkedAt: '2026-09-05T00:00:00Z', documents: 1, issues: [], repairs: [] } }),

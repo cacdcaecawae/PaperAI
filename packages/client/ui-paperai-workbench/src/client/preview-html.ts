@@ -55,10 +55,10 @@ export interface PreviewTextPatch {
 export function patchPreviewHtml(html: string, patches: readonly PreviewTextPatch[]): string {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const blocks = blocksOf(parsed.body)
-  for (const { baseText, nextText, cell, ordinal } of patches) {
-    const block = addressed(blocks, baseText).filter(candidate => (candidate.closest('td, th') !== null) === cell)[ordinal]
-    if (block !== undefined) block.textContent = nextText
-  }
+  // Every block is located against the text the edits started from before any of them is rewritten.
+  const located = patches.map(patch => [patch, addressed(blocks, patch.baseText)
+    .filter(candidate => (candidate.closest('td, th') !== null) === patch.cell)[patch.ordinal]] as const)
+  for (const [patch, block] of located) if (block !== undefined) block.textContent = patch.nextText
   return parsed.documentElement.outerHTML
 }
 

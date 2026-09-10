@@ -1,5 +1,5 @@
-- textbox "编辑段落": 浏览器中的本地草稿
-- alert: 这一段已被其他会话修改。草稿已保留，请复制需要的内容后取消编辑。
-- text: 编辑段落
-- button "取消"
-- button "保存" [disabled]
+- group "已修改 1 段":
+  - text: 已修改 1 段
+  - alert: 有一段已被其他会话修改。草稿已保留，请复制需要的内容后放弃修改。
+  - button "放弃修改"
+  - button "保存" [disabled]

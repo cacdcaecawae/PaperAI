@@ -1,12 +1,12 @@
 /**
- * The document itself: the Host's read-only preview rendered in a shadow
- * tree so its own stylesheet stays inside, with every paragraph, heading,
- * list item, and table cell mapped back to a semantic node so a click edits
- * that block in place.
+ * The document itself: the Host's preview rendered in a shadow tree so its own
+ * stylesheet stays inside, with every addressed paragraph, heading, list item,
+ * and table cell mapped back to a semantic node. Mapped blocks are typed into
+ * directly, as in Word; each retyped block carries a marker until the drafts
+ * are saved together as one version.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
@@ -14,7 +14,7 @@ import css from './DocumentWorkbench.module.css'
 import { blocksOf, normalize } from './preview-html.ts'
 import type { WordExcerpt } from './selection-context.ts'
 
-/** Props of the in-place block editor and the preview around it. */
+/** Props of the editable preview and the save bar under it. */
 export interface DocumentPreviewProps {
   readonly active?: boolean
   readonly scrollTop?: number
@@ -23,13 +23,13 @@ export interface DocumentPreviewProps {
   readonly html: string
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly title: string
-  readonly editing: PaperAIBlockEdit | null
+  /** Blocks retyped and not yet saved. */
+  readonly edits: readonly PaperAIBlockEdit[]
   /** The HTML carries a version's marked changes; blocks stay read-only and a navigator walks the marks. */
   readonly comparing?: boolean
   readonly saving: boolean
-  /** A block was clicked; `null` reports one that matches no editable node. */
-  readonly onSelectBlock: (nodeId: PaperAIDocumentNodeId | null) => void
-  readonly onDraft: (value: string) => void
+  /** A mapped block now reads `value`; its original text drops the draft again. */
+  readonly onDraft: (nodeId: PaperAIDocumentNodeId, value: string) => void
   readonly onSave: () => void
   readonly onCancel: () => void
   readonly t: PaperAIDocumentWorkbenchProps['t']
@@ -37,8 +37,9 @@ export interface DocumentPreviewProps {
 
 const DROPPED_ELEMENTS = 'script, iframe, object, embed, link, meta, base, form, input, button, textarea, select, noscript'
 const URL_ATTRIBUTES = new Set(['href', 'src', 'xlink:href', 'action', 'formaction'])
+const EDITABLE = 'contenteditable'
 
-/** Styles the shadow tree needs beyond the document's own: block affordances and the editor. */
+/** Styles the shadow tree needs beyond the document's own: block affordances and change marks. */
 const PREVIEW_STYLE = `
 :host { display: block; }
 /* The Host renders the document as pages that paint their own white; the ink stays black in both color schemes
@@ -46,31 +47,22 @@ const PREVIEW_STYLE = `
    with a hairline edge, zoomed down to fit the column when it is narrower than a page. */
 .paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); zoom: var(--paperai-page-zoom, 1); }
 .paperai-doc .page { outline: 1px solid var(--dsw-alias-border-l2); }
-/* Compare mode: a changed block is tinted with a marker at its left edge; deleted words are struck, inserted words underlaid. */
-[data-paperai-change] { position: relative; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding-left: 12px; padding-right: 12px; background: var(--dsw-alias-state-business-tertiary); }
-[data-paperai-change]::before { content: ''; position: absolute; top: 6px; bottom: 6px; left: -10px; width: 3px; border-radius: 2px; background: var(--dsw-alias-state-business-primary); }
+/* A compared change and a retyped block read alike: tinted, with a marker at the left edge. A retyped block whose
+   text changed elsewhere turns the marker red. Deleted words are struck, inserted words underlaid. */
+[data-paperai-change], [data-paperai-changed] { position: relative; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding-left: 12px; padding-right: 12px; background: var(--dsw-alias-state-business-tertiary); }
+[data-paperai-change]::before, [data-paperai-changed]::before { content: ''; position: absolute; top: 6px; bottom: 6px; left: -10px; width: 3px; border-radius: 2px; background: var(--dsw-alias-state-business-primary); }
+[data-paperai-conflicted]::before { background: var(--dsw-alias-state-error-primary); }
 [data-paperai-change][data-paperai-current] { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
 [data-paperai-change] del { border-radius: 3px; padding: 0 2px; background: var(--dsw-alias-state-error-tertiary, var(--dsw-alias-interactive-bg-hover-danger)); color: var(--dsw-alias-state-error-primary); text-decoration: line-through; }
 [data-paperai-change] ins { border-radius: 3px; padding: 0 2px; background: var(--dsw-alias-state-success-tertiary, var(--dsw-alias-interactive-bg-hover)); color: var(--dsw-alias-state-success-primary); text-decoration: none; }
-[data-paperai-block] { cursor: text; border-radius: 3px; transition: box-shadow 120ms ease; }
-[data-paperai-block]:hover { box-shadow: 0 0 0 2px var(--dsw-alias-state-business-tertiary); }
-[data-paperai-block][data-paperai-editing] { display: none; }
-/* Editing happens in the paragraph's own place and type: the seat copies the block's typography and margins,
-   the textarea inherits them and grows with the text, and the chrome is one gold marker plus two small buttons. */
-.paperai-editor-host { position: relative; display: block; margin-left: -12px; margin-right: -12px; border-radius: 4px; padding: 0 12px; background: var(--dsw-alias-state-business-tertiary); }
-.paperai-editor-host::before { content: ''; position: absolute; top: 6px; bottom: 6px; left: -10px; width: 3px; border-radius: 2px; background: var(--dsw-alias-state-business-primary); }
-.paperai-block-editor { display: flex; flex-direction: column; gap: 2px; }
-.paperai-block-editor textarea { box-sizing: border-box; display: block; width: 100%; min-height: 1lh; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; line-height: inherit; text-align: inherit; text-indent: inherit; resize: none; outline: none; field-sizing: content; }
-.paperai-block-editor .paperai-editor-actions { display: flex; align-items: center; gap: 6px; padding: 2px 0 6px; color: var(--dsw-alias-label-tertiary); font: 12px/18px system-ui, sans-serif; text-align: left; text-indent: 0; }
-.paperai-block-editor .paperai-editor-label { flex: 1; }
-.paperai-block-editor button { height: 26px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 0 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); cursor: pointer; font: inherit; }
-.paperai-block-editor button[data-primary] { border-color: transparent; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
-.paperai-block-editor button:disabled { cursor: default; opacity: 0.4; }
-.paperai-block-editor button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+/* Editable blocks are written in place, in their own type; the only chrome is a ring on hover and focus. */
+[data-paperai-block][contenteditable] { cursor: text; border-radius: 3px; outline: none; transition: box-shadow 120ms ease; }
+[data-paperai-block][contenteditable]:hover { box-shadow: 0 0 0 2px var(--dsw-alias-state-business-tertiary); }
+[data-paperai-block][contenteditable]:focus { box-shadow: 0 0 0 2px var(--dsw-alias-state-business-primary); }
 @media (prefers-reduced-motion: reduce) { [data-paperai-block] { transition: none; } }
 `
 
-/** Drop active content and event handlers from the Host preview before it enters the page. */
+/** Drop active content, event handlers, and editing flags from the Host preview before it enters the page. */
 function sanitize(html: string): { readonly styles: string; readonly body: Node[] } {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   for (const element of parsed.querySelectorAll(DROPPED_ELEMENTS)) element.remove()
@@ -80,7 +72,7 @@ function sanitize(html: string): { readonly styles: string; readonly body: Node[
       const raster = element.tagName === 'IMG' && name === 'src'
         && /^\s*data:image\/(?:png|jpeg|gif|webp|bmp|avif);base64,/iu.test(attribute.value)
       const scripted = URL_ATTRIBUTES.has(name) && /^\s*(?:javascript|data):/iu.test(attribute.value) && !raster
-      if (name.startsWith('on') || scripted) element.removeAttribute(attribute.name)
+      if (name.startsWith('on') || scripted || name === EDITABLE) element.removeAttribute(attribute.name)
     }
   }
   const styles = [...parsed.querySelectorAll('style')].map(style => style.textContent).join('\n')
@@ -115,52 +107,17 @@ function mapBlocks(
   return mapping
 }
 
-/** The in-place editor: a textarea in the block's place, with save and cancel. */
-function BlockEditor({ editing, saving, onDraft, onSave, onCancel, t }: Pick<
-  DocumentPreviewProps, 'saving' | 'onDraft' | 'onSave' | 'onCancel' | 't'
-> & { editing: PaperAIBlockEdit }): ReactNode {
-  const textarea = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    textarea.current?.focus()
-  }, [editing.nodeId])
-  const dirty = editing.draft !== editing.baseText
-  return (
-    <div className="paperai-block-editor" data-paperai-block-editor>
-      <textarea
-        ref={textarea}
-        aria-label={t('block.editing')}
-        value={editing.draft}
-        disabled={saving}
-        onInput={(event) => { onDraft(event.currentTarget.value) }}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onCancel()
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && dirty && !saving && editing.conflicted !== true) onSave()
-        }}
-      />
-      {editing.conflicted === true && <p role="alert">{t('block.conflicted')}</p>}
-      <div className="paperai-editor-actions">
-        <span className="paperai-editor-label">{t('block.editing')}</span>
-        <button type="button" disabled={saving} onClick={onCancel}>{t('block.cancel')}</button>
-        <button type="button" data-primary="" disabled={saving || !dirty || editing.conflicted === true} onClick={onSave}>
-          {saving ? t('block.saving') : t('block.save')}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/** Render the preview with block-level editing. */
+/** Render the preview with blocks written in place. */
 export function DocumentPreview({
-  html, nodes, title, editing, saving, onSelectBlock, onDraft, onSave, onCancel, t,
+  html, nodes, title, edits, saving, onDraft, onSave, onCancel, t,
   active = true, scrollTop = 0, onScroll, onQuote, comparing = false,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
-  const [editorHost, setEditorHost] = useState<HTMLElement | null>(null)
-  const select = useRef(onSelectBlock)
-  select.current = onSelectBlock
-  const compare = useRef(false)
-  compare.current = comparing
+  // Each mapped block as the Host rendered it, so a discarded draft brings its runs back.
+  const originals = useRef(new Map<HTMLElement, Node>())
+  const callbacks = useRef({ onDraft, onSave, nodes })
+  callbacks.current = { onDraft, onSave, nodes }
   const [excerpt, setExcerpt] = useState<WordExcerpt | null>(null)
   const [changes, setChanges] = useState<{ readonly count: number; readonly index: number }>({ count: 0, index: 0 })
 
@@ -178,11 +135,29 @@ export function DocumentPreview({
     const blocks = blocksOf(container)
     blocks.forEach((block, index) => { block.dataset.paperaiBlock = String(index) })
     mapping.current = mapBlocks(blocks, nodes)
+    originals.current = new Map([...mapping.current.keys()].map(block => [block, block.cloneNode(true)]))
     shadow.replaceChildren(style, container)
-    setEditorHost(null)
     setExcerpt(null)
     setChanges({ count: container.querySelectorAll('[data-paperai-change]').length, index: 0 })
   }, [html, nodes])
+
+  // Mapped blocks show their drafts and carry a marker until saved; a dropped draft restores the Host's rendering.
+  // A block being typed into already reads as its draft, so its caret is left alone.
+  useLayoutEffect(() => {
+    const drafts = new Map(edits.map(edit => [edit.nodeId, edit]))
+    const editable = !comparing && !saving
+    for (const [block, nodeId] of mapping.current) {
+      const edit = drafts.get(nodeId)
+      if (edit !== undefined && block.textContent !== edit.draft) block.textContent = edit.draft
+      if (edit === undefined && block.textContent !== originals.current.get(block)?.textContent) {
+        block.replaceChildren(...[...originals.current.get(block)?.childNodes ?? []].map(node => node.cloneNode(true)))
+      }
+      block.toggleAttribute('data-paperai-changed', edit !== undefined)
+      block.toggleAttribute('data-paperai-conflicted', edit?.conflicted === true)
+      if (editable && block.getAttribute(EDITABLE) === null) block.setAttribute(EDITABLE, 'plaintext-only')
+      if (!editable) block.removeAttribute(EDITABLE)
+    }
+  }, [edits, comparing, saving, html, nodes])
 
   // The change navigator walks the marked blocks; the current one is outlined and scrolled into view.
   const goToChange = (step: number): void => {
@@ -222,75 +197,57 @@ export function DocumentPreview({
     return () => { observer.disconnect() }
   }, [html])
 
-  // One delegated click on the shadow tree resolves the block under the pointer.
+  // Delegated listeners on the shadow tree: typing reports the block's text, keys revert or save, a selection quotes.
   useEffect(() => {
     const shadow = host.current?.shadowRoot
     if (shadow === null || shadow === undefined) return
-    const captureSelection = (): boolean => {
-      const selection = (shadow as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()
-        ?? window.getSelection()
-      if (selection !== null && !selection.isCollapsed && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0)
-        const nodeIds = [...mapping.current.entries()]
-          .filter(([block]) => range.intersectsNode(block))
-          .map(([, nodeId]) => nodeId)
-        const text = selection.toString()
-        if (nodeIds.length > 0 && text.trim() !== '') {
-          setExcerpt({ nodeIds, text })
-          return true
-        }
-      }
-      return false
-    }
-    const onClick = (event: Event): void => {
-      if (captureSelection() || compare.current) return
+    const blockOf = (event: Event): readonly [HTMLElement, PaperAIDocumentNodeId] | undefined => {
       const target = event.composedPath().find((node): node is HTMLElement => (
         node instanceof HTMLElement && node.dataset.paperaiBlock !== undefined
       ))
-      if (target === undefined || event.composedPath().some(node => (
-        node instanceof HTMLElement && node.dataset.paperaiBlockEditor !== undefined
-      ))) return
-      select.current(mapping.current.get(target) ?? null)
+      const nodeId = target === undefined ? undefined : mapping.current.get(target)
+      return target !== undefined && nodeId !== undefined ? [target, nodeId] : undefined
     }
-    shadow.addEventListener('click', onClick)
+    const onInput = (event: Event): void => {
+      const hit = blockOf(event)
+      if (hit !== undefined) callbacks.current.onDraft(hit[1], hit[0].textContent)
+    }
+    const onKeyDown = (event: Event): void => {
+      const hit = blockOf(event)
+      if (hit === undefined || !(event instanceof KeyboardEvent)) return
+      // A block is one paragraph: Enter saves with a modifier and otherwise does nothing; Escape drops the block's draft.
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        if (event.metaKey || event.ctrlKey) callbacks.current.onSave()
+      } else if (event.key === 'Escape') {
+        callbacks.current.onDraft(hit[1], callbacks.current.nodes.find(node => node.nodeId === hit[1])?.text ?? '')
+        hit[0].blur()
+      }
+    }
+    const captureSelection = (): void => {
+      const selection = (shadow as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()
+        ?? window.getSelection()
+      if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return
+      const range = selection.getRangeAt(0)
+      const nodeIds = [...mapping.current.entries()]
+        .filter(([block]) => range.intersectsNode(block))
+        .map(([, nodeId]) => nodeId)
+      const text = selection.toString()
+      if (nodeIds.length > 0 && text.trim() !== '') setExcerpt({ nodeIds, text })
+    }
+    shadow.addEventListener('input', onInput)
+    shadow.addEventListener('keydown', onKeyDown)
+    shadow.addEventListener('click', captureSelection)
     shadow.addEventListener('keyup', captureSelection)
     return () => {
-      shadow.removeEventListener('click', onClick)
+      shadow.removeEventListener('input', onInput)
+      shadow.removeEventListener('keydown', onKeyDown)
+      shadow.removeEventListener('click', captureSelection)
       shadow.removeEventListener('keyup', captureSelection)
     }
   }, [])
 
-  // Put the editor in the edited block's place and restore the block afterwards.
-  const editingNodeId = editing?.nodeId ?? null
-  useLayoutEffect(() => {
-    if (editingNodeId === null) {
-      setEditorHost(null)
-      return
-    }
-    const block = [...mapping.current.entries()].find(([, nodeId]) => nodeId === editingNodeId)?.[0]
-    if (block === undefined) {
-      setEditorHost(null)
-      return
-    }
-    const seat = document.createElement('div')
-    seat.className = 'paperai-editor-host'
-    // The seat stands in for the block, so it takes the block's type and rhythm; the textarea inherits them.
-    const type = getComputedStyle(block)
-    for (const property of [
-      'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing', 'line-height',
-      'text-align', 'text-indent', 'color', 'margin-top', 'margin-bottom',
-    ] as const) {
-      seat.style.setProperty(property, type.getPropertyValue(property))
-    }
-    block.after(seat)
-    block.dataset.paperaiEditing = ''
-    setEditorHost(seat)
-    return () => {
-      seat.remove()
-      delete block.dataset.paperaiEditing
-    }
-  }, [editingNodeId, html, nodes])
-
+  const conflicted = edits.some(edit => edit.conflicted === true)
   return (
     <div className={css.previewSeat} hidden={!active} aria-hidden={!active || undefined}>
       {active && excerpt !== null && onQuote !== undefined && (
@@ -316,12 +273,15 @@ export function DocumentPreview({
           </button>
         </div>
       )}
-      {active && editorHost === null && editing?.conflicted === true && (
-        <BlockEditor editing={editing} saving={saving} onDraft={onDraft} onSave={onSave} onCancel={onCancel} t={t} />
-      )}
-      {active && editorHost !== null && editing !== null && createPortal(
-        <BlockEditor editing={editing} saving={saving} onDraft={onDraft} onSave={onSave} onCancel={onCancel} t={t} />,
-        editorHost,
+      {active && edits.length > 0 && (
+        <div className={css.pending} role="group" aria-label={t('block.pending', { count: edits.length })} data-paperai-pending>
+          <span>{t('block.pending', { count: edits.length })}</span>
+          {conflicted && <span role="alert">{t('block.conflicted')}</span>}
+          <button className={css.chip} type="button" disabled={saving} onClick={onCancel}>{t('block.discard')}</button>
+          <button className={css.chip} type="button" data-kind="save" disabled={saving || conflicted} onClick={onSave}>
+            {saving ? t('block.saving') : t('block.save')}
+          </button>
+        </div>
       )}
     </div>
   )

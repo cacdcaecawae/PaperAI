@@ -1,7 +1,6 @@
 /** DSH-native PaperAI plugin: sidebar documents, project start page, template library, and document view. */
 
 import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Config as LayoutConfig } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -14,7 +13,6 @@ import { PaperAIWorkbenchController } from './controller.ts'
 import { resolvePreviewBudget, type Config } from '../config.ts'
 import { selectionSource, wordSelectionReference } from './selection-context.ts'
 import { DiagnosticsController } from './diagnostics-controller.ts'
-import { AgentDiagnostics } from './AgentDiagnostics.tsx'
 import { WordSelectionMessage } from './WordSelectionMessage.tsx'
 
 export type { Config } from '../config.ts'
@@ -116,14 +114,6 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       'paperai-ui-workbench: local Agent onboarding profile',
     )
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'paperai-ui-workbench: dictionaries')
-    ctx.slots.inject('conversation.hero.agentPreset.status', () => ctx.slots.register({
-      name: 'conversation.hero.agentPreset.status', locale: NS,
-      inject: () => ({
-        hooks: { diagnostics: diagnostics.store },
-        loadAgents: () => diagnostics.loadAgents(),
-        probe: (provider: string, force: boolean) => diagnostics.probe(provider, force),
-      }),
-    }, AgentDiagnostics))
     const t = ctx.locale.bind(NS)
     // A DSH Workspace is the shell-level account, while a PaperAI project is
     // the product-level account that also owns the standard folders,
@@ -140,12 +130,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       'paperai-ui-workbench: eager project initialization',
     )
     initializeWorkspaces()
-    ctx.on('connection/reset', () => { controller.refreshLoaded(); void diagnostics.loadAgents() })
-    const connection = ctx.get('connection') as ConnectionHandle
-    ctx.effect(() => connection.hostDescription.subscribe(() => {
-      if (connection.hostDescription.getSnapshot() === undefined) diagnostics.disconnected()
-    }), 'paperai-ui-workbench: Host connection loss')
-    ctx.effect(() => ctx.remote.$on('paperai/acp-changed', () => { void diagnostics.loadAgents() }), 'paperai-ui-workbench: ACP connection status')
+    ctx.on('connection/reset', () => { controller.refreshLoaded() })
     ctx.effect(
       () => ctx.remote.$on('paperai/document-changed', (change) => {
         controller.handleDocumentChanged(change)
@@ -285,8 +270,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
           if (accepted) ctx.layout.revealConversation()
         },
         showPanel: (panel) => { controller.showPanel(sessionId, panel) },
-        selectBlock: nodeId => controller.selectBlock(sessionId, nodeId),
-        updateDraft: (value) => { controller.updateDraft(sessionId, value) },
+        updateDraft: (nodeId, value) => { controller.updateDraft(sessionId, nodeId, value) },
         cancelEdit: () => { controller.cancelEdit(sessionId) },
         commitEdit: () => controller.commitEdit(sessionId),
         validate: () => controller.validate(sessionId),

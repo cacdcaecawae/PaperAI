@@ -4,7 +4,6 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore, SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import paperAIWorkbenchRemote from '@paperai/workbench-service/remote'
 import { DocumentWorkbench } from '../src/client/DocumentWorkbench.tsx'
-import { AgentDiagnostics, type AgentDiagnosticsInjected } from '../src/client/AgentDiagnostics.tsx'
 import { WordSelectionMessage } from '../src/client/WordSelectionMessage.tsx'
 import {
   apply, inject, NS, PAPERAI_DETAILS_VIEW_ID, PAPERAI_LAYOUT_CONFIG, PAPERAI_TEMPLATES_SECTION_ID,
@@ -27,7 +26,7 @@ vi.mock('@paperai/workbench-service/remote', () => ({
 
 const SLOTS = [
   'sidebar.workspaces.content', 'conversation.hero.content', 'settings.section', 'conversation.details.view',
-  'conversation.hero.agentPreset.status', 'conversation.message.userText',
+  'conversation.message.userText',
 ] as const
 
 async function bench(mountError?: Error) {
@@ -133,7 +132,6 @@ function declare(slots: SlotRegistry): () => void {
       'conversation.hero.content': { kind: 'single', scope: 'root' },
       'settings.section': { kind: 'list', scope: 'root' },
       'conversation.details.view': { kind: 'list', scope: 'session' },
-      'conversation.hero.agentPreset.status': { kind: 'single', scope: 'root' },
       'conversation.message.userText': { kind: 'chain', scope: 'session' },
     },
   } as never, () => null)
@@ -166,7 +164,6 @@ describe('PaperAI workbench browser plugin', () => {
       expect(b.slots.entries('conversation.hero.content')[0]?.component).toBe(StartPage)
       expect(b.slots.entries('settings.section')[0]?.component).toBe(TemplatesSection)
       expect(b.slots.entries('conversation.details.view')[0]?.component).toBe(DocumentWorkbench)
-      expect(b.slots.entries('conversation.hero.agentPreset.status')[0]?.component).toBe(AgentDiagnostics)
       expect(b.slots.entries('conversation.message.userText')[0]?.component).toBe(WordSelectionMessage)
     })
     expect(b.slots.entries('sidebar.workspaces.content')[0]?.options).toMatchObject({ id: PAPERAI_DETAILS_VIEW_ID, order: 10 })
@@ -222,25 +219,14 @@ describe('PaperAI workbench browser plugin', () => {
     await b.ctx.fiber.dispose()
   })
 
-  it('keeps provider discovery and reviewed recovery behind their own explicit actions', async () => {
+  it('keeps reviewed recovery behind its own explicit action', async () => {
     const b = await bench()
     declare(b.slots)
-    const discover = vi.spyOn(b.remote, 'agentDiagnostics')
-    const probe = vi.spyOn(b.remote, 'probeAgent')
     const inspect = vi.spyOn(b.remote, 'inspectProject')
     const recover = vi.spyOn(b.remote, 'recoverWorking')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    const status = injected(b.slots, 'conversation.hero.agentPreset.status') as AgentDiagnosticsInjected
     const workspace = injected(b.slots, 'sidebar.workspaces.content') as PaperAIWorkspaceContentInjected
-    expect(discover).not.toHaveBeenCalled()
     expect(inspect).not.toHaveBeenCalled()
-    await status.loadAgents()
-    expect(discover).toHaveBeenCalledOnce()
-    expect(probe).not.toHaveBeenCalled()
-    await status.probe('claude', true)
-    expect(probe).toHaveBeenCalledWith({ provider: 'claude', force: true })
-    expect(discover).toHaveBeenCalledTimes(2)
-    expect(status.hooks.diagnostics.getSnapshot().probing).toEqual([])
     await workspace.inspectProject(WORKSPACE_ID)
     expect(inspect).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID })
     expect(recover).not.toHaveBeenCalled()
@@ -299,10 +285,10 @@ describe('PaperAI workbench browser plugin', () => {
     expect(details.hooks.projects.getSnapshot().workspaces[WORKSPACE_ID]).toMatchObject({ selected: RESOURCE_ID })
     details.showPanel('versions')
     expect(details.hooks.workbench.getSnapshot().panel).toBe('versions')
-    expect(details.selectBlock(NODE_HEADING)).toEqual({ ok: true })
-    details.updateDraft('Local draft')
+    details.updateDraft(NODE_HEADING, 'Local draft')
+    expect(details.hooks.workbench.getSnapshot().edits).toHaveLength(1)
     details.cancelEdit()
-    await expect(details.commitEdit()).resolves.toEqual({ ok: false, error: 'no block is being edited' })
+    await expect(details.commitEdit()).resolves.toEqual({ ok: false, error: 'no block has changes' })
     await expect(details.validate()).resolves.toEqual({ ok: true })
     await expect(details.suggestType()).resolves.toEqual({ ok: true })
     await expect(details.applyTemplate('midterm')).resolves.toEqual({ ok: true })

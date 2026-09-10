@@ -49,8 +49,10 @@ describe('PaperAI DSH-native styling', () => {
     expect(preview).toMatch(/script, iframe, object, embed/u)
     expect(preview).toContain("name.startsWith('on')")
     expect(preview).not.toContain('dangerouslySetInnerHTML')
-    expect(preview).not.toContain('contentEditable')
-    expect(preview).toContain('<textarea')
+    expect(preview).not.toContain('innerHTML')
+    // Blocks are written into in place, as plain text, and the Host may not pre-declare any of them editable.
+    expect(preview).toContain("setAttribute(EDITABLE, 'plaintext-only')")
+    expect(preview).toContain('name === EDITABLE) element.removeAttribute')
   })
 
   it('composes from DSH primitives and never reaches for a primary button or card vocabulary', () => {

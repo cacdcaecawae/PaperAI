@@ -135,7 +135,7 @@ function Toolbar({ document, state, panel, showPanel, exportDocument, focusActiv
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
   closeDetails, setDraft, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
-  retryOpen, showPanel, selectBlock, updateDraft, cancelEdit, commitEdit, validate, suggestType,
+  retryOpen, showPanel, updateDraft, cancelEdit, commitEdit, validate, suggestType,
   applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal, captureExternal,
   setDetailsFocus, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
 }: PaperAIDocumentWorkbenchProps): ReactNode {
@@ -147,7 +147,6 @@ export function DocumentWorkbench({
   const library = useLibrary(value => value)
   const [focusActive, setFocusActive] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [blockNotice, setBlockNotice] = useState<PaperAIWorkbenchKey | null>(null)
   // The picked version's changes marked on the current preview while the versions panel is open.
   const changes = state.panel === 'versions' ? state.diff?.result?.changes ?? null : null
   const compare = useMemo(
@@ -167,11 +166,6 @@ export function DocumentWorkbench({
     setDetailsFocus(true)
     return () => { setDetailsFocus(manualFocus.current) }
   }, [panelOpen, setDetailsFocus])
-  // A block notice answers one click. Once the workbench moves on — another
-  // block opened or closed, an action settled, a new revision arrives — the
-  // reason it named is gone, so the line goes with it.
-  const editingNodeId = state.edit?.nodeId ?? null
-  useEffect(() => { setBlockNotice(null) }, [document?.documentId, document?.revision, editingNodeId, state.action])
   useEffect(() => {
     if (dialogOpen) void loadLibrary()
   }, [dialogOpen, loadLibrary])
@@ -243,9 +237,6 @@ export function DocumentWorkbench({
       {state.actionError !== null && actionErrorKey(state.actionError) !== 'workbench.workingChanged' && (
         <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError))}</p>
       )}
-      {blockNotice !== null && (
-        <p className={css.actionError} role="status">{t(blockNotice)}</p>
-      )}
       <main className={css.body} data-panel={panelOpen || undefined}>
         {state.phase === 'idle' && <p className={css.centerMessage}>{t('workbench.idle')}</p>}
         {state.phase === 'loading' && <p className={css.centerMessage} aria-live="polite">{t('workbench.loading')}</p>}
@@ -270,17 +261,9 @@ export function DocumentWorkbench({
                 onScroll={setScroll}
                 onQuote={(excerpt) => { if (view.document !== null) quoteSelection(view.document, excerpt) }}
                 title={t('preview.title')}
-                editing={view.edit}
+                edits={view.edits}
                 comparing={view === state && compare !== null}
                 saving={state.action === 'committing'}
-                onSelectBlock={(nodeId) => {
-                  if (nodeId === null) {
-                    setBlockNotice('block.unmapped')
-                    return
-                  }
-                  const result = selectBlock(nodeId)
-                  setBlockNotice(result.ok ? null : 'block.busy')
-                }}
                 onDraft={updateDraft}
                 onSave={() => { void commitEdit() }}
                 onCancel={cancelEdit}

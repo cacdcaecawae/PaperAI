@@ -54,7 +54,7 @@ function libraryState(overrides: Partial<PaperAILibraryState> = {}): PaperAILibr
 function workbenchState(overrides: Partial<PaperAIWorkbenchState> = {}): PaperAIWorkbenchState {
   return {
     retained: [], scrollTop: 0,
-    phase: 'idle', document: null, edit: null, action: null, panel: null, diff: null, typeSuggestion: null,
+    phase: 'idle', document: null, edits: [], action: null, panel: null, diff: null, typeSuggestion: null,
     exportReceipt: null, externalUpdate: null, error: null, actionError: null, ...overrides,
   }
 }
@@ -122,7 +122,6 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
     setDraft: vi.fn(),
     retryOpen: vi.fn(async () => {}),
     showPanel: vi.fn(),
-    selectBlock: vi.fn(() => ok),
     updateDraft: vi.fn(),
     cancelEdit: vi.fn(),
     commitEdit: vi.fn(async () => ok),
@@ -384,10 +383,12 @@ describe('DocumentWorkbench', () => {
     }) }))
     const view = render(<DocumentWorkbench {...b.props} />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
-    fireEvent.click(shadow.querySelector(`.${band} p`)!)
-    expect(b.selectBlock).not.toHaveBeenCalled()
-    fireEvent.click(shadow.querySelector('.page-body p')!)
-    expect(b.selectBlock).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH)
+    expect(shadow.querySelector(`.${band} p`)?.hasAttribute('contenteditable')).toBe(false)
+    const body = shadow.querySelector<HTMLElement>('.page-body p')!
+    expect(body.getAttribute('contenteditable')).toBe('plaintext-only')
+    body.textContent = 'Rewritten background'
+    fireEvent.input(body)
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, 'Rewritten background')
   })
 
   it('does not consume body matches for unaddressed preview content', () => {
@@ -397,11 +398,11 @@ describe('DocumentWorkbench', () => {
     }) }))
     const view = render(<DocumentWorkbench {...b.props} />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
-    const paragraphs = shadow.querySelectorAll('p')
-    for (const paragraph of [...paragraphs].slice(0, 3)) fireEvent.click(paragraph)
-    expect(b.selectBlock).not.toHaveBeenCalled()
-    fireEvent.click(paragraphs[3]!)
-    expect(b.selectBlock).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH)
+    const paragraphs = [...shadow.querySelectorAll('p')]
+    for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.hasAttribute('contenteditable')).toBe(false)
+    paragraphs[3]!.textContent = 'Changed'
+    fireEvent.input(paragraphs[3]!)
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, 'Changed')
   })
 
   it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
@@ -420,14 +421,19 @@ describe('DocumentWorkbench', () => {
     } }))
     const view = render(<DocumentWorkbench {...b.props} />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
-    fireEvent.click(shadow.querySelector('td p')!)
-    if (cell === 'editable') expect(b.selectBlock).toHaveBeenCalledWith(NODE_TABLE)
-    else expect(b.selectBlock).not.toHaveBeenCalled()
-    b.selectBlock.mockClear()
+    const cellBlock = shadow.querySelector<HTMLElement>('td p')!
+    expect(cellBlock.hasAttribute('contenteditable')).toBe(cell === 'editable')
+    cellBlock.textContent = 'Cell retyped'
+    fireEvent.input(cellBlock)
+    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, 'Cell retyped')
+    else expect(b.updateDraft).not.toHaveBeenCalled()
+    b.updateDraft.mockClear()
     const paragraphs = [...shadow.querySelectorAll('p')].filter(element => element.closest('td') === null)
-    fireEvent.click(paragraphs[0]!)
-    fireEvent.click(paragraphs[1]!)
-    expect(b.selectBlock.mock.calls).toEqual([[NODE_PARAGRAPH], [NODE_HEADING]])
+    for (const paragraph of paragraphs) {
+      paragraph.textContent = `${paragraph.textContent} retyped`
+      fireEvent.input(paragraph)
+    }
+    expect(b.updateDraft.mock.calls).toEqual([[NODE_PARAGRAPH, 'Research background retyped'], [NODE_HEADING, 'Research background retyped']])
   })
 
   it('retains embedded raster figures while removing executable data URLs and handlers', () => {
@@ -467,7 +473,7 @@ describe('DocumentWorkbench', () => {
     expect(fireEvent.mouseDown(ask)).toBe(false)
     fireEvent.click(ask)
     expect(b.quoteSelection).toHaveBeenCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' })
-    expect(b.selectBlock).not.toHaveBeenCalled()
+    expect(b.updateDraft).not.toHaveBeenCalled()
     expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
     fireEvent.click(paragraph)
     fireEvent.click(screen.getByRole('button', { name: '取消选区' }))
@@ -487,8 +493,8 @@ describe('DocumentWorkbench', () => {
     expect(b.closeDetails).toHaveBeenCalledOnce()
   })
 
-  it('renders the document in a sealed shadow tree and edits one block in place', async () => {
-    // One snapshot identity: the controller keeps the document while only the edit changes.
+  it('renders the document in a sealed shadow tree and retypes blocks in place', () => {
+    // One snapshot identity: the controller keeps the document while only the edits change.
     const snapshot = documentSnapshot()
     const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot }))
     const view = render(<DocumentWorkbench {...b.props} />)
@@ -499,37 +505,36 @@ describe('DocumentWorkbench', () => {
     expect(closing.hasAttribute('onclick')).toBe(false)
     expect(shadow.querySelector('style')?.textContent).toContain('p { margin: 0 }')
 
-    // Clicking the paragraph resolves the node it renders.
+    // The table cell has no editable node and stays as rendered; the paragraph is written into directly.
+    expect(shadow.querySelector('td')?.hasAttribute('contenteditable')).toBe(false)
     const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
-    fireEvent.click(paragraph)
-    expect(b.selectBlock).toHaveBeenCalledWith(NODE_PARAGRAPH)
-    // The table cell has no editable node: the click reports an unmapped block.
-    fireEvent.click(shadow.querySelector('td')!)
-    expect(screen.getByRole('status').textContent).toBe('这一段暂时无法在此修改，可以让 Agent 修改。')
+    expect(paragraph.getAttribute('contenteditable')).toBe('plaintext-only')
+    paragraph.textContent = 'Rewritten background'
+    fireEvent.input(paragraph)
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, 'Rewritten background')
+    fireEvent.keyDown(paragraph, { key: 'Enter', ctrlKey: true })
+    expect(b.commitEdit).toHaveBeenCalledOnce()
+    fireEvent.keyDown(paragraph, { key: 'Escape' })
+    expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, 'Research background')
+    expect(screen.queryByRole('group', { name: '已修改 1 段' })).toBeNull()
 
     act(() => {
       b.store.set(workbenchState({
         phase: 'ready', document: snapshot,
-        edit: { nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Research background' },
+        edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Rewritten background' }],
       }))
     })
-    expect(screen.queryByText('这一段暂时无法在此修改，可以让 Agent 修改。')).toBeNull()
-    const editor = shadow.querySelector('textarea')!
-    expect(editor.value).toBe('Research background')
-    expect(paragraph.hasAttribute('data-paperai-editing')).toBe(true)
-    fireEvent.input(editor, { target: { value: 'Rewritten background' } })
-    expect(b.updateDraft).toHaveBeenCalledWith('Rewritten background')
-    fireEvent.keyDown(editor, { key: 'Escape' })
+    expect(paragraph.textContent).toBe('Rewritten background')
+    expect(paragraph.hasAttribute('data-paperai-changed')).toBe(true)
+    expect(screen.getByRole('group', { name: '已修改 1 段' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(b.commitEdit).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: '放弃修改' }))
     expect(b.cancelEdit).toHaveBeenCalledOnce()
-    act(() => {
-      b.store.set(workbenchState({
-        phase: 'ready', document: snapshot,
-        edit: { nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Rewritten background' },
-      }))
-    })
-    const save = [...shadow.querySelectorAll('button')].find(button => button.textContent === '保存')!
-    fireEvent.click(save)
-    expect(b.commitEdit).toHaveBeenCalledOnce()
+    act(() => { b.store.set(workbenchState({ phase: 'ready', document: snapshot })) })
+    expect(paragraph.textContent).toBe('Research background')
+    expect(paragraph.hasAttribute('data-paperai-changed')).toBe(false)
+    expect(screen.queryByRole('group', { name: '已修改 1 段' })).toBeNull()
   })
 
   it('opens the template, gate, and versions panels from the toolbar and drafts an agent fix', () => {
@@ -656,7 +661,7 @@ describe('DocumentWorkbench', () => {
       phase: 'ready', document: documentSnapshot(), actionError: 'save or cancel the current block first',
     }))
     render(<DocumentWorkbench {...editing.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('请先保存或取消正在编辑的段落。')
+    expect(screen.getByRole('alert').textContent).toBe('请先保存或放弃页面上的修改。')
   })
 
   it('offers to record a Working DOCX changed outside PaperAI when a commit is refused for it', () => {
@@ -727,7 +732,7 @@ describe('DocumentWorkbench', () => {
       phase: 'ready', document: documentSnapshot(), actionError: 'block changed externally; local draft dropped',
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('这一段已被其他会话修改。草稿已保留，请复制需要的内容后取消编辑。')
+    expect(screen.getByRole('alert').textContent).toBe('有一段已被其他会话修改。草稿已保留，请复制需要的内容后放弃修改。')
   })
 
   it('renders a Remote failure with only its backed retry action', () => {
