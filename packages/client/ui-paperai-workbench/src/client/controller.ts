@@ -83,7 +83,8 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
 function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
   return edits.map((edit) => {
     const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
-    return { ...edit, conflicted: node === undefined || !node.editable || node.text !== edit.baseText }
+    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable
+      || node.text !== edit.baseText || (edit.baseRevision !== undefined && edit.baseRevision !== document.revision) }
   })
 }
 
@@ -461,11 +462,19 @@ export class PaperAIWorkbenchController {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
       const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
-      if (state.phase !== 'ready' || state.action !== null || node === undefined || !node.editable) return
+      if (state.phase !== 'ready' || state.action !== null || state.document === null || node === undefined || !node.editable) return
       const others = state.edits.filter(edit => edit.nodeId !== nodeId)
+      const previous = state.edits.find(edit => edit.nodeId === nodeId)
+      if (draft !== null && previous?.conflicted === true) return
       state.edits = draft === null
         ? others
-        : [...others, { nodeId, baseText: node.text, draft: draft.text, ...(draft.runs === undefined ? {} : { runs: draft.runs }) }]
+        : [...others, {
+          nodeId, baseText: previous?.baseText ?? node.text,
+          baseRevision: previous?.baseRevision ?? state.document.revision,
+          draft: draft.text,
+          ...(draft.runs === undefined ? {} : { runs: draft.runs }),
+          ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
+        }]
       state.actionError = null
     })
   }
@@ -516,6 +525,7 @@ export class PaperAIWorkbenchController {
         baseText: edit.baseText,
         nextText: edit.draft,
         ...(edit.runs === undefined ? {} : { runs: edit.runs }),
+        ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs }),
       })),
     }, request.signal))
     // The preview patch finds each block the way the page maps it: same kind, same text, same ordinal among peers.
@@ -524,7 +534,10 @@ export class PaperAIWorkbenchController {
       const ordinal = document.nodes
         .filter(node => node.kind !== 'table' && (node.kind === 'table-cell') === cell && normalize(node.text) === normalize(edit.baseText))
         .findIndex(node => node.nodeId === edit.nodeId)
-      return { baseText: edit.baseText, nextText: edit.draft, cell, ordinal, ...(edit.runs === undefined ? {} : { runs: edit.runs }) }
+      return { baseText: edit.baseText, nextText: edit.draft, cell, ordinal,
+        ...(edit.runs === undefined ? {} : { runs: edit.runs }),
+        ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs }),
+      }
     })
     return this.settleCommit(entry, request, document, result, patches)
   }
@@ -630,7 +643,7 @@ export class PaperAIWorkbenchController {
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.diff?.commitId === commitId) {
+    if (state.diff?.commitId === commitId && state.diff.error === null) {
       entry.store.update((draft) => { draft.diff = null })
       return OK
     }
@@ -1120,7 +1133,7 @@ export class PaperAIWorkbenchController {
     const fresh = result.value.document
     entry.store.update((draft) => {
       if (draft.document?.revision !== committed.revision) return
-      if (fresh.revision === committed.revision) {
+      if (fresh.revision === committed.revision && draft.edits.length === 0) {
         draft.document = { ...draft.document, previewHtml: fresh.previewHtml }
       } else if (fresh.headCommitId !== draft.document.headCommitId) {
         draft.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }

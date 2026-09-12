@@ -42,11 +42,16 @@ export function WordSelectionMessage({ matched, t }: PropsRuntime<'conversation.
     {parts.map((part, index) => part.citation === undefined
       ? <span key={index}>{part.text}</span>
       : <div key={index} className={css.citation}>
+        <strong>{part.citation.path.split(/[\\/]/u).at(-1)}</strong>
         <blockquote>{part.citation.text}</blockquote>
         <details>
           <summary>{t('selection.source')}</summary>
           <span className={css.path}>{part.citation.path}</span>
-          <pre>{JSON.stringify(part.citation, null, 2)}</pre>
+          <dl>
+            <dt>{t('selection.document')}</dt><dd>{part.citation.document}</dd>
+            <dt>{t('selection.version')}</dt><dd>{part.citation.version ?? part.citation.revision}</dd>
+            <dt>{t('selection.blocks')}</dt><dd>{part.citation.blocks.join(', ')}</dd>
+          </dl>
         </details>
       </div>)}
   </div>

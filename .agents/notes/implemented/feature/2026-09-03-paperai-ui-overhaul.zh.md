@@ -4,7 +4,7 @@ Status: implemented
 
 [English](2026-09-03-paperai-ui-overhaul.md) | 中文
 
-部分取代：布局与草稿刷新由[以文档为中心的工作台决策](../architecture/2026-09-05-paperai-agentero-adoption.zh.md)规定，下述其他决策继续有效。
+部分取代：布局与草稿刷新由[以文档为中心的工作台决策](../architecture/2026-09-05-paperai-agentero-adoption.zh.md)规定；模板提示、编辑命令和面板行为遵循[写作流程决策](2026-09-12-paperai-writing-workflow.zh.md)。下述其他决策继续有效。
 
 ## 问题
 

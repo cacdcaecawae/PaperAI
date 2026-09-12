@@ -15,9 +15,10 @@ const PROJECT_EMPTY: PaperAIProjectState = Object.freeze({
 })
 
 /** One tracked document as a row in the DSH session-row idiom. */
-function DocumentRow({ row, selected, open, t }: {
+function DocumentRow({ row, selected, duplicate, open, t }: {
   row: PaperAIDocumentRow
   selected: boolean
+  duplicate: boolean
   open: () => void
   t: PaperAIWorkspaceContentProps['t']
 }): ReactNode {
@@ -28,11 +29,13 @@ function DocumentRow({ row, selected, open, t }: {
       style={typeAccent(row.documentType)}
       aria-current={selected ? 'true' : undefined}
       aria-label={t('documents.open', { name: row.fileName })}
-      title={row.fileName}
+      title={row.workingPath ?? row.fileName}
       onClick={open}
     >
       <span className={css.slot} aria-hidden="true"><IconBrowseOutline16 size={16} /></span>
-      <span className={css.title}>{row.name}</span>
+      <span className={css.title}>{row.name}
+        {duplicate && <small>{row.fileName} · {row.documentId.slice(-8)}</small>}
+      </span>
       {row.documentType !== 'other' && (
         <span className={css.meta}>{t(DOCUMENT_TYPE_KEYS[row.documentType])}</span>
       )}
@@ -83,6 +86,7 @@ export function WorkspaceContent({
             <div role="listitem" key={row.id}>
               <DocumentRow
                 row={row}
+                duplicate={documents.some(other => other.id !== row.id && other.name === row.name)}
                 selected={state.selected === row.id}
                 open={() => { void openDocument(workspaceId, row.id) }}
                 t={t}

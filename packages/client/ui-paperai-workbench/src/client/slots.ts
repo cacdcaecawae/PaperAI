@@ -1,6 +1,7 @@
 /** Component-side contracts for the PaperAI slot entries. */
 
-import type { HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { createWorkbenchViewStore } from './view-store.ts'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the SlotMap merges of the entries this plugin occupies.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -111,6 +112,10 @@ export type PaperAITemplatesSectionProps =
 
 /** Operations and sources injected into the document view. */
 export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected {
+  /** Close the document panel, leave writing mode, and reveal the Session conversation. */
+  showConversation: () => void
+  /** Append a repair request to the existing composer draft and reveal the Session conversation. */
+  prepareAgentFix: (text: string) => void
   /** Add a frozen Word excerpt to the Session's composer. */
   quoteSelection: (document: import('./types.ts').PaperAIDocumentSnapshot, excerpt: import('./selection-context.ts').WordExcerpt) => void
   /** Remember the active document's scroll offset. */
@@ -158,6 +163,7 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
 /** Full props assembled for the PaperAI details view entry. */
 export type PaperAIDocumentWorkbenchProps =
   PropsRuntime<'conversation.details.view'>
+  & PropsStore<ReturnType<typeof createWorkbenchViewStore>>
   & InjectFace<PaperAIDocumentWorkbenchInjected>
   & PropsLocale<'paperai.workbench'>
 

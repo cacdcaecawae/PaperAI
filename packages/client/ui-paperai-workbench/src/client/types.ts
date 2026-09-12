@@ -6,7 +6,7 @@ import type {} from '@paperai/workbench-service/remote'
 import type {
   PaperAIDocumentNodeId, PaperAIDocumentSnapshot, PaperAIDocumentTextRun, PaperAIDocumentType,
   PaperAIDocumentTypeSuggestion, PaperAIExportMode, PaperAIProjectOverview, PaperAIResourceId,
-  PaperAITemplateLibrary, PaperAIVersionDiff,
+  PaperAITemplateLibrary, PaperAIVersionDiff, PaperAIDocumentParagraph, PaperAIDocumentRevision,
 } from '@paperai/workbench-service/types'
 
 export type * from '@paperai/workbench-service/types'
@@ -104,15 +104,20 @@ export type PaperAIWorkbenchAction =
 export interface PaperAIBlockDraft {
   readonly text: string
   readonly runs?: readonly PaperAIDocumentTextRun[]
+  /** Paragraphs replacing this original block after a split or paragraph-format edit. */
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
 }
 
 /** The block being edited in place: its node, the text it started from, and the draft. */
 export interface PaperAIBlockEdit {
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
+  /** The original revision is retained until save or discard, including after an external reload. */
+  readonly baseRevision?: PaperAIDocumentRevision
   readonly draft: string
   /** The block's runs, present when its character formatting differs from the document's. */
   readonly runs?: readonly PaperAIDocumentTextRun[]
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
   /** The current document changed this block; retain the draft for copying or discarding. */
   readonly conflicted?: boolean
 }

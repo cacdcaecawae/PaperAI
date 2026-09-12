@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
-  applyRuns, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, wordDiff,
+  applyRuns, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, textOf, wordDiff,
 } from '../src/client/preview-html.ts'
 
 const HTML = '<html><head></head><body>'
@@ -81,6 +81,12 @@ describe('patchPreviewHtml', () => {
 })
 
 describe('block runs', () => {
+  it('keeps real soft breaks while omitting the browser caret placeholder', () => {
+    const element = block('<span>first<br><br data-paperai-placeholder></span>')
+    expect(textOf(element)).toBe('first\v')
+    expect(runsOf(element)).toEqual([{ text: 'first\v' }])
+  })
+
   it('reads a block as the runs Word stores, stating only what overrides the block', () => {
     expect(runsOf(block('<span>plain </span><span style="font-weight:bold">bold</span>'
       + '<span style="font-weight:bold">er</span><span style="font-size:16pt">big</span>'))).toEqual([
@@ -145,6 +151,15 @@ describe('block runs', () => {
 })
 
 describe('clearing a run', () => {
+  it('clears the DOCX font without storing the browser fallback family', () => {
+    const element = block('plain', 'font-family:-apple-system, sans-serif')
+    expect(fontOf(getComputedStyle(element))).toBe('')
+    expect(restateCleared([{ text: 'plain' }], [{ text: 'plain', font: 'Arial' }], element))
+      .toEqual([{ text: 'plain', font: '' }])
+    element.style.fontFamily = 'Times New Roman'
+    expect(restateCleared([{ text: 'plain' }], [{ text: 'plain', font: 'Arial' }], element))
+      .toEqual([{ text: 'plain', font: 'Times New Roman' }])
+  })
   it('states on the first run what it stopped stating, so the rebuild cannot keep it', () => {
     const element = block('plain')
     expect(restateCleared([{ text: 'plain' }], [{ text: 'bold', bold: true, size: '16pt' }], element))

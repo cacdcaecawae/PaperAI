@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-09-09-paperai-minimal-workbench-and-outside-edits.zh.md)
 
+Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns editor commands, draft conflicts, writing defaults, and panel behavior. Resident-engine lifecycle, version publication, outside-file capture, and theme ownership below remain active.
+
 ## Problem
 
 A paragraph commit took 13 to 15 seconds on a 23 KB document because every OfficeCLI command started a fresh process and every commit waited for the Host to render the preview again. The browser looked assembled from parts rather than designed: the start page repeated the DSH headline, the ACP settings page carried banners and counters, the document view wore capsule chips, and the version panels lay over the page they described. A Working DOCX changed outside PaperAI (Word, a file sync, an older import defect) left the writer stuck: the commit service refused edits until "the external edit is captured as its own version", and nothing offered that capture. Editing itself did not feel like Word: a click swapped the paragraph for a textarea with its own buttons, one paragraph at a time, and the Agent-status chip beside the composer opened a popover that the conversation column clipped.

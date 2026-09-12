@@ -7,6 +7,7 @@ import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/
 import type { AcpCatalogEntry } from '@paperai/agent-acp/diagnostic-types'
 import { AcpSettingsController, type AcpRemote } from '../src/client/controller.ts'
 import { AcpSettingsSection, type AcpSettingsProps } from '../src/client/SettingsSection.tsx'
+import { t, english } from './translations.client.ts'
 
 const controllers: AcpSettingsController[] = []
 afterEach(() => {
@@ -82,7 +83,7 @@ async function bench() {
     acpImportHistory: vi.fn(),
   } satisfies AcpRemote
   const navigation = { create: vi.fn().mockResolvedValue('created'), open: vi.fn(), localDirectory: (): string | undefined => '/local' }
-  const controller = new AcpSettingsController(remote, api, mirror, navigation)
+  const controller = new AcpSettingsController(remote, api, mirror, navigation, t)
   controllers.push(controller)
   await controller.load()
   return { controller, remote, mutate, describe, navigation, mirror }
@@ -90,6 +91,7 @@ async function bench() {
 
 function settingsProps(b: Awaited<ReturnType<typeof bench>>): AcpSettingsProps {
   return {
+    t,
     useAcp: selector =>
       selector(
         useSyncExternalStore(
@@ -440,4 +442,26 @@ it('confirms destructive channel actions and validates provider headers without 
     await click('确认')
     expect(b.remote.acpManage.mock.calls.length + b.remote.acpInstall.mock.calls.length).toBeGreaterThan(0)
   }
+})
+
+it('retains provider routing inputs after a rejected save and renders the Agent setup in English', async () => {
+  const b = await bench()
+  const provider = { id: 'custom', required: false, supported: ['openai'], current: null }
+  b.remote.acpManage.mockResolvedValue({ ok: true, value: { providers: [provider] } })
+  await b.controller.manage('codex', { kind: 'providers' })
+  const props = { ...settingsProps(b), t: english }
+  render(<AcpSettingsSection {...props} />)
+  fireEvent.click(screen.getByText('Codex', { selector: 'strong' }).closest('button')!)
+  fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+  fireEvent.change(screen.getByLabelText('API URL'), { target: { value: 'https://routing.example.test' } })
+  fireEvent.change(screen.getByLabelText('Headers · JSON object'), { target: { value: '{"test":"retained"}' } })
+  b.remote.acpManage.mockResolvedValueOnce({ ok: false, error: { message: 'Routing unavailable' } })
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save to channel' })))
+  expect(screen.getByRole('dialog', { name: 'Configure model provider' })).toBeTruthy()
+  expect(screen.getByLabelText('API URL')).toHaveProperty('value', 'https://routing.example.test')
+  expect(screen.getByLabelText('Headers · JSON object')).toHaveProperty('value', '{"test":"retained"}')
+  expect(screen.getAllByRole('alert').some(node => node.textContent?.includes('Routing unavailable'))).toBe(true)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save to channel' })))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.getByRole('heading', { name: 'Access and connection diagnostics' })).toBeTruthy()
 })

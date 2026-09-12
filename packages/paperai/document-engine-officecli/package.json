@@ -35,7 +35,8 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^",
-    "@officecli/officecli": "1.0.145"
+    "@officecli/officecli": "1.0.145",
+    "@xmldom/xmldom": "0.9.12"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",

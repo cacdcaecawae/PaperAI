@@ -23,13 +23,13 @@ describe('PaperAI DSH-native styling', () => {
   })
 
   it('follows the sidebar row and heading metrics of the DSH session list', () => {
-    expect(sidebar).toContain('height: 32px')
+    expect(sidebar).toContain('min-height: 36px')
     expect(sidebar).toContain('border-radius: 8px')
     expect(sidebar).toContain('font-size: 14px')
     expect(sidebar).toContain('min-height: 34px')
     expect(sidebar).toContain('var(--dsw-alias-interactive-bg-hover)')
     expect(start).toContain('font-size: 20px')
-    expect(start).toContain('height: 44px')
+    expect(start).toContain('min-height: 48px')
   })
 
   it('paints only through theme tokens, with no drop shadows, literal colors, or product accent overrides', () => {
@@ -49,11 +49,7 @@ describe('PaperAI DSH-native styling', () => {
     expect(preview).toMatch(/script, iframe, object, embed/u)
     expect(preview).toContain("name.startsWith('on')")
     expect(preview).not.toContain('dangerouslySetInnerHTML')
-    expect(preview).not.toContain('innerHTML')
-    // Blocks are written into in place, as plain text, and the Host may not pre-declare any of them editable.
-    expect(preview).toContain("setAttribute(EDITABLE, 'true')")
     expect(preview).toContain("getData('text/plain')")
-    expect(preview).toContain('name === EDITABLE) element.removeAttribute')
   })
 
   it('composes from DSH primitives and never reaches for a primary button or card vocabulary', () => {

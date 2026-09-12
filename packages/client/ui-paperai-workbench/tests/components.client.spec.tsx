@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { DocumentWorkbench } from '../src/client/DocumentWorkbench.tsx'
+import { PaperAIWorkbenchController } from '../src/client/controller.ts'
+import { createWorkbenchViewStore } from '../src/client/view-store.ts'
 import { StartPage } from '../src/client/StartPage.tsx'
 import { TemplateLibraryView, TemplatesSection } from '../src/client/TemplateLibrary.tsx'
 import { WorkspaceContent } from '../src/client/WorkspaceContent.tsx'
@@ -17,10 +19,10 @@ import type {
 } from '../src/client/types.ts'
 import {
   COMMIT_0, CUSTOM_PACK_ID, DIFF, documentSnapshot, HIT_PACK_ID, LIBRARY, NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE,
-  OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, UNDECIDED_OVERVIEW, WORKSPACE_ID,
+  OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, UNDECIDED_OVERVIEW, WORKSPACE_ID, successfulRemote,
 } from './fixtures.client.ts'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); localStorage.clear() })
 
 function bind<T>(source: HostObservable<T>): SnapshotSelectorHook<T> {
   return function useSelector<S>(selector: (state: T) => S): S {
@@ -112,11 +114,18 @@ function startProps(state: PaperAIProjectState | null, library = libraryState())
 }
 
 function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectState = projectState()) {
+  const viewStore = createWorkbenchViewStore().create()
   const store = createSnapshotStore(state)
   const projects = createSnapshotStore<PaperAIProjectDirectoryState>({ workspaces: { [WORKSPACE_ID]: project } })
   const libraryStore = createSnapshotStore(libraryState())
   const actions = libraryActions()
+  const showConversation = vi.fn(() => {
+    viewStore.actions.setWriting(false)
+    store.update((state) => { state.panel = null; state.diff = null })
+  })
   const callbacks = {
+    showConversation,
+    prepareAgentFix: vi.fn((_text: string) => { showConversation() }),
     quoteSelection: vi.fn(), setScroll: vi.fn(),
     closeDetails: vi.fn(),
     setDraft: vi.fn(),
@@ -139,6 +148,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
   }
   const props = {
     sessionId: SESSION_ID,
+    useStore: bind(viewStore), actions: viewStore.actions,
     useWorkbench: bind(store), useProjects: bind(projects), useLibrary: bind(libraryStore),
     ...callbacks, ...actions, t,
   } as unknown as PaperAIDocumentWorkbenchProps
@@ -246,9 +256,11 @@ describe('StartPage', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('asks an undecided project for its template once and records the answer', async () => {
+  it('leaves an undecided project usable and opens template selection only on request', async () => {
     const b = startProps(projectState({ overview: UNDECIDED_OVERVIEW }))
     render(<StartPage {...b.props} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '尚未选择本项目的模板' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('本项目用哪套模板？')).toBeTruthy()
     expect(b.loadLibrary).toHaveBeenCalled()
@@ -316,6 +328,8 @@ describe('TemplateLibraryView', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
     expect(actions.deleteTemplateSet).toHaveBeenCalledWith(CUSTOM_PACK_ID)
     fireEvent.click(screen.getByRole('button', { name: '移除：开题报告' }))
+    expect(actions.removeTemplateFormat).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '确认移除格式' }))
     expect(actions.removeTemplateFormat).toHaveBeenCalledWith(CUSTOM_PACK_ID, 'proposal')
   })
 
@@ -376,6 +390,84 @@ describe('TemplateLibraryView', () => {
 })
 
 describe('DocumentWorkbench', () => {
+  it.each(['template', 'gate', 'versions'] as const)('returns to collaboration from the %s panel', (panel) => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(), panel }))
+    b.props.actions.setWriting(false)
+    render(<DocumentWorkbench {...b.props} />)
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(true)
+    fireEvent.click(screen.getByRole('button', { name: '显示 Agent 协作' }))
+    expect(b.showConversation).toHaveBeenCalledOnce()
+    expect(b.store.getSnapshot().panel).toBeNull()
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
+    expect(screen.getByRole('button', { name: '专注写作' })).toBeTruthy()
+  })
+
+  it('keeps an unsupported Word draft visible with specific editing guidance', () => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(),
+      edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Retained draft' }],
+      actionError: "internal: UNSUPPORTED_DOCUMENT_CONTENT: paragraph '/body/p[2]' contains objects that require editing in Word",
+    }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    expect(screen.getByRole('alert').textContent).toBe(zh['workbench.unsupportedContent'])
+    expect(view.container.querySelector('[role="document"]')!.shadowRoot!.textContent).toContain('Retained draft')
+    expect(screen.getByRole('button', { name: '放弃修改' })).toBeTruthy()
+    expect(screen.queryByText(/UNSUPPORTED_DOCUMENT_CONTENT/u)).toBeNull()
+    expect(screen.queryByText(zh['workbench.actionError'])).toBeNull()
+  })
+
+  it('keeps conflicted drafts protected until an external refresh finishes', () => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(), action: 'reloading-external',
+      edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'local draft', conflicted: true }],
+    }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const discard = screen.getByRole<HTMLButtonElement>('button', { name: '放弃修改' })
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    expect(discard.disabled).toBe(true)
+    expect(shadow.querySelector('[contenteditable]')).toBeNull()
+    fireEvent.click(discard)
+    expect(b.cancelEdit).not.toHaveBeenCalled()
+    act(() => { b.store.update((state) => { state.action = null }) })
+    expect(discard.disabled).toBe(false)
+    fireEvent.click(discard)
+    expect(b.cancelEdit).toHaveBeenCalledOnce()
+  })
+
+  it('keeps Enter history after injected controller updates in the complete workbench', async () => {
+    const controller = new PaperAIWorkbenchController(successfulRemote())
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    const b = workbenchProps(store.getSnapshot())
+    const useLive = bind(store)
+    const useClonedWorkbench: SnapshotSelectorHook<PaperAIWorkbenchState> = selector => useLive(state => selector({
+      ...state, document: state.document === null ? null : { ...state.document, nodes: state.document.nodes.map(node => ({ ...node })) },
+    }))
+    const view = render(<DocumentWorkbench {...b.props} useWorkbench={useClonedWorkbench}
+      updateDraft={(id, draft) => { controller.updateDraft(SESSION_ID, id, draft) }}
+      setScroll={(top) => { controller.setScroll(SESSION_ID, top) }}
+      cancelEdit={() => { controller.cancelEdit(SESSION_ID) }} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const block = shadow.querySelector<HTMLElement>('p[contenteditable]')!
+    let range = document.createRange()
+    range.setStart(block.firstChild!, 5); range.collapse(true)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      rangeCount: 1, getRangeAt: () => range, removeAllRanges: () => {}, addRange: (next: Range) => { range = next },
+    }) })
+    act(() => { block.focus() })
+    fireEvent.keyUp(block, { key: 'Shift' })
+    fireEvent.keyDown(block, { key: 'Enter' })
+    fireEvent.scroll(view.container.querySelector('[role="document"]')!, { target: { scrollTop: 10 } })
+    expect(shadow.querySelector('p[contenteditable]')).toBe(block)
+    expect(store.getSnapshot().edits).toHaveLength(1)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: zh['editor.undo'] }).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: zh['editor.undo'] }))
+    expect(store.getSnapshot().edits).toEqual([])
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: zh['editor.redo'] }).disabled).toBe(false)
+    act(() => { store.update((state) => { state.document = { ...state.document!, revision: REVISION_2 } }) })
+    expect(shadow.querySelector('p[contenteditable]')).not.toBe(block)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: zh['editor.redo'] }).disabled).toBe(true)
+    controller.dispose()
+  })
+
   it.each(['doc-header', 'doc-footer'])('does not bind a repeated %s to a same-text body paragraph', (band) => {
     const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(undefined, {
       previewHtml: `<div class="page"><div class="${band}"><p>Research background</p></div></div>`
@@ -383,7 +475,7 @@ describe('DocumentWorkbench', () => {
     }) }))
     const view = render(<DocumentWorkbench {...b.props} />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
-    expect(shadow.querySelector(`.${band} p`)?.hasAttribute('contenteditable')).toBe(false)
+    expect(shadow.querySelector(`.${band} p`)?.getAttribute('contenteditable')).toBe('false')
     const body = shadow.querySelector<HTMLElement>('.page-body p')!
     expect(body.getAttribute('contenteditable')).toBe('true')
     body.textContent = 'Rewritten background'
@@ -399,7 +491,7 @@ describe('DocumentWorkbench', () => {
     const view = render(<DocumentWorkbench {...b.props} />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     const paragraphs = [...shadow.querySelectorAll('p')]
-    for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.hasAttribute('contenteditable')).toBe(false)
+    for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.getAttribute('contenteditable')).toBe('false')
     paragraphs[3]!.textContent = 'Changed'
     fireEvent.input(paragraphs[3]!)
     expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Changed' })
@@ -422,7 +514,7 @@ describe('DocumentWorkbench', () => {
     const view = render(<DocumentWorkbench {...b.props} />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     const cellBlock = shadow.querySelector<HTMLElement>('td p')!
-    expect(cellBlock.hasAttribute('contenteditable')).toBe(cell === 'editable')
+    expect(cellBlock.getAttribute('contenteditable')).toBe(cell === 'editable' ? 'true' : 'false')
     cellBlock.textContent = 'Cell retyped'
     fireEvent.input(cellBlock)
     if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, { text: 'Cell retyped' })
@@ -460,6 +552,10 @@ describe('DocumentWorkbench', () => {
     const view = render(<DocumentWorkbench {...b.props} />)
     const host = view.container.querySelector<HTMLElement>('[role="document"]')!
     const shadow = host.shadowRoot!
+    const ask = screen.getByRole<HTMLButtonElement>('button', { name: '交给 Agent' })
+    expect(ask.disabled).toBe(true)
+    expect(ask.closest('[role="toolbar"]')).not.toBeNull()
+    const siblings = [...host.parentElement!.children]
     const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
     const range = document.createRange()
     range.setStart(paragraph.firstChild!, 2)
@@ -467,17 +563,20 @@ describe('DocumentWorkbench', () => {
     // jsdom does not expose ShadowRoot.getSelection; its Range still resolves real shadow nodes.
     Object.defineProperty(shadow, 'getSelection', { value: () => ({
       isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: (next: Range) => {
+        range.setStart(next.startContainer, next.startOffset)
+        range.setEnd(next.endContainer, next.endOffset)
+      },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
-    expect(screen.getByRole('region', { name: '选中的文字' }).textContent).toContain('search bac')
-    const ask = screen.getByRole('button', { name: '交给 Agent' })
+    expect(ask.disabled).toBe(false)
+    expect([...host.parentElement!.children]).toEqual(siblings)
     expect(fireEvent.mouseDown(ask)).toBe(false)
     fireEvent.click(ask)
     expect(b.quoteSelection).toHaveBeenCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' })
     expect(b.updateDraft).not.toHaveBeenCalled()
     expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
-    fireEvent.click(paragraph)
-    fireEvent.click(screen.getByRole('button', { name: '取消选区' }))
+    expect(ask.disabled).toBe(true)
     expect(b.quoteSelection).toHaveBeenCalledOnce()
     expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
     expect(host.scrollTop).toBe(120)
@@ -507,7 +606,7 @@ describe('DocumentWorkbench', () => {
     expect(shadow.querySelector('style')?.textContent).toContain('p { margin: 0 }')
 
     // The table cell has no editable node and stays as rendered; the paragraph is written into directly.
-    expect(shadow.querySelector('td')?.hasAttribute('contenteditable')).toBe(false)
+    expect(shadow.querySelector('td')?.getAttribute('contenteditable')).toBe('false')
     const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
     expect(paragraph.getAttribute('contenteditable')).toBe('true')
     paragraph.textContent = 'Rewritten background'
@@ -528,7 +627,7 @@ describe('DocumentWorkbench', () => {
     expect(paragraph.textContent).toBe('Rewritten background')
     expect(paragraph.hasAttribute('data-paperai-changed')).toBe(true)
     expect(screen.getByRole('group', { name: '已修改 1 段' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    fireEvent.click(within(screen.getByRole('group', { name: '已修改 1 段' })).getByRole('button', { name: '保存' }))
     expect(b.commitEdit).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: '放弃修改' }))
     expect(b.cancelEdit).toHaveBeenCalledOnce()
@@ -550,6 +649,10 @@ describe('DocumentWorkbench', () => {
     // jsdom does not expose ShadowRoot.getSelection; its Range still resolves real shadow nodes.
     Object.defineProperty(shadow, 'getSelection', { value: () => ({
       isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: (next: Range) => {
+        range.setStart(next.startContainer, next.startOffset)
+        range.setEnd(next.endContainer, next.endOffset)
+      },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
 
@@ -563,13 +666,12 @@ describe('DocumentWorkbench', () => {
     })
     expect(screen.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('true')
 
-    // The size control states a size over the block's own, and 默认 takes it back.
-    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '16pt' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '16pt' } })
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true, size: '16pt' }, { text: ' background' }],
     })
-    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '' } })
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true }, { text: ' background' }],
@@ -587,6 +689,10 @@ describe('DocumentWorkbench', () => {
     range.setEnd(paragraph.firstChild!, 8)
     Object.defineProperty(shadow, 'getSelection', { value: () => ({
       isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: (next: Range) => {
+        range.setStart(next.startContainer, next.startOffset)
+        range.setEnd(next.endContainer, next.endOffset)
+      },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
 
@@ -597,10 +703,10 @@ describe('DocumentWorkbench', () => {
       runs: [{ text: 'Research', italic: true, underline: true }, { text: ' background' }],
     })
 
-    // Clicking away collapses the selection, and the controls go with it.
+    // The persistent controls describe insertion formatting at a collapsed caret.
     range.collapse(true)
     fireEvent.click(paragraph)
-    expect(screen.queryByRole('button', { name: '斜体' })).toBeNull()
+    expect(screen.getByRole('button', { name: '斜体' })).toBeTruthy()
 
     // Word text arrives as markup; a block is one paragraph, so only its text enters.
     b.updateDraft.mockClear()
@@ -645,6 +751,10 @@ describe('DocumentWorkbench', () => {
     range.selectNodeContents(paragraph)
     Object.defineProperty(shadow, 'getSelection', { value: () => ({
       isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: (next: Range) => {
+        range.setStart(next.startContainer, next.startOffset)
+        range.setEnd(next.endContainer, next.endOffset)
+      },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
     // The whole block is bold, so the control reads the run inside it rather than the block.
@@ -674,6 +784,10 @@ describe('DocumentWorkbench', () => {
     range.setEnd(text, 8)
     Object.defineProperty(shadow, 'getSelection', { value: () => ({
       isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: (next: Range) => {
+        range.setStart(next.startContainer, next.startOffset)
+        range.setEnd(next.endContainer, next.endOffset)
+      },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
     expect(screen.getByRole('button', { name: '下划线' }).getAttribute('aria-pressed')).toBe('true')
@@ -695,14 +809,18 @@ describe('DocumentWorkbench', () => {
     range.selectNodeContents(paragraph)
     Object.defineProperty(shadow, 'getSelection', { value: () => ({
       isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: (next: Range) => {
+        range.setStart(next.startContainer, next.startOffset)
+        range.setEnd(next.endContainer, next.endOffset)
+      },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
-    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '16pt' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '16pt' } })
     fireEvent.click(screen.getByRole('button', { name: '加粗' }))
     expect(paragraph.textContent).toBe('Research background')
     expect(paragraph.innerHTML).toContain('font-size: 16pt')
 
-    fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '' } })
     expect(paragraph.innerHTML).not.toContain('font-size')
     expect(paragraph.innerHTML).toContain('font-weight: bold')
   })
@@ -710,29 +828,34 @@ describe('DocumentWorkbench', () => {
   it('opens the template, gate, and versions panels from the toolbar and drafts an agent fix', () => {
     const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot() }))
     render(<DocumentWorkbench {...b.props} />)
-    fireEvent.click(screen.getByRole('button', { name: 'HIT 开题报告' }))
+    fireEvent.click(screen.getByRole('button', { name: '模板' }))
     expect(b.showPanel).toHaveBeenCalledWith('template')
-    fireEvent.click(screen.getByRole('button', { name: /门禁未通过 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: '格式问题 1' }))
     expect(b.showPanel).toHaveBeenCalledWith('gate')
     fireEvent.click(screen.getByRole('button', { name: '版本 2' }))
     expect(b.showPanel).toHaveBeenCalledWith('versions')
 
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(true)
+    fireEvent.click(screen.getByRole('button', { name: '显示 Agent 协作' }))
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
     fireEvent.click(screen.getByRole('button', { name: '专注写作' }))
     expect(b.setDetailsFocus).toHaveBeenLastCalledWith(true)
-    fireEvent.click(screen.getByRole('button', { name: '退出专注' }))
-    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
 
     act(() => { b.store.set(workbenchState({ phase: 'ready', document: documentSnapshot(), panel: 'gate' })) })
-    const gate = screen.getByRole('complementary', { name: '门禁' })
+    const gate = screen.getByRole('complementary', { name: '格式检查' })
     expect(within(gate).getByText('Heading font')).toBeTruthy()
     expect(within(gate).getByText('位置：Chapter 1')).toBeTruthy()
     fireEvent.click(within(gate).getByRole('button', { name: '检查' }))
     expect(b.validate).toHaveBeenCalledOnce()
-    fireEvent.click(within(gate).getByRole('button', { name: '让 Agent 修复' }))
-    expect(b.setDraft).toHaveBeenCalledOnce()
-    expect(String(b.setDraft.mock.calls[0]?.[0])).toContain('Heading font')
     fireEvent.click(within(gate).getByRole('button', { name: '关闭面板' }))
     expect(b.showPanel).toHaveBeenLastCalledWith(null)
+    fireEvent.click(within(gate).getByRole('button', { name: '让 Agent 修复' }))
+    expect(b.setDraft).not.toHaveBeenCalled()
+    expect(b.prepareAgentFix).toHaveBeenCalledOnce()
+    expect(b.prepareAgentFix.mock.calls[0]?.[0]).toContain('Heading font')
+    expect(b.showConversation).toHaveBeenCalledTimes(2)
+    expect(b.store.getSnapshot().panel).toBeNull()
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
   })
 
   it('applies the project template by type, guessing first, and detaches a bound format', async () => {
@@ -869,6 +992,8 @@ describe('DocumentWorkbench', () => {
     expect(within(compared).getByText('2 处变化 · 3 段未变')).toBeTruthy()
     expect(within(compared).getAllByRole('button', { pressed: true })).toHaveLength(1)
     fireEvent.click(within(compared).getByRole('button', { name: '恢复到此版本' }))
+    expect(b.restore).not.toHaveBeenCalled()
+    fireEvent.click(within(compared).getByRole('button', { name: '确认恢复并创建新版本' }))
     expect(b.restore).toHaveBeenCalledWith(COMMIT_0)
 
     // The document shows the changes in place and offers to walk them.
@@ -889,7 +1014,7 @@ describe('DocumentWorkbench', () => {
     render(<DocumentWorkbench {...b.props} />)
     expect(screen.getByText('草稿已导出')).toBeTruthy()
     expect(screen.getByText('F:/paper/exports/drafts/开题报告-草稿.docx')).toBeTruthy()
-    expect(screen.getByRole('alert').textContent).toBe('这一版未通过门禁，正式版未导出。')
+    expect(screen.getByRole('alert').textContent).toBe('这一版未通过交付检查。请查看格式检查面板，修正后重试。')
     fireEvent.click(screen.getByRole('button', { name: '刷新' }))
     expect(b.reloadExternal).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '导出' }))
@@ -899,10 +1024,10 @@ describe('DocumentWorkbench', () => {
 
   it('tells the writer when a refresh retains a conflicting draft', () => {
     const b = workbenchProps(workbenchState({
-      phase: 'ready', document: documentSnapshot(), actionError: 'block changed externally; local draft dropped',
+      phase: 'ready', document: documentSnapshot(), actionError: 'block changed externally; local draft retained',
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('有一段已被其他会话修改。草稿已保留，请复制需要的内容后放弃修改。')
+    expect(screen.getByRole('alert').textContent).toBe('文档版本已更新。草稿已保留，请复制需要的内容后放弃修改，再编辑最新版本。')
   })
 
   it('renders a Remote failure with only its backed retry action', () => {

@@ -24,6 +24,9 @@
       "path": "../ui-settings"
     },
     {
+      "path": "../ui-model-selection"
+    },
+    {
       "path": "../ui-slots"
     },
     {

@@ -1,0 +1,4 @@
+- group "已修改 2 段":
+  - text: 已修改 2 段
+  - button "放弃修改"
+  - button "保存"

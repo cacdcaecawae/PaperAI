@@ -2,6 +2,7 @@
 - paragraph:
   - button "本项目的模板已不在模板库中"
   - text: 0 篇文档
+- paragraph: 从模板创建文档，或导入已有 Word 文件开始写作。
 - button "新建或导入文档":
   - img
   - text: 新建或导入文档

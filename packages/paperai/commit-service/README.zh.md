@@ -19,6 +19,8 @@ PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperC
 
 编译的修改覆盖 `replace-text`、`insert-node`、`delete-node`、`bind-template`、`unbind-template`、`set-document-type` 与 `milestone`。`replace-text` 可携带该块的 `runs`，其文字拼接必须与 `nextText` 完全一致；带 runs 时块的字符格式属于本次修改，因此文字本身可以保持不变。`bind-template` 会以同一提交要切换到的文档类型调用 `paperTemplates.validateAssociation()`；`unbind-template` 在文档没有绑定模板时失败；`set-document-type` 在类型未变化时失败，并且除非同一提交绑定了另一模板，否则会先记录一条 `unbind-template` 操作，因为一份绑定的格式只适用于一种类型。发布的 `DocumentRecord` 携带最终的类型与模板绑定。
 
+`replace-text.paragraphs` 是一个原始节点的完整非空替换内容，与顶层 `runs` 互斥。每段字符片段的文字拼接必须等于该段文字；各段文字以换行符拼接后必须等于 `nextText`。段内文字不含段落分隔符，垂直制表符表示软换行。仅修改格式时允许文字保持不变。
+
 ## 发布与恢复
 
 每个文档有一个进程内 FIFO。服务把 Working DOCX 复制为项目内的私有候选文件，把受支持的领域修改编译为 Office 路径修改，要求 `documentEngine` 保存并校验候选文件，再要求 `paperDocuments` 重建语义索引但不发布索引。

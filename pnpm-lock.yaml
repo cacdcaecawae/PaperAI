@@ -2466,6 +2466,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-conversation':
         specifier: workspace:^
         version: link:../ui-conversation
+      '@deepseek-ai/dsh-client-ui-model-selection':
+        specifier: workspace:^
+        version: link:../ui-model-selection
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: workspace:^
         version: link:../ui-primitives
@@ -2735,6 +2738,9 @@ importers:
       clsx:
         specifier: ^2.0.0
         version: 2.1.1
+      focus-trap:
+        specifier: ^7.8.0
+        version: 7.8.0
       katex:
         specifier: ^0.16.47
         version: 0.16.47
@@ -6295,6 +6301,9 @@ importers:
       '@officecli/officecli':
         specifier: 1.0.145
         version: 1.0.145
+      '@xmldom/xmldom':
+        specifier: 0.9.12
+        version: 0.9.12
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -12928,6 +12937,10 @@ packages:
   '@vueuse/shared@12.8.2':
     resolution: {integrity: sha512-dznP38YzxZoNloI0qpEfpkms8knDtaoQ6Y/sfS0L7Yki4zh40LFHEhur0odJC6xTHG5dxWVPiUWBXn+wCG2s5w==}
 
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
+
   '@yarnpkg/cli-dist@4.17.1':
     resolution: {integrity: sha512-2tiSQuJNl/L3QwTdrq6lKWDpkcnp9MGvCT/rIldHcbu3SWfnLdmehvt3eulX1hT7FFt1Gjfq3CesF+kvhFip6g==}
     engines: {node: '>=18.12.0'}
@@ -18333,6 +18346,8 @@ snapshots:
       vue: 3.5.39(typescript@6.0.3)
     transitivePeerDependencies:
       - typescript
+
+  '@xmldom/xmldom@0.9.12': {}
 
   '@yarnpkg/cli-dist@4.17.1': {}
 

@@ -566,7 +566,7 @@ export class PaperCommitService extends Service {
               `node '${node.id}' text changed since the mutation was prepared`,
             )
           }
-          if (mutation.nextText === mutation.baseText && mutation.runs === undefined) {
+          if (mutation.nextText === mutation.baseText && mutation.runs === undefined && mutation.paragraphs === undefined) {
             throw new PaperCommitError('INVALID_REQUEST', `replace-text for node '${node.id}' is a no-op`)
           }
           if (mutation.runs !== undefined && mutation.runs.map(run => run.text).join('') !== mutation.nextText) {
@@ -575,11 +575,24 @@ export class PaperCommitService extends Service {
               `replace-text runs for node '${node.id}' do not spell its text`,
             )
           }
+          if (mutation.paragraphs !== undefined) {
+            if (mutation.runs !== undefined || mutation.paragraphs.length === 0
+              || mutation.paragraphs.map(paragraph => paragraph.text).join('\n') !== mutation.nextText) {
+              throw new PaperCommitError('INVALID_REQUEST', `replace-text paragraphs for node '${node.id}' do not spell its text`)
+            }
+            for (const paragraph of mutation.paragraphs) {
+              if (/[\r\n]/u.test(paragraph.text)
+                || (paragraph.runs !== undefined && paragraph.runs.map(run => run.text).join('') !== paragraph.text)) {
+                throw new PaperCommitError('INVALID_REQUEST', `replacement paragraph for node '${node.id}' has invalid text or runs`)
+              }
+            }
+          }
           engineMutations.push({
             type: 'replace-text',
             officePath: node.officePath,
             text: mutation.nextText,
             ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
+            ...(mutation.paragraphs === undefined ? {} : { paragraphs: mutation.paragraphs }),
           })
           operations.push({
             type: mutation.type,

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 /**
- * createLayoutStore unit account: init shape, the action write set (clamp
- * inside actions), and the absence of browser persistence. Uses the
+ * Layout preferences retain widths while open views and responsive state stay transient. Uses the
  * test-sanctioned path: factory self-call + .create() gives the
  * real engine instance (same create path as production).
  */
@@ -12,14 +11,14 @@ import {
   SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
 } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 
-const PERSIST_KEY = 'dsh.layout.panels'
+const PERSIST_KEY = 'dsh.layout.preferences'
 
 beforeEach(() => { localStorage.clear() })
 
 describe('createLayoutStore', () => {
   it('initializes the sidebar at its default width, details closed, wide viewport assumed', () => {
     const { store } = createLayoutStore().create()
-    expect(store.getSnapshot()).toEqual({
+    expect(store.getSnapshot()).toMatchObject({
       sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, detailsFocus: false, conversationFocus: false,
     })
   })
@@ -43,13 +42,13 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().details).toBe(DETAILS_MAX)
   })
 
-  it('toggleSidebar flips closed <-> contract default (drag width forgotten)', () => {
+  it('reopens the sidebar at the preferred drag width', () => {
     const { store, actions } = createLayoutStore().create()
     actions.setSidebar(400)
     actions.toggleSidebar()
     expect(store.getSnapshot().sidebar).toBe(0)
     actions.toggleSidebar()
-    expect(store.getSnapshot().sidebar).toBe(SIDEBAR_DEFAULT)
+    expect(store.getSnapshot().sidebar).toBe(400)
   })
 
   it('narrow toggleSidebar flips only the re-expand override; the width preference survives', () => {
@@ -57,7 +56,7 @@ describe('createLayoutStore', () => {
     actions.setSidebar(400)
     actions.setNarrow(true)
     actions.toggleSidebar()
-    expect(store.getSnapshot()).toEqual({
+    expect(store.getSnapshot()).toMatchObject({
       sidebar: 400, details: 0, narrow: true, narrowExpanded: true, detailsFocus: false, conversationFocus: false,
     })
     actions.toggleSidebar()
@@ -100,22 +99,36 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().details).toBe(960)
   })
 
-  it('does not persist panel geometry', () => {
+  it('restores user widths without reopening stale details or focus', () => {
     const first = createLayoutStore().create()
     first.actions.setSidebar(400)
     first.actions.openDetails()
     first.actions.setDetails(500)
-    expect(localStorage.getItem(PERSIST_KEY)).toBeNull()
+    first.actions.setDetailsFocus(true)
+    first.actions.toggleSidebar()
+    expect(localStorage.getItem(PERSIST_KEY)).not.toBeNull()
 
     const second = createLayoutStore().create()
-    expect(second.store.getSnapshot()).toEqual({
-      sidebar: SIDEBAR_DEFAULT,
+    expect(second.store.getSnapshot()).toMatchObject({
+      sidebar: 0,
       details: 0,
       narrow: false,
       narrowExpanded: false,
       detailsFocus: false,
       conversationFocus: false,
     })
+    second.actions.toggleSidebar()
+    second.actions.openDetails()
+    expect(second.getSnapshot()).toMatchObject({ sidebar: 400, details: 500 })
+  })
+
+  it('ignores corrupt stored values and clamps restored widths to the active geometry', () => {
+    localStorage.setItem(PERSIST_KEY, '{')
+    expect(createLayoutStore().create().getSnapshot().sidebar).toBe(SIDEBAR_DEFAULT)
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({ sidebarWidth: 9999, detailsWidth: 2000 }))
+    const restored = createLayoutStore().create()
+    restored.actions.openDetails()
+    expect(restored.getSnapshot()).toMatchObject({ sidebar: SIDEBAR_MAX, details: DETAILS_MAX })
   })
 
   it('setDetailsFocus flips the demand and closeDetails releases it', () => {

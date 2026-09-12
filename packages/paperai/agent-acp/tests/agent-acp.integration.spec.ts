@@ -458,9 +458,10 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
   it.each(['raw', 'terminal-delta'])('flushes throttled %s output before completion and stops its timer after the turn', async (format) => {
     const harness = await mountHarness({ settingsDocument: {} })
     const gate = join(harness.root, 'stream-gate')
+    const intervalMs = 100
     await writeFile(gate, 'hold')
     await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, {
-      toolProgressIntervalMs: 100,
+      toolProgressIntervalMs: intervalMs,
       providers: { codex: { env: { FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_GATE_FILE: gate, FAKE_ACP_STREAM_FORMAT: format } } },
     })
     const handle = await createAgent(harness, 'throttled-output')
@@ -470,17 +471,24 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       await expect.poll(() => progress().some(event => event.data.arguments.includes('399 '))).toBe(true)
       expect(handle.agent.session.events.some(event => event.type === 'turn/end')).toBe(false)
       expect(JSON.parse(progress().at(-1)!.data.arguments)).toMatchObject({ status: 'in_progress', truncated: true })
-      expect(progress().length).toBeLessThan(5)
+      const updates = progress()
+      for (let index = 1; index < updates.length; index++) {
+        // Session timestamps and native timers have integer-millisecond resolution.
+        expect(updates[index]!.time - updates[index - 1]!.time).toBeGreaterThanOrEqual(intervalMs - 1)
+      }
       expect(JSON.stringify(handle.agent.session.events)).not.toMatch(/unrelated-output|no longer available/u)
     } finally {
       await rm(gate)
       await running
     }
-    const final = JSON.parse(progress().at(-1)!.data.arguments) as { status: string; output: string }
+    const finalProgress = progress().at(-1)!
+    const final = JSON.parse(finalProgress.data.arguments) as { status: string; output: string }
     expect(final.status).toBe('completed')
     expect(final.output).toContain('399 ')
+    expect(finalProgress.seq).toBeLessThan(handle.agent.session.events.findLast(event => event.type === 'tool/result')!.seq)
+    expect(finalProgress.seq).toBeLessThan(handle.agent.session.events.findLast(event => event.type === 'turn/end')!.seq)
     const count = handle.agent.session.events.length
-    await new Promise(resolve => setTimeout(resolve, 150))
+    await new Promise(resolve => setTimeout(resolve, intervalMs * 1.5))
     expect(handle.agent.session.events).toHaveLength(count)
   })
 

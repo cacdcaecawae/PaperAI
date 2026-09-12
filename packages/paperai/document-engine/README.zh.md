@@ -6,6 +6,8 @@ PaperAI Word 能力 seam 的 Service Definition，以 `ctx.documentEngine` 暴�
 
 Provider 必须串行化指向同一规范 Working DOCX 的操作。`applyMutations` 持有贯穿保存过程的独占 lease；消费方在其外部创建和发布可恢复快照。HTML 被明确限定为预览结果。
 
+替换操作可以携带多个段落及其字符片段和段落格式。同次保存拆分多个原始段落时，消费方必须保持原有位置地址有效；浏览器工作台先提交靠后的节点。Provider 会拒绝替换无法重建的段内对象，由版本服务丢弃候选文件。
+
 ## 模型体验
 
 ### 引擎支持的文档操作

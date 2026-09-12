@@ -854,6 +854,19 @@ describe('PaperCommitService', () => {
       ...replaceMutation(harness.nodeId, 'alpha', 'beta'),
       runs: [{ text: 'other' }],
     }])).rejects.toThrow('do not spell its text')
+    const paragraphs = [{ text: 'al', runs: [{ text: 'al', font: 'Arial' }] }, { text: 'pha', format: { align: 'center' as const } }]
+    expect((await compile(harness, [{ ...replaceMutation(harness.nodeId, 'alpha', 'al\npha'), paragraphs }])).engineMutations)
+      .toEqual([{ type: 'replace-text', officePath: '/body/p[1]', text: 'al\npha', paragraphs }])
+    for (const invalid of [
+      { nextText: '', paragraphs: [] },
+      { nextText: 'alpha', paragraphs: [{ text: 'beta' }] },
+      { nextText: 'alpha', paragraphs: [{ text: 'alpha', runs: [{ text: 'beta' }] }] },
+      { nextText: 'al\npha', paragraphs: [{ text: 'al\npha' }] },
+      { nextText: 'alpha', paragraphs: [{ text: 'alpha' }], runs: [{ text: 'alpha' }] },
+    ]) {
+      await expect(compile(harness, [{ ...replaceMutation(harness.nodeId, 'alpha', 'alpha'), ...invalid }]))
+        .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    }
     await expect(compile(harness, [{ type: 'delete-node', nodeId: harness.nodeId, baseText: 'stale' }]))
       .rejects.toMatchObject({ code: 'NODE_TEXT_CONFLICT' })
     await expect(compile(harness, [{ type: 'milestone', label: ' ' }]))

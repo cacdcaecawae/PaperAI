@@ -1,13 +1,12 @@
-/* The document view keeps the DSH details-shell chrome and adds one quiet row
-   above the document: the facts (template, gate, versions) as 12px text
-   entries on the left, the actions on the right with export as the one filled
-   button. The document is a page on the base tone. An open panel takes the
-   conversation's place: the column claims the whole content area and the panel
-   stands beside the page; only a narrow column lays it over the page. */
+/* Document actions, secondary panels and status share DSH semantic tokens. */
 
 .root {
   container-name: paperai-workbench;
   container-type: inline-size;
+}
+
+.root :where(button, select) {
+  min-height: 32px;
 }
 
 .toolbar {
@@ -17,6 +16,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
   padding: 6px 16px;
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-base);
@@ -43,7 +43,7 @@
   display: inline-flex;
   max-width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 32px;
   align-items: center;
   gap: 6px;
   border: 0;
@@ -51,11 +51,11 @@
   padding: 0 8px;
   overflow: hidden;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
   transition:
@@ -147,12 +147,10 @@
 }
 
 .notice span {
-  overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .receipt strong {
@@ -217,7 +215,7 @@
   flex: 1;
   overflow: auto;
   padding: 24px 24px 48px;
-  background: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-bg-layer-1);
 }
 
 .previewSeat {
@@ -226,6 +224,7 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 /* The change navigator floats at the foot of the page while a version is
@@ -336,7 +335,7 @@
    and layer tone as the details header. */
 .panel {
   display: flex;
-  width: 420px;
+  width: min(360px, 42%);
   min-height: 0;
   flex: none;
   flex-direction: column;
@@ -414,9 +413,9 @@
 .panelCaption,
 .panelError {
   margin: 0;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .panelError {
@@ -821,19 +820,46 @@
     padding: 0;
   }
 
-  /* A narrow column cannot seat the panel beside the page; it lays over it. */
+  /* Both document and controls remain reachable in a narrow workbench. */
   .body[data-panel] {
     flex-direction: column;
   }
 
   .panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(380px, 100%);
+    width: 100%;
+    max-height: 50%;
+    border-left: 0;
+    border-top: 1px solid var(--dsw-alias-border-l2);
   }
 }
+
+.statusBar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  min-height: 38px;
+  padding: 4px 16px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.saveStatus { color: var(--dsw-alias-label-primary); }
+.statusHint { flex: 1; font-size: 12px; }
+.zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.zoom select {
+  max-width: 140px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+.zoom select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
 
 @media (prefers-reduced-motion: reduce) {
   .chip {

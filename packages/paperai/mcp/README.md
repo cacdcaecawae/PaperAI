@@ -18,6 +18,9 @@ const lease = ctx.paperMcp.issueDescriptor({
   provider: 'openai',
   model: 'gpt-5.6-codex',
   sessionId: String(agent.session.id),
+}, {
+  workspaceRoot: ctx.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot,
+  sandboxMode: () => ctx.sandboxPolicy.resolve({ session: agent.session }).mode,
 })
 
 try {
@@ -41,7 +44,7 @@ The descriptor always uses loopback even when the browser server listens on `0.0
 | `maxNodesPerRead` | `200` | Maximum semantic nodes returned by one call. |
 | `maxMutationsPerCommit` | `64` | Maximum ordered mutations in one document commit. |
 
-All numeric fields are positive safe integers. The default read count cannot exceed its maximum. Invalid configuration fails plugin activation.
+The three numeric limits are positive safe integers, validated separately from the route and server-name strings. The default read count cannot exceed its maximum. Invalid configuration fails plugin activation.
 
 ## Tools
 
@@ -64,7 +67,7 @@ The commit schema exposes only mutations implemented by the current commit servi
 
 `registerExportAdapter(adapter)` conditionally adds `paperai_export_document`. The adapter receives the checked document, destination, mode, and descriptor-bound actor. It must return a commit for that same document and actor; otherwise the MCP call rejects with `INVALID_EXPORT_PROVENANCE`. A failing formal delivery check rejects before the adapter runs. Callers register the adapter through a Cordis effect and retain its disposer.
 
-`createPaperMcpServer(dependencies, actor, limits, exportAdapter?)` is the transport-neutral server factory used by the Host route. It can also be connected to an SDK stdio transport inside a process that already owns the PaperAI services. A standalone child process cannot use the Host's in-memory services without a separate RPC carrier, so the shipped Agent descriptor uses the existing authenticated HTTP carrier.
+`createPaperMcpServer(dependencies, actor, scope, limits, exportAdapter?)` is the transport-neutral server factory used by the Host route. It can also be connected to an SDK stdio transport inside a process that already owns the PaperAI services. A standalone child process cannot use the Host's in-memory services without a separate RPC carrier, so the shipped Agent descriptor uses the existing authenticated HTTP carrier.
 
 ## Failures and ownership
 
@@ -90,6 +93,6 @@ The base catalog is stable for the descriptor lifetime. Registering or removing 
 
 ## Known Limitations and Deferred Work
 
-- **Delivery publishing requires a provider** — Current PaperAI services expose delivery checks but no file-publication service. `paperai_prepare_export` remains read-only, and the mutating export tool is absent until a provider implementing `PaperMcpExportAdapter` is registered.
+- **Delivery publishing requires a provider** — The PaperAI bundle registers the export-service adapter. Other compositions omit the mutating export tool unless they register a `PaperMcpExportAdapter`; `paperai_prepare_export` remains read-only.
 - **Lifecycle mutations need durable provenance** — Project creation, Word import, template installation, upload, and confirmation do not yet return a durable operation commit from their owning services, so this bridge exposes their query operations but does not offer untracked Agent mutations.
 - **The descriptor depends on the Host WebServer** — `issueDescriptor()` fails before the WebServer has a listening port. The ACP Agent and Host must share a machine because the descriptor intentionally uses loopback.

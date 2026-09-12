@@ -6,6 +6,8 @@ Service Definition for PaperAI's Word capability seam, exposed as `ctx.documentE
 
 Providers must serialize operations that address the same canonical Working DOCX. `applyMutations` owns one exclusive lease through save; consumers create and publish recoverable snapshots around that call. HTML is explicitly preview-only.
 
+Replacement mutations can carry multiple paragraphs with character runs and paragraph layout. Consumers must preserve original positional addresses when several original paragraphs split in one save; the browser workbench submits later nodes first. Providers reject replacement of inline objects they cannot reconstruct, leaving the commit service to discard the candidate.
+
 ## Model Experience
 
 ### Engine-backed document operations

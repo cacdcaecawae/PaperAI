@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-09-10-paperai-character-formatting.zh.md)
 
+Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns the persistent toolbar, fonts, structural drafts, and protected content. Run inheritance and clearing below remain active.
+
 ## Problem
 
 Blocks could be written into but only as plain text. Every browser commit compiled to `set <paragraph> --prop text=`, which OfficeCLI answers by replacing the paragraph with one implicit run, so a paragraph that carried a bold lead-in or a red phrase lost it the moment anyone corrected a typo in it. Nothing in the product could make text bold or change its size, and the writer's own request was for exactly that.

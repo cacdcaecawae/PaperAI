@@ -75,6 +75,6 @@ describe('Project Doctor review and recovery', () => {
     expect(screen.queryByRole('region', { name: '查看恢复方案' })).toBeNull()
     expect(inspect).toHaveBeenCalledWith()
     view.rerender(<ProjectDoctor state={{ busy: false, report: null, error: 'Inspection unavailable' }} inspect={inspect} capture={capture} t={translate} />)
-    expect(screen.getByRole('alert').textContent).toBe('Inspection unavailable')
+    expect(screen.getByRole('alert').textContent).toBe(zh['doctor.failed'])
   })
 })

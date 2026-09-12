@@ -14,6 +14,8 @@ import { resolvePreviewBudget, type Config } from '../config.ts'
 import { selectionSource, wordSelectionReference } from './selection-context.ts'
 import { DiagnosticsController } from './diagnostics-controller.ts'
 import { WordSelectionMessage } from './WordSelectionMessage.tsx'
+import { createWorkbenchViewStore } from './view-store.ts'
+import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 
 export type { Config } from '../config.ts'
 import { DocumentWorkbench } from './DocumentWorkbench.tsx'
@@ -67,17 +69,6 @@ export const inject = [
   'conversation', 'inputTriggers',
 ]
 
-/**
- * Reopen the product details view after React has committed a possible
- * Session switch.  AppFrame intentionally closes the previous Session's
- * panel in a layout effect; yielding one task prevents that cleanup from
- * winning over the explicit document-open gesture.
- */
-async function settleDetailsSelection(ctx: ClientContext, sessionId: SessionId): Promise<void> {
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
-  ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
-}
-
 /** Register the generated Remote and the four PaperAI entries. */
 export async function apply(ctx: ClientContext, config: Config = {}): Promise<() => Promise<void>> {
   const previewBudget = resolvePreviewBudget(config)
@@ -95,6 +86,15 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
   }
   const controller = new PaperAIWorkbenchController(remote, previewBudget)
   const diagnostics = new DiagnosticsController(remote)
+  const viewStore = createWorkbenchViewStore()
+  let detailsFocus = false
+
+  /** Reopen after a Session switch and restore the mounted view's focus demand. */
+  const settleDetailsSelection = async (sessionId: SessionId): Promise<void> => {
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
+    ctx.layout.setDetailsFocus(detailsFocus)
+  }
 
   try {
     ctx.effect(() => ctx.inputTriggers.registerSource(selectionSource()), 'paperai-ui-workbench: Word selection codec')
@@ -157,7 +157,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
         ctx.sessions.open(sessionId)
         ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
         const result = await establish(sessionId)
-        await settleDetailsSelection(ctx, sessionId)
+        await settleDetailsSelection(sessionId)
         return result
       } catch (error: unknown) {
         controller.failWorkspace(workspaceId, error)
@@ -190,14 +190,14 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
         try {
           const sessionId = await documentSession(workspaceId)
           ctx.sessions.open(sessionId)
-          await settleDetailsSelection(ctx, sessionId)
+          await settleDetailsSelection(sessionId)
           await controller.openDocument(workspaceId, sessionId, resourceId)
           // A Session switch and a details-open gesture may land in the same
           // render turn.  The generic frame closes the previous Session's
           // details in its layout effect; reopen after the document request so
           // that cleanup cannot accidentally hide the newly selected
           // PaperAI view.
-          await settleDetailsSelection(ctx, sessionId)
+          await settleDetailsSelection(sessionId)
         } catch (error: unknown) {
           controller.failWorkspace(workspaceId, error)
         }
@@ -249,42 +249,65 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       id: PAPERAI_DETAILS_VIEW_ID,
       order: 10,
       locale: NS,
-      inject: (sessionId: SessionId): PaperAIDocumentWorkbenchInjected => ({
-        ...libraryInjected,
-        hooks: {
-          library: controller.libraryStore(),
-          workbench: controller.workbenchStore(sessionId),
-          projects: controller.projectDirectoryStore(),
-        },
-        retryOpen: () => controller.retryOpen(sessionId),
-        setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
-        quoteSelection: (document, excerpt) => {
+      store: viewStore,
+      inject: (sessionId: SessionId, actions: BoundActions<typeof viewStore>): PaperAIDocumentWorkbenchInjected => {
+        const sessionInput = () => {
           const scope = ctx.sessions.scope(sessionId)
-          if (scope === undefined) return
-          const input = ctx.conversation.input.for(scope)
-          const state = input.state.getSnapshot()
-          const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
-            start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
-          })
-          if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
-          if (accepted) ctx.layout.revealConversation()
-        },
-        showPanel: (panel) => { controller.showPanel(sessionId, panel) },
-        updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
-        cancelEdit: () => { controller.cancelEdit(sessionId) },
-        commitEdit: () => controller.commitEdit(sessionId),
-        validate: () => controller.validate(sessionId),
-        suggestType: () => controller.suggestType(sessionId),
-        applyTemplate: documentType => controller.applyTemplate(sessionId, documentType),
-        detachTemplate: () => controller.detachTemplate(sessionId),
-        setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
-        showDiff: commitId => controller.showDiff(sessionId, commitId),
-        restore: commitId => controller.restore(sessionId, commitId),
-        exportDocument: mode => controller.exportDocument(sessionId, mode),
-        reloadExternal: () => controller.reloadExternal(sessionId),
-        captureExternal: () => controller.captureExternal(sessionId),
-        setDetailsFocus: (active) => { ctx.layout.setDetailsFocus(active) },
-      }),
+          return scope === undefined ? undefined : ctx.conversation.input.for(scope)
+        }
+        const showConversation = (): void => {
+          controller.showPanel(sessionId, null)
+          actions.setWriting(false)
+          detailsFocus = false
+          ctx.layout.revealConversation()
+        }
+        return {
+          ...libraryInjected,
+          hooks: {
+            library: controller.libraryStore(),
+            workbench: controller.workbenchStore(sessionId),
+            projects: controller.projectDirectoryStore(),
+          },
+          retryOpen: () => controller.retryOpen(sessionId),
+          showConversation,
+          prepareAgentFix: (text) => {
+            const input = sessionInput()
+            if (input === undefined) return
+            const { draft } = input.state.getSnapshot()
+            input.setDraft(draft === '' ? text : `${draft}\n\n${text}`)
+            showConversation()
+          },
+          setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
+          quoteSelection: (document, excerpt) => {
+            const input = sessionInput()
+            if (input === undefined) return
+            const state = input.state.getSnapshot()
+            const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
+              start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
+            })
+            if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
+            if (accepted) showConversation()
+          },
+          showPanel: (panel) => { controller.showPanel(sessionId, panel) },
+          updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
+          cancelEdit: () => { controller.cancelEdit(sessionId) },
+          commitEdit: () => controller.commitEdit(sessionId),
+          validate: () => controller.validate(sessionId),
+          suggestType: () => controller.suggestType(sessionId),
+          applyTemplate: documentType => controller.applyTemplate(sessionId, documentType),
+          detachTemplate: () => controller.detachTemplate(sessionId),
+          setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
+          showDiff: commitId => controller.showDiff(sessionId, commitId),
+          restore: commitId => controller.restore(sessionId, commitId),
+          exportDocument: mode => controller.exportDocument(sessionId, mode),
+          reloadExternal: () => controller.reloadExternal(sessionId),
+          captureExternal: () => controller.captureExternal(sessionId),
+          setDetailsFocus: (active) => {
+            detailsFocus = active
+            ctx.layout.setDetailsFocus(active)
+          },
+        }
+      },
     }, DocumentWorkbench))
   } catch (error) {
     diagnostics.dispose()

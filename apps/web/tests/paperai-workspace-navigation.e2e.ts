@@ -1,6 +1,6 @@
 // PaperAI project navigation snapshot: the sidebar lists a project's tracked
 // documents beside its DSH sessions, the start page carries the project's
-// template set, an undecided project is asked for its set once, and the
+// template set, an undecided project opens its chooser on request, and the
 // settings page manages the template library.
 import { Buffer } from 'node:buffer'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -75,6 +75,7 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
   let tripwire: ReturnType<typeof watchConsole>
   let builtInSetName: string
   let builtInPackId: string
+  let trackedWorkingPath: string
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({ extraOverlayPath: PAPERAI_OVERLAY })
@@ -91,8 +92,7 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
   }, 180_000)
 
-  // Seed after the no-project view: startup otherwise resumes the most recent
-  // project and correctly opens its unanswered template dialog.
+  // Seed after capturing the no-project view; startup resumes the most recent project.
   async function seedProjects(): Promise<void> {
     // A decided project with one freely imported document.
     const projectRoot = join(scaffold.workspaceCwd, 'paper-project')
@@ -110,6 +110,7 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
     if (imported.status !== 'imported') {
       throw new Error(`PaperAI browser fixture import unavailable: ${imported.capability}: ${imported.detail}`)
     }
+    trackedWorkingPath = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId: workspace.id })).documents[0]!.workingPath!
 
     // A project that has never decided its template set.
     const emptyProjectRoot = join(scaffold.workspaceCwd, 'empty-project')
@@ -150,6 +151,7 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
     await detail.waitFor({ timeout: 15_000 })
     // Only tracked documents and DSH sessions: no template rows, no new-document buttons.
     await page.getByRole('button', { name: '打开 Workspace brief.docx' }).waitFor({ timeout: 15_000 })
+    expect(await page.getByRole('button', { name: '打开 Workspace brief.docx' }).getAttribute('title')).toBe(trackedWorkingPath)
     await page.getByRole('heading', { name: '文档', level: 3 }).waitFor({ timeout: 15_000 })
     await page.getByRole('heading', { name: '会话', level: 3 }).waitFor({ timeout: 15_000 })
     await page.getByRole('button', { name: '在“Paper project”中新建会话' }).waitFor({ timeout: 15_000 })
@@ -181,7 +183,7 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
     expect(await page.getByRole('region', { name: '文档' }).count()).toBe(0)
   }, 60_000)
 
-  it('asks an undecided project for its template set once and remembers the answer', async () => {
+  it('keeps an undecided project usable until its template chooser is requested and remembers the answer', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-workspace-empty'))
     await page.getByRole('treeitem', { name: 'Empty project' }).click()
     await page.getByRole('heading', { name: 'Empty project', level: 2 }).waitFor({ timeout: 15_000 })
@@ -190,6 +192,12 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
     await page.getByRole('button', { name: '在“Empty project”中新建会话' }).click()
 
     const dialog = page.getByRole('dialog', { name: '本项目用哪套模板？' })
+    await page.getByRole('button', { name: '尚未选择本项目的模板', exact: true }).waitFor()
+    expect(await dialog.count()).toBe(0)
+    await page.getByRole('button', { name: '新建或导入文档' }).click()
+    await page.getByRole('menuitem', { name: '导入 Word，自由写', exact: true }).waitFor()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: '尚未选择本项目的模板', exact: true }).click()
     await dialog.waitFor({ timeout: 15_000 })
     const use = dialog.getByRole('button', { name: '用于本项目' }).first()
     await use.waitFor({ timeout: 15_000 })
@@ -237,6 +245,13 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
       buffer: Buffer.from(fixtureDocxBase64(), 'base64'),
     })
     await customSet.getByRole('button', { name: '移除：开题报告' }).waitFor({ timeout: 15_000 })
+    await customSet.getByRole('button', { name: '移除：开题报告' }).click()
+    const removal = customSet.getByRole('group', { name: '确认移除格式', exact: true })
+    await removal.waitFor()
+    expect(await customSet.getByRole('button', { name: '移除：开题报告' }).isVisible()).toBe(true)
+    await removal.getByRole('button', { name: '取消', exact: true }).click()
+    await removal.waitFor({ state: 'hidden' })
+    expect(await customSet.getByRole('button', { name: '移除：开题报告' }).isVisible()).toBe(true)
     await page.keyboard.press('Escape')
     await expect.poll(() => settings.count(), { timeout: 5_000 }).toBe(0)
 
@@ -284,7 +299,7 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
   })
 })
 
-it('prompts for a template after picking a fresh project and creates one document in its public directory', async () => {
+it('offers a template after picking a fresh project and creates one document in its public directory', async () => {
   const scaffold = await launchWebScaffold({ extraOverlayPath: PAPERAI_OVERLAY })
   let browser: Browser | undefined
   let page: Page | undefined
@@ -305,6 +320,9 @@ it('prompts for a template after picking a fresh project and creates one documen
     await picker.waitFor({ state: 'hidden', timeout: 15_000 })
 
     const dialog = page.getByRole('dialog', { name: '本项目用哪套模板？' })
+    await page.getByRole('button', { name: '尚未选择本项目的模板', exact: true }).waitFor()
+    expect(await dialog.count()).toBe(0)
+    await page.getByRole('button', { name: '尚未选择本项目的模板', exact: true }).click()
     await dialog.waitFor({ timeout: 15_000 })
     await dialog.getByRole('button', { name: '用于本项目' }).first().waitFor({ timeout: 15_000 })
     await compareOrRefreshGolden(TEMPLATE_DIALOG_EXPECTED, await dialog.ariaSnapshot(), MODE)
@@ -313,7 +331,8 @@ it('prompts for a template after picking a fresh project and creates one documen
     await page.getByRole('button', { name: '新建或导入文档' }).click()
     await page.getByRole('menuitem', { name: '新建开题报告' }).click()
     const displayedPath = 'documents/working/硕士学位论文开题报告.docx'
-    await page.getByText(displayedPath, { exact: true }).waitFor({ timeout: 30_000 })
+    await page.getByTitle(displayedPath, { exact: true }).waitFor({ timeout: 30_000 })
+    expect(await page.getByText(displayedPath, { exact: true }).count()).toBe(0)
     await page.getByRole('treeitem', { name: 'new-paper-project' }).click()
     await page.getByRole('region', { name: '文档' }).getByRole('button', { name: '打开 硕士学位论文开题报告.docx' }).waitFor({ timeout: 15_000 })
 

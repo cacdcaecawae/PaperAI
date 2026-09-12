@@ -870,12 +870,15 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     ])
     const paragraphs = (nodes: readonly { text: string }[]): string[] => nodes.map(node => node.text)
     const diff = diffParagraphs(paragraphs(before), paragraphs(after))
+    const formattingEditCount = commit.operations.filter(operation => operation.type === 'replace-text'
+      && typeof operation.before === 'string' && operation.before === operation.after).length
     return {
       documentId,
       commitId: commit.id,
       parentCommitId: parent?.id ?? null,
       changes: diff.changes,
       unchangedCount: diff.unchangedCount,
+      ...(formattingEditCount === 0 ? {} : { formattingEditCount }),
     }
   }
 
@@ -993,6 +996,10 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const id = DocumentId(String(request.documentId))
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
+    // Positional Office paths remain valid when later paragraphs split first.
+    const order = new Map(before.nodes.map((node, index) => [String(node.id), index]))
+    const mutations = [...request.mutations].sort((left, right) =>
+      (order.get(String(right.nodeId)) ?? -1) - (order.get(String(left.nodeId)) ?? -1))
     const commit = await this.ctx.paperCommits.submit({
       documentId: id,
       ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
@@ -1003,12 +1010,13 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         client: 'paperai',
         sessionId: String(request.sessionId),
       },
-      mutations: request.mutations.map(mutation => ({
+      mutations: mutations.map(mutation => ({
         type: 'replace-text' as const,
         nodeId: DocumentNodeId(String(mutation.nodeId)),
         baseText: mutation.baseText,
         nextText: mutation.nextText,
         ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
+        ...(mutation.paragraphs === undefined ? {} : { paragraphs: mutation.paragraphs }),
       })),
       ...(signal === undefined ? {} : { signal }),
     })
@@ -1102,6 +1110,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         documentId: document.id,
         name: document.name,
         fileName: basename(document.workingPath),
+        workingPath: document.workingPath,
         documentType: document.role,
         templateName: this.contractOf(document)?.name ?? null,
         updatedAt: document.updatedAt,

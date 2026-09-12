@@ -1,6 +1,6 @@
 /** The three panels that open beside the document: template, gate, versions. */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   Button, DisclosureRow, IconCheckOutline14, IconChecklistOutline14, IconChevronDownOutline14,
@@ -23,11 +23,22 @@ export function Panel({ title, onClose, children, t }: {
   children: ReactNode
   t: Translate
 }): ReactNode {
+  const close = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const origin = window.document.activeElement
+    close.current?.focus()
+    return () => { if (origin instanceof HTMLElement && origin.isConnected) origin.focus() }
+  }, [])
   return (
-    <aside className={css.panel} aria-label={title}>
+    <aside className={css.panel} aria-label={title} onKeyDown={(event) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.stopPropagation()
+        onClose()
+      }
+    }}>
       <div className={css.panelHeader}>
         <h2>{title}</h2>
-        <button type="button" className={css.panelClose} aria-label={t('panel.close')} onClick={onClose}>
+        <button ref={close} type="button" className={css.panelClose} aria-label={t('panel.close')} onClick={onClose}>
           <IconCloseOutline16 />
         </button>
       </div>
@@ -101,7 +112,7 @@ export function TemplatePanel({
   onClose: () => void
   t: Translate
 }): ReactNode {
-  const busy = state.action !== null
+  const busy = state.action !== null || state.edits.length > 0
   const projectFormats = overview?.template?.formats ?? []
   const available = DOCUMENT_TYPE_ORDER.filter(type => projectFormats.some(format => format.documentType === type))
   const suggested = state.typeSuggestion?.documentType
@@ -113,8 +124,10 @@ export function TemplatePanel({
   useEffect(() => { setChosen(initial) }, [initial])
   // Ask once what the document looks like, so the type chooser starts on the likely answer.
   useEffect(() => {
-    if (document.template === null && state.typeSuggestion === null && state.action === null) void suggestType()
-  }, [document.template, state.typeSuggestion, state.action, suggestType])
+    if (document.template === null && state.typeSuggestion === null && state.action === null && state.actionError === null) {
+      void suggestType()
+    }
+  }, [document.template, state.typeSuggestion, state.action, state.actionError, suggestType])
   const [requirementsOpen, setRequirementsOpen] = useState(false)
   const template = document.template
   // The Host's guess, while it is still the chooser's value: the caption says where the default came from.
@@ -197,7 +210,7 @@ export function TemplatePanel({
                 <span className={css.panelCaption}>{t('template.typeQuestion')}</span>
                 <div className={css.applyRow}>
                   <Menu
-                    compact
+                    portal
                     open={typeOpen}
                     selectedId={chosen}
                     items={available.map(type => ({ id: type, label: t(DOCUMENT_TYPE_KEYS[type]) }))}
@@ -254,7 +267,7 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
   onClose: () => void
   t: Translate
 }): ReactNode {
-  const busy = state.action !== null
+  const busy = state.action !== null || state.edits.length > 0
   const failing = document.gate.findings.filter(finding => !finding.passed).length
   const statusKey: PaperAIWorkbenchKey = document.gate.status === 'passed'
     ? 'gate.passed'
@@ -292,8 +305,8 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
 
 /**
  * Versions panel: the history as a timeline in the panel column. Picking a
- * version shows its changes on the document; the panel keeps the count, lists
- * the changes later versions overwrote, and offers restore for the picked one.
+ * version shows its text changes on the document; unplaced changes remain in
+ * the panel, alongside recorded formatting operations and version restoration.
  */
 export function VersionsPanel({ document, state, unplaced, showDiff, restore, onClose, t }: {
   document: PaperAIDocumentSnapshot
@@ -305,7 +318,9 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
   t: Translate
 }): ReactNode {
   const busy = state.action !== null
+  const [confirmRestore, setConfirmRestore] = useState(false)
   const diff = state.diff
+  const formattingEditCount = diff?.result?.formattingEditCount ?? 0
   const picked = diff === null ? null : document.versions.find(version => version.commitId === diff.commitId) ?? null
   const caption = picked === null
     ? t('versions.select')
@@ -321,6 +336,12 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
         : (
           <>
             <p className={css.panelNote} aria-live="polite">{caption}</p>
+            {formattingEditCount > 0 && (
+              <p className={css.panelNote}>{t('versions.formatting', { count: formattingEditCount })}</p>
+            )}
+            {diff?.error != null && <Button variant="outline" size="sm" onClick={() => {
+              void showDiff(diff.commitId)
+            }}>{t('versions.retry')}</Button>}
             {unplaced.length > 0 && (
               <div className={css.unplaced}>
                 <span className={css.panelCaption}>{t('versions.unplaced', { count: unplaced.length })}</span>
@@ -345,7 +366,8 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
                       className={css.versionRow}
                       aria-pressed={open}
                       disabled={busy && !open}
-                      onClick={() => { void showDiff(version.commitId) }}
+                      title={version.summary}
+                      onClick={() => { setConfirmRestore(false); void showDiff(version.commitId) }}
                     >
                       <span className={css.versionMain}>
                         <strong>{version.summary}</strong>
@@ -355,7 +377,9 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
                           {current && <em>{t('versions.current')}</em>}
                         </span>
                       </span>
-                      <time dateTime={version.createdAt}>{versionDate(version.createdAt)}</time>
+                      <time dateTime={version.createdAt} title={new Date(version.createdAt).toLocaleString()}>
+                        {versionDate(version.createdAt)}
+                      </time>
                     </button>
                   </li>
                 )
@@ -364,9 +388,16 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
             {picked?.restorable === true && (
               <div className={css.versionFooter}>
                 <span className={css.panelCaption}>{t('versions.restoreNote')}</span>
-                <Button variant="outline" disabled={busy} onClick={() => { void restore(picked.commitId) }}>
-                  {state.action === 'restoring' ? t('versions.restoring') : t('versions.restore')}
-                </Button>
+                {confirmRestore
+                  ? <>
+                    <Button variant="outline" disabled={busy || state.edits.length > 0} onClick={() => {
+                      void restore(picked.commitId).then((result) => { if (result.ok) setConfirmRestore(false) })
+                    }}>{state.action === 'restoring' ? t('versions.restoring') : t('versions.confirmRestore')}</Button>
+                    <Button variant="toolbar" disabled={busy} onClick={() => { setConfirmRestore(false) }}>{t('versions.cancelRestore')}</Button>
+                  </>
+                  : <Button variant="outline" disabled={busy || state.edits.length > 0} onClick={() => { setConfirmRestore(true) }}>
+                    {t('versions.restore')}
+                  </Button>}
               </div>
             )}
           </>

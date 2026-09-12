@@ -251,6 +251,19 @@ describe('PaperAIWorkbenchController template library', () => {
 })
 
 describe('PaperAIWorkbenchController documents', () => {
+  it('retains draft text and the unsupported-content diagnostic when Word preservation rejects a save', async () => {
+    const remote = successfulRemote()
+    const message = "UNSUPPORTED_DOCUMENT_CONTENT: paragraph '/body/p[2]' contains objects that require editing in Word"
+    vi.spyOn(remote, 'commit').mockResolvedValueOnce({ ok: false, error: { code: 'internal', message, details: {} } })
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Keep my words' })
+    const original = store.getSnapshot().document
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: false, error: `internal: ${message}` })
+    expect(store.getSnapshot()).toMatchObject({ action: null, actionError: `internal: ${message}`, edits: [{ draft: 'Keep my words' }] })
+    expect(store.getSnapshot().document).toBe(original)
+    controller.dispose()
+  })
+
   it('opens a document, retypes blocks in place, and saves them as one version', async () => {
     const remote = successfulRemote()
     const commit = vi.spyOn(remote, 'commit')
@@ -265,7 +278,7 @@ describe('PaperAIWorkbenchController documents', () => {
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Rewritten background' })
     // The page owns the comparison, because a block can differ by its formatting alone; null drops its draft.
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
-    expect(store.getSnapshot().edits).toEqual([{ nodeId: NODE_HEADING, baseText: 'Introduction', draft: 'Rewritten introduction' }])
+    expect(store.getSnapshot().edits).toEqual([{ nodeId: NODE_HEADING, baseText: 'Introduction', baseRevision: REVISION_1, draft: 'Rewritten introduction' }])
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Rewritten background', runs: [
       { text: 'Rewritten ' }, { text: 'background', bold: true },
     ] })
@@ -391,6 +404,9 @@ describe('PaperAIWorkbenchController documents', () => {
     diffVersion.mockResolvedValueOnce(REMOTE_FAILURE)
     await expect(controller.showDiff(SESSION_ID, COMMIT_0)).resolves.toEqual({ ok: false, error: 'internal: Host capability unavailable' })
     expect(store.getSnapshot().diff).toEqual({ commitId: COMMIT_0, result: null, error: 'internal: Host capability unavailable' })
+    diffVersion.mockResolvedValueOnce({ ok: true, value: { ...DIFF, commitId: COMMIT_0 } })
+    await expect(controller.showDiff(SESSION_ID, COMMIT_0)).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().diff?.result?.commitId).toBe(COMMIT_0)
     controller.showPanel(SESSION_ID, 'versions')
     expect(store.getSnapshot()).toMatchObject({ panel: null, diff: null })
   })
@@ -496,9 +512,25 @@ describe('PaperAIWorkbenchController documents', () => {
       actionError: null,
       edits: [{ draft: 'Local draft', conflicted: true }],
     })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Local draft with more typing' })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', conflicted: true }])
     await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
     expect(remote.commit).not.toHaveBeenCalled()
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'no external document update' })
+  })
+
+  it('retains formatting drafts as conflicts after an external revision changes no plain text', async () => {
+    const remote = successfulRemote()
+    const commit = vi.spyOn(remote, 'commit')
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Introduction', runs: [{ text: 'Introduction', bold: true }] })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-12T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    expect(store.getSnapshot().edits).toMatchObject([{ baseRevision: REVISION_1, conflicted: true, runs: [{ bold: true }] }])
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Changed again' })
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
+    expect(commit).not.toHaveBeenCalled()
   })
 })
 
@@ -523,12 +555,30 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Rewritten' })
     await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
     const patched = store.getSnapshot().document?.previewHtml ?? ''
-    expect(patched).toContain('<h1 data-path="/body/p[1]">Rewritten</h1>')
+    expect(new DOMParser().parseFromString(patched, 'text/html').querySelector('h1')?.textContent).toBe('Rewritten')
     expect(patched).toContain('Research background')
     expect(remote.open).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, resourceId: RESOURCE_ID })
     const rendered = '<html><head></head><body><h1 data-path="/body/p[1]">Rewritten</h1></body></html>'
     finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: rendered }) })
     await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe(rendered) })
+  })
+
+  it('keeps a new draft and its preview while an earlier commit render completes', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    let finish!: (value: RemoteResult<PaperAIDocumentOpenResult>) => void
+    remote.open = vi.fn<typeof remote.open>(() => new Promise((resolve) => { finish = resolve }))
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed text' })
+    await controller.commitEdit(SESSION_ID)
+    const painted = store.getSnapshot().document?.previewHtml
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Typing during preview rendering' })
+    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.getSnapshot().document?.previewHtml).toBe(painted)
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Typing during preview rendering' }])
   })
 
   it('records an outside working edit as a version and reopens the document with the draft kept', async () => {

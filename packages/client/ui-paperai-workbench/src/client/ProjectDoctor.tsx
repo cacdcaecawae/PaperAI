@@ -26,7 +26,7 @@ export function ProjectDoctor({ state, inspect, capture, t }: {
         <button type="button" className={css.trigger} disabled={state?.busy} onClick={() => { setPlan(null); void inspect() }}>
           {t(state?.busy === true ? 'doctor.scanning' : 'doctor.scan')}
         </button>
-        {state?.error != null && <p role="alert">{state.error}</p>}
+        {state?.error != null && <p role="alert">{t('doctor.failed')}</p>}
         {state?.report != null && <>
           {state.report.issues.length === 0 && <p role="status">{t('doctor.healthy')}</p>}
           <ul>{state.report.issues.map((issue, index) => <li key={index}>

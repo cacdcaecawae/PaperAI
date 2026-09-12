@@ -4,7 +4,7 @@ Status: implemented
 
 English | [中文](2026-09-03-paperai-ui-overhaul.zh.md)
 
-Partially superseded: layout and draft refresh are governed by the [document-centered workbench decision](../architecture/2026-09-05-paperai-agentero-adoption.md). Other decisions below remain active.
+Partially superseded: layout and draft refresh are governed by the [document-centered workbench decision](../architecture/2026-09-05-paperai-agentero-adoption.md); template prompting, editor commands, and panel behavior follow the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md). Other decisions below remain active.
 
 ## Problem
 

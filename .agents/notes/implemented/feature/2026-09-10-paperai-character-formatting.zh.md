@@ -4,6 +4,8 @@ Status: implemented
 
 [English](2026-09-10-paperai-character-formatting.md) | 中文
 
+部分取代：[写作流程决策](2026-09-12-paperai-writing-workflow.zh.md)拥有常驻工具栏、字体、结构草稿和复杂内容保护。下述 run 继承与清除规则继续有效。
+
 ## 问题
 
 块可以直接书写，但只能写纯文本。浏览器的每次提交都编译成 `set <段落> --prop text=`，OfficeCLI 会把整段替换为一个隐式 run，因此带加粗开头或红色短语的段落，只要有人改一个错字，这些格式就全没了。产品里没有任何地方能加粗或改字号，而写作者要的正是这个。

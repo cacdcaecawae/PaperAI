@@ -13,6 +13,7 @@ export interface DetailsViewShellTab {
 /** Stable chrome shared by built-in and product-specific details views. */
 export interface DetailsViewShellProps {
   readonly title: string
+  readonly titleHint?: string
   readonly subtitle?: string
   readonly closeLabel: string
   readonly onClose: () => void
@@ -25,13 +26,13 @@ export interface DetailsViewShellProps {
 
 /** Render the DSH details header, close action, and accessible tab strip. */
 export function DetailsViewShell({
-  title, subtitle, closeLabel, onClose, tabs = [], activeTab, onSelectTab, className, children,
+  title, titleHint, subtitle, closeLabel, onClose, tabs = [], activeTab, onSelectTab, className, children,
 }: DetailsViewShellProps): ReactNode {
   return (
     <div className={clsx(css.root, className)} data-dsh-details-shell>
       <header className={css.header}>
         <div className={css.heading}>
-          <strong>{title}</strong>
+          <strong title={titleHint ?? title}>{title}</strong>
           {subtitle !== undefined && <span title={subtitle}>{subtitle}</span>}
         </div>
         <button type="button" className={css.close} aria-label={closeLabel} onClick={onClose}>

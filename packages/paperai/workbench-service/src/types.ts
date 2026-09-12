@@ -93,6 +93,8 @@ export interface PaperAIDocumentRow {
   readonly documentId: PaperAIDocumentId
   readonly name: string
   readonly fileName: string
+  /** Authoritative Working DOCX path for disambiguation and file details. */
+  readonly workingPath?: string
   readonly documentType: PaperAIDocumentType
   /** Display name of the bound format, or `null` while the document writes freely. */
   readonly templateName: string | null
@@ -175,7 +177,7 @@ export interface PaperAIDocumentNodeSummary {
   readonly text: string
 }
 
-/** Replace the text of exactly one semantic node. */
+/** Replace one semantic node; additional paragraphs split that original node. */
 export interface PaperAIReplaceTextMutation {
   readonly type: 'replace-text'
   readonly nodeId: PaperAIDocumentNodeId
@@ -183,6 +185,8 @@ export interface PaperAIReplaceTextMutation {
   readonly nextText: string
   /** The block's runs in reading order, present when its character formatting is part of the change. */
   readonly runs?: readonly PaperAIDocumentTextRun[]
+  /** Complete replacement paragraphs; nonempty and joined by newlines to spell nextText. */
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
 }
 
 /** One run of a block's text, carrying only the character formatting that overrides the block's own. */
@@ -195,6 +199,25 @@ export interface PaperAIDocumentTextRun {
   readonly size?: string
   /** Text color as `#RRGGBB`. */
   readonly color?: string
+  /** Font family applied to Latin and East Asian text; an empty string removes explicit run fonts. */
+  readonly font?: string
+}
+
+/** Explicit paragraph layout overrides. */
+export interface PaperAIParagraphFormat {
+  readonly style?: string
+  readonly align?: 'left' | 'center' | 'right' | 'justify'
+  /** Left indentation with a unit, for example `24pt`. */
+  readonly indent?: string
+  /** Line-height multiplier or fixed height, for example `1.5x` or `18pt`. */
+  readonly lineSpacing?: string
+}
+
+/** One replacement paragraph; vertical tabs represent soft line breaks. */
+export interface PaperAIDocumentParagraph {
+  readonly text: string
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+  readonly format?: PaperAIParagraphFormat
 }
 
 /** Only node-addressed text mutations are admitted by the browser workbench. */
@@ -427,6 +450,8 @@ export interface PaperAIVersionDiff {
   readonly changes: readonly PaperAIVersionChange[]
   /** Paragraphs that did not change; lets the reader judge the scale of an edit. */
   readonly unchangedCount: number
+  /** Recorded text-preserving formatting operations; not an exhaustive formatting diff. */
+  readonly formattingEditCount?: number
 }
 
 /** User-facing export mode: draft remains available, delivery runs the gate. */

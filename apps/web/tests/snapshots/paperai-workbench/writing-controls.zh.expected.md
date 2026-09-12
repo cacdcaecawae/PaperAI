@@ -1,0 +1,46 @@
+- toolbar "文档编辑工具栏":
+  - group "保存到文档":
+    - button "保存" [disabled]
+    - button "撤销草稿修改" [disabled]: ↶
+    - button "重做草稿修改" [disabled]: ↷
+  - group "格式":
+    - combobox "字体":
+      - option "继承（未指定）" [selected]
+      - option "宋体"
+      - option "黑体"
+      - option "等线"
+      - option "Times New Roman"
+      - option "Arial"
+    - combobox "字号（磅）":
+      - option "9"
+      - option "10 · 继承" [selected]
+      - option "10.5"
+      - option "11"
+      - option "12"
+      - option "14"
+      - option "15"
+      - option "16"
+      - option "18"
+      - option "22"
+      - option "24"
+      - option "28"
+      - option "36"
+    - button "加粗": B
+    - button "斜体": I
+    - button "下划线": U
+    - button "清除字符格式": Tx
+  - button "段落"
+  - button "查找文档"
+  - button "交给 Agent"
+  - text: 选中文字
+- contentinfo "文档状态与视图":
+  - status: 已写入文档
+  - text: 预览分页仅供参考，以 Word 排版为准 缩放
+  - combobox "缩放":
+    - option "适合页宽" [selected]
+    - option "50%"
+    - option "75%"
+    - option "100%"
+    - option "125%"
+    - option "150%"
+    - option "200%"

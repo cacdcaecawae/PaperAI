@@ -148,7 +148,7 @@ describe('CI workflow', () => {
       'packages/client/connection/tests/client-apply.client.spec.ts',
       'packages/client/connection/tests/api-helpers.client.spec.ts',
       'packages/client/ui-paperai-workbench/tests',
-      'packages/client/ui-primitives/tests/tooltip.client.spec.tsx',
+      'packages/client/ui-primitives/tests',
       'packages/host/apiproxy/tests/rpc-schemas.spec.ts',
       'packages/interaction/permission-presets/tests',
       'packages/paperai',

@@ -560,6 +560,7 @@ describe('PaperAiWorkbenchService', () => {
       documentId: DOCUMENT_ID,
       name: '开题报告',
       fileName: '开题报告.docx',
+      workingPath: harness.document.workingPath,
       documentType: 'proposal',
       templateName: 'HIT 开题报告',
       updatedAt: '2026-08-28T00:00:00.000Z',
@@ -684,6 +685,27 @@ describe('PaperAiWorkbenchService', () => {
       mutations: [{ type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '过期编辑' }],
     })).rejects.toThrow('changed; reload')
     expect(harness.submit).toHaveBeenCalledOnce()
+  })
+
+  it('saves paragraph splits from later original nodes first and forwards their formatting', async () => {
+    const harness = await createHarness()
+    const laterId = DocumentNodeId('later-node')
+    harness.nodes.push({ ...harness.nodes[0]!, id: laterId, ordinal: 1, officePath: '/body/p[2]', text: 'later' })
+    const opened = await harness.service.open({
+      workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, resourceId: `document:${DOCUMENT_ID}` as PaperAIResourceId,
+    })
+    const paragraphs = [{ text: 'first', runs: [{ text: 'first', font: 'Arial' }], format: { indent: '24pt' } }, { text: 'new' }]
+    await harness.service.commit({
+      sessionId: SESSION_ID, documentId: DOCUMENT_ID, baseRevision: opened.document.revision, baseCommitId: null,
+      mutations: [
+        { type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: 'first\nnew', paragraphs },
+        { type: 'replace-text', nodeId: laterId, baseText: 'later', nextText: 'last' },
+      ],
+    })
+    expect(harness.submit.mock.calls[0]?.[0].mutations).toEqual([
+      { type: 'replace-text', nodeId: laterId, baseText: 'later', nextText: 'last' },
+      { type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: 'first\nnew', paragraphs },
+    ])
   })
 
   it('runs a live gate and restores through a new recoverable commit', async () => {
@@ -1103,6 +1125,13 @@ describe('PaperAiWorkbenchService', () => {
     expect(root.changes).toEqual([
       { kind: 'added', after: '标题' }, { kind: 'added', after: '第一版' }, { kind: 'added', after: '删掉的段落' },
     ])
+    const edited = harness.history[0]!
+    harness.history[0] = { ...edited, operations: [
+      { type: 'replace-text', nodeId: NODE_ID, before: '第二版', after: '第二版' },
+      { type: 'replace-text', nodeId: NODE_ID, before: '第一版', after: '第二版' },
+    ] }
+    expect(await harness.service.diffVersion({ documentId: DOCUMENT_ID, commitId: second.createdCommitId }))
+      .toMatchObject({ formattingEditCount: 1 })
     await expect(harness.service.diffVersion({ documentId: DOCUMENT_ID, commitId: 'commit-9' as PaperAIDocumentCommitId }))
       .rejects.toThrow('does not belong')
   })

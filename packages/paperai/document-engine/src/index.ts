@@ -6,7 +6,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { CapabilityHealth } from '@paperai/domain'
+import type { CapabilityHealth, DocumentParagraph } from '@paperai/domain'
 
 /** Text-bearing Word node projected by the engine. */
 export interface EngineTextNode {
@@ -25,11 +25,13 @@ export interface EngineTextRun {
   size?: string
   /** Text color as `#RRGGBB`. */
   color?: string
+  /** Font family applied to Latin and East Asian text; an empty string removes explicit run fonts. */
+  font?: string
 }
 
 /** Office-path mutation applied atomically inside one engine document lease. */
 export type EngineMutation =
-  | { type: 'replace-text'; officePath: string; text: string; runs?: readonly EngineTextRun[] }
+  | { type: 'replace-text'; officePath: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }
   | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; index?: number }
   | { type: 'remove'; officePath: string }
 

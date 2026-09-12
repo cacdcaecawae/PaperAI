@@ -1,8 +1,8 @@
 /** Unified ACP directory and instance editor inside the existing settings shell. */
 
 import { useEffect, useState } from 'react'
-import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HostObservable, InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { HostObservable, InjectFace, PropsRenderSlots, PropsRuntime, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from './brand-slot.ts'
 import type { AcpSettingsState, ChannelDraft } from './controller.ts'
@@ -20,7 +20,7 @@ export interface AcpSettingsInjected {
   cancelEdit: () => void
   save: () => Promise<void>
   setDefault: (id: string) => Promise<void>
-  manage: (id: string, action: AcpManagementRequest) => Promise<void>
+  manage: (id: string, action: AcpManagementRequest) => Promise<boolean>
   install: (id: string, action: 'install' | 'uninstall') => Promise<void>
   importHistory: (id: string, history: AcpHistoryEntry) => Promise<boolean>
 }
@@ -28,7 +28,7 @@ export interface AcpSettingsInjected {
 /** Settings section owner and injected actions. */
 export type AcpSettingsProps = PropsRuntime<'settings.section'>
   & PropsRenderSlots<'paperai.acp.channel.mark'>
-  & InjectFace<AcpSettingsInjected>
+  & InjectFace<AcpSettingsInjected> & PropsLocale<'paperai.acp'>
 
 /** Render the complete channel directory without switching the active conversation. */
 export function AcpSettingsSection({
@@ -46,6 +46,7 @@ export function AcpSettingsSection({
   importHistory,
   close,
   renderSlot,
+  t,
 }: AcpSettingsProps) {
   const state = useAcp(value => value)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -68,35 +69,35 @@ export function AcpSettingsSection({
   }, [load])
   const draft = state.draft
   return (
-    <section className={css.page} aria-label="Agent">
+    <section className={css.page} aria-label="Agent" aria-busy={state.loading}>
+      <header><h2>Agent</h2><p className={css.note}>{t('intro')}</p></header>
+      {!state.writable && !state.loading && <p className={css.note}>{t('readOnly')}</p>}
       <div className={css.group}>
         <div className={css.groupLabel}>
-          <span>Agent</span>
+          <h3>{t('connectionGroup')}</h3>
           <span className={css.actions}>
-            <button
+            <Button variant="outline"
               type="button"
               disabled={state.loading}
               onClick={() => {
                 void load()
               }}
-            >
-              刷新安装状态
-            </button>
-            <button
+            >{t('refresh')}</Button>
+            <Button variant="outline"
               type="button"
               disabled={state.busy.length > 0}
               onClick={() => {
                 void probe()
               }}
-            >
-              一键检测
-            </button>
+            >{t('probeAll')}</Button>
           </span>
         </div>
         {state.error !== null && (
-          <p role="alert" className={css.error}>
-            {state.error}
-          </p>
+          <div role="alert" className={css.error}>
+            <p>{t('failureHint')}</p>
+            <details><summary>{t('reason')}</summary><p>{state.error}</p></details>
+            <Button variant="toolbar" disabled={state.loading} onClick={() => { void load() }}>{t('retry')}</Button>
+          </div>
         )}
         <div className={css.card}>
           {state.entries.map((entry) => {
@@ -106,26 +107,26 @@ export function AcpSettingsSection({
             const missing = entry.source !== 'remote' && entry.adapter === null
             const status = busy && entry.busy !== 'connecting'
               ? entry.busy === 'install'
-                ? '安装中'
+                ? t('installing')
                 : entry.busy === 'authenticate'
-                  ? '认证中'
+                  ? t('authenticating')
                   : entry.busy === 'probe'
-                    ? '检测中'
-                    : '处理中'
+                    ? t('probing')
+                    : t('working')
               : missing
-                ? '未安装'
+                ? t('missing')
                 : diagnostic.status === 'ready'
-                  ? '检测通过'
+                  ? t('ready')
                   : diagnostic.status === 'error'
-                    ? '检测失败'
-                    : '待检测'
+                    ? t('failed')
+                    : t('unchecked')
             const usage = !state.usageKnown
-              ? '使用情况未知'
+              ? t('usageUnknown')
               : entry.connected
-                ? '正在使用'
+                ? t('inUse')
                 : entry.startup !== null
-                  ? '连接中'
-                  : '未使用'
+                  ? t('connecting')
+                  : t('unused')
             return (
               <article key={entry.id}>
                 <div className={css.row}>
@@ -135,7 +136,7 @@ export function AcpSettingsSection({
                       size: 20,
                     }, { entryKey: entry.id })}
                   </span>
-                  <button
+                  <Button variant="outline"
                     type="button"
                     className={css.identity}
                     aria-expanded={expanded === entry.id}
@@ -145,15 +146,15 @@ export function AcpSettingsSection({
                   >
                     <span>
                       <strong>{entry.name}</strong>
-                      {state.defaultProvider === entry.id && <span className={css.badge}>默认</span>}
-                      {!entry.enabled && <span className={css.badge}>未启用</span>}
+                      {state.defaultProvider === entry.id && <span className={css.badge}>{t('default')}</span>}
+                      {!entry.enabled && <span className={css.badge}>{t('disabled')}</span>}
                     </span>
                     <small>
                       {entry.host} · {entry.command} {entry.args.join(' ')}
                     </small>
-                  </button>
+                  </Button>
                   <div className={css.channelState}>
-                    <span className={css.status} data-ready={status === '检测通过'} data-error={status === '检测失败'}>
+                    <span className={css.status} data-ready={status === t('ready')} data-error={status === t('failed')}>
                       {status}
                     </span>
                     <span className={css.status} data-ready={state.usageKnown && entry.connected}>
@@ -162,149 +163,138 @@ export function AcpSettingsSection({
                   </div>
                   <div className={css.actions}>
                     {busy ? (
-                      <button
+                      <Button variant="outline"
                         type="button"
                         onClick={() => {
                           void cancel(entry.id)
                         }}
-                      >
-                        取消
-                      </button>
+                      >{t('cancel')}</Button>
                     ) : (
-                      <button
+                      <Button variant="outline"
                         type="button"
                         disabled={missing}
                         onClick={() => {
                           void probe(entry.id)
                         }}
-                      >
-                        检测
-                      </button>
+                      >{t('probe')}</Button>
                     )}
-                    <button
+                    <Button variant="outline"
                       type="button"
                       disabled={!state.writable}
                       onClick={() => {
                         edit(entry.id)
                       }}
-                    >
-                      配置
-                    </button>
+                    >{t('configure')}</Button>
                   </div>
                 </div>
                 {expanded === entry.id && (
                   <div className={css.details}>
                     <dl>
-                      <dt>运行主机</dt>
+                      <dt>{t('host')}</dt>
                       <dd>{entry.host}</dd>
                       <dt>CLI</dt>
-                      <dd>{entry.cli ?? (entry.source === 'remote' ? '远程路径未报告' : '未在此主机发现')}</dd>
-                      <dt>检测 / 操作</dt>
+                      <dd>{entry.cli ?? (entry.source === 'remote' ? t('remoteUnknown') : t('localMissing'))}</dd>
+                      <dt>{t('diagnostic')}</dt>
                       <dd>
                         {status}
-                        {status === '检测通过' && (
+                        {status === t('ready') && (
                           <>
                             {' · '}
-                            {diagnostic.stage === 'prompt' ? '模型请求成功' : diagnostic.stage === 'session' ? '会话已就绪' : '握手通过'}
+                            {diagnostic.stage === 'prompt' ? t('promptReady') : diagnostic.stage === 'session' ? t('sessionReady') : t('handshakeReady')}
                           </>
                         )}
                       </dd>
-                      <dt>会话使用</dt>
-                      <dd>正在使用表示有会话已连接此渠道；不同会话可以同时使用不同渠道。</dd>
+                      <dt>{t('usage')}</dt>
+                      <dd>{t('usageHint')}</dd>
                       {entry.startup !== null && (
                         <>
-                          <dt>连接阶段</dt>
+                          <dt>{t('startup')}</dt>
                           <dd>
                             {(
                               {
-                                spawn: '启动进程',
-                                initialize: 'ACP 握手',
-                                load: '恢复会话',
-                                new: '创建会话',
-                                permissions: '同步权限',
+                                spawn: t('spawn'),
+                                initialize: t('handshake'),
+                                load: t('resume'),
+                                new: t('newSession'),
+                                permissions: t('permissionsSync'),
                               } as Record<string, string>
                             )[entry.startup.stage] ?? entry.startup.stage}{' '}
                             · {entry.startup.elapsedMs} ms
                           </dd>
                         </>
                       )}
-                      <dt>ACP 适配器</dt>
-                      <dd>{entry.adapter ?? '未发现'}</dd>
-                      <dt>安装来源</dt>
+                      <dt>{t('adapter')}</dt>
+                      <dd>{entry.adapter ?? t('notFound')}</dd>
+                      <dt>{t('source')}</dt>
                       <dd>
                         {entry.source === 'remote'
-                          ? 'SSH 远程主机'
+                          ? t('remoteHost')
                           : entry.source === 'bundled'
-                            ? '随 PaperAI 发布'
+                            ? t('bundled')
                             : entry.source === 'managed'
-                              ? 'PaperAI 管理'
-                              : '用户已有 / 自定义命令'}
+                              ? t('managed')
+                              : t('customCommand')}
                       </dd>
-                      <dt>版本</dt>
-                      <dd>
-                        适配器 {diagnostic.adapterVersion ?? '—'} · Agent {diagnostic.agentVersion ?? '—'}
+                      <dt>{t('version')}</dt>
+                      <dd>{t('adapterLabel')}{diagnostic.adapterVersion ?? '—'} · Agent {diagnostic.agentVersion ?? '—'}
                       </dd>
-                      <dt>最近检测</dt>
+                      <dt>{t('lastCheck')}</dt>
                       <dd>
-                        {diagnostic.checkedAt === null ? '尚未检测' : new Date(diagnostic.checkedAt).toLocaleString()}
+                        {diagnostic.checkedAt === null ? t('neverChecked') : new Date(diagnostic.checkedAt).toLocaleString()}
                         {diagnostic.elapsedMs === null ? '' : ` · ${diagnostic.elapsedMs} ms`}
                       </dd>
-                      <dt>登录</dt>
+                      <dt>{t('login')}</dt>
                       <dd>
-                        {entry.login ?? '按渠道文档配置环境变量或登录'}
+                        {entry.login ?? t('loginHint')}
                         {entry.documentation !== null && (
                           <>
                             {' '}
                             ·{' '}
-                            <a href={entry.documentation} target="_blank" rel="noreferrer">
-                              渠道文档
-                            </a>
+                            <a href={entry.documentation} target="_blank" rel="noreferrer">{t('documentation')}</a>
                           </>
                         )}
                       </dd>
                     </dl>
-                    <p className={css.note}>握手检测不发送模型请求。登录状态、模型访问权限与余额以实际对话为准。</p>
+                    <p className={css.note}>{t('probeHint')}</p>
                     {diagnostic.error !== null && (
                       <p role="alert" className={css.error}>
                         {diagnostic.error === 'authentication'
-                          ? '需要登录或检查凭据'
+                          ? t('authError')
                           : diagnostic.error === 'timeout'
-                            ? '检测超时，可重试或检查命令'
+                            ? t('timeoutError')
                             : diagnostic.error === 'unavailable'
-                              ? '可执行文件不可用'
-                              : 'ACP 协议初始化失败'}
+                              ? t('executableError')
+                              : t('protocolError')}
                       </p>
                     )}
                     {diagnostic.models.length > 0 && (
-                      <p>最近会话的模型：{diagnostic.models.map(model => model.name).join('、')}</p>
+                      <p>{t('recentModels')}{diagnostic.models.map(model => model.name).join('、')}</p>
                     )}
                     <div className={css.actions}>
                       {entry.installable && (
-                        <button
+                        <Button variant="outline"
                           type="button"
                           disabled={busy}
                           onClick={() => {
                             setConfirm({ id: entry.id, kind: 'install' })
                           }}
                         >
-                          {entry.source === 'managed' ? '更新托管安装' : '安装到 PaperAI'}
-                        </button>
+                          {entry.source === 'managed' ? t('updateInstall') : t('install')}
+                        </Button>
                       )}
                       {entry.source === 'managed' && (
-                        <button
+                        <Button variant="outline"
                           type="button"
                           disabled={busy}
                           onClick={() => {
                             setConfirm({ id: entry.id, kind: 'uninstall' })
                           }}
-                        >
-                          卸载托管安装
-                        </button>
+                        >{t('uninstall')}</Button>
                       )}
                       {diagnostic.authMethods
                         ?.filter(method => method.type === 'agent')
                         .map(method => (
-                          <button
+                          <Button variant="outline"
                             type="button"
                             key={method.id}
                             disabled={busy}
@@ -314,50 +304,46 @@ export function AcpSettingsSection({
                             }}
                           >
                             {method.name}
-                          </button>
+                          </Button>
                         ))}
                       {diagnostic.capabilities?.logout && (
-                        <button
+                        <Button variant="outline"
                           type="button"
                           disabled={busy}
                           onClick={() => {
                             setConfirm({ id: entry.id, kind: 'logout' })
                           }}
-                        >
-                          退出渠道登录
-                        </button>
+                        >{t('logoutChannel')}</Button>
                       )}
                       {diagnostic.capabilities?.providers && (
-                        <button
+                        <Button variant="outline"
                           type="button"
                           disabled={busy}
                           onClick={() => {
                             void manage(entry.id, { kind: 'providers' })
                           }}
-                        >
-                          模型服务商
-                        </button>
+                        >{t('providers')}</Button>
                       )}
                     </div>
                     {entry.output !== null && (
                       <details open={busy}>
-                        <summary>操作输出</summary>
+                        <summary>{t('output')}</summary>
                         <pre>{entry.output}</pre>
                       </details>
                     )}
                     {diagnostic.capabilities?.list && (
                       <details>
-                        <summary>渠道中的历史会话</summary>
+                        <summary>{t('history')}</summary>
                         <div className={css.toolbar}>
-                          <input
-                            aria-label={`${entry.name} 历史工作目录`}
+                          <Input
+                            aria-label={t('historyDirectory', { name: entry.name })}
                             value={historyCwd}
                             onChange={(event) => {
                               setHistoryCwd(event.target.value)
                             }}
-                            placeholder="全部目录，或输入此主机上的绝对路径"
+                            placeholder={t('historyDirectoryHint')}
                           />
-                          <button
+                          <Button variant="outline"
                             type="button"
                             disabled={busy}
                             onClick={() => {
@@ -366,19 +352,17 @@ export function AcpSettingsSection({
                                 ...(historyCwd.trim() === '' ? {} : { cwd: historyCwd.trim() }),
                               })
                             }}
-                          >
-                            读取历史
-                          </button>
+                          >{t('readHistory')}</Button>
                         </div>
                         {state.management[entry.id]?.sessions?.map(session => (
                           <div className={css.history} key={session.sessionId}>
                             <div>
                               <strong>{session.title ?? session.sessionId}</strong>
                               <small>
-                                {session.cwd} · {session.updatedAt ?? '时间未报告'}
+                                {session.cwd} · {session.updatedAt ?? t('timeUnknown')}
                               </small>
                             </div>
-                            <button
+                            <Button variant="outline"
                               type="button"
                               disabled={busy || !entry.enabled || diagnostic.capabilities?.load !== true}
                               onClick={() => {
@@ -386,24 +370,20 @@ export function AcpSettingsSection({
                                   if (opened) close()
                                 })
                               }}
-                            >
-                              导入并打开
-                            </button>
+                            >{t('importHistory')}</Button>
                             {diagnostic.capabilities?.delete && (
-                              <button
+                              <Button variant="outline"
                                 type="button"
                                 disabled={busy}
                                 onClick={() => {
                                   setConfirm({ id: entry.id, kind: 'delete', sessionId: session.sessionId })
                                 }}
-                              >
-                                删除外部历史
-                              </button>
+                              >{t('deleteHistory')}</Button>
                             )}
                           </div>
                         ))}
                         {nextCursor != null && (
-                          <button
+                          <Button variant="outline"
                             type="button"
                             disabled={busy}
                             onClick={() => {
@@ -413,9 +393,7 @@ export function AcpSettingsSection({
                                 ...(historyCwd.trim() === '' ? {} : { cwd: historyCwd.trim() }),
                               })
                             }}
-                          >
-                            加载更多
-                          </button>
+                          >{t('loadMore')}</Button>
                         )}
                       </details>
                     )}
@@ -424,15 +402,15 @@ export function AcpSettingsSection({
                         <div>
                           <strong>
                             {provider.id}
-                            {provider.required ? ' · 必需' : ''}
+                            {provider.required ? t('required') : ''}
                           </strong>
                           <small>
                             {provider.current === null
-                              ? '未启用'
+                              ? t('disabled')
                               : `${provider.current.apiType} · ${provider.current.baseUrl}`}
                           </small>
                         </div>
-                        <button
+                        <Button variant="outline"
                           type="button"
                           disabled={busy}
                           onClick={() => {
@@ -445,48 +423,44 @@ export function AcpSettingsSection({
                               error: null,
                             })
                           }}
-                        >
-                          设置
-                        </button>
+                        >{t('settings')}</Button>
                         {!provider.required && provider.current !== null && (
-                          <button
+                          <Button variant="outline"
                             type="button"
                             disabled={busy}
                             onClick={() => {
                               void manage(entry.id, { kind: 'disable-provider', providerId: provider.id })
                             }}
-                          >
-                            禁用服务商
-                          </button>
+                          >{t('disableProvider')}</Button>
                         )}
                       </div>
                     ))}
                     {diagnostic.capabilities !== undefined && (
                       <details>
-                        <summary>协议能力</summary>
+                        <summary>{t('capabilities')}</summary>
                         <p>
                           {Object.entries(diagnostic.capabilities)
                             .filter(([, enabled]) => enabled)
                             .map(
                               ([name]) =>
                                 ({
-                                  load: '加载历史',
-                                  resume: '恢复会话',
-                                  list: '历史列表',
-                                  fork: '原生分叉',
-                                  close: '关闭会话',
-                                  delete: '删除历史',
-                                  additionalDirectories: '额外目录',
-                                  image: '图片输入',
-                                  audio: '音频输入',
-                                  embeddedContext: '嵌入资源',
+                                  load: t('loadHistory'),
+                                  resume: t('resume'),
+                                  list: t('historyList'),
+                                  fork: t('fork'),
+                                  close: t('closeSession'),
+                                  delete: t('delete'),
+                                  additionalDirectories: t('directories'),
+                                  image: t('image'),
+                                  audio: t('audio'),
+                                  embeddedContext: t('resources'),
                                   mcpHttp: 'MCP HTTP',
                                   mcpSse: 'MCP SSE',
-                                  providers: '模型服务商配置',
-                                  logout: '退出登录',
+                                  providers: t('providerSettings'),
+                                  logout: t('logout'),
                                 })[name] ?? name,
                             )
-                            .join(' · ') || '仅 ACP 基础会话能力'}
+                            .join(' · ') || t('basicCapabilities')}
                         </p>
                       </details>
                     )}
@@ -495,16 +469,16 @@ export function AcpSettingsSection({
               </article>
             )
           })}
-          {state.entries.length === 0 && <p className={css.note}>{state.loading ? '正在读取渠道…' : '没有可用的 Agent'}</p>}
+          {state.entries.length === 0 && <p className={css.note}>{state.loading ? t('loading') : t('empty')}</p>}
         </div>
       </div>
       <div className={css.group}>
-        <div className={css.groupLabel}>新会话默认</div>
+        <div className={css.groupLabel}>{t('newSessionDefaults')}</div>
         <div className={css.card}>
           <label className={css.row}>
             <span className={css.fact}>
-              <span>默认 Agent</span>
-              <span>用于新建会话；进行中的会话保持它开始时的选择</span>
+              <span>{t('defaultAgent')}</span>
+              <span>{t('defaultHint')}</span>
             </span>
             <select
               value={state.defaultProvider}
@@ -529,29 +503,27 @@ export function AcpSettingsSection({
         onClose={() => {
           setConfirm(null)
         }}
-        title="确认渠道操作"
-        closeLabel="取消操作"
+        title={t('confirmTitle')}
+        closeLabel={t('cancelOperation')}
       >
         <p>
           {confirm?.id}：
           {confirm?.kind === 'install'
-            ? '下载官方渠道包并安装到 PaperAI 的独立目录；会运行该包的安装脚本。'
+            ? t('installImpact')
             : confirm?.kind === 'uninstall'
-              ? '移除 PaperAI 托管安装。内置适配器、系统 CLI 和会话记录会保留。'
+              ? t('uninstallImpact')
               : confirm?.kind === 'logout'
-                ? '退出此主机上该渠道的登录状态。其他使用同一账户配置的应用也可能需要重新登录。'
-                : '永久删除渠道中的这条外部历史；PaperAI 的本地记录不会一并删除。'}
+                ? t('logoutImpact')
+                : t('deleteImpact')}
         </p>
         <div className={css.actions}>
-          <button
+          <Button variant="outline"
             type="button"
             onClick={() => {
               setConfirm(null)
             }}
-          >
-            取消
-          </button>
-          <button
+          >{t('cancel')}</Button>
+          <Button variant="outline"
             type="button"
             onClick={() => {
               if (confirm === null) return
@@ -561,18 +533,16 @@ export function AcpSettingsSection({
                 void manage(confirm.id, { kind: 'delete', sessionId: confirm.sessionId })
               setConfirm(null)
             }}
-          >
-            确认
-          </button>
+          >{t('confirm')}</Button>
         </div>
       </Modal>
       <Modal
         open={routing !== null}
         onClose={() => {
-          setRouting(null)
+          if (routing === null || !state.busy.includes(routing.id)) setRouting(null)
         }}
-        title="设置模型服务商"
-        closeLabel="取消设置"
+        title={t('routingTitle')}
+        closeLabel={t('cancelRouting')}
       >
         {routing !== null && (
           <form
@@ -587,24 +557,24 @@ export function AcpSettingsSection({
                   Array.isArray(headers) ||
                   Object.values(headers).some(value => typeof value !== 'string')
                 )
-                  throw new Error('请求头须为 JSON 字符串对象')
+                  throw new Error(t('headersError'))
+                if (state.busy.includes(routing.id)) return
+                setRouting({ ...routing, error: null })
                 void manage(routing.id, {
                   kind: 'set-provider',
                   providerId: routing.providerId,
                   apiType: routing.apiType,
                   baseUrl: routing.baseUrl,
                   headers: headers as Record<string, string>,
-                })
-                setRouting(null)
+                }).then((ok) => { if (ok) setRouting(null) })
               } catch (error: unknown) {
                 setRouting({ ...routing, error: String(error) })
               }
             }}
           >
-            <p>{routing.providerId} · 本操作完整替换此渠道的服务商配置，包括请求头。</p>
-            <label>
-              API 协议
-              <select
+            <p>{routing.providerId}{t('routingImpact')}</p>
+            <fieldset disabled={state.busy.includes(routing.id)}>
+              <label>{t('apiType')}<select
                 value={routing.apiType}
                 onChange={(event) => {
                   setRouting({ ...routing, apiType: event.target.value })
@@ -616,10 +586,8 @@ export function AcpSettingsSection({
                     <option key={api}>{api}</option>
                   ))}
               </select>
-            </label>
-            <label>
-              API 地址
-              <input
+              </label>
+              <label>{t('apiUrl')}<Input
                 required
                 type="url"
                 value={routing.baseUrl}
@@ -627,28 +595,30 @@ export function AcpSettingsSection({
                   setRouting({ ...routing, baseUrl: event.target.value })
                 }}
               />
-            </label>
-            <label>
-              请求头 · JSON 对象
-              <textarea
+              </label>
+              <label>{t('headers')}<textarea
                 value={routing.headers}
                 onChange={(event) => {
                   setRouting({ ...routing, headers: event.target.value })
                 }}
                 autoComplete="off"
               />
-            </label>
+              </label>
+            </fieldset>
             {routing.error !== null && <p role="alert">{routing.error}</p>}
-            <button type="submit">保存到渠道</button>
+            {state.error !== null && <p role="alert" className={css.error}>{state.error}</p>}
+            <Button variant="primary" type="submit" disabled={state.busy.includes(routing.id)}>
+              {t(state.busy.includes(routing.id) ? 'saving' : 'saveRouting')}
+            </Button>
           </form>
         )}
       </Modal>
       <Modal
         open={draft !== null}
         onClose={cancelEdit}
-        title="配置 ACP 渠道"
-        description="启动配置用于之后建立的连接。空白凭据输入会保留已有值。"
-        closeLabel="取消编辑"
+        title={t('editTitle')}
+        description={t('editHint')}
+        closeLabel={t('cancelEdit')}
         className={css.modal ?? ''}
       >
         {draft !== null && (
@@ -660,20 +630,17 @@ export function AcpSettingsSection({
             }}
           >
             <fieldset disabled={state.saving}>
+              <legend>{t('connectionGroup')}</legend>
               <div className={css.fields}>
-                <label>
-                  渠道 ID
-                  <input value={draft.id} readOnly />
+                <label>{t('channelId')}<Input value={draft.id} readOnly />
                 </label>
-                <label>
-                  显示名称
-                  <input
-                    value={draft.name}
-                    required
-                    onChange={(event) => {
-                      updateDraft({ name: event.target.value })
-                    }}
-                  />
+                <label>{t('name')}<Input
+                  value={draft.name}
+                  required
+                  onChange={(event) => {
+                    updateDraft({ name: event.target.value })
+                  }}
+                />
                 </label>
                 <label className={css.check}>
                   <input
@@ -682,56 +649,46 @@ export function AcpSettingsSection({
                     onChange={(event) => {
                       updateDraft({ enabled: event.target.checked })
                     }}
-                  />
-                  启用渠道
-                </label>
+                  />{t('enable')}</label>
               </div>
-              <label>
-                可执行命令
-                <input
-                  value={draft.command}
-                  onChange={(event) => {
-                    updateDraft({ command: event.target.value })
-                  }}
-                  placeholder="留空使用渠道默认命令"
-                />
+              <label>{t('command')}<Input
+                value={draft.command}
+                onChange={(event) => {
+                  updateDraft({ command: event.target.value })
+                }}
+                placeholder={t('commandHint')}
+              />
               </label>
-              <label>
-                启动参数 · JSON 数组
-                <textarea
-                  rows={2}
-                  value={draft.args}
-                  onChange={(event) => {
-                    updateDraft({ args: event.target.value })
-                  }}
-                  spellCheck={false}
-                />
+              <label>{t('args')}<textarea
+                rows={2}
+                value={draft.args}
+                onChange={(event) => {
+                  updateDraft({ args: event.target.value })
+                }}
+                spellCheck={false}
+              />
               </label>
               <details>
-                <summary>SSH 远程连接</summary>
-                <label>
-                  SSH 配置 · JSON 对象
-                  <textarea
-                    rows={4}
-                    value={draft.ssh}
-                    onChange={(event) => {
-                      updateDraft({ ssh: event.target.value })
-                    }}
-                    placeholder={'{"host":"research-server","cwd":"/home/me/project"}'}
-                    spellCheck={false}
-                  />
+                <summary>{t('ssh')}</summary>
+                <label>{t('sshConfig')}<textarea
+                  rows={4}
+                  value={draft.ssh}
+                  onChange={(event) => {
+                    updateDraft({ ssh: event.target.value })
+                  }}
+                  placeholder={'{"host":"research-server","cwd":"/home/me/project"}'}
+                  spellCheck={false}
+                />
                 </label>
-                <p className={css.note}>
-                  留空在本机运行。远程 POSIX 主机须已安装 Node.js、对应 ACP 适配器，并使用 OpenSSH 密钥登录；PaperAI
-                  论文工具通过 SSH 转发，文件回调不会访问本机目录。可设置 user、port、identityFile 和 node。
-                </p>
+                <p className={css.note}>{t('sshHint')}</p>
               </details>
+              <h3>{t('credentialsGroup')}</h3>
               <div className={css.fields}>
                 {(draft.template === 'codex' || draft.template === 'claude') && (
                   <>
                     <label>
                       API Key
-                      <input
+                      <Input
                         type="password"
                         autoComplete="off"
                         value={draft.apiKey}
@@ -739,41 +696,72 @@ export function AcpSettingsSection({
                         onChange={(event) => {
                           updateDraft({ apiKey: event.target.value })
                         }}
-                        placeholder="保留已有凭据"
+                        placeholder={t('retainCredentials')}
                       />
                     </label>
                     <label>
                       Base URL
-                      <input
+                      <Input
                         value={draft.baseURL}
                         onChange={(event) => {
                           updateDraft({ baseURL: event.target.value })
                         }}
-                        placeholder="留空使用渠道默认值"
+                        placeholder={t('channelDefault')}
                       />
                     </label>
                   </>
                 )}
-                <label>
-                  网络代理
-                  <input
-                    value={draft.proxy}
-                    onChange={(event) => {
-                      updateDraft({ proxy: event.target.value })
-                    }}
-                    placeholder="例如 http://127.0.0.1:7890"
-                  />
+                <label>{t('proxy')}<Input
+                  value={draft.proxy}
+                  onChange={(event) => {
+                    updateDraft({ proxy: event.target.value })
+                  }}
+                  placeholder={t('proxyHint')}
+                />
                 </label>
-                <label>
-                  默认模型
-                  <input
-                    value={draft.model}
-                    onChange={(event) => {
-                      updateDraft({ model: event.target.value })
-                    }}
-                    list="acp-known-models"
-                    placeholder="留空使用 Agent 默认模型"
-                  />
+              </div>
+              <details>
+                <summary>{t('advanced')}</summary>
+                <label>{t('env')}<textarea
+                  rows={3}
+                  value={draft.env}
+                  disabled={draft.clearEnv}
+                  onChange={(event) => {
+                    updateDraft({ env: event.target.value })
+                  }}
+                  placeholder={t('envHint')}
+                  spellCheck={false}
+                />
+                </label>
+                <div className={css.fields}>
+                  <label className={css.check}>
+                    <input
+                      type="checkbox"
+                      checked={draft.clearKey}
+                      onChange={(event) => {
+                        updateDraft({ clearKey: event.target.checked })
+                      }}
+                    />{t('clearKey')}</label>
+                  <label className={css.check}>
+                    <input
+                      type="checkbox"
+                      checked={draft.clearEnv}
+                      onChange={(event) => {
+                        updateDraft({ clearEnv: event.target.checked })
+                      }}
+                    />{t('clearEnv')}</label>
+                </div>
+              </details>
+              <details>
+                <summary>{t('modelsGroup')}</summary>
+                <label>{t('model')}<Input
+                  value={draft.model}
+                  onChange={(event) => {
+                    updateDraft({ model: event.target.value })
+                  }}
+                  list="acp-known-models"
+                  placeholder={t('modelHint')}
+                />
                 </label>
                 <datalist id="acp-known-models">
                   {state.entries
@@ -784,106 +772,58 @@ export function AcpSettingsSection({
                       </option>
                     ))}
                 </datalist>
-              </div>
-              <details>
-                <summary>高级设置</summary>
-                <label>
-                  环境变量 · JSON 对象
-                  <textarea
-                    rows={3}
-                    value={draft.env}
-                    disabled={draft.clearEnv}
-                    onChange={(event) => {
-                      updateDraft({ env: event.target.value })
-                    }}
-                    placeholder="留空保留；输入新对象会替换此渠道的环境变量覆盖"
-                    spellCheck={false}
-                  />
+                <label>{t('reasoning')}<Input
+                  value={draft.reasoningEffort}
+                  onChange={(event) => {
+                    updateDraft({ reasoningEffort: event.target.value })
+                  }}
+                  placeholder={t('reasoningHint')}
+                />
                 </label>
-                <div className={css.fields}>
-                  <label className={css.check}>
-                    <input
-                      type="checkbox"
-                      checked={draft.clearKey}
-                      onChange={(event) => {
-                        updateDraft({ clearKey: event.target.checked })
-                      }}
-                    />
-                    清除已保存的 API Key
-                  </label>
-                  <label className={css.check}>
-                    <input
-                      type="checkbox"
-                      checked={draft.clearEnv}
-                      onChange={(event) => {
-                        updateDraft({ clearEnv: event.target.checked })
-                      }}
-                    />
-                    清除环境变量覆盖
-                  </label>
-                </div>
-                <label>
-                  默认思考强度
-                  <input
-                    value={draft.reasoningEffort}
-                    onChange={(event) => {
-                      updateDraft({ reasoningEffort: event.target.value })
-                    }}
-                    placeholder="仅填写渠道实际支持的值"
-                  />
+                <label>{t('options')}<textarea
+                  rows={3}
+                  value={draft.configOptions}
+                  onChange={(event) => {
+                    updateDraft({ configOptions: event.target.value })
+                  }}
+                  spellCheck={false}
+                />
                 </label>
-                <label>
-                  默认会话选项 · JSON 对象
-                  <textarea
-                    rows={3}
-                    value={draft.configOptions}
-                    onChange={(event) => {
-                      updateDraft({ configOptions: event.target.value })
-                    }}
-                    spellCheck={false}
-                  />
+                <label>{t('permissions')}<textarea
+                  rows={3}
+                  value={draft.permissionModes}
+                  onChange={(event) => {
+                    updateDraft({ permissionModes: event.target.value })
+                  }}
+                  placeholder={'{"read-only":"…","workspace-write":"…","danger-full-access":"…"}'}
+                  spellCheck={false}
+                />
                 </label>
-                <label>
-                  原生权限模式映射 · JSON 对象
-                  <textarea
-                    rows={3}
-                    value={draft.permissionModes}
-                    onChange={(event) => {
-                      updateDraft({ permissionModes: event.target.value })
-                    }}
-                    placeholder={'{"read-only":"…","workspace-write":"…","danger-full-access":"…"}'}
-                    spellCheck={false}
-                  />
-                </label>
-                <p className={css.note}>留空使用 Codex、Claude 的默认权限映射。连接时会校验渠道实际提供的模式。</p>
+                <p className={css.note}>{t('permissionsHint')}</p>
               </details>
               <details>
-                <summary>对话偏好</summary>
-                <label>
-                  回复语言
-                  <input
-                    value={draft.language}
-                    onChange={(event) => {
-                      updateDraft({ language: event.target.value })
-                    }}
-                    placeholder="例如 简体中文"
-                  />
+                <summary>{t('preferences')}</summary>
+                <label>{t('language')}<Input
+                  value={draft.language}
+                  onChange={(event) => {
+                    updateDraft({ language: event.target.value })
+                  }}
+                  placeholder={t('languageHint')}
+                />
                 </label>
-                <label>
-                  个人指令
-                  <textarea
-                    rows={4}
-                    value={draft.personalPrompt}
-                    onChange={(event) => {
-                      updateDraft({ personalPrompt: event.target.value })
-                    }}
-                    placeholder="此渠道新会话使用的写作或交互偏好"
-                  />
+                <label>{t('instructions')}<textarea
+                  rows={4}
+                  value={draft.personalPrompt}
+                  onChange={(event) => {
+                    updateDraft({ personalPrompt: event.target.value })
+                  }}
+                  placeholder={t('instructionsHint')}
+                />
                 </label>
               </details>
             </fieldset>
             {!draft.enabled && state.defaultProvider === draft.id && (
-              <p className={css.note}>请先更换默认 Agent，再停用此渠道。</p>
+              <p className={css.note}>{t('disableDefault')}</p>
             )}
             {state.draftError !== null && (
               <p role="alert" className={css.error}>
@@ -891,12 +831,10 @@ export function AcpSettingsSection({
               </p>
             )}
             <footer className={css.actions}>
-              <button type="button" disabled={state.saving} onClick={cancelEdit}>
-                取消
-              </button>
-              <button type="submit" disabled={state.saving || !state.writable}>
-                {state.saving ? '保存中…' : '保存配置'}
-              </button>
+              <Button variant="outline" type="button" disabled={state.saving} onClick={cancelEdit}>{t('cancel')}</Button>
+              <Button variant="primary" type="submit" disabled={state.saving || !state.writable}>
+                {state.saving ? t('saving') : t('save')}
+              </Button>
             </footer>
           </form>
         )}

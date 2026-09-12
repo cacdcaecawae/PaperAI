@@ -1,6 +1,6 @@
 /** Block-level reading of the Host's preview HTML: the rendered preview, the commit patch, and the version diff. */
 
-import type { PaperAIDocumentTextRun, PaperAIVersionChange } from './types.ts'
+import type { PaperAIDocumentTextRun, PaperAIVersionChange, PaperAIDocumentParagraph, PaperAIParagraphFormat } from './types.ts'
 
 /** Tags whose text maps back to one semantic node. */
 export const BLOCK_TAGS = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH']
@@ -12,6 +12,20 @@ export const BLOCK_TAGS = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 
  */
 export function normalize(text: string): string {
   return text.replace(/\s+/gu, ' ').trim()
+}
+
+/**
+ * Read preview text with Word's soft-break marker rather than dropping HTML breaks.
+ * @param block - one preview paragraph.
+ * @returns its complete text, including vertical-tab soft breaks.
+ */
+export function textOf(block: HTMLElement): string {
+  const walker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  let text = ''
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    text += node instanceof Element ? (node.tagName === 'BR' && !node.hasAttribute('data-paperai-placeholder') ? '\v' : '') : node.nodeValue ?? ''
+  }
+  return text
 }
 
 /**
@@ -92,12 +106,25 @@ function overridesOf(element: Element, block: HTMLElement, base: CSSStyleDeclara
     ...(underline === underlinedWithin(block, block) ? {} : { underline }),
     ...(!Number.isFinite(size) || size === pointsOf(base) ? {} : { size: `${size}pt` }),
     ...(run.color === base.color ? {} : { color: hexOf(run.color) }),
+    ...(run.fontFamily === base.fontFamily ? {} : { font: fontOf(run) }),
   }
 }
 
 /** Two runs carry the same formatting when every stated override matches. */
 function sameFormat(left: PaperAIDocumentTextRun, right: PaperAIDocumentTextRun): boolean {
-  return (['bold', 'italic', 'underline', 'size', 'color'] as const).every(key => left[key] === right[key])
+  return (['bold', 'italic', 'underline', 'size', 'color', 'font'] as const).every(key => left[key] === right[key])
+}
+
+/**
+ * The first named font family, excluding browser and CSS generic defaults.
+ * @param style - resolved character style.
+ * @returns the primary font family, or empty when the preview has no document font.
+ */
+export function fontOf(style: CSSStyleDeclaration): string {
+  const family = style.fontFamily.split(',')[0]?.trim().replace(/^["']|["']$/gu, '') ?? ''
+  const generic = /^(?:-apple-system|BlinkMacSystemFont|system-ui|serif|sans-serif|monospace|cursive|fantasy|emoji|math|fangsong|ui-.+)$/iu
+  return generic.test(family)
+    ? '' : family
 }
 
 /**
@@ -121,12 +148,12 @@ export function sameRuns(left: readonly PaperAIDocumentTextRun[], right: readonl
  */
 export function runsOf(block: HTMLElement): PaperAIDocumentTextRun[] {
   const view = block.ownerDocument.defaultView
-  if (view === null) return [{ text: block.textContent }]
+  if (view === null) return [{ text: textOf(block) }]
   const base = view.getComputedStyle(block)
-  const walker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+  const walker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
   const runs: PaperAIDocumentTextRun[] = []
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const text = node.nodeValue ?? ''
+    const text = node instanceof Element ? (node.tagName === 'BR' && !node.hasAttribute('data-paperai-placeholder') ? '\v' : '') : node.nodeValue ?? ''
     const parent = node.parentElement
     if (text === '' || parent === null) continue
     const run = { text, ...(parent === block ? {} : overridesOf(parent, block, base)) }
@@ -152,6 +179,7 @@ function readingOf(block: HTMLElement): Required<Omit<PaperAIDocumentTextRun, 't
     underline: style !== null && underlinedWithin(block, block),
     size: Number.isFinite(size) ? `${size}pt` : '',
     color: style === null ? '' : hexOf(style.color),
+    font: style === null ? '' : fontOf(style),
   }
 }
 
@@ -181,6 +209,7 @@ export function restateCleared(
     ...(was.underline !== undefined && first.underline === undefined ? { underline: own.underline } : {}),
     ...(was.size !== undefined && first.size === undefined && own.size !== '' ? { size: own.size } : {}),
     ...(was.color !== undefined && first.color === undefined && own.color !== '' ? { color: own.color } : {}),
+    ...(was.font !== undefined && first.font === undefined ? { font: own.font } : {}),
   }, ...rest]
 }
 
@@ -199,7 +228,11 @@ export function applyRuns(block: HTMLElement, runs: readonly PaperAIDocumentText
     if (run.underline !== undefined) span.style.textDecoration = run.underline ? 'underline' : 'none'
     if (run.size !== undefined) span.style.fontSize = run.size
     if (run.color !== undefined) span.style.color = run.color
-    span.textContent = run.text
+    if (run.font !== undefined) span.style.fontFamily = run.font
+    run.text.split('\v').forEach((text, index) => {
+      if (index > 0) span.append(block.ownerDocument.createElement('br'))
+      span.append(block.ownerDocument.createTextNode(text))
+    })
     return span
   }))
 }
@@ -207,7 +240,7 @@ export function applyRuns(block: HTMLElement, runs: readonly PaperAIDocumentText
 /** Provider-addressed blocks whose text matches, in reading order; page bands without an address never take part. */
 function addressed(blocks: readonly HTMLElement[], text: string): HTMLElement[] {
   const wanted = normalize(text)
-  return blocks.filter(block => block.dataset.path !== undefined && normalize(block.textContent) === wanted)
+  return blocks.filter(block => block.dataset.path !== undefined && normalize(textOf(block)) === wanted)
 }
 
 /**
@@ -220,6 +253,7 @@ export interface PreviewTextPatch {
   readonly nextText: string
   /** The block's runs, when its character formatting was part of the commit. */
   readonly runs?: readonly PaperAIDocumentTextRun[]
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
   readonly cell: boolean
   readonly ordinal: number
 }
@@ -242,10 +276,61 @@ export function patchPreviewHtml(html: string, patches: readonly PreviewTextPatc
     .filter(candidate => (candidate.closest('td, th') !== null) === patch.cell)[patch.ordinal]] as const)
   for (const [patch, block] of located) {
     if (block === undefined) continue
-    if (patch.runs === undefined) block.textContent = patch.nextText
+    if (patch.paragraphs !== undefined) applyParagraphs(block, patch.paragraphs)
+    else if (patch.runs === undefined) applyRuns(block, [{ text: patch.nextText }])
     else applyRuns(block, patch.runs)
   }
   return parsed.documentElement.outerHTML
+}
+
+/**
+ * Read draft paragraph containers, or the original block before its first split.
+ * @param block - mapped original paragraph.
+ * @returns draft paragraphs in reading order.
+ */
+export function paragraphsOf(block: HTMLElement): HTMLElement[] {
+  const parts = [...block.children].filter((child): child is HTMLElement =>
+    child instanceof HTMLElement && child.dataset.paperaiParagraph !== undefined)
+  return parts.length === 0 ? [block] : parts
+}
+
+/**
+ * Apply supported paragraph declarations and retain their explicit values for DOCX submission.
+ * @param block - original or draft paragraph.
+ * @param patch - explicit paragraph settings.
+ */
+export function applyParagraphFormat(block: HTMLElement, patch: PaperAIParagraphFormat): void {
+  const previous = paragraphFormatOf(block)
+  const format = { ...previous, ...patch }
+  block.dataset.paperaiFormat = JSON.stringify(format)
+  if (format.align !== undefined) block.style.textAlign = format.align
+  if (format.indent !== undefined) block.style.marginLeft = format.indent
+  if (format.lineSpacing !== undefined) block.style.lineHeight = format.lineSpacing.replace(/x$/u, '')
+}
+
+/**
+ * Read explicit draft paragraph settings.
+ * @param block - original or draft paragraph.
+ * @returns only settings selected in the editor.
+ */
+export function paragraphFormatOf(block: HTMLElement): PaperAIParagraphFormat | undefined {
+  const raw = block.dataset.paperaiFormat
+  return raw === undefined ? undefined : JSON.parse(raw) as PaperAIParagraphFormat
+}
+
+/**
+ * Paint one original block's replacement paragraphs until the DOCX preview arrives.
+ * @param block - original mapped block.
+ * @param paragraphs - draft paragraphs, including the original first paragraph.
+ */
+export function applyParagraphs(block: HTMLElement, paragraphs: readonly PaperAIDocumentParagraph[]): void {
+  block.replaceChildren(...paragraphs.map((paragraph) => {
+    const part = block.ownerDocument.createElement('div')
+    part.dataset.paperaiParagraph = ''
+    applyRuns(part, paragraph.runs ?? [{ text: paragraph.text }])
+    if (paragraph.format !== undefined) applyParagraphFormat(part, paragraph.format)
+    return part
+  }))
 }
 
 /** Tokens a word diff compares: CJK characters one by one, Latin words and numbers whole, whitespace and punctuation as they come. */

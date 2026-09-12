@@ -13,6 +13,8 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.root :where(button) { min-height: 36px; }
+
 .headline {
   display: flex;
   min-width: 0;
@@ -112,7 +114,7 @@
   box-sizing: border-box;
   display: flex;
   width: 100%;
-  height: 44px;
+  min-height: 48px;
   min-width: 0;
   align-items: center;
   gap: 10px;
@@ -127,6 +129,8 @@
   line-height: 20px;
   text-align: left;
 }
+
+.docName small { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 
 .docRow:hover,
 .createRow:hover:not(:disabled) {

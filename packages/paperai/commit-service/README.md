@@ -19,6 +19,8 @@ The service requires `paperRepository`, `documentEngine`, and `paperDocuments`.
 
 Compiled mutations cover `replace-text`, `insert-node`, `delete-node`, `bind-template`, `unbind-template`, `set-document-type`, and `milestone`. `replace-text` may carry the block's `runs`, which must spell exactly its `nextText`; with runs the block's character formatting is part of the change, so its text alone may stay as it is. `bind-template` runs `paperTemplates.validateAssociation()` with the document type the same commit switches to; `unbind-template` fails on a document with no bound template; `set-document-type` fails when the type is unchanged and, unless the same commit binds another template, records an `unbind-template` operation first because a bound format applies to one type. The published `DocumentRecord` carries the resulting type and template binding.
 
+`replace-text.paragraphs` contains the complete nonempty replacement for one original node and is mutually exclusive with top-level `runs`. Each paragraph's runs must spell its text, and the paragraph texts joined by newlines must spell `nextText`. Paragraph texts contain no paragraph separators; a vertical tab denotes a soft line break. Formatting-only replacements remain valid when the text is unchanged.
+
 ## Publication and Recovery
 
 Each document has one in-process FIFO. The service copies the Working DOCX to a private project-local candidate, compiles supported domain mutations to Office-path mutations, asks `documentEngine` to save and validate that candidate, and asks `paperDocuments` to rebuild its semantic index without publishing it.

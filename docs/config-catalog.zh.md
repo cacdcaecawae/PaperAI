@@ -3413,7 +3413,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/document-engine-officecli/src/index.ts:43`](../packages/paperai/document-engine-officecli/src/index.ts)
+来源：[`packages/paperai/document-engine-officecli/src/index.ts:44`](../packages/paperai/document-engine-officecli/src/index.ts)
 
 <a id="paperaiexport-service"></a>
 

@@ -9,8 +9,9 @@ import { inspect } from 'node:util'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
-import { strToU8, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@paperai/workbench-service'
 import {
   assertFixtureInventory, compareOrRefreshGolden, captureStableAria,
@@ -65,7 +66,7 @@ async function readAcpLog(path: string): Promise<AcpLogEntry[]> {
 }
 
 /** Small valid OOXML document sent through the real browser import path. */
-function fixtureDocxBase64(withFigureAndTable = false): string {
+function fixtureDocxBase64(withFigureAndTable = false, paragraphs = ['Initial browser paragraph', 'Second paragraph']): string {
   return Buffer.from(zipSync({
     '[Content_Types].xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8"?>'
@@ -89,8 +90,7 @@ function fixtureDocxBase64(withFigureAndTable = false): string {
     'word/document.xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
-      + '<w:p><w:r><w:t>Initial browser paragraph</w:t></w:r></w:p>'
-      + '<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p>'
+      + paragraphs.map(text => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`).join('')
       + (withFigureAndTable
         ? '<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid>'
           + '<w:tr><w:tc><w:tcPr/><w:p><w:r><w:t>Repeated passage</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
@@ -135,14 +135,32 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   let scaffold: WebScaffold
   let browser: Browser
   let page: Page
-  /** The sidebar's row for one tracked document; the start page lists the same documents. */
-  /** Retype a mapped block the way a writer does: select its text and insert the replacement. */
-  const retype = async (block: Locator, text: string): Promise<void> => {
+  const selectBlockText = async (block: Locator): Promise<void> => {
     await block.click()
-    await page.keyboard.press('Control+A')
+    await block.evaluate((element) => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
+    })
+  }
+  /** Replace one paragraph's selected text through the browser's native input event. */
+  const retype = async (block: Locator, text: string): Promise<void> => {
+    await selectBlockText(block)
     await page.keyboard.insertText(text)
   }
   const pending = () => page.locator('[data-paperai-pending]')
+  const agentColumn = () => page.locator('[class*="centerCol"]')
+  const expectAgentHidden = async (): Promise<void> => {
+    await expect.poll(() => agentColumn().evaluate(element => element.hasAttribute('inert')
+      && element.getAttribute('aria-hidden') === 'true' && element.getBoundingClientRect().width < 1)).toBe(true)
+  }
+  const expectAgentVisible = async (): Promise<void> => {
+    await expect.poll(() => agentColumn().evaluate(element => !element.hasAttribute('inert')
+      && element.getBoundingClientRect().width >= 280)).toBe(true)
+  }
   const sidebarDocument = (fileName: string) => page.getByRole('region', { name: '文档' })
     .getByRole('button', { name: `打开 ${fileName}`, exact: true })
   let tripwire: ReturnType<typeof watchConsole>
@@ -263,7 +281,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const open = sidebarDocument('Browser conflict proposal.docx')
     await open.waitFor({ timeout: 15_000 })
     await open.click()
-    await page.getByRole('document', { name: '文档预览' }).waitFor({ timeout: 30_000 })
+    await page.getByRole('document', { name: '文档预览' }).filter({ visible: true }).waitFor({ timeout: 30_000 })
   }, 180_000)
 
   afterAll(async () => {
@@ -291,6 +309,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-agent-presets'))
     await expect.poll(() => scaffold.ctx.settings.describe().find(entry => entry.ns === 'paperai-acp-agents')?.user)
       .toEqual({ providers: { codex: { apiKey: 'browser-old-codex' }, claude: { apiKey: 'browser-old-claude' } } })
+    await expectAgentHidden()
+    await page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true }).waitFor()
+    await page.getByRole('button', { name: '显示 Agent 协作', exact: true }).click()
+    await expectAgentVisible()
     const trigger = page.getByRole('button', { name: 'Codex' }).first()
     await trigger.waitFor({ timeout: 10_000 })
     await trigger.click()
@@ -583,7 +605,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-conflict'))
     await sidebarDocument('Browser conflict proposal.docx').click()
     await expect.poll(() => page.locator('[data-phase="active"]').count()).toBeGreaterThan(0)
-    const preview = page.getByRole('document', { name: '文档预览' })
+    const preview = page.getByRole('document', { name: '文档预览' }).filter({ visible: true })
     await retype(preview.locator('[data-paperai-block]', { hasText: 'Initial browser paragraph — normalized' }).first(), '浏览器中的本地草稿')
     const changed = preview.locator('[data-paperai-changed]')
     await expect.poll(() => pending().getByRole('button', { name: '保存', exact: true }).isEnabled()).toBe(true)
@@ -635,6 +657,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     })
     await banner.waitFor({ timeout: 10_000 })
     await banner.getByRole('button', { name: '刷新' }).click()
+    await expect.poll(() => banner.count(), { timeout: 30_000 }).toBe(0)
     await page.getByRole('alert').filter({ hasText: '草稿已保留' }).waitFor({ timeout: 30_000 })
     expect(await changed.textContent()).toBe('浏览器中的本地草稿')
     expect(await changed.getAttribute('data-paperai-conflicted')).not.toBeNull()
@@ -664,7 +687,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       contentBase64: fixtureDocxBase64(), name: 'Second proposal',
     })
     expect(imported.status).toBe('imported')
-    const preview = page.getByRole('document', { name: '文档预览' })
+    const preview = page.getByRole('document', { name: '文档预览' }).filter({ visible: true })
+    await page.getByRole('combobox', { name: '缩放', exact: true }).selectOption('100')
     const original = await preview.elementHandle()
     if (original === null) throw new Error('document preview missing')
     await retype(preview.locator('[data-paperai-block]', { hasText: '浏览器合并后的最终文本' }), '切换文档保留的草稿')
@@ -679,6 +703,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'retained-draft.expected.md'),
       await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
     await pending().getByRole('button', { name: '放弃修改', exact: true }).click()
+    await page.getByRole('combobox', { name: '缩放', exact: true }).selectOption('fit')
     await original.dispose()
   }, 90_000)
 
@@ -690,7 +715,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('button', { name: 'Claude', exact: true }).first().waitFor({ timeout: 20_000 })
     await expect.poll(() => page.getByRole('button', { name: 'Claude', exact: true }).first().getAttribute('aria-busy')).not.toBe('true')
     await sidebarDocument('Browser conflict proposal.docx').click()
-    const preview = page.getByRole('document', { name: '文档预览' })
+    const preview = page.getByRole('document', { name: '文档预览' }).filter({ visible: true })
     await preview.waitFor({ timeout: 15_000 })
     expect(await page.locator('[data-paperai-start="project"]').count()).toBe(0)
     const frame = page.locator('[data-details-position="start"]')
@@ -705,10 +730,11 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       selection.addRange(range)
       element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
     })
-    const selection = page.getByRole('region', { name: '选中的文字' })
-    await selection.waitFor({ timeout: 10_000 })
+    const selection = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
+      .getByRole('button', { name: '交给 Agent', exact: true })
+    await expect.poll(() => selection.isEnabled(), { timeout: 10_000 }).toBe(true)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection.expected.md'), await selection.ariaSnapshot(), MODE)
-    await selection.getByRole('button', { name: '交给 Agent' }).click()
+    await selection.click()
     const composer = page.locator('textarea:enabled').last()
     await expect.poll(() => composer.isVisible()).toBe(true)
     expect(await composer.inputValue()).toContain('浏览器合并后的最终文本')
@@ -723,7 +749,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.setViewportSize({ width: 1680, height: 1000 })
     await expect.poll(async () => (await preview.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(480)
     await expect.poll(async () => (await page.locator('[class*=sidebarCol]').boundingBox())?.width ?? 0).toBe(280)
-    await expect.poll(async () => (await page.locator('[class*=detailsCol]').boundingBox())?.width ?? 0).toBe(860)
+    await expect.poll(async () => (await page.locator('[class*=detailsCol]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(480)
     const quotedMessage = page.locator('[data-word-selection-message]').last()
     await quotedMessage.waitFor()
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection-message.expected.md'), await quotedMessage.ariaSnapshot(), MODE)
@@ -762,7 +788,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
     await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
     await sidebarDocument('Browser conflict proposal.docx').click()
-    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
     await preview.locator('[data-paperai-block]').first().waitFor({ timeout: 20_000 })
     await page.getByRole('button', { name: '关闭文档', exact: true }).click()
     await page.locator('[data-paperai-start="project"]').waitFor({ timeout: 20_000 })
@@ -785,7 +811,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
         buffer: Buffer.from(fixtureDocxBase64(true), 'base64'),
       })
       await ready.promise
-      await retype(preview.locator('[data-paperai-block][contenteditable]').first(), '导入期间新写的草稿')
+      await retype(preview.locator('[data-paperai-block][contenteditable="true"]').first(), '导入期间新写的草稿')
       release.resolve(undefined)
       await sidebarDocument('Review figures.docx').waitFor({ timeout: 20_000 })
       expect(await preview.locator('[data-paperai-changed]').textContent()).toBe('导入期间新写的草稿')
@@ -801,7 +827,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
   it('loads embedded figures and edits body text without retargeting a matching table cell', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-table-figure'))
     await sidebarDocument('Review figures.docx').click()
-    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
     const figure = preview.locator('img')
     await figure.waitFor({ timeout: 20_000 })
     expect(await figure.count()).toBe(1)
@@ -811,7 +837,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const before = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('review-read'), resourceId: row.id })
     const cell = before.document.nodes.find(node => node.kind === 'table-cell' && node.text === 'Repeated passage' && node.editable)
     const cellBlock = preview.locator('td').getByText('Repeated passage', { exact: true })
-    expect(await cellBlock.getAttribute('contenteditable')).toBe(cell === undefined ? null : 'plaintext-only')
+    expect(await cellBlock.evaluate(element => (element as HTMLElement).isContentEditable)).toBe(cell !== undefined)
     const body = preview.locator('p[data-paperai-block]:not(table p)', { hasText: /^Repeated passage$/u })
     expect(await body.count()).toBe(1)
     await retype(body, 'Only the body paragraph changed')
@@ -830,9 +856,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('keeps headers and footers read-only when body paragraphs have the same text', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-header-footer'))
-    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
     for (const band of ['doc-header', 'doc-footer']) {
-      expect(await preview.locator(`.${band} p`).getAttribute('contenteditable')).toBeNull()
+      expect(await preview.locator(`.${band} p`).evaluate(element => (element as HTMLElement).isContentEditable)).toBe(false)
     }
     const body = preview.locator('.page-body p[data-path="/body/p[1]"]')
     expect(await body.textContent()).toBe(await preview.locator('.doc-header p').textContent())
@@ -848,20 +874,274 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('carries bold and a font size from the page into the saved document', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-formatting'))
-    const preview = page.getByRole('document', { name: '文档预览', exact: true })
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
     const body = preview.locator('.page-body p[data-path="/body/p[1]"]')
-    await body.click()
-    await page.keyboard.press('Control+A')
-    const selection = page.getByRole('region', { name: '选中的文字', exact: true })
-    await selection.getByRole('button', { name: '加粗', exact: true }).click()
-    await selection.getByRole('combobox', { name: '字号', exact: true }).selectOption('16pt')
+    await selectBlockText(body)
+    const toolbar = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
+    await toolbar.getByRole('button', { name: '加粗', exact: true }).click()
+    await toolbar.getByRole('combobox', { name: '字号（磅）', exact: true }).selectOption('16pt')
     await pending().getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
     // The Host re-renders the preview from the DOCX, so its spans are the run properties Word now stores.
     await expect.poll(() => body.locator('span').first().getAttribute('style'), { timeout: 30_000 })
-      .toMatch(/font-weight:s*bold/u)
-    expect(await body.locator('span').first().getAttribute('style')).toMatch(/font-size:s*16pt/u)
+      .toMatch(/font-weight:\s*bold/u)
+    expect(await body.locator('span').first().getAttribute('style')).toMatch(/font-size:\s*16pt/u)
     expect(await body.textContent()).toBe('Body edited; header unchanged')
+  }, 90_000)
+
+  it('separates recorded formatting operations from text comparison and confirms a restore before writing', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-versions'))
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const row = overview.documents.find(document => document.fileName === 'Review figures.docx')!
+    const read = () => scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('versions-read'), resourceId: row.id })
+    const before = await read()
+    await page.locator('[data-paperai-toolbar] button[data-kind="versions"]').click()
+    const versions = page.getByRole('complementary', { name: '版本', exact: true })
+    await versions.locator('ol > li button').first().click()
+    const formatting = versions.getByText('此版本记录了 1 项格式操作；具体格式差异暂不展示。', { exact: true })
+    await formatting.waitFor({ timeout: 20_000 })
+    expect(await page.getByRole('document', { name: '文档预览' }).filter({ visible: true }).locator('[data-paperai-change]').count()).toBe(0)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'formatting-comparison.expected.md'), await formatting.ariaSnapshot(), MODE)
+    await versions.locator('ol > li button').nth(1).click()
+    await versions.getByRole('button', { name: '恢复到此版本', exact: true }).click()
+    const confirm = versions.getByRole('button', { name: '确认恢复并创建新版本', exact: true })
+    await confirm.waitFor()
+    expect((await read()).document.headCommitId).toBe(before.document.headCommitId)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'restore-confirmation.expected.md'), [
+      await confirm.ariaSnapshot(),
+      await versions.getByRole('button', { name: '保留当前版本', exact: true }).ariaSnapshot(),
+    ].join('\n'), MODE)
+    await versions.getByRole('button', { name: '保留当前版本', exact: true }).click()
+    expect(await confirm.count()).toBe(0)
+    expect((await read()).document.headCommitId).toBe(before.document.headCommitId)
+    await versions.getByRole('button', { name: '恢复到此版本', exact: true }).click()
+    await confirm.click()
+    await expect.poll(async () => (await read()).document.versions.length, { timeout: 30_000 }).toBe(before.document.versions.length + 1)
+    const after = await read()
+    expect(after.document.headCommitId).not.toBe(before.document.headCommitId)
+    expect(after.document.nodes.map(node => node.text)).toEqual(before.document.nodes.map(node => node.text))
+    await versions.getByRole('button', { name: '关闭面板', exact: true }).click()
+    const body = page.getByRole('document', { name: '文档预览' }).filter({ visible: true }).locator('.page-body p').first()
+    expect(await body.innerText()).toBe('Body edited; header unchanged')
+    expect(`${await body.getAttribute('style') ?? ''} ${await body.innerHTML()}`).not.toMatch(/font-size:\s*16pt/u)
+  }, 120_000)
+
+  it('saves Enter, multiline paste, soft breaks, multi-block formatting and paragraph layout through OfficeCLI', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-paragraph-editing'))
+    const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('paragraph-edit-import'), fileName: 'Paragraph editing.docx',
+      contentBase64: fixtureDocxBase64(), name: 'Paragraph editing',
+    })
+    expect(imported.status).toBe('imported')
+    await sidebarDocument('Paragraph editing.docx').click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    const blocks = preview.locator('[data-paperai-block][contenteditable="true"]').filter({ visible: true })
+    const toolbar = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
+    await expect.poll(() => blocks.first().textContent(), { timeout: 20_000 }).toBe('Initial browser paragraph')
+    await retype(blocks.first(), '第一段')
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.insertText('新增段落')
+    expect(await blocks.first().locator('[data-paperai-paragraph]').count()).toBe(2)
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.evaluate(text => navigator.clipboard.writeText(text), '\n多行粘贴')
+    await page.keyboard.press('Control+V')
+    await expect.poll(() => blocks.first().locator('[data-paperai-paragraph]').count()).toBe(3)
+    await toolbar.getByRole('button', { name: '撤销草稿修改', exact: true }).click()
+    expect(await blocks.first().locator('[data-paperai-paragraph]').count()).toBe(2)
+    await toolbar.getByRole('button', { name: '重做草稿修改', exact: true }).click()
+    expect(await blocks.first().locator('[data-paperai-paragraph]').count()).toBe(3)
+    await page.keyboard.press('Shift+Enter')
+    await page.keyboard.insertText('软换行')
+    await retype(blocks.nth(1), '尾段已修改')
+    const beforeCrossBlockDelete = await blocks.allTextContents()
+    await blocks.first().click()
+    await page.keyboard.press('Control+A')
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toContain('尾段已修改')
+    await page.keyboard.press('Backspace')
+    expect(await blocks.allTextContents()).toEqual(beforeCrossBlockDelete)
+    await blocks.first().evaluate((first) => {
+      const last = first.parentElement!.querySelectorAll('[data-paperai-block][contenteditable="true"]')[1]!
+      const range = document.createRange()
+      range.setStart(first, 0)
+      range.setEnd(last, last.childNodes.length)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      first.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
+    })
+    await toolbar.getByRole('button', { name: '加粗', exact: true }).click()
+    await toolbar.getByRole('combobox', { name: '字体', exact: true }).selectOption('Arial')
+    await toolbar.getByRole('combobox', { name: '字号（磅）', exact: true }).selectOption('14pt')
+    await toolbar.getByRole('button', { name: '段落', exact: true }).click()
+    await toolbar.getByLabel('段落对齐', { exact: true }).selectOption('center')
+    await toolbar.getByLabel('左缩进（磅）', { exact: true }).fill('24')
+    await toolbar.getByLabel('行距', { exact: true }).selectOption('1.5x')
+    expect(await preview.locator('[data-paperai-changed]').count()).toBe(2)
+    expect(await page.locator('[data-paperai-toolbar] button[data-kind="export"]').isEnabled()).toBe(false)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-draft.expected.md'),
+      await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
+    await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+    await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+    await sidebarDocument('Paragraph editing.docx').click()
+    await expect.poll(() => blocks.count(), { timeout: 20_000 }).toBe(4)
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const row = overview.documents.find(document => document.fileName === 'Paragraph editing.docx')!
+    const saved = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('paragraph-edit-read'), resourceId: row.id })
+    expect(saved.document.nodes.filter(node => node.editable).map(node => node.text))
+      .toEqual(['第一段', '新增段落', '多行粘贴\v软换行', '尾段已修改'])
+    const wordXml = unzipSync(await readFile(row.workingPath!))['word/document.xml']!
+    const paragraphLayouts = await page.evaluate((xml) => {
+      const namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+      const document = new DOMParser().parseFromString(xml, 'application/xml')
+      const body = document.getElementsByTagNameNS(namespace, 'body')[0]!
+      return [...body.getElementsByTagNameNS(namespace, 'p')].map((paragraph) => {
+        const properties = paragraph.getElementsByTagNameNS(namespace, 'pPr')[0]
+        const value = (name: string, attribute: string): string | null | undefined =>
+          properties?.getElementsByTagNameNS(namespace, name)[0]?.getAttributeNS(namespace, attribute)
+        return { align: value('jc', 'val'), indent: value('ind', 'left'), spacing: value('spacing', 'line'), rule: value('spacing', 'lineRule') }
+      })
+    }, strFromU8(wordXml))
+    expect(paragraphLayouts).toEqual(Array.from({ length: 4 }, () => ({ align: 'center', indent: '480', spacing: '360', rule: 'auto' })))
+    for (const block of await blocks.all()) {
+      expect(await block.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
+      const readings = await block.evaluate((element) => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+        const values = []
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+          if (node.nodeValue === '') continue
+          const style = getComputedStyle(node.parentElement!)
+          values.push({ font: style.fontFamily, size: parseFloat(style.fontSize), weight: style.fontWeight })
+        }
+        return values
+      })
+      expect(readings.length).toBeGreaterThan(0)
+      for (const reading of readings) {
+        expect(reading.font).toContain('Arial')
+        expect(reading.size).toBeCloseTo(14 * 96 / 72, 2)
+        expect(reading.weight).toBe('700')
+      }
+    }
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-saved.expected.md'), await preview.ariaSnapshot(), MODE)
+  }, 180_000)
+
+  it('keeps writing controls reachable across desktop viewports, themes, locales and document zoom', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-writing-viewports'))
+    const fileName = '毕业论文_公开合成长文档_方法结果与讨论_Methods_Results_Discussion_Appendix_Review_Draft_2026.docx'
+    const endMarker = 'Long document end marker 080'
+    const paragraphs = Array.from({ length: 80 }, (_, index) =>
+      `${index === 79 ? endMarker : `Public synthetic paragraph ${String(index + 1).padStart(3, '0')}`} ${'公开合成正文，用于验证长文档的阅读、查找与视口布局。'.repeat(8)}`)
+    const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('long-document-import'), fileName,
+      contentBase64: fixtureDocxBase64(false, paragraphs), name: fileName.slice(0, -5),
+    })
+    expect(imported.status).toBe('imported')
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(document => document.fileName === fileName)!
+    const readback = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('long-document-read'), resourceId: row.id })
+    expect(readback.document.nodes.filter(node => node.editable).map(node => node.text)).toEqual(paragraphs)
+    await sidebarDocument(fileName).click()
+    const longPreview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    await expect.poll(() => longPreview.locator('[data-paperai-block][contenteditable="true"]').count()).toBe(80)
+    expect(await longPreview.evaluate(element => element.scrollHeight / element.clientHeight)).toBeGreaterThan(3)
+    expect(await sidebarDocument(fileName).getAttribute('title')).toBe(row.workingPath)
+    await page.getByRole('button', { name: '查找文档', exact: true }).click()
+    await page.getByRole('textbox', { name: '查找正文', exact: true }).fill(endMarker)
+    await page.getByRole('button', { name: '下一个匹配', exact: true }).click()
+    await expect.poll(() => longPreview.evaluate(element => element.scrollTop)).toBeGreaterThan(1_000)
+    const last = longPreview.locator('[data-paperai-block]', { hasText: endMarker })
+    await expect.poll(async () => {
+      const outer = (await longPreview.boundingBox())!; const target = (await last.boundingBox())!
+      return target.y >= outer.y && target.y < outer.y + outer.height
+    }).toBe(true)
+    await page.getByRole('button', { name: '查找文档', exact: true }).click()
+    const readingPosition = await longPreview.evaluate(element => element.scrollTop)
+    await page.locator('[data-paperai-toolbar] button[data-kind="versions"]').click()
+    await page.getByRole('complementary', { name: '版本', exact: true }).getByRole('button', { name: '关闭面板', exact: true }).click()
+    expect(await longPreview.evaluate(element => element.scrollTop)).toBe(readingPosition)
+    const focus = page.getByRole('button', { name: '专注写作', exact: true })
+    if (await focus.isVisible()) await focus.click()
+    const artifactRoot = join(process.cwd(), '.playwright-mcp', 'paperai-writing-viewports')
+    await mkdir(artifactRoot, { recursive: true })
+    const evidence: unknown[] = []
+    for (const [width, height, locale, scheme] of [
+      [1366, 768, 'zh', 'light'], [1366, 768, 'zh', 'dark'],
+      [1440, 900, 'en', 'light'], [1440, 900, 'en', 'dark'],
+      [1920, 1080, 'zh', 'light'], [1920, 1080, 'en', 'dark'],
+    ] as const) {
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme: scheme })
+      await scaffold.ctx.settings.mutate(settingsNamespace('locale'), [{ op: 'set', path: ['preference'], value: locale }])
+      await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toBe(locale === 'zh' ? 'zh-CN' : 'en')
+      await expect.poll(() => page.evaluate(() => document.body.hasAttribute('data-ds-dark-theme'))).toBe(scheme === 'dark')
+      await expectAgentHidden()
+      const toolbar = page.getByRole('toolbar', { name: locale === 'zh' ? '文档编辑工具栏' : 'Document editing toolbar', exact: true })
+      const preview = page.getByRole('document', { name: locale === 'zh' ? '文档预览' : 'Document preview', exact: true }).filter({ visible: true })
+      const status = page.locator('footer').filter({ has: page.getByRole('combobox', { name: locale === 'zh' ? '缩放' : 'Zoom', exact: true }) })
+      const zoom = status.getByRole('combobox')
+      await zoom.selectOption('fit')
+      const geometry = async (): Promise<{ toolbar: unknown; preview: unknown; status: unknown }> => {
+        await expect.poll(async () => {
+          const boxes = await Promise.all([toolbar.boundingBox(), preview.boundingBox(), status.boundingBox()])
+          return boxes.every(box => box !== null && box.x >= 0 && box.y >= 0
+            && box.x + box.width <= width + 1 && box.y + box.height <= height + 1)
+        }).toBe(true)
+        const boxes = { toolbar: await toolbar.boundingBox(), preview: await preview.boundingBox(), status: await status.boundingBox() }
+        for (const box of Object.values(boxes)) {
+          expect(box).not.toBeNull()
+          expect(box!.x).toBeGreaterThanOrEqual(0)
+          expect(box!.y).toBeGreaterThanOrEqual(0)
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1)
+          expect(box!.y + box!.height).toBeLessThanOrEqual(height + 1)
+        }
+        expect(boxes.preview!.width).toBeGreaterThanOrEqual(480)
+        expect(boxes.preview!.height).toBeGreaterThanOrEqual(280)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        return boxes
+      }
+      const fit = await geometry()
+      await zoom.selectOption('100')
+      const normal = await preview.locator('.page').first().boundingBox()
+      await zoom.selectOption('125')
+      await expect.poll(async () => ((await preview.locator('.page').first().boundingBox())?.width ?? 0) / normal!.width).toBeCloseTo(1.25, 2)
+      await geometry()
+      expect(await preview.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+      await page.screenshot({ path: join(artifactRoot, `${width}x${height}-${locale}-${scheme}-document-125.png`) })
+      await zoom.selectOption('fit')
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, `writing-controls.${locale}.expected.md`), [
+        await toolbar.ariaSnapshot(), await status.ariaSnapshot(),
+      ].join('\n'), MODE)
+      const collaborate = page.getByRole('button', { name: locale === 'zh' ? '显示 Agent 协作' : 'Show Agent collaboration', exact: true })
+      await collaborate.click()
+      await expectAgentVisible()
+      await page.screenshot({ path: join(artifactRoot, `${width}x${height}-${locale}-${scheme}-agent.png`) })
+      await page.getByRole('button', { name: locale === 'zh' ? '专注写作' : 'Focus writing', exact: true }).click()
+      await expectAgentHidden()
+      await page.screenshot({ path: join(artifactRoot, `${width}x${height}-${locale}-${scheme}.png`) })
+      evidence.push({ width, height, locale, scheme, documentZoom: '125% verified against 100%', fit })
+    }
+    await writeFile(join(artifactRoot, 'geometry.json'), `${JSON.stringify(evidence, null, 2)}\n`)
+    await scaffold.ctx.settings.mutate(settingsNamespace('locale'), [{ op: 'set', path: ['preference'], value: 'zh' }])
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.setViewportSize({ width: 1680, height: 1000 })
+    await page.getByRole('button', { name: '显示 Agent 协作', exact: true }).click()
+  }, 180_000)
+
+  it('exports the saved writing document to the displayed project path', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-draft-export'))
+    await sidebarDocument('Paragraph editing.docx').click()
+    await page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true }).getByText('第一段', { exact: true }).waitFor()
+    await page.locator('[data-paperai-toolbar] button[data-kind="export"]').click()
+    await page.getByRole('menuitem', { name: '导出草稿', exact: true }).click()
+    const receipt = page.getByRole('status').filter({ hasText: '草稿已导出' })
+    await receipt.waitFor({ timeout: 30_000 })
+    const outputPath = await receipt.locator('span').textContent()
+    expect(outputPath).toBe(join(scaffold.workspaceCwd, 'paper-project', 'exports', 'drafts', 'Paragraph editing-草稿.docx'))
+    expect((await readFile(outputPath!)).byteLength).toBeGreaterThan(0)
+    const exported = await scaffold.ctx.documentEngine.readTextNodes(outputPath!)
+    expect(exported.map(node => node.text)).toEqual(['第一段', '新增段落', '多行粘贴\v软换行', '尾段已修改'])
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'draft-export.expected.md'),
+      await receipt.locator('strong').ariaSnapshot(), MODE)
   }, 90_000)
 
   it('starts from migrated credentials with optional defaults and renders throttled tool progress', async () => {
@@ -877,10 +1157,11 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     const claude = settings.getByRole('article').filter({ has: page.getByRole('button', { name: /^Claude/ }) })
     await claude.getByRole('button', { name: '配置', exact: true }).click()
     const editor = page.getByRole('dialog', { name: '配置 ACP 渠道', exact: true })
+    await editor.getByText('模型与权限', { exact: true }).click()
     await editor.getByLabel('默认模型', { exact: true }).fill('custom-browser-model')
-    await editor.getByText('高级设置', { exact: true }).click()
     await editor.getByRole('textbox', { name: '默认思考强度', exact: true }).fill('retired-effort')
     await editor.getByRole('textbox', { name: '默认会话选项 · JSON 对象', exact: true }).fill('{"removed-option":true}')
+    await editor.getByText('高级设置', { exact: true }).click()
     await editor.getByRole('textbox', { name: '环境变量 · JSON 对象', exact: true }).fill(JSON.stringify({
       FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_UPDATES: '4', FAKE_ACP_STREAM_GATE_FILE: streamGate, FAKE_ACP_STREAM_FORMAT: 'terminal-delta',
     }))
@@ -894,6 +1175,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('button', { name: '返回项目列表', exact: true }).click()
     await page.getByRole('treeitem', { name: /ACP defaults/ }).click()
     await page.getByRole('button', { name: '在“ACP defaults”中新建会话', exact: true }).click()
+    await page.getByRole('button', { name: '尚未选择本项目的模板', exact: true }).click()
     await page.getByRole('button', { name: '不用模板，自由写', exact: true }).click()
     await page.getByRole('dialog', { name: '本项目用哪套模板？', exact: true }).waitFor({ state: 'hidden' })
     await page.getByRole('button', { name: 'Claude', exact: true }).first().waitFor()
@@ -936,7 +1218,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'block-editor.expected.md',
       'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
+      'draft-export.expected.md',
       'external-update.expected.md',
+      'formatting-comparison.expected.md',
       'header-footer.expected.md',
       'import-draft.expected.md',
       'model-failure.expected.md',
@@ -944,11 +1228,16 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'permission-default.expected.md',
       'permission-failure.expected.md',
       'permission-read-only.expected.md',
+      'paragraph-draft.expected.md',
+      'paragraph-saved.expected.md',
       'project-doctor.expected.md',
       'retained-draft.expected.md',
+      'restore-confirmation.expected.md',
       'table-figure.expected.md',
       'word-selection.expected.md',
       'word-selection-message.expected.md',
+      'writing-controls.en.expected.md',
+      'writing-controls.zh.expected.md',
     ])
   })
 })

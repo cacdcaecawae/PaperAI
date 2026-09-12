@@ -8,7 +8,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Button, IconBrowseOutline16, IconPlusOutline16, IconRefreshOutline14, Menu,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PaperAIDocumentType, PaperAIFormatChoice, PaperAIProjectState, PaperAIWordUpload } from './types.ts'
 import type { PaperAIStartPageProps } from './slots.ts'
 import { readWordFileBase64 } from './browser-file.ts'
@@ -66,7 +65,6 @@ export function StartPage({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [invalidFile, setInvalidFile] = useState(false)
-  const prompted = useRef(new Set<WorkspaceId>())
   const intent = useRef<UploadIntent | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const overview = project.overview
@@ -74,14 +72,6 @@ export function StartPage({
   useEffect(() => {
     if (workspaceId !== undefined) void ensureProject(workspaceId)
   }, [ensureProject, workspaceId])
-
-  // A project that never decided its template is asked once per visit; a
-  // closed dialog is an answer for this visit, not a reason to nag.
-  useEffect(() => {
-    if (workspaceId === undefined || overview === null || overview.templateDecided || prompted.current.has(workspaceId)) return
-    prompted.current.add(workspaceId)
-    setDialogOpen(true)
-  }, [workspaceId, overview])
 
   useEffect(() => {
     if (dialogOpen) void loadLibrary()
@@ -156,7 +146,7 @@ export function StartPage({
     <div className={css.root} data-paperai-start="project">
       <div className={css.headline}>
         {mark}
-        <h1 className={css.title}>{overview?.projectName ?? ''}</h1>
+        <h1 className={css.title} title={overview?.projectName}>{overview?.projectName ?? ''}</h1>
         {project.phase === 'error' && overview === null && (
           <div className={css.failure} role="alert">
             <span>{t('start.error')}</span>
@@ -192,6 +182,7 @@ export function StartPage({
       </div>
       {overview !== null && (
         <div className={css.documents}>
+          {documents.length === 0 && <p className={css.lead}>{t('start.empty')}</p>}
           {documents.length > 0 && (
             <>
               <div className={css.listHead} aria-hidden="true">
@@ -206,11 +197,15 @@ export function StartPage({
                       className={css.docRow}
                       style={typeAccent(row.documentType)}
                       aria-label={t('documents.open', { name: row.fileName })}
-                      title={row.fileName}
+                      title={row.workingPath ?? row.fileName}
                       onClick={() => { void openDocument(workspaceId, row.id) }}
                     >
                       <span className={css.docIcon} aria-hidden="true"><IconBrowseOutline16 size={16} /></span>
-                      <span className={css.docName}>{row.name}</span>
+                      <span className={css.docName}>{row.name}
+                        {documents.some(other => other.id !== row.id && other.name === row.name) && (
+                          <small>{row.fileName} · {row.documentId.slice(-8)}</small>
+                        )}
+                      </span>
                       {row.documentType !== 'other' && (
                         <span className={css.badge}>{t(DOCUMENT_TYPE_KEYS[row.documentType])}</span>
                       )}
@@ -223,7 +218,7 @@ export function StartPage({
           )}
           <div className={css.menu}>
             <Menu
-              compact
+              portal
               open={menuOpen}
               items={items}
               anchor={(
