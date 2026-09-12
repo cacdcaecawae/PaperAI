@@ -147,8 +147,10 @@ describe('CI workflow', () => {
     for (const selection of [
       'packages/client/connection/tests/client-apply.client.spec.ts',
       'packages/client/connection/tests/api-helpers.client.spec.ts',
+      'packages/client/connection/tests/fixture.client.spec.ts',
       'packages/client/ui-paperai-workbench/tests',
       'packages/client/ui-primitives/tests',
+      'packages/session/session-title/tests',
       'packages/host/apiproxy/tests/rpc-schemas.spec.ts',
       'packages/interaction/permission-presets/tests',
       'packages/paperai',

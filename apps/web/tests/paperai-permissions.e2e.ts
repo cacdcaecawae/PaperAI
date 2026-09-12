@@ -47,6 +47,7 @@ const MODE = webSnapshotMode()
 interface AcpLogEntry {
   readonly event: string
   readonly modeId?: string
+  readonly title?: string
 }
 
 /** Include engine validation evidence when setup fails before browser assertions. */
@@ -219,6 +220,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
               FAKE_ACP_STARTUP_GATE_FILE: startupGatePath,
               FAKE_ACP_MODEL: 'fake-beta',
               FAKE_ACP_LOG: acpLogPath,
+              FAKE_ACP_TITLE_ECHO: '1',
             },
           },
         },
@@ -707,7 +709,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await original.dispose()
   }, 90_000)
 
-  it('quotes exact Word text into a logged message and reveals the Agent at narrow widths', async () => {
+  it('quotes exact Word text into a logged message, keeps source metadata out of the session title, and reveals the Agent at narrow widths', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-selection'))
     await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
     await page.getByRole('button', { name: 'Codex', exact: true }).first().click()
@@ -752,6 +754,15 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(async () => (await page.locator('[class*=detailsCol]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(480)
     const quotedMessage = page.locator('[data-word-selection-message]').last()
     await quotedMessage.waitFor()
+    const titleEcho = (await readAcpLog(acpLogPath)).filter(entry => entry.event === 'title-echo').at(-1)?.title
+    expect(titleEcho).toContain('[Word selection]')
+    expect(titleEcho).toContain('"document"')
+    const sessions = page.getByRole('tree', { name: '项目会话', exact: true })
+    const sessionTitle = sessions.getByText('Browser conflict proposal', { exact: true })
+    await sessionTitle.waitFor({ timeout: 10_000 })
+    expect(await sessions.innerText()).not.toContain('[Word selection]')
+    expect(await sessions.innerText()).not.toContain('"revision"')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection-session-title.expected.md'), await sessionTitle.ariaSnapshot(), MODE)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection-message.expected.md'), await quotedMessage.ariaSnapshot(), MODE)
     await page.screenshot({ path: join(process.cwd(), '.artifacts', 'paperai-agentero-workbench.png') })
   }, 90_000)
@@ -1236,6 +1247,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'table-figure.expected.md',
       'word-selection.expected.md',
       'word-selection-message.expected.md',
+      'word-selection-session-title.expected.md',
       'writing-controls.en.expected.md',
       'writing-controls.zh.expected.md',
     ])
