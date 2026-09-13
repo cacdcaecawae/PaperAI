@@ -430,6 +430,17 @@ function makeAgent(connection) {
           await connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: 'session_info_update', title } })
         }
       }
+      if (process.env.FAKE_ACP_FAILED_MCP_TOOL === '1') {
+        await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call', toolCallId: 'failed-mcp-edit', name: 'mcp__paperai__paperai_commit_document',
+          title: 'paperai: paperai_commit_document', kind: 'other', status: 'in_progress',
+          rawInput: { documentId: 'public-synthetic-document', expectedRevision: 1 },
+        } })
+        await connection.sessionUpdate({ sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call_update', toolCallId: 'failed-mcp-edit', status: 'failed',
+          rawOutput: { content: [{ type: 'text', text: '{"error":"revision_conflict","detail":"Read the current revision before retrying."}' }], isError: true },
+        } })
+      }
       const streamTool = process.env.FAKE_ACP_STREAM_TOOL
       if (streamTool !== undefined) {
         const terminalDelta = process.env.FAKE_ACP_STREAM_FORMAT === 'terminal-delta'

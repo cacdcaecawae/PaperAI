@@ -554,6 +554,7 @@ jobs:
         run: >-
           pnpm exec vitest run --config vitest.web.config.ts
           apps/web/tests/paperai-dsh-preset.e2e.ts
+          apps/web/tests/paperai-acp-tool-failure.e2e.ts
           apps/web/tests/paperai-permissions.e2e.ts
           apps/web/tests/paperai-workspace-navigation.e2e.ts
           apps/web/tests/built-boot.snapshot.ts

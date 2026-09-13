@@ -184,6 +184,7 @@ describe('CI workflow', () => {
     expect(uiCommands).toContain('snapshot: pwsh-tool-turn matches')
     expect(uiCommands).not.toContain('persistent-pwsh-tool-turn')
     expect(uiCommands).toContain('scripts/translation-prompt.snapshot.ts')
+    expect(uiCommands).toContain('apps/web/tests/paperai-acp-tool-failure.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-permissions.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-workspace-navigation.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
