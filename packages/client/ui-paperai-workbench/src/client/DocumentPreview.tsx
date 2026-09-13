@@ -19,6 +19,7 @@ export interface DocumentPreviewProps {
   readonly html: string
   readonly revision: PaperAIDocumentSnapshot['revision']
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
+  readonly paragraphStyles: PaperAIDocumentSnapshot['paragraphStyles']
   readonly title: string
   readonly edits: readonly PaperAIBlockEdit[]
   readonly comparing?: boolean
@@ -130,7 +131,7 @@ function compositionSnapshot(container: HTMLElement): () => void {
 }
 
 /** Render draft operations over the preview; successful Host commits replace the document revision. */
-export function DocumentPreview({ html, revision, nodes, title, edits, saving, onDraft, onSave, onCancel, t,
+export function DocumentPreview({ html, revision, nodes, paragraphStyles, title, edits, saving, onDraft, onSave, onCancel, t,
   active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, comparing = false, busy = false,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
@@ -521,7 +522,8 @@ export function DocumentPreview({ html, revision, nodes, title, edits, saving, o
   }
   return (
     <div className={css.previewSeat} hidden={!active} aria-hidden={!active || undefined}>
-      {active && !comparing && <EditorRibbon caret={caret} fonts={fonts} disabled={!editable || composing.current} dirty={edits.length > 0}
+      {active && !comparing && <EditorRibbon caret={caret} fonts={fonts} paragraphStyles={paragraphStyles}
+        disabled={!editable || composing.current} dirty={edits.length > 0}
         undo={historyState.undo} redo={historyState.redo} onSave={onSave} onUndo={() =>{  undo() }} onRedo={() =>{  undo(true) }}
         onToggle={toggle} onFormat={format} onParagraph={paragraph} onFind={find}
         quote={excerpt !== null} onQuote={onQuote === undefined ? undefined : () => {

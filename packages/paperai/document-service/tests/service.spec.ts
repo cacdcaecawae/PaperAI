@@ -88,6 +88,7 @@ class FakeDocumentEngine {
   healthResult: CapabilityHealth = { status: 'ready', version: 'test' }
   nodes: EngineTextNode[] = []
   previews: string[] = []
+  stylePaths: string[] = []
   readPaths: string[] = []
   released: string[] = []
   readFailure: Error | undefined
@@ -105,6 +106,11 @@ class FakeDocumentEngine {
   previewHtml(filePath: string): Promise<string> {
     this.previews.push(filePath)
     return Promise.resolve(`<article>${filePath}</article>`)
+  }
+
+  readParagraphStyles(filePath: string): Promise<{ id: string; name: string }[]> {
+    this.stylePaths.push(filePath)
+    return Promise.resolve([{ id: 'a', name: 'Normal' }])
   }
 
   inspect(): Promise<Record<string, unknown>> {
@@ -234,6 +240,8 @@ describe('PaperDocumentService', () => {
     const preview = await ctx.paperDocuments.previewHtml(result.document.id)
     expect(preview).toContain(result.document.workingPath)
     expect(engine.previews).toEqual([result.document.workingPath])
+    await expect(ctx.paperDocuments.readParagraphStyles(result.document.id)).resolves.toEqual([{ id: 'a', name: 'Normal' }])
+    expect(engine.stylePaths).toEqual([result.document.workingPath])
 
     await chmod(result.document.immutableSourcePath, 0o600)
     await writeFile(result.document.immutableSourcePath, 'tampered source')
@@ -631,6 +639,7 @@ describe('PaperDocumentService', () => {
     await expect(ctx.paperDocuments.previewHtml(missing)).rejects.toMatchObject({
       code: 'DOCUMENT_NOT_FOUND',
     } satisfies Partial<PaperDocumentError>)
+    await expect(ctx.paperDocuments.readParagraphStyles(missing)).rejects.toMatchObject({ code: 'DOCUMENT_NOT_FOUND' })
     await expect(ctx.paperDocuments.rebuildIndex(missing)).rejects.toMatchObject({
       code: 'DOCUMENT_NOT_FOUND',
     } satisfies Partial<PaperDocumentError>)

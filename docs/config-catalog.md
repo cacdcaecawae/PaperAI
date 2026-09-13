@@ -3411,7 +3411,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/document-engine-officecli/src/index.ts:44`](../packages/paperai/document-engine-officecli/src/index.ts)
+Source: [`packages/paperai/document-engine-officecli/src/index.ts:60`](../packages/paperai/document-engine-officecli/src/index.ts)
 
 <a id="paperaiexport-service"></a>
 
@@ -3553,7 +3553,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/workbench-service/src/index.ts:290`](../packages/paperai/workbench-service/src/index.ts)
+Source: [`packages/paperai/workbench-service/src/index.ts:291`](../packages/paperai/workbench-service/src/index.ts)
 
 ## Loadable plugins with no config
 

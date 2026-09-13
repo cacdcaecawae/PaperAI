@@ -543,6 +543,7 @@ describe('PaperAIWorkbenchController deferred previews', () => {
         createdCommitId: COMMIT_2,
         ...documentOpenResult(REVISION_2, {
           previewHtml: '',
+          paragraphStyles: [],
           nodes: documentOpenResult().document.nodes.map(node => node.nodeId === request.mutations[0]?.nodeId
             ? { ...node, text: request.mutations[0].nextText, label: request.mutations[0].nextText }
             : node),
@@ -557,10 +558,13 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     const patched = store.getSnapshot().document?.previewHtml ?? ''
     expect(new DOMParser().parseFromString(patched, 'text/html').querySelector('h1')?.textContent).toBe('Rewritten')
     expect(patched).toContain('Research background')
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual(documentOpenResult().document.paragraphStyles)
     expect(remote.open).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, resourceId: RESOURCE_ID })
     const rendered = '<html><head></head><body><h1 data-path="/body/p[1]">Rewritten</h1></body></html>'
-    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: rendered }) })
+    const paragraphStyles = [{ id: 'Normal', name: 'Normal' }, { id: 'TemplateBody', name: 'Template body' }]
+    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: rendered, paragraphStyles }) })
     await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe(rendered) })
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual(paragraphStyles)
   })
 
   it('keeps a new draft and its preview while an earlier commit render completes', async () => {
@@ -575,10 +579,44 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     await controller.commitEdit(SESSION_ID)
     const painted = store.getSnapshot().document?.previewHtml
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Typing during preview rendering' })
-    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
+    const paragraphStyles = [{ id: 'Normal', name: 'Normal' }]
+    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>', paragraphStyles }) })
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(store.getSnapshot().document?.previewHtml).toBe(painted)
     expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Typing during preview rendering' }])
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual(paragraphStyles)
+  })
+
+  it.each([false, true])('refreshes only the retained original document and preserves a subsequent draft: %s', async (drafting) => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '', paragraphStyles: [] }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed in A' })
+    await controller.commitEdit(SESSION_ID)
+    const patched = store.getSnapshot().document?.previewHtml
+    if (drafting) controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'New draft in A' })
+    const secondResource = 'document:second' as typeof RESOURCE_ID
+    const second = documentOpenResult(REVISION_2, {
+      documentId: 'second' as typeof DOCUMENT_ID, resourceId: secondResource,
+      previewHtml: '<p>Document B</p>', paragraphStyles: [{ id: 'StyleB', name: 'Style in B' }],
+    })
+    vi.mocked(remote.open).mockResolvedValueOnce({ ok: true, value: second })
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, secondResource)
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, {
+      previewHtml: '<p>Document A</p>', paragraphStyles: [{ id: 'StyleA', name: 'Style in A' }],
+    }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.getSnapshot().document).toEqual(second.document)
+    expect(store.getSnapshot().externalUpdate).toBeNull()
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    expect(remote.open).toHaveBeenCalledTimes(2)
+    expect(store.getSnapshot().document?.previewHtml).toBe(drafting ? patched : '<p>Document A</p>')
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual([{ id: 'StyleA', name: 'Style in A' }])
+    expect(store.getSnapshot().edits).toMatchObject(drafting ? [{ draft: 'New draft in A' }] : [])
   })
 
   it('records an outside working edit as a version and reopens the document with the draft kept', async () => {

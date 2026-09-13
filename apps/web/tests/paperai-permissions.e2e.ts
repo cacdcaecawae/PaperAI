@@ -386,27 +386,45 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-provider-round-trip'))
     const model = page.locator('button[aria-label^="选择模型"]').first()
     let current = 'Codex'
-    for (const [provider, wanted] of [
+    for (const [index, [provider, wanted]] of ([
       ['Claude', 'Fake Alpha'],
       ['Codex', 'Fake Beta'],
       ['Claude', 'Fake Alpha'],
       ['Codex', 'Fake Alpha'],
-    ] as const) {
-      await page.getByRole('button', { name: current, exact: true }).first().click()
-      await page.getByRole('menuitem', { name: new RegExp(`^${provider}`) }).click()
-      const providerChip = page.getByRole('button', { name: provider, exact: true }).first()
-      await providerChip.waitFor({ timeout: 15_000 })
-      await expect.poll(() => providerChip.getAttribute('aria-busy'), { timeout: 15_000 }).not.toBe('true')
-      await expect.poll(() => providerChip.isEnabled(), { timeout: 15_000 }).toBe(true)
-      await expect.poll(() => model.isEnabled(), { timeout: 10_000 }).toBe(true)
-      await model.click()
-      await page.getByRole('menuitem', { name: /^模型/ }).click()
-      // The directory reloads after a provider switch; pick only once the menu lists the new provider's models.
-      await page.getByRole('menu').getByText(provider, { exact: true }).waitFor({ timeout: 15_000 })
-      await page.getByRole('menuitemradio', { name: new RegExp(wanted) }).click()
-      await expect.poll(() => model.getAttribute('aria-label'), { timeout: 10_000 }).toContain(wanted)
-      await expect.poll(() => page.getByRole('menu').count(), { timeout: 10_000 }).toBe(0)
-      current = provider
+    ] as const).entries()) {
+      const ready = Promise.withResolvers<undefined>()
+      const release = Promise.withResolvers<undefined>()
+      await page.route('**/api/session.models', async (route) => {
+        const response = await route.fetch()
+        ready.resolve(undefined)
+        await release.promise
+        await route.fulfill({ response })
+      })
+      try {
+        await page.getByRole('button', { name: current, exact: true }).first().click()
+        await page.getByRole('menuitem', { name: new RegExp(`^${provider}`) }).click()
+        const providerChip = page.getByRole('button', { name: provider, exact: true }).first()
+        await providerChip.waitFor({ timeout: 15_000 })
+        await expect.poll(() => providerChip.getAttribute('aria-busy'), { timeout: 15_000 }).not.toBe('true')
+        await expect.poll(() => providerChip.isEnabled(), { timeout: 15_000 }).toBe(true)
+        await ready.promise
+        await model.click()
+        await page.getByRole('menuitem', { name: /^模型/ }).click()
+        const menu = page.getByRole('menu', { name: '模型与推理等级' })
+        expect(await menu.getAttribute('aria-busy')).toBe('true')
+        expect(await menu.getByRole('menuitemradio').count()).toBe(0)
+        expect(await model.getAttribute('aria-label')).toBe('选择模型')
+        if (index === 0) await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'model-agent-loading.expected.md'), await menu.ariaSnapshot(), MODE)
+        release.resolve(undefined)
+        await menu.getByText(provider, { exact: true }).waitFor({ timeout: 15_000 })
+        await page.getByRole('menuitemradio', { name: new RegExp(wanted) }).click()
+        await expect.poll(() => model.getAttribute('aria-label'), { timeout: 10_000 }).toContain(wanted)
+        await expect.poll(() => page.getByRole('menu').count(), { timeout: 10_000 }).toBe(0)
+        current = provider
+      } finally {
+        release.resolve(undefined)
+        await page.unrouteAll({ behavior: 'wait' })
+      }
     }
     await model.click()
     await compareOrRefreshGolden(MODEL_MENU_EXPECTED, await page.getByRole('menu', { name: '模型与推理等级' }).ariaSnapshot(), MODE)
@@ -1037,6 +1055,54 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-saved.expected.md'), await preview.ariaSnapshot(), MODE)
   }, 180_000)
 
+  it('offers the document paragraph styles and saves Normal over an existing template style', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-paragraph-styles'))
+    const entries = unzipSync(Buffer.from(fixtureDocxBase64(false, ['Template body paragraph']), 'base64'))
+    entries['[Content_Types].xml'] = strToU8(strFromU8(entries['[Content_Types].xml']!).replace('</Types>',
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>'))
+    entries['word/_rels/document.xml.rels'] = strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+      + '</Relationships>')
+    entries['word/styles.xml'] = strToU8('<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+      + '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>'
+      + '<w:style w:type="paragraph" w:styleId="SchoolBody"><w:name w:val="学院正文"/><w:basedOn w:val="Normal"/></w:style>'
+      + '</w:styles>')
+    entries['word/document.xml'] = strToU8(strFromU8(entries['word/document.xml']!).replace('<w:p>',
+      '<w:p><w:pPr><w:pStyle w:val="SchoolBody"/></w:pPr>'))
+    const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('style-menu-import'), fileName: 'Template styles.docx',
+      contentBase64: Buffer.from(zipSync(entries)).toString('base64'), name: 'Template styles',
+    })
+    expect(imported.status).toBe('imported')
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === 'Template styles.docx')!
+    const beforeXml = strFromU8(unzipSync(await readFile(row.workingPath!))['word/document.xml']!)
+    expect(beforeXml).toContain('w:pStyle w:val="SchoolBody"')
+    await sidebarDocument('Template styles.docx').click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    const paragraph = preview.locator('[data-paperai-block][contenteditable="true"]').first()
+    const toolbar = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
+    await expect.poll(() => paragraph.textContent(), { timeout: 20_000 }).toBe('Template body paragraph')
+    await selectBlockText(paragraph)
+    await toolbar.getByRole('button', { name: '段落', exact: true }).click()
+    const styles = toolbar.getByRole('combobox', { name: '段落样式', exact: true })
+    expect(await styles.locator('option').allTextContents()).toEqual(['应用样式', 'Normal', '学院正文'])
+    expect(await styles.locator('option[value="Heading1"]').count()).toBe(0)
+    expect(await styles.locator('option[value="SchoolBody"]').textContent()).toBe('学院正文')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-styles.expected.md'), await styles.ariaSnapshot(), MODE)
+    await styles.selectOption('Normal')
+    expect(await styles.inputValue()).toBe('Normal')
+    await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+    await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+    await sidebarDocument('Template styles.docx').click()
+    await expect.poll(() => paragraph.textContent(), { timeout: 20_000 }).toBe('Template body paragraph')
+    const saved = await scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId: SessionId('style-menu-read'), resourceId: row.id })
+    expect(saved.document.paragraphStyles).toEqual([{ id: 'Normal', name: 'Normal' }, { id: 'SchoolBody', name: '学院正文' }])
+    const afterXml = strFromU8(unzipSync(await readFile(row.workingPath!))['word/document.xml']!)
+    expect(afterXml).toContain('w:pStyle w:val="Normal"')
+    expect(afterXml).not.toContain('w:pStyle w:val="SchoolBody"')
+  }, 90_000)
+
   it('keeps writing controls reachable across desktop viewports, themes, locales and document zoom', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-writing-viewports'))
     const fileName = '毕业论文_公开合成长文档_方法结果与讨论_Methods_Results_Discussion_Appendix_Review_Draft_2026.docx'
@@ -1221,6 +1287,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
+      'model-agent-loading.expected.md',
       'agent-connecting.expected.md',
       'acp-connection-status.expected.md',
       'acp-migrated-defaults.expected.md',
@@ -1241,6 +1308,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'permission-read-only.expected.md',
       'paragraph-draft.expected.md',
       'paragraph-saved.expected.md',
+      'paragraph-styles.expected.md',
       'project-doctor.expected.md',
       'retained-draft.expected.md',
       'restore-confirmation.expected.md',

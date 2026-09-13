@@ -140,9 +140,8 @@ export function sameRuns(left: readonly PaperAIDocumentTextRun[], right: readonl
 
 /**
  * Read one rendered block as the runs Word stores: its text split where the
- * character formatting changes, each run stating only what it overrides. Runs
- * that read alike merge, so an unformatted block is one run and a commit for it
- * stays one engine operation.
+ * character formatting changes, each run stating only what it overrides.
+ * Adjacent text with matching formatting merges into one run.
  * @param block - rendered block, attached to a document so its style resolves.
  * @returns the block's runs in reading order.
  */
@@ -184,39 +183,35 @@ function readingOf(block: HTMLElement): Required<Omit<PaperAIDocumentTextRun, 't
 }
 
 /**
- * State on the first run whatever it used to state and no longer does. Setting
- * a paragraph's text leaves its first run in place carrying the properties it
- * had, so a property the run has stopped stating would survive the rebuild
- * instead of going back to the block's own reading.
+ * Make cleared overrides explicit because the engine preserves omitted run
+ * properties. A missing override reads as the block's own value, including
+ * after text edits merge or split runs.
  * @param runs - the block's runs as it reads now.
  * @param previous - the block's runs as the document has them.
  * @param block - the block, whose own reading replaces what is no longer stated.
- * @returns the runs with the first one stating everything it must.
+ * @returns runs with cleared properties set to the block's rendered values.
  */
 export function restateCleared(
   runs: readonly PaperAIDocumentTextRun[],
   previous: readonly PaperAIDocumentTextRun[],
   block: HTMLElement,
 ): PaperAIDocumentTextRun[] {
-  const [first, ...rest] = runs
-  const was = previous[0]
-  if (first === undefined || was === undefined) return [...runs]
+  if (runs.length === 0 || previous.length === 0) return [...runs]
+  const stated = new Set(previous.flatMap(run => Object.keys(run)))
   const own = readingOf(block)
-  return [{
-    ...first,
-    ...(was.bold !== undefined && first.bold === undefined ? { bold: own.bold } : {}),
-    ...(was.italic !== undefined && first.italic === undefined ? { italic: own.italic } : {}),
-    ...(was.underline !== undefined && first.underline === undefined ? { underline: own.underline } : {}),
-    ...(was.size !== undefined && first.size === undefined && own.size !== '' ? { size: own.size } : {}),
-    ...(was.color !== undefined && first.color === undefined && own.color !== '' ? { color: own.color } : {}),
-    ...(was.font !== undefined && first.font === undefined ? { font: own.font } : {}),
-  }, ...rest]
+  return runs.map(run => ({
+    ...run,
+    ...(stated.has('bold') && run.bold === undefined ? { bold: own.bold } : {}),
+    ...(stated.has('italic') && run.italic === undefined ? { italic: own.italic } : {}),
+    ...(stated.has('underline') && run.underline === undefined ? { underline: own.underline } : {}),
+    ...(stated.has('size') && run.size === undefined && own.size !== '' ? { size: own.size } : {}),
+    ...(stated.has('color') && run.color === undefined && own.color !== '' ? { color: own.color } : {}),
+    ...(stated.has('font') && run.font === undefined ? { font: own.font } : {}),
+  }))
 }
 
 /**
- * Write runs into a block as spans carrying their overrides. The rendered
- * preview from the Host replaces this shortly after a commit; until it arrives
- * a rebuilt run shows in the block's own typeface rather than its original one.
+ * Write run text, explicit formatting, and soft breaks into browser spans.
  * @param block - block whose contents are replaced.
  * @param runs - runs in reading order.
  */

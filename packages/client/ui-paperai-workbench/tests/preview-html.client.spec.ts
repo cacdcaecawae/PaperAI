@@ -160,15 +160,47 @@ describe('clearing a run', () => {
     expect(restateCleared([{ text: 'plain' }], [{ text: 'plain', font: 'Arial' }], element))
       .toEqual([{ text: 'plain', font: 'Times New Roman' }])
   })
-  it('states on the first run what it stopped stating, so the rebuild cannot keep it', () => {
+  it('states removed overrides as the block values', () => {
     const element = block('plain')
     expect(restateCleared([{ text: 'plain' }], [{ text: 'bold', bold: true, size: '16pt' }], element))
       .toEqual([{ text: 'plain', bold: false, size: '12pt' }])
   })
 
-  it('leaves a run that still states what it stated, and runs after the first', () => {
+  it('keeps explicit overrides and clears omitted overrides after the first run', () => {
     const element = block('<span style="font-weight:bold">bold</span>plain')
     const runs = runsOf(element)
-    expect(restateCleared(runs, [{ text: 'bold', bold: true }, { text: 'x', italic: true }], element)).toEqual(runs)
+    expect(restateCleared(runs, [{ text: 'bold', bold: true }, { text: 'x', italic: true }], element)).toEqual([
+      { text: 'bold', bold: true, italic: false }, { text: 'plain', bold: false, italic: false },
+    ])
+  })
+
+  it('clears middle and trailing formatting after their text merges with a plain lead', () => {
+    const element = block('lead<span style="font-weight:bold;font-style:italic;text-decoration:underline">middle</span>'
+      + '<span style="font-family:Arial;font-size:16pt;color:#FF0000">tail</span>',
+    'font-family:Calibri;font-size:12pt;color:#112233')
+    const previous = runsOf(element)
+    element.textContent = 'leadmiddletail'
+    expect(restateCleared(runsOf(element), previous, element)).toEqual([{
+      text: 'leadmiddletail', bold: false, italic: false, underline: false,
+      font: 'Calibri', size: '12pt', color: '#112233',
+    }])
+  })
+
+  it('retains explicit mixed fonts while clearing another run to the paragraph font', () => {
+    const element = block('<span style="font-family:Arial">Latin</span>正文'
+      + '<span style="font-family:SimSun">中文</span>', 'font-family:Calibri;font-size:12pt')
+    const previous = [{ text: 'Latin', font: 'Arial' }, { text: '正文', font: 'SimHei' }, { text: '中文', font: 'SimSun' }]
+    expect(restateCleared(runsOf(element), previous, element)).toEqual([
+      { text: 'Latin', font: 'Arial' }, { text: '正文', font: 'Calibri' }, { text: '中文', font: 'SimSun' },
+    ])
+  })
+
+  it('does not add font or size declarations for an emphasis-only edit with a soft break', () => {
+    const element = block('first<br><span style="font-style:italic">last</span>', 'font-family:Calibri;font-size:12pt')
+    expect(restateCleared(runsOf(element), [{ text: 'first\v' }, { text: 'last', bold: true }], element)).toEqual([
+      { text: 'first\v', bold: false }, { text: 'last', italic: true, bold: false },
+    ])
+    expect(restateCleared([], [{ text: 'last', bold: true }], element)).toEqual([])
+    expect(restateCleared([{ text: 'new' }], [], element)).toEqual([{ text: 'new' }])
   })
 })

@@ -6,13 +6,18 @@
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { DOMParser, onWarningStopParsing, type Element as XmlElement } from '@xmldom/xmldom'
+import { mkdtemp, rm, rmdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { DOMParser, onWarningStopParsing, XMLSerializer, type Element as XmlElement } from '@xmldom/xmldom'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import { DocumentEngine } from '@paperai/document-engine'
-import type { EngineMutation, EngineTextNode, EngineTextRun, EngineValidation } from '@paperai/document-engine'
-import type { CapabilityHealth, DocumentParagraph, DocumentParagraphFormat } from '@paperai/domain'
+import type { EngineMutation, EngineParagraphStyle, EngineTextNode, EngineValidation } from '@paperai/document-engine'
+import type { CapabilityHealth } from '@paperai/domain'
+import { applyDocumentMutations } from './document-mutations.ts'
+import { resolveOfficePath } from './office-path.ts'
+import { replaceParagraphXml } from './paragraph-xml.ts'
 import {
   convertLegacyDocument,
   LegacyDocConversionError,
@@ -38,6 +43,17 @@ export class OfficeCliError extends Error {
     super(message)
     this.name = 'OfficeCliError'
   }
+}
+
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
+function parseWordXml(xml: unknown, part: string): XmlElement {
+  if (typeof xml !== 'string') throw new OfficeCliError(`OfficeCLI did not return ${part} XML`)
+  const root = new DOMParser({ onError: onWarningStopParsing }).parseFromString(xml, 'application/xml').documentElement
+  if (root === null || root.namespaceURI !== WORD_NS || root.localName !== part) {
+    throw new OfficeCliError(`OfficeCLI returned invalid ${part} XML`)
+  }
+  return root
 }
 
 /** Provider configuration; every deployment-sensitive limit is explicit. */
@@ -111,121 +127,6 @@ function packagedCommand(): { command: string; prefix: string[] } {
   const manifest = JSON.parse(readFileSync(packagePath, 'utf8')) as OfficePackageJson
   const bin = officeCliBin(manifest)
   return { command: process.execPath, prefix: [join(dirname(packagePath), bin)] }
-}
-
-/** OfficeCLI `--prop` values for one run; Word writes the Latin and complex-script sizes together, so both travel. */
-function runProps(run: EngineTextRun): Record<string, string> {
-  return {
-    ...(run.bold === undefined ? {} : { bold: String(run.bold) }),
-    ...(run.italic === undefined ? {} : { italic: String(run.italic) }),
-    ...(run.underline === undefined ? {} : { underline: run.underline ? 'single' : 'none' }),
-    ...(run.size === undefined ? {} : { size: run.size, 'size.cs': run.size }),
-    ...(run.color === undefined ? {} : { color: run.color }),
-    ...(run.font === undefined ? {} : { font: run.font }),
-  }
-}
-
-/**
- * Rebuild one paragraph from its runs. The paragraph setter creates the first
- * run, including soft breaks. Run setters change only formatting; appended
- * run text encodes vertical-tab soft breaks as line feeds for OfficeCLI add.
- * @param officePath - paragraph or cell paragraph being rebuilt.
- * @param runs - the block's runs in reading order.
- * @returns OfficeCLI batch items in application order.
- */
-function runBatch(officePath: string, runs: readonly EngineTextRun[]): Record<string, unknown>[] {
-  const [first, ...rest] = runs
-  const firstProps = first === undefined ? {} : runProps(first)
-  return [
-    { command: 'set', path: officePath, props: { text: first?.text ?? '' } },
-    ...(Object.keys(firstProps).length > 0 ? [{ command: 'set', path: `${officePath}/r[1]`, props: firstProps }] : []),
-    ...rest.map(run => ({ command: 'add', parent: officePath, type: 'run', props: { text: run.text.replaceAll('\v', '\n'), ...runProps(run) } })),
-  ]
-}
-
-/** Copy the supported paragraph layout, excluding engine diagnostics and effective character values. */
-function paragraphProps(format: DocumentParagraphFormat): Record<string, string> {
-  return {
-    ...(format.style === undefined ? {} : { style: format.style }),
-    ...(format.align === undefined ? {} : { align: format.align }),
-    ...(format.indent === undefined ? {} : { indent: format.indent }),
-    ...(format.lineSpacing === undefined ? {} : { lineSpacing: format.lineSpacing }),
-  }
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown> : undefined
-}
-
-/** Reject inline objects that paragraph replacement cannot reconstruct without losing content. */
-function editableParagraph(data: Record<string, unknown>, officePath: string): Record<string, unknown> {
-  const results = Array.isArray(data.results) ? data.results : [data]
-  const paragraph = results.length === 1 ? record(results[0]) : undefined
-  const children = paragraph?.children
-  if (paragraph?.type !== 'paragraph' || !Array.isArray(children)
-    || paragraph.childCount !== children.length
-    || children.some((child) => {
-      const run = record(child)
-      return run?.type !== 'run' || run.childCount !== 0
-    })) {
-    throw new OfficeCliError(`UNSUPPORTED_DOCUMENT_CONTENT: paragraph '${officePath}' contains objects that require editing in Word`)
-  }
-  return paragraph
-}
-
-const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-const WORD_ID_NS = 'http://schemas.microsoft.com/office/word/2010/wordml'
-
-function elements(node: XmlElement): XmlElement[] {
-  return Array.from(node.childNodes).filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)
-}
-
-/** Inspect the actual inline XML because OfficeCLI's projected run children omit breaks, fields, and symbols. */
-function assertRebuildableParagraph(xml: unknown, officePath: string): void {
-  const reject: () => never = () => {
-    throw new OfficeCliError(`UNSUPPORTED_DOCUMENT_CONTENT: paragraph '${officePath}' contains objects that require editing in Word`)
-  }
-  if (typeof xml !== 'string') reject()
-  const root = new DOMParser({ onError: onWarningStopParsing }).parseFromString(xml, 'application/xml').documentElement
-  if (root === null || root.namespaceURI !== WORD_NS || root.localName !== 'document') reject()
-  let node = root
-  for (const segment of officePath.replace(/^\/document(?=\/)/u, '').split('/').filter(Boolean)) {
-    const match = /^(body|tbl|tr|tc|p)(?:\[(?:(\d+)|@paraId=['"]?([A-Za-z0-9]+)['"]?)\])?$/u.exec(segment)
-    if (match === null) reject()
-    const candidates = elements(node).filter(child => child.namespaceURI === WORD_NS && child.localName === match[1])
-    const found = match[3] === undefined ? candidates[Number(match[2] ?? '1') - 1]
-      : candidates.find(child => child.getAttributeNS(WORD_ID_NS, 'paraId') === match[3])
-    if (found === undefined) reject()
-    node = found
-  }
-  if (node.localName !== 'p') reject()
-  for (const child of elements(node)) {
-    if (child.namespaceURI !== WORD_NS) reject()
-    if (child.localName === 'pPr') continue
-    if (child.localName !== 'r') reject()
-    for (const inline of elements(child)) {
-      if (inline.namespaceURI !== WORD_NS) reject()
-      if (inline.localName === 'rPr') {
-        for (const property of elements(inline)) {
-          if (property.namespaceURI !== WORD_NS || elements(property).length > 0
-            || !['b', 'i', 'u', 'sz', 'szCs', 'color', 'rFonts'].includes(property.localName ?? '')) reject()
-          const attributes = Array.from(property.attributes).filter(attribute => attribute.namespaceURI !== 'http://www.w3.org/2000/xmlns/')
-          const names = property.localName === 'rFonts' ? ['ascii', 'hAnsi', 'eastAsia'] : ['val']
-          if (attributes.some(attribute => attribute.namespaceURI !== WORD_NS || !names.includes(attribute.localName ?? ''))) reject()
-          if (property.localName === 'u' && !['single', 'none'].includes(property.getAttributeNS(WORD_NS, 'val') ?? 'single')) reject()
-          if (property.localName === 'rFonts' && new Set(attributes.map(attribute => attribute.value)).size > 1) reject()
-          if (property.localName === 'szCs' && elements(inline).find(sibling => sibling.localName === 'sz')?.getAttributeNS(WORD_NS, 'val')
-            !== property.getAttributeNS(WORD_NS, 'val')) reject()
-        }
-        continue
-      }
-      if (inline.localName === 't' || inline.localName === 'tab') continue
-      if (inline.localName === 'br' && ['','textWrapping'].includes(inline.getAttributeNS(WORD_NS, 'type') ?? '')
-        && ['', 'none'].includes(inline.getAttributeNS(WORD_NS, 'clear') ?? '')) continue
-      reject()
-    }
-  }
 }
 
 /** OfficeCLI-backed `ctx.documentEngine`: every operation runs through the pinned launcher under one per-file lease. */
@@ -335,6 +236,24 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     return this.withLease(filePath, async () => (await this.run(['view', filePath, 'html'], signal)).stdout)
   }
 
+  override readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+    return this.withLease(filePath, () => this.paragraphStyles(filePath, signal))
+  }
+
+  private async paragraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+    const result = await this.run(['raw', filePath, '/styles', '--json'], signal)
+    const data = this.parseEnvelope(result.stdout).data
+    if (data === '(no styles)') return []
+    const root = parseWordXml(data, 'styles')
+    return Array.from(root.getElementsByTagNameNS(WORD_NS, 'style')).flatMap((style) => {
+      if (style.getAttributeNS(WORD_NS, 'type') !== 'paragraph') return []
+      const id = style.getAttributeNS(WORD_NS, 'styleId')
+      if (id === null || id === '') return []
+      const name = style.getElementsByTagNameNS(WORD_NS, 'name')[0]?.getAttributeNS(WORD_NS, 'val')
+      return [{ id, name: name || id }]
+    })
+  }
+
   override inspect(filePath: string, officePath: string, depth = 2, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.withLease(filePath, async () => {
       const result = await this.run(['get', filePath, officePath, '--depth', String(depth), '--json'], signal)
@@ -344,66 +263,47 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   override applyMutations(filePath: string, mutations: readonly EngineMutation[], signal?: AbortSignal): Promise<void> {
     return this.withLease(filePath, async () => {
-      for (const mutation of mutations) {
-        if (mutation.type === 'replace-text') {
-          const inspection = await this.run(['get', filePath, mutation.officePath, '--depth', '3', '--json'], signal)
-          const paragraph = editableParagraph(this.parseEnvelope(inspection.stdout), mutation.officePath)
-          const raw = await this.run(['raw', filePath, '/document', '--json'], signal)
-          assertRebuildableParagraph(this.parseEnvelope(raw.stdout).data, mutation.officePath)
-          if (mutation.paragraphs !== undefined) {
-            await this.replaceParagraphs(filePath, mutation.officePath, mutation.paragraphs, paragraph, signal)
-            continue
-          }
-        }
-        await this.run(this.mutationArgs(filePath, mutation), signal)
+      if (mutations.length === 0) return
+      const raw = await this.run(['raw', filePath, '/document', '--json'], signal)
+      const data = this.parseEnvelope(raw.stdout).data
+      const root = parseWordXml(data, 'document')
+      const stylesNeeded = mutations.some(mutation => mutation.type === 'insert-paragraph'
+        ? mutation.style !== undefined
+        : mutation.type === 'replace-text' && mutation.paragraphs?.some(paragraph => paragraph.format?.style !== undefined))
+      const styles = stylesNeeded ? await this.paragraphStyles(filePath, signal) : []
+      const resolveStyle = (name: string): string => {
+        const style = styles.find(style => style.id === name)
+          ?? styles.find(style => style.id.toLowerCase() === name.toLowerCase())
+          ?? styles.find(style => style.name.toLowerCase() === name.toLowerCase())
+        if (style === undefined) throw new OfficeCliError(`UNKNOWN_PARAGRAPH_STYLE: '${name}' is not a paragraph style in this document`)
+        return style.id
       }
-      await this.run(['save', filePath, '--json'], signal)
+      applyDocumentMutations(root, mutations,
+        (paragraph, mutation) => { replaceParagraphXml(paragraph, mutation, resolveStyle) }, resolveStyle)
+      const body = resolveOfficePath(root, '/body')
+      // The package part preserves legacy attributes; the /document alias reparses typed OpenXML and renames them.
+      const commands = [{ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace',
+        xml: new XMLSerializer().serializeToString(body) }]
+      const directory = await mkdtemp(join(tmpdir(), 'paperai-officecli-'))
+      const input = join(directory, 'commands.json')
+      try {
+        await writeFile(input, JSON.stringify(commands), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+        const batch = await this.run(['batch', filePath, '--input', input, '--json'], signal)
+        const response = this.parseEnvelope(batch.stdout)
+        const summary = response.summary as Record<string, unknown> | null | undefined
+        const results = response.results as Array<Record<string, unknown> | null> | undefined
+        if (summary?.total !== 1 || summary.executed !== 1 || summary.succeeded !== 1
+          || summary.failed !== 0 || summary.skipped !== 0
+          || !Array.isArray(results) || results.length !== 1 || results[0]?.index !== 0 || results[0].success !== true) {
+          throw new OfficeCliError('OfficeCLI did not apply the complete document batch', batch)
+        }
+        await this.run(['save', filePath, '--json'], signal)
+      } finally {
+        await rm(input, { force: true })
+        await rmdir(directory)
+      }
     })
   }
-
-  private async replaceParagraphs(
-    filePath: string,
-    officePath: string,
-    paragraphs: readonly DocumentParagraph[],
-    original: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const originalFormat = record(original.format) ?? {}
-    const inherited: Record<string, string> = {}
-    for (const key of ['style', 'align', 'indent', 'lineSpacing']) {
-      if (typeof originalFormat[key] === 'string') inherited[key] = originalFormat[key]
-    }
-    for (const key of ['font', 'font.latin', 'font.ea', 'font.cs', 'size', 'size.cs', 'bold', 'italic', 'underline', 'color']) {
-      if (typeof originalFormat[key] === 'string' || typeof originalFormat[key] === 'boolean') inherited[key] = String(originalFormat[key])
-    }
-    const parent = officePath.replace(/\/p\[[^\]]+\]$/u, '')
-    let currentPath = officePath
-    for (const [index, paragraph] of paragraphs.entries()) {
-      const format = paragraphProps(paragraph.format ?? {})
-      if (index > 0) {
-        const result = await this.run([
-          'add', filePath, parent, '--type', 'paragraph', '--after', currentPath,
-          ...Object.entries({ ...inherited, ...format, text: paragraph.text })
-            .flatMap(([key, value]) => ['--prop', `${key}=${value}`]), '--json',
-        ], signal)
-        const envelope: unknown = JSON.parse(result.stdout)
-        const added = record(envelope)?.data
-        const path = typeof added === 'string' ? /^Added paragraph at (\/[^\r\n]+)$/u.exec(added)?.[1] : undefined
-        if (path === undefined) throw new OfficeCliError('OfficeCLI did not return the inserted paragraph path')
-        currentPath = path
-      }
-      const commands: Record<string, unknown>[] = []
-      if (Object.keys(format).length > 0 && index === 0) {
-        commands.push({ command: 'set', path: currentPath, props: format })
-      }
-      if (paragraph.runs !== undefined) commands.push(...runBatch(currentPath, paragraph.runs))
-      else if (index === 0 && paragraph.text !== original.text) {
-        commands.push({ command: 'set', path: currentPath, props: { text: paragraph.text } })
-      }
-      if (commands.length > 0) await this.run(['batch', filePath, '--commands', JSON.stringify(commands), '--json'], signal)
-    }
-  }
-
   override validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation> {
     return this.withLease(filePath, async () => {
       const result = await this.run(['validate', filePath, '--json'], signal, true)
@@ -413,26 +313,6 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       const declared = typeof details.success === 'boolean' ? details.success : undefined
       return { success: declared ?? result.outcome.exitCode === 0, details }
     })
-  }
-
-  private mutationArgs(filePath: string, mutation: EngineMutation): string[] {
-    if (mutation.type === 'replace-text') {
-      // Plain text stays one command. Runs rebuild the paragraph, which takes
-      // several OfficeCLI operations, so they travel as one batch: the resident
-      // applies them in a single pass instead of one process round trip each.
-      if (mutation.runs === undefined || mutation.runs.length === 0) {
-        return ['set', filePath, mutation.officePath, '--prop', `text=${mutation.text}`, '--json']
-      }
-      return ['batch', filePath, '--commands', JSON.stringify(runBatch(mutation.officePath, mutation.runs)), '--json']
-    }
-    if (mutation.type === 'remove') return ['remove', filePath, mutation.officePath, '--json']
-    const args = ['add', filePath, '/body', '--type', 'paragraph', '--prop', `text=${mutation.text}`]
-    if (mutation.style !== undefined) args.push('--prop', `style=${mutation.style}`)
-    if (mutation.after !== undefined) args.push('--after', mutation.after)
-    if (mutation.before !== undefined) args.push('--before', mutation.before)
-    if (mutation.index !== undefined) args.push('--index', String(mutation.index))
-    args.push('--json')
-    return args
   }
 
   private async command(): Promise<{ command: string; prefix: string[] }> {

@@ -144,9 +144,8 @@ export interface DocumentNode {
 }
 
 /**
- * Character formatting of one run of a block's text. Only properties that
- * override the block's own formatting are carried, so a run that reads as its
- * paragraph does carries nothing but its text.
+ * Explicit character overrides for a run of text. Omitted fields retain
+ * original Word properties; clients restate cleared values explicitly.
  */
 export interface DocumentTextRun {
   text: string

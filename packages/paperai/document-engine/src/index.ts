@@ -15,7 +15,13 @@ export interface EngineTextNode {
   kind: 'paragraph' | 'table' | 'unknown'
 }
 
-/** Character formatting of one run of a block's text; only overrides of the block's own formatting are carried. */
+/** Paragraph style defined by the Word document, with its stored ID and display name. */
+export interface EngineParagraphStyle {
+  id: string
+  name: string
+}
+
+/** Explicit character overrides; omitted fields retain the original run properties. */
 export interface EngineTextRun {
   text: string
   bold?: boolean
@@ -29,7 +35,7 @@ export interface EngineTextRun {
   font?: string
 }
 
-/** Office-path mutation applied atomically inside one engine document lease. */
+/** Ordered mutation whose Office paths identify nodes in the document at batch start; insertion indices address the body at that step. */
 export type EngineMutation =
   | { type: 'replace-text'; officePath: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }
   | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; index?: number }
@@ -71,6 +77,14 @@ export abstract class DocumentEngine extends Service {
    */
   abstract readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]>
   /**
+   * Read the paragraph styles defined in the document.
+   * @param filePath - canonical DOCX path to inspect.
+   * @param signal - optional cancellation signal for provider work.
+   * @returns paragraph style IDs and display names in document definition order.
+   * @throws when cancelled or the provider cannot read or parse the styles.
+   */
+  abstract readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]>
+  /**
    * Produce generated HTML preview; HTML is never an editable authority.
    * @param filePath - canonical DOCX path to render.
    * @param signal - optional cancellation signal for provider work.
@@ -91,7 +105,7 @@ export abstract class DocumentEngine extends Service {
   /**
    * Apply a batch under one exclusive file lease and save before returning.
    * @param filePath - canonical Working DOCX path to mutate.
-   * @param mutations - ordered Office-path mutations in the batch.
+   * @param mutations - mutations in application order; Office paths retain their original targets across earlier structure edits.
    * @param signal - optional cancellation signal for provider work.
    * @throws when cancelled or any mutation or save operation fails.
    */

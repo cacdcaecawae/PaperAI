@@ -100,6 +100,7 @@ export function documentSnapshot(
     revision,
     headCommitId,
     previewHtml: PREVIEW_HTML,
+    paragraphStyles: [{ id: 'Normal', name: '正文' }, { id: 'SectionTitle', name: '章节标题' }],
     nodes: [
       { nodeId: NODE_HEADING, kind: 'heading', label: 'Introduction', depth: 0, editable: true, text: 'Introduction' },
       { nodeId: NODE_PARAGRAPH, kind: 'paragraph', label: 'Research background', depth: 0, editable: true, text: 'Research background' },

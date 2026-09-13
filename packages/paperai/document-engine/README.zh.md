@@ -2,11 +2,13 @@
 
 [English](README.md) | 中文
 
-PaperAI Word 能力 seam 的 Service Definition，以 `ctx.documentEngine` 暴露。它定义健康状态、文本节点检查、结构化 Office path 检查、生成 HTML 预览、批量语义修改和验证，同时让消费方不依赖 OfficeCLI 或进程传输细节。
+PaperAI Word 能力 seam 的 Service Definition，以 `ctx.documentEngine` 暴露。它定义健康状态、文本节点检查、段落样式发现、结构化 Office path 检查、生成 HTML 预览、批量语义修改和验证，同时让消费方不依赖 OfficeCLI 或进程传输细节。
+
+`readParagraphStyles(filePath, signal?)` 按定义顺序返回文档中段落样式的存储 ID 和显示名称。它读取可选样式，不读取各段落的当前样式。
 
 Provider 必须串行化指向同一规范 Working DOCX 的操作。`applyMutations` 持有贯穿保存过程的独占 lease；消费方在其外部创建和发布可恢复快照。HTML 被明确限定为预览结果。
 
-替换操作可以携带多个段落及其字符片段和段落格式。同次保存拆分多个原始段落时，消费方必须保持原有位置地址有效；浏览器工作台先提交靠后的节点。Provider 会拒绝替换无法重建的段内对象，由版本服务丢弃候选文件。
+替换操作可以携带多个段落及其字符片段和段落格式。Provider 先将每个 Office 路径绑定到原节点，再按调用方顺序执行批次，插入、拆段和删除不会改变后续引用的目标。引用已删除节点会拒绝整个批次。省略的字符字段保留原属性，客户端必须显式声明被清除的值。Provider 会拒绝替换无法保留的段内对象，由版本服务丢弃候选文件。
 
 ## 模型体验
 

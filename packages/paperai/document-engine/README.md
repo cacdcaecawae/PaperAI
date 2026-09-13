@@ -2,11 +2,13 @@
 
 English | [中文](README.zh.md)
 
-Service Definition for PaperAI's Word capability seam, exposed as `ctx.documentEngine`. It defines health, text-node inspection, structured Office-path inspection, generated HTML preview, batched semantic mutation, and validation without coupling consumers to OfficeCLI or process transport.
+Service Definition for PaperAI's Word capability seam, exposed as `ctx.documentEngine`. It defines health, text-node inspection, paragraph-style discovery, structured Office-path inspection, generated HTML preview, batched semantic mutation, and validation without coupling consumers to OfficeCLI or process transport.
+
+`readParagraphStyles(filePath, signal?)` returns the document's defined paragraph styles as stored IDs and display names in definition order. It reads choices, not the current style of each paragraph.
 
 Providers must serialize operations that address the same canonical Working DOCX. `applyMutations` owns one exclusive lease through save; consumers create and publish recoverable snapshots around that call. HTML is explicitly preview-only.
 
-Replacement mutations can carry multiple paragraphs with character runs and paragraph layout. Consumers must preserve original positional addresses when several original paragraphs split in one save; the browser workbench submits later nodes first. Providers reject replacement of inline objects they cannot reconstruct, leaving the commit service to discard the candidate.
+Replacement mutations can carry multiple paragraphs with character runs and paragraph layout. Providers bind every Office path to its original node before applying the batch in caller order, so insertions, splits, and removals cannot redirect subsequent references. Referencing a removed node rejects the batch. Omitted character fields preserve original properties; clients must state cleared values explicitly. Providers reject replacement of inline objects they cannot preserve, leaving the commit service to discard the candidate.
 
 ## Model Experience
 

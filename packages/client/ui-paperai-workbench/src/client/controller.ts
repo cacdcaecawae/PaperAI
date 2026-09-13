@@ -1111,7 +1111,8 @@ export class PaperAIWorkbenchController {
     const committed = result.value.document
     const deferred = committed.previewHtml === '' && document.previewHtml !== ''
     this.publishOpenResult(entry.store, deferred
-      ? { ...result.value, document: { ...committed, previewHtml: patchPreviewHtml(document.previewHtml, patches) } }
+      ? { ...result.value, document: { ...committed, previewHtml: patchPreviewHtml(document.previewHtml, patches),
+        paragraphStyles: committed.paragraphStyles.length === 0 ? document.paragraphStyles : committed.paragraphStyles } }
       : result.value)
     if (deferred) void this.refreshPreview(entry, committed)
     return OK
@@ -1132,11 +1133,14 @@ export class PaperAIWorkbenchController {
     if (!result.ok || this.disposed) return
     const fresh = result.value.document
     entry.store.update((draft) => {
-      if (draft.document?.revision !== committed.revision) return
-      if (fresh.revision === committed.revision && draft.edits.length === 0) {
-        draft.document = { ...draft.document, previewHtml: fresh.previewHtml }
-      } else if (fresh.headCommitId !== draft.document.headCommitId) {
-        draft.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
+      const view = draft.document?.documentId === committed.documentId ? draft
+        : draft.retained.find(retained => retained.document?.documentId === committed.documentId)
+      if (view?.document?.revision !== committed.revision) return
+      if (fresh.revision === committed.revision) {
+        view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
+          ...(view.edits.length === 0 ? { previewHtml: fresh.previewHtml } : {}) }
+      } else if (fresh.headCommitId !== view.document.headCommitId) {
+        view.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
       }
     })
   }

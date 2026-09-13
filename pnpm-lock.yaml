@@ -6304,6 +6304,9 @@ importers:
       '@xmldom/xmldom':
         specifier: 0.9.12
         version: 0.9.12
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -6314,6 +6317,9 @@ importers:
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:^
         version: link:../../subprocess/subprocess
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess-local
       '@paperai/document-engine':
         specifier: workspace:*
         version: link:../document-engine

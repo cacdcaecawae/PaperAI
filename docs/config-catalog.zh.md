@@ -3413,7 +3413,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/document-engine-officecli/src/index.ts:44`](../packages/paperai/document-engine-officecli/src/index.ts)
+来源：[`packages/paperai/document-engine-officecli/src/index.ts:60`](../packages/paperai/document-engine-officecli/src/index.ts)
 
 <a id="paperaiexport-service"></a>
 
@@ -3555,7 +3555,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/workbench-service/src/index.ts:290`](../packages/paperai/workbench-service/src/index.ts)
+来源：[`packages/paperai/workbench-service/src/index.ts:291`](../packages/paperai/workbench-service/src/index.ts)
 
 ## 无配置的可加载插件
 

@@ -190,6 +190,10 @@ describe('CI workflow', () => {
 
     const windowsCommands = commandText(paperaiWindows.steps)
     expect(windowsCommands).toContain('pnpm run test:paperai:windows --maxWorkers=2')
+    expect(windowsCommands).toContain('packages/paperai/document-engine-officecli/tests/officecli.real.spec.ts')
+    expect(paperaiWindows.steps).toContainEqual(expect.objectContaining({
+      env: { DSH_PAPERAI_OFFICECLI_REAL: '1' },
+    }))
     expect(windowsCommands).toContain('snapshot: persistent-pwsh-tool-turn matches')
     expect(windowsCommands).not.toContain('check:ci:windows-complete')
     expect(typeof windowsNative['runs-on']).toBe('string')

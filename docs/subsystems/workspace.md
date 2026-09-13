@@ -173,6 +173,15 @@ abstract health(signal?: AbortSignal): Promise<CapabilityHealth>
 abstract readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]>
 
 /**
+ * Read the paragraph styles defined in the document.
+ * @param filePath - canonical DOCX path to inspect.
+ * @param signal - optional cancellation signal for provider work.
+ * @returns paragraph style IDs and display names in document definition order.
+ * @throws when cancelled or the provider cannot read or parse the styles.
+ */
+abstract readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]>
+
+/**
  * Produce generated HTML preview; HTML is never an editable authority.
  * @param filePath - canonical DOCX path to render.
  * @param signal - optional cancellation signal for provider work.
@@ -195,7 +204,7 @@ abstract inspect(filePath: string, officePath: string, depth?: number, signal?: 
 /**
  * Apply a batch under one exclusive file lease and save before returning.
  * @param filePath - canonical Working DOCX path to mutate.
- * @param mutations - ordered Office-path mutations in the batch.
+ * @param mutations - mutations in application order; Office paths retain their original targets across earlier structure edits.
  * @param signal - optional cancellation signal for provider work.
  * @throws when cancelled or any mutation or save operation fails.
  */
@@ -756,6 +765,15 @@ buildCandidateIndex(request: BuildCandidateDocumentIndexRequest): Promise<readon
  * @throws PaperDocumentError when the document does not exist.
  */
 async previewHtml(documentId: DocumentId, signal?: AbortSignal): Promise<string>
+
+/**
+ * Read paragraph styles defined in the current Working DOCX.
+ * @param documentId - document identity.
+ * @param signal - optional engine cancellation.
+ * @returns stored style IDs and display names in definition order.
+ * @throws PaperDocumentError when the document does not exist, or an engine error when styles cannot be read.
+ */
+async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise<EngineParagraphStyle[]>
 
 /**
  * Re-read the Working DOCX and replace its semantic index while preserving

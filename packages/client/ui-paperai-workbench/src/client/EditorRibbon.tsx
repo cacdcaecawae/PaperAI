@@ -1,7 +1,7 @@
 /** Persistent native document controls; the preview retains and applies their target selection. */
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
-import type { PaperAIParagraphFormat } from './types.ts'
+import type { PaperAIDocumentSnapshot, PaperAIParagraphFormat } from './types.ts'
 import css from './EditorRibbon.module.css'
 
 /** Formatting of the caret or selected text; `mixed` preserves distinct readings. */
@@ -22,6 +22,7 @@ export interface EditorFormat {
 interface EditorRibbonProps {
   readonly caret: EditorFormat | null
   readonly fonts: readonly string[]
+  readonly paragraphStyles: PaperAIDocumentSnapshot['paragraphStyles']
   readonly disabled: boolean
   readonly dirty: boolean
   readonly undo: boolean
@@ -76,6 +77,7 @@ export function EditorRibbon(props: EditorRibbonProps): ReactNode {
   }
   useLayoutEffect(() => { setTabStop(tabStop.current) })
   const unavailable = props.disabled || caret === null
+  const currentStyle = caret?.paragraph.style ?? ''
   const sizes = [...new Set([9, 10.5, 11, 12, 14, 15, 16, 18, 22, 24, 28, 36,
     ...(caret === null || caret.size === 'mixed' || caret.size === '' ? [] : [parseFloat(caret.size)])])].sort((a, b) => a - b)
   const sourceLabel = (source: EditorFormat['sizeSource'] | undefined): string =>
@@ -118,9 +120,11 @@ export function EditorRibbon(props: EditorRibbonProps): ReactNode {
       </div>
       <span className={css.scope}>{caret === null ? t('editor.noCaret') : t(caret.collapsed ? 'editor.insertion' : 'editor.selection')}</span>
       {paragraphOpen && <div className={css.paragraph} role="group" aria-label={t('editor.paragraph')}>
-        <label>{t('editor.style')}<select aria-label={t('editor.style')} disabled={unavailable} value={caret?.paragraph.style ?? ''} onChange={(event) =>{  props.onParagraph({ style: event.target.value }) }}>
-          <option value="" disabled>{t(caret?.paragraphMixed === true ? 'editor.mixed' : 'editor.inherited')}</option>
-          {(['Normal', 'Heading1', 'Heading2', 'Heading3'] as const).map((style, index) => <option key={style} value={style}>{t(index === 0 ? 'editor.normal' : index === 1 ? 'editor.heading1' : index === 2 ? 'editor.heading2' : 'editor.heading3')}</option>)}
+        <label>{t('editor.style')}<select aria-label={t('editor.style')} disabled={unavailable || props.paragraphStyles.length === 0} value={currentStyle} onChange={(event) =>{  props.onParagraph({ style: event.target.value }) }}>
+          <option value="" disabled>{t(caret?.paragraphMixed === true ? 'editor.mixed' : 'editor.applyStyle')}</option>
+          {currentStyle !== '' && !props.paragraphStyles.some(style => style.id === currentStyle)
+            && <option value={currentStyle} disabled>{currentStyle}</option>}
+          {props.paragraphStyles.map(style => <option key={style.id} value={style.id}>{style.name}</option>)}
         </select></label>
         <label>{t('editor.align')}<select aria-label={t('editor.align')} disabled={unavailable} value={caret?.paragraph.align ?? ''} onChange={(event) =>{  props.onParagraph({ align: event.target.value as NonNullable<PaperAIParagraphFormat['align']> }) }}>
           <option value="" disabled>{t(caret?.paragraphMixed === true ? 'editor.mixed' : 'editor.inherited')}</option>

@@ -286,6 +286,12 @@ export interface PaperAITemplateGateReport {
   readonly findings: readonly PaperAIGateFinding[]
 }
 
+/** A paragraph style defined in the current Word document. */
+export interface PaperAIParagraphStyle {
+  readonly id: string
+  readonly name: string
+}
+
 /** Read-only projection of one authoritative Working DOCX. */
 export interface PaperAIDocumentSnapshot {
   readonly documentId: PaperAIDocumentId
@@ -299,6 +305,8 @@ export interface PaperAIDocumentSnapshot {
   readonly headCommitId: PaperAIDocumentCommitId | null
   /** Derived document preview; never accepted as an edit source. */
   readonly previewHtml: string
+  /** Defined paragraph styles; empty while the preview is deferred or styles are unavailable. */
+  readonly paragraphStyles: readonly PaperAIParagraphStyle[]
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly versions: readonly PaperAIDocumentVersion[]
   readonly template: PaperAITemplateSummary | null

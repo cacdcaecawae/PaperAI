@@ -253,6 +253,7 @@ export function DocumentWorkbench({
                 html={view === state && compare !== null ? compare.html : view.document.previewHtml}
                 revision={view.document.revision}
                 nodes={view.document.nodes}
+                paragraphStyles={view.document.paragraphStyles}
                 active={view === state}
                 scrollTop={view.scrollTop}
                 onScroll={setScroll}

@@ -12,6 +12,7 @@ PaperAI document service exposed as `ctx.paperDocuments`. It imports Word source
 - `readDocument(documentId)` returns repository metadata and ordered nodes without reading Word bytes again.
 - `verifyImmutableSource(documentId, signal?)` verifies that the imported source remains a read-only regular file whose bytes match the recorded SHA-256. Consumers call it before reading or copying source bytes.
 - `previewHtml(documentId, signal?)` renders the current Working DOCX. HTML remains preview-only.
+- `readParagraphStyles(documentId, signal?)` reads the current Working DOCX's defined paragraph style IDs and display names through the document engine.
 - `rebuildIndex(documentId, signal?)` re-reads the Working DOCX and replaces its semantic index without creating a document commit.
 
 ## File and index semantics

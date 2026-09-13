@@ -1,6 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { DOMParser, XMLSerializer, type Element as XmlElement } from '@xmldom/xmldom'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -17,6 +18,11 @@ interface Reply {
   exitCode?: number | null
   lossy?: boolean
 }
+
+const successfulBatch = () => ({
+  results: [{ index: 0, success: true, output: 'raw-set replace applied' }],
+  summary: { total: 1, executed: 1, succeeded: 1, failed: 0, skipped: 0 },
+})
 
 const read = (text: string, lossy = false): SubprocessOutputRead => ({
   text,
@@ -44,15 +50,29 @@ const handle = (reply: Reply): SubprocessHandle => ({
 function fixture(respond: (spec: SubprocessSpawnSpec) => Reply) {
   const ctx = new Context()
   const calls: SubprocessSpawnSpec[] = []
+  const batches: Array<{ command: string; xml: string; input: string }> = []
   ctx.provide('subprocess', {
     resolveExecutable: vi.fn(async (command: string) => `C:\\bin\\${command}.exe`),
     spawn: vi.fn((spec: SubprocessSpawnSpec) => {
       calls.push(spec)
+      if (spec.argv.includes('--input')) {
+        const input = spec.argv[spec.argv.indexOf('--input') + 1]!
+        const commands = JSON.parse(readFileSync(input, 'utf8')) as Array<{ command: string; xml: string }>
+        batches.push(...commands.map(command => ({ ...command, input })))
+      }
       const reply = respond(spec)
+      if (spec.argv.includes('batch') && reply.stdout === undefined) {
+        return handle({ ...reply, stdout: JSON.stringify({ data: successfulBatch() }) })
+      }
+      if (spec.argv.includes('/styles') && reply.stdout === undefined) {
+        return handle({ ...reply, stdout: JSON.stringify({ data: '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+          + '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="Heading 1"/></w:style>'
+          + '<w:style w:type="paragraph" w:styleId="Normal"/></w:styles>' }) })
+      }
       if (spec.argv.includes('raw') && reply.stdout === undefined) {
         return handle({ ...reply, stdout: JSON.stringify({ data:
           '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
-          + '<w:p><w:r><w:t>original</w:t></w:r></w:p><w:p><w:r><w:t>original</w:t></w:r></w:p></w:body></w:document>',
+          + '<w:p><w:r><w:t>original</w:t></w:r></w:p><w:p><w:r><w:t>original</w:t></w:r></w:p><w:p><w:r><w:t>third</w:t></w:r></w:p></w:body></w:document>',
         }) })
       }
       return handle(spec.argv.includes('get') && reply.stdout === undefined
@@ -66,8 +86,17 @@ function fixture(respond: (spec: SubprocessSpawnSpec) => Reply) {
     outputMaxBytes: 1_000_000,
     terminateGraceMs: 1_000,
   })
-  return { ctx, calls, engine }
+  return { ctx, calls, engine, batches }
 }
+
+const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+const documentXml = (body: string) => '<w:document xmlns:w="' + W + '"><w:body>' + body + '</w:body></w:document>'
+const paragraphXml = (text: string) => '<w:p><w:r><w:t>' + text + '</w:t></w:r></w:p>'
+const xmlFixture = (body: string) => fixture(spec => spec.argv.includes('/document')
+  ? { stdout: JSON.stringify({ data: documentXml(body) }) } : {})
+const writtenBody = (test: ReturnType<typeof fixture>) => new DOMParser().parseFromString(test.batches[0]!.xml, 'application/xml').documentElement!
+const childElements = (node: XmlElement) => Array.from(node.childNodes)
+  .filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -110,238 +139,259 @@ describe('OfficeCliDocumentEngine', () => {
     ])
   })
 
-  it('applies one ordered mutation batch and saves once', async () => {
-    const { calls, engine } = fixture(() => ({}))
-    await engine.applyMutations('D:\\paper.docx', [
-      { type: 'replace-text', officePath: '/document/body/p[1]', text: '新文本' },
-      { type: 'insert-paragraph', text: '新增', style: 'Heading 1', after: '/document/body/p[1]' },
-      { type: 'remove', officePath: '/document/body/p[3]' },
+  it('applies ordered structural mutations with one document read and one command-file batch', async () => {
+    const test = xmlFixture(paragraphXml('alpha') + paragraphXml('beta') + paragraphXml('gamma'))
+    await test.engine.applyMutations('paper.docx', [
+      { type: 'replace-text', officePath: '/body/p[1]', text: 'edited' },
+      { type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' },
+      { type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
+      { type: 'remove', officePath: '/body/p[3]' },
     ])
-    expect(calls.map(call => call.argv.slice(1))).toEqual([
-      ['get', 'D:\\paper.docx', '/document/body/p[1]', '--depth', '3', '--json'],
-      ['raw', 'D:\\paper.docx', '/document', '--json'],
-      ['set', 'D:\\paper.docx', '/document/body/p[1]', '--prop', 'text=新文本', '--json'],
-      ['add', 'D:\\paper.docx', '/body', '--type', 'paragraph', '--prop', 'text=新增', '--prop', 'style=Heading 1', '--after', '/document/body/p[1]', '--json'],
-      ['remove', 'D:\\paper.docx', '/document/body/p[3]', '--json'],
-      ['save', 'D:\\paper.docx', '--json'],
-    ])
+    expect(childElements(writtenBody(test)).map(node => node.textContent)).toEqual(['edited', 'inserted', 'beta edited'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch', 'save'])
+    expect(test.batches).toHaveLength(1)
+    expect(test.batches[0]).toMatchObject({ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace' })
+    expect(existsSync(test.batches[0]!.input)).toBe(false)
+    expect(test.calls.find(call => call.argv.includes('batch'))?.argv).toContain('--input')
   })
 
-  it('rebuilds a paragraph from its runs in one batch and leaves plain text one command', async () => {
-    const { calls, engine } = fixture(() => ({}))
-    await engine.applyMutations('D:\\paper.docx', [
-      { type: 'replace-text', officePath: '/body/p[1]', text: '普通' },
-      {
-        type: 'replace-text',
-        officePath: '/body/p[2]',
-        text: '加粗其余',
-        runs: [{ text: '加粗', bold: true, size: '16pt' }, { text: '其余' }],
-      },
-    ])
-    const [plain, formatted] = calls.filter(call => !call.argv.includes('get') && !call.argv.includes('raw')).map(call => call.argv.slice(1))
-    expect(plain).toEqual(['set', 'D:\\paper.docx', '/body/p[1]', '--prop', 'text=普通', '--json'])
-    expect(formatted?.slice(0, 3)).toEqual(['batch', 'D:\\paper.docx', '--commands'])
-    expect(JSON.parse(String(formatted?.[3]))).toEqual([
-      { command: 'set', path: '/body/p[2]', props: { text: '加粗' } },
-      { command: 'set', path: '/body/p[2]/r[1]', props: { bold: 'true', size: '16pt', 'size.cs': '16pt' } },
-      { command: 'add', parent: '/body/p[2]', type: 'run', props: { text: '其余' } },
-    ])
+  it('keeps command arguments bounded for a large multi-paragraph batch', async () => {
+    const test = xmlFixture(Array.from({ length: 70 }, (_, index) => paragraphXml(`paragraph ${index}`)).join(''))
+    await test.engine.applyMutations('paper.docx', Array.from({ length: 70 }, (_, index) => ({
+      type: 'replace-text' as const, officePath: `/body/p[${index + 1}]`, text: `edited ${index} ${'x'.repeat(800)}`,
+    })))
+    expect(writtenBody(test).getElementsByTagNameNS(W, 'p')).toHaveLength(70)
+    expect(test.batches[0]!.xml.length).toBeGreaterThan(32_768)
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch', 'save'])
+    expect(test.calls.every(call => call.argv.join(' ').length < 1000)).toBe(true)
   })
 
-  it('keeps soft breaks in the first run and encodes later run breaks for OfficeCLI add', async () => {
-    const { calls, engine } = fixture(() => ({}))
-    await engine.applyMutations('D:\\paper.docx', [{
-      type: 'replace-text', officePath: '/body/p[1]', text: 'first\vnextlast\vline',
-      runs: [{ text: 'first\vnext', bold: true }, { text: 'last\vline', italic: true }],
+  it('does not read or write an empty mutation batch', async () => {
+    const test = fixture(() => ({}))
+    await test.engine.applyMutations('paper.docx', [])
+    expect(test.calls).toEqual([])
+  })
+
+  it('writes explicit run overrides and retains opaque original run metadata', async () => {
+    const test = xmlFixture('<w:p><w:r><w:rPr><w:lang w:val="en-US"/><w:vertAlign w:val="subscript"/></w:rPr><w:t>original</w:t></w:r></w:p>')
+    await test.engine.applyMutations('paper.docx', [{
+      type: 'replace-text', officePath: '/body/p[1]', text: 'bold rest',
+      runs: [{ text: 'bold', bold: true, size: '16pt', font: 'Arial', color: '#ff0000' }, { text: ' rest', italic: true, underline: false }],
     }])
-    const batch = calls.find(call => call.argv.includes('batch'))!
-    expect(JSON.parse(String(batch.argv[batch.argv.indexOf('--commands') + 1]))).toEqual([
-      { command: 'set', path: '/body/p[1]', props: { text: 'first\vnext' } },
-      { command: 'set', path: '/body/p[1]/r[1]', props: { bold: 'true' } },
-      { command: 'add', parent: '/body/p[1]', type: 'run', props: { text: 'last\nline', italic: 'true' } },
-    ])
+    const body = writtenBody(test)
+    expect(body.textContent).toBe('bold rest')
+    expect(body.getElementsByTagNameNS(W, 'lang')[0]?.getAttributeNS(W, 'val')).toBe('en-US')
+    expect(body.getElementsByTagNameNS(W, 'vertAlign')[0]?.getAttributeNS(W, 'val')).toBe('subscript')
+    expect(body.getElementsByTagNameNS(W, 'sz')[0]?.getAttributeNS(W, 'val')).toBe('32')
+    expect(body.getElementsByTagNameNS(W, 'szCs')[0]?.getAttributeNS(W, 'val')).toBe('32')
+    expect(body.getElementsByTagNameNS(W, 'rFonts')[0]?.getAttributeNS(W, 'ascii')).toBe('Arial')
+    expect(body.getElementsByTagNameNS(W, 'u')[0]?.getAttributeNS(W, 'val')).toBe('none')
   })
 
-  it('splits a paragraph beside its original anchor and preserves layout on new paragraphs', async () => {
-    const { calls, engine } = fixture((spec) => {
-      if (spec.argv.includes('get')) return { stdout: JSON.stringify({ data: {
-        type: 'paragraph', text: 'original', childCount: 1,
-        format: { style: 'Normal', align: 'left', indent: '12pt', lineSpacing: '1.5x' },
-        children: [{ type: 'run', childCount: 0 }],
-      } }) }
-      if (spec.argv.includes('add')) return { stdout: JSON.stringify({ data: 'Added paragraph at /body/p[@paraId=NEW]' }) }
-      return {}
-    })
-    await engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[2]', text: 'one\ntwo', paragraphs: [
-      { text: 'one', runs: [{ text: 'one', font: 'Arial' }], format: { align: 'center' } },
-      { text: 'two', runs: [{ text: 'two', underline: false }], format: { indent: '24pt' } },
-    ] }])
-    const batches = calls.filter(call => call.argv.includes('batch')).map(call => JSON.parse(String(call.argv[4])) as unknown)
-    expect(batches[0]).toEqual([
-      { command: 'set', path: '/body/p[2]', props: { align: 'center' } },
-      { command: 'set', path: '/body/p[2]', props: { text: 'one' } },
-      { command: 'set', path: '/body/p[2]/r[1]', props: { font: 'Arial' } },
-    ])
-    expect(calls.find(call => call.argv.includes('add'))?.argv).toEqual([
-      'C:\\bin\\officecli.exe', 'add', 'paper.docx', '/body', '--type', 'paragraph', '--after', '/body/p[2]',
-      '--prop', 'style=Normal', '--prop', 'align=left', '--prop', 'indent=24pt', '--prop', 'lineSpacing=1.5x', '--prop', 'text=two', '--json',
-    ])
-    expect(batches[1]).toContainEqual({ command: 'set', path: '/body/p[@paraId=NEW]/r[1]', props: { underline: 'none' } })
-    expect(calls.at(-1)?.argv).toEqual(['C:\\bin\\officecli.exe', 'save', 'paper.docx', '--json'])
-  })
-
-  it('changes paragraph layout without replacing its unchanged text', async () => {
-    const { calls, engine } = fixture(() => ({}))
-    await engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'original',
-      paragraphs: [{ text: 'original', format: { style: 'Heading1', lineSpacing: '2x' } }],
+  it('preserves soft breaks and tabs when reconstructing multiple runs', async () => {
+    const test = fixture(() => ({}))
+    await test.engine.applyMutations('paper.docx', [{
+      type: 'replace-text', officePath: '/body/p[1]', text: 'first\vnextlast\vline\tend',
+      runs: [{ text: 'first\vnext', bold: true }, { text: 'last\vline\tend', italic: true }],
     }])
-    expect(JSON.parse(String(calls.find(call => call.argv.includes('batch'))?.argv[4]))).toEqual([
-      { command: 'set', path: '/body/p[1]', props: { style: 'Heading1', lineSpacing: '2x' } },
+    const paragraph = writtenBody(test).getElementsByTagNameNS(W, 'p')[0]!
+    expect(paragraph.getElementsByTagNameNS(W, 'br')).toHaveLength(2)
+    expect(paragraph.getElementsByTagNameNS(W, 'tab')).toHaveLength(1)
+    expect(writtenBody(test).getElementsByTagNameNS(W, 'p')).toHaveLength(3)
+  })
+
+  it('splits beside its original node while preserving paragraph properties and later targets', async () => {
+    const test = xmlFixture('<w:p><w:pPr><w:keepNext/><w:spacing w:line="360" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial"/></w:rPr></w:pPr>'
+      + '<w:r><w:rPr><w:lang w:val="zh-CN"/></w:rPr><w:t>original</w:t></w:r></w:p>' + paragraphXml('tail'))
+    await test.engine.applyMutations('paper.docx', [
+      { type: 'replace-text', officePath: '/body/p[1]', text: 'one\ntwo', paragraphs: [
+        { text: 'one', format: { align: 'center' } },
+        { text: 'two', runs: [{ text: 'two', underline: false }], format: { indent: '24pt' } },
+      ] },
+      { type: 'replace-text', officePath: '/body/p[2]', text: 'tail edited' },
     ])
+    const paragraphs = Array.from(writtenBody(test).getElementsByTagNameNS(W, 'p'))
+    expect(paragraphs.map(node => node.textContent)).toEqual(['one', 'two', 'tail edited'])
+    expect(paragraphs.slice(0, 2).map(node => node.getElementsByTagNameNS(W, 'keepNext').length)).toEqual([1, 1])
+    expect(paragraphs[1]?.getElementsByTagNameNS(W, 'ind')[0]?.getAttributeNS(W, 'left')).toBe('480')
+    expect(paragraphs[1]?.getElementsByTagNameNS(W, 'spacing')[0]?.getAttributeNS(W, 'line')).toBe('360')
+    expect(paragraphs[1]?.getElementsByTagNameNS(W, 'lang')[0]?.getAttributeNS(W, 'val')).toBe('zh-CN')
+  })
+
+  it('resolves paragraph style names once while preserving unchanged text XML', async () => {
+    const test = xmlFixture('<w:p><w:r w:rsidR="AABB"><w:rPr><w:lang w:val="en-US"/></w:rPr><w:t>original</w:t></w:r></w:p>')
+    await test.engine.applyMutations('paper.docx', [
+      { type: 'replace-text', officePath: '/body/p[1]', text: 'original', paragraphs: [{ text: 'original', format: { style: 'Heading 1', lineSpacing: '2x' } }] },
+      { type: 'insert-paragraph', text: 'inserted', style: 'normal' },
+    ])
+    const paragraphs = Array.from(writtenBody(test).getElementsByTagNameNS(W, 'p'))
+    expect(paragraphs.map(node => node.getElementsByTagNameNS(W, 'pStyle')[0]?.getAttributeNS(W, 'val'))).toEqual(['Heading1', 'Normal'])
+    expect(paragraphs[0]?.getElementsByTagNameNS(W, 'r')[0]?.getAttributeNS(W, 'rsidR')).toBe('AABB')
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'raw', 'batch', 'save'])
+    expect(test.calls.filter(call => call.argv.includes('/styles'))).toHaveLength(1)
+  })
+
+  it('rejects unknown paragraph style names before writing', async () => {
+    const test = fixture(() => ({}))
+    await expect(test.engine.applyMutations('paper.docx', [{ type: 'insert-paragraph', text: 'inserted', style: 'Missing' }]))
+      .rejects.toThrow('UNKNOWN_PARAGRAPH_STYLE')
+    expect(test.batches).toEqual([])
+  })
+
+  it('rejects an insertion into a table row before writing any batch', async () => {
+    const test = xmlFixture('<w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>')
+    await expect(test.engine.applyMutations('paper.docx', [
+      { type: 'insert-paragraph', before: '/body/tbl[1]/tr[1]/tc[1]', text: 'invalid' },
+    ])).rejects.toThrow('INVALID_INSERT_POSITION')
+    expect(test.batches).toEqual([])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
+  })
+
+  it('reads defined paragraph style IDs and display names without changing the document', async () => {
+    const test = fixture(spec => spec.argv.includes('/styles') ? { stdout: JSON.stringify({ data:
+      '<w:styles xmlns:w="' + W + '"><w:style w:type="character" w:styleId="Emphasis"/>'
+      + '<w:style w:type="paragraph"/><w:style w:type="paragraph" w:styleId=""/>'
+      + '<w:style w:type="paragraph" w:styleId="a"><w:name w:val="Normal"/></w:style>'
+      + '<w:style w:type="paragraph" w:styleId="2"><w:name w:val="Body Text Indent 2"/></w:style>'
+      + '<w:style w:type="paragraph" w:styleId="Custom"/>'
+      + '<w:style w:type="paragraph" w:styleId="Blank"><w:name w:val=""/></w:style></w:styles>',
+    }) } : {})
+    await expect(test.engine.readParagraphStyles('paper.docx')).resolves.toEqual([
+      { id: 'a', name: 'Normal' }, { id: '2', name: 'Body Text Indent 2' },
+      { id: 'Custom', name: 'Custom' }, { id: 'Blank', name: 'Blank' },
+    ])
+    expect(test.calls.map(call => call.argv.slice(1))).toEqual([['raw', 'paper.docx', '/styles', '--json']])
+    expect(test.batches).toEqual([])
+  })
+
+  it('prefers a selected exact style ID over colliding IDs and display names', async () => {
+    const test = fixture(spec => spec.argv.includes('/styles') ? { stdout: JSON.stringify({ data:
+      '<w:styles xmlns:w="' + W + '"><w:style w:type="paragraph" w:styleId="BODY"><w:name w:val="Upper"/></w:style>'
+      + '<w:style w:type="paragraph" w:styleId="body"><w:name w:val="Lower"/></w:style>'
+      + '<w:style w:type="paragraph" w:styleId="Other"><w:name w:val="body"/></w:style></w:styles>',
+    }) } : {})
+    await test.engine.applyMutations('paper.docx', [
+      { type: 'insert-paragraph', text: 'selected', style: 'body' },
+      { type: 'insert-paragraph', text: 'by-name', style: 'upper' },
+    ])
+    expect(Array.from(writtenBody(test).getElementsByTagNameNS(W, 'pStyle')).map(style => style.getAttributeNS(W, 'val')))
+      .toEqual(['body', 'BODY'])
+  })
+
+  it('rejects a malformed style catalog without returning choices', async () => {
+    const test = fixture(() => ({ stdout: JSON.stringify({ data: '<w:document xmlns:w="' + W + '"/>' }) }))
+    await expect(test.engine.readParagraphStyles('paper.docx')).rejects.toThrow()
+  })
+
+  it('returns no choices when the optional styles part is absent', async () => {
+    const test = fixture(() => ({ stdout: JSON.stringify({ success: true, data: '(no styles)', message: '(no styles)' }) }))
+    await expect(test.engine.readParagraphStyles('paper.docx')).resolves.toEqual([])
+  })
+
+  it('ignores non-paragraph and unidentified styles while allowing an existing style without a display name', async () => {
+    const test = fixture(spec => spec.argv.includes('/styles') ? { stdout: JSON.stringify({ data:
+      '<w:styles xmlns:w="' + W + '"><w:style w:type="character" w:styleId="Emphasis"/>'
+      + '<w:style w:type="paragraph"/><w:style w:type="paragraph" w:styleId="Custom"/></w:styles>',
+    }) } : {})
+    await test.engine.applyMutations('paper.docx', [{ type: 'insert-paragraph', text: 'inserted', style: 'custom' }])
+    expect(writtenBody(test).getElementsByTagNameNS(W, 'pStyle')[0]?.getAttributeNS(W, 'val')).toBe('Custom')
   })
 
   it.each([
-    { type: 'paragraph', childCount: 1, children: [{ type: 'math', childCount: 0 }] },
-    { type: 'paragraph', childCount: 1, children: [{ type: 'run', childCount: 1 }] },
-    { type: 'paragraph', childCount: 2, children: [{ type: 'run', childCount: 0 }] },
-    { matches: 0, results: [] },
-  ])('refuses paragraph replacement when its content cannot be reconstructed: %j', async (data) => {
-    const { calls, engine } = fixture(() => ({ stdout: JSON.stringify({ data }) }))
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+    '<w:sym w:font="Symbol" w:char="F041"/>', '<w:softHyphen/>', '<w:instrText>PAGE</w:instrText>',
+    '<w:fldChar w:fldCharType="begin"/>', '<w:footnoteReference w:id="1"/>',
+  ])('rejects text objects that the editor cannot project: %s', async (inline) => {
+    const test = xmlFixture('<w:p><w:r><w:t>before</w:t>' + inline + '<w:t>after</w:t></w:r></w:p>')
+    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
       .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
-    expect(calls.map(call => call.argv[1])).toEqual(['get'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
+    expect(test.batches).toEqual([])
   })
 
-  it('refuses to continue after an insertion with no returned paragraph identity', async () => {
-    const { engine } = fixture(() => ({}))
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'original\nnew',
-      paragraphs: [{ text: 'original' }, { text: 'new' }],
-    }])).rejects.toThrow()
+  it.each(['<w:br w:type="page"/>', '<w:br w:type="column"/>', '<w:lastRenderedPageBreak/>'])
+  ('retains non-text break markers omitted from the projected text: %s', async (inline) => {
+    const test = xmlFixture('<w:p><w:r><w:t>before</w:t>' + inline + '<w:t>after</w:t></w:r></w:p>')
+    await test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'before edited after' }])
+    expect(new XMLSerializer().serializeToString(writtenBody(test))).toContain(inline)
   })
 
-  it.each([
-    '<x:br x:type="page"/>', '<x:br x:type="column"/>', '<x:br x:clear="all"/>',
-    '<x:sym x:font="Symbol" x:char="F041"/>', '<x:softHyphen/>', '<x:instrText>PAGE</x:instrText>',
-    '<x:fldChar x:fldCharType="begin"/>', '<x:footnoteReference x:id="1"/>', '<x:lastRenderedPageBreak/>',
-  ])('protects inline XML omitted from the OfficeCLI run projection: %s', async (inline) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<x:document xmlns:x="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
-      + 'xmlns:id="http://schemas.microsoft.com/office/word/2010/wordml"><x:body><x:p id:paraId="AABB0011">'
-      + `<x:r><x:t>before</x:t>${inline}<x:t>after</x:t></x:r></x:p></x:body></x:document>`,
-    }) } : {})
-    await expect(engine.applyMutations('paper.docx', [{
-      type: 'replace-text', officePath: '/body/p[@paraId=AABB0011]', text: 'edited',
-    }])).rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw'])
+  it('retains a clear-bearing soft break unless the replacement text explicitly removes it', async () => {
+    const body = '<w:p><w:r><w:t>before</w:t><w:br w:clear="all"/><w:t>after</w:t></w:r></w:p>'
+    const retained = xmlFixture(body)
+    await retained.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'before\vafter edited' }])
+    expect(new XMLSerializer().serializeToString(writtenBody(retained))).toContain('<w:br w:clear="all"/>')
+    const removed = xmlFixture(body)
+    await removed.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'beforeafter edited' }])
+    expect(writtenBody(removed).getElementsByTagNameNS(W, 'br')).toHaveLength(0)
   })
 
-  it('accepts projected line breaks and tabs at a nested table paragraph', async () => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
-      + '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>before</w:t><w:br/><w:tab/><w:t>after</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
-      + '</w:body></w:document>',
-    }) } : {})
-    await engine.applyMutations('paper.docx', [{
-      type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'edited',
+  it('accepts soft breaks and tabs inside a nested table paragraph', async () => {
+    const test = xmlFixture('<w:tbl><w:tr><w:tc><w:p><w:r><w:t>before</w:t><w:br/><w:tab/><w:t>after</w:t></w:r></w:p></w:tc></w:tr></w:tbl>')
+    await test.engine.applyMutations('paper.docx', [{
+      type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'before\v\tafter edited',
     }])
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw', 'set', 'save'])
+    const body = writtenBody(test)
+    expect(body.getElementsByTagNameNS(W, 'tc')[0]?.textContent).toBe('beforeafter edited')
+    expect(body.getElementsByTagNameNS(W, 'br')).toHaveLength(1)
+    expect(body.getElementsByTagNameNS(W, 'tab')).toHaveLength(1)
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch', 'save'])
   })
 
   it.each(['vertAlign', 'strike', 'dstrike', 'vanish', 'rStyle', 'rPrChange', 'lang', 'rtl'])
-  ('protects run properties absent from editable text runs: %s', async (property) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
-      + `<w:r><w:rPr><w:${property} w:val="subscript"/></w:rPr><w:t>original</w:t></w:r></w:p></w:body></w:document>`,
-    }) } : {})
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
-      .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw'])
-  })
-
-  it.each(['b', 'i'])('protects independent complex-script emphasis: %s', async (property) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
-      + '<w:r><w:t>First </w:t></w:r><w:r><w:rPr>'
-      + `<w:${property} w:val="0"/><w:${property}Cs/></w:rPr><w:t>العربية</w:t></w:r></w:p></w:body></w:document>`,
-    }) } : {})
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'First edited',
-      runs: [{ text: 'First ' }, { text: 'edited' }],
-    }])).rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw'])
-  })
-
-  it.each(['w:val="double"', 'w:val="wave"', 'w:val="single" w:color="FF0000"', 'w:themeColor="accent1"', 'color="FF0000"'])
-  ('protects underline details absent from the boolean edit value: %s', async (attributes) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
-      + `<w:r><w:rPr><w:u ${attributes}/></w:rPr><w:t>original</w:t></w:r></w:p></w:body></w:document>`,
-    }) } : {})
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
-      .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw'])
-  })
-
-  it.each(['', 'w:val="single"', 'w:val="none"'])('accepts boolean underline declarations: %s', async (attributes) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
-      + `<w:r><w:rPr><w:u ${attributes}/></w:rPr><w:t>original</w:t></w:r></w:p></w:body></w:document>`,
-    }) } : {})
-    await engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw', 'set', 'save'])
+  ('retains opaque run property %s while changing text', async (property) => {
+    const test = xmlFixture('<w:p><w:r><w:rPr><w:' + property + ' w:val="detail"/></w:rPr><w:t>original</w:t></w:r></w:p>')
+    await test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
+    expect(writtenBody(test).getElementsByTagNameNS(W, property)[0]?.getAttributeNS(W, 'val')).toBe('detail')
   })
 
   it.each([
     '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="SimSun"/>',
     '<w:rFonts w:asciiTheme="minorHAnsi"/>', '<w:sz w:val="24"/><w:szCs w:val="40"/>',
     '<w:szCs w:val="40"/>', '<w:color w:val="4472C4" w:themeColor="accent1"/>',
-  ])('protects character detail that one font, size, or RGB value cannot represent: %s', async (properties) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
-      + `<w:r><w:rPr>${properties}</w:rPr><w:t>original</w:t></w:r></w:p></w:body></w:document>`,
-    }) } : {})
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
-      .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw'])
+    '<w:u w:val="double" w:color="FF0000"/>', '<w:b w:val="0"/><w:bCs/>',
+  ])('retains script and theme details while changing unrelated paragraph text: %s', async (properties) => {
+    const test = xmlFixture('<w:p><w:r><w:rPr>' + properties + '</w:rPr><w:t>original</w:t></w:r></w:p>')
+    await test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
+    expect(new XMLSerializer().serializeToString(writtenBody(test))).toContain(properties)
   })
 
-  it('accepts matching script fonts and sizes with a plain RGB color', async () => {
-    const { engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data:
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
-      + '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial"/>'
-      + '<w:sz w:val="24"/><w:szCs w:val="24"/><w:color w:val="4472C4"/></w:rPr>'
-      + '<w:t>original</w:t></w:r></w:p></w:body></w:document>',
-    }) } : {})
-    await engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
-  })
-
-  it.each(['<broken>', '', null])('rejects unavailable or malformed raw XML before writing: %j', async (data) => {
-    const { calls, engine } = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data }) } : {})
-    await expect(engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+  it.each(['<broken>', '', null, '<document/>', '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'])
+  ('rejects unavailable or malformed document XML before writing: %j', async (data) => {
+    const test = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data }) } : {})
+    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
       .rejects.toThrow()
-    expect(calls.map(call => call.argv[1])).toEqual(['get', 'raw'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
+    expect(test.batches).toEqual([])
   })
 
-  it('inherits paragraph character defaults on inserted paragraphs while run overrides remain explicit', async () => {
-    const { calls, engine } = fixture((spec) => {
-      if (spec.argv.includes('get')) return { stdout: JSON.stringify({ data: {
-        type: 'paragraph', text: 'original', childCount: 0, children: [],
-        format: { 'font.latin': 'Arial', 'font.ea': 'Arial', size: '20pt', 'size.cs': '20pt', bold: true },
-      } }) }
-      if (spec.argv.includes('add')) return { stdout: JSON.stringify({ data: 'Added paragraph at /body/p[@paraId=NEW]' }) }
-      return {}
-    })
-    await engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'original\nnew',
-      paragraphs: [{ text: 'original' }, { text: 'new', runs: [{ text: 'new', bold: false, font: '' }] }],
-    }])
-    const add = calls.find(call => call.argv.includes('add'))!.argv
-    expect(add).toEqual(expect.arrayContaining(['font.latin=Arial', 'font.ea=Arial', 'size=20pt', 'size.cs=20pt', 'bold=true']))
-    const batch = JSON.parse(String(calls.find(call => call.argv.includes('batch'))!.argv[4])) as unknown
-    expect(batch).toEqual([
-      { command: 'set', path: '/body/p[@paraId=NEW]', props: { text: 'new' } },
-      { command: 'set', path: '/body/p[@paraId=NEW]/r[1]', props: { bold: 'false', font: '' } },
-    ])
+  it('removes its temporary command file after an OfficeCLI batch failure', async () => {
+    const test = fixture(spec => spec.argv.includes('batch') ? { exitCode: 1, stderr: 'batch rejected' } : {})
+    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+      .rejects.toThrow('batch rejected')
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch'])
+    expect(existsSync(test.batches[0]!.input)).toBe(false)
   })
 
+  it.each([
+    { results: successfulBatch().results },
+    { ...successfulBatch(), summary: null },
+    ...([['total', 2], ['executed', 0], ['succeeded', 0], ['failed', 1], ['skipped', 1]] as const).map(([key, value]) => ({
+      ...successfulBatch(), summary: { ...successfulBatch().summary, [key]: value },
+    })),
+    { ...successfulBatch(), results: undefined },
+    { ...successfulBatch(), results: [] },
+    { ...successfulBatch(), results: [...successfulBatch().results, ...successfulBatch().results] },
+    { ...successfulBatch(), results: [null] },
+    { ...successfulBatch(), results: [{ index: 1, success: true }] },
+    { ...successfulBatch(), results: [{ index: 0, success: false, error: 'raw-set failed' }] },
+    { ...successfulBatch(), results: [{ index: 0, skipped: true }] },
+  ])('rejects an unsuccessful or incomplete batch response despite exit code zero: %j', async (data) => {
+    const test = fixture(spec => spec.argv.includes('batch') ? { stdout: JSON.stringify({ data }) } : {})
+    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+      .rejects.toThrow('OfficeCLI did not apply the complete document batch')
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch'])
+    expect(existsSync(test.batches[0]!.input)).toBe(false)
+  })
   it('parses preview, inspection, and validation envelopes', async () => {
     const { engine } = fixture((spec) => {
       if (spec.argv.includes('html')) return { stdout: '<article>论文</article>' }
@@ -485,28 +535,11 @@ describe('OfficeCliDocumentEngine', () => {
     await expect(errorEngine.health()).resolves.toEqual({ status: 'unavailable', detail: 'executable lookup failed' })
   })
 
-  it('applies optional insertion positions independently', async () => {
-    const { calls, engine } = fixture(() => ({}))
-    await engine.applyMutations('paper.docx', [
-      { type: 'insert-paragraph', text: 'positioned', before: '/document/body/p[2]', index: 1 },
-    ])
-    expect(calls[0]?.argv).toEqual([
-      'C:\\bin\\officecli.exe',
-      'add',
-      'paper.docx',
-      '/body',
-      '--type',
-      'paragraph',
-      '--prop',
-      'text=positioned',
-      '--before',
-      '/document/body/p[2]',
-      '--index',
-      '1',
-      '--json',
-    ])
+  it('inserts at an explicit current body index', async () => {
+    const test = fixture(() => ({}))
+    await test.engine.applyMutations('paper.docx', [{ type: 'insert-paragraph', text: 'positioned', index: 1 }])
+    expect(childElements(writtenBody(test)).map(node => node.textContent)).toEqual(['original', 'positioned', 'original', 'third'])
   })
-
   it('classifies OfficeCLI cancellation, timeout, and non-zero failures', async () => {
     const cancellation = new AbortController()
     const cancelledCtx = new Context()
@@ -673,6 +706,23 @@ describe('OfficeCliDocumentEngine', () => {
     await engine.release('paper.docx')
     await engine.release('paper.docx')
     expect(calls.map(call => call.argv[1])).toEqual(['view', 'close'])
+  })
+
+  it('releases every retained document when the Provider context is disposed', async () => {
+    const ctx = new Context()
+    const calls: SubprocessSpawnSpec[] = []
+    ctx.provide('subprocess', {
+      resolveExecutable: async (command: string) => command,
+      spawn: (spec: SubprocessSpawnSpec) => {
+        calls.push(spec)
+        return handle({ stdout: '<article />' })
+      },
+    } as never)
+    await ctx.plugin(OfficeCliDocumentEngine, { command: 'officecli' })
+    await ctx.documentEngine.previewHtml('one.docx')
+    await ctx.documentEngine.previewHtml('two.docx')
+    await ctx.fiber.dispose()
+    expect(calls.filter(call => call.argv.includes('close')).map(call => call.argv[2])).toEqual(['one.docx', 'two.docx'])
   })
 
   it('serializes overlapping operations and releases only the current lease tail', async () => {

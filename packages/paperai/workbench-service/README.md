@@ -12,6 +12,8 @@ Host Remote for the PaperAI workbench layered into the pinned DeepSeek Harness c
 
 The Working DOCX is authoritative. Preview HTML is output-only and is never accepted by a mutation method. Every edit carries both the observed document revision and head commit, and a successful edit immediately returns a recoverable version with human provenance. A block commit answers before the preview is rendered: the browser writes the committed text into the preview it shows and fetches the rendered preview in the background. Paragraph splits and formatting travel through the same commit operation; later original nodes are submitted first so insertions do not shift earlier positional addresses. Overview rows include the authoritative `workingPath` for same-name document details.
 
+Snapshots carry `paragraphStyles`, the document engine's defined style IDs and display names. A deferred block-commit projection carries an empty catalog for the browser to refresh with the preview. Catalog read failures also produce an empty catalog with the cause logged; they cannot turn a successful commit into a failed operation.
+
 `importDocument()` imports one browser-selected `.doc` or `.docx` as a free-writing document: no format is bound, and its document type stays `other` until the user or an Agent sets it. Document import and root-version creation form one workbench operation. If root submission rejects or is cancelled, the Host awaits non-cancellable document rollback before rejecting; the original upload or template source remains untouched. The root commit is the commit point: once it lands, the operation returns the created document and commit even if the preview cannot be rendered or the caller cancelled meanwhile — the projection is built without the caller's signal, a failed preview becomes an empty preview with the cause logged, and no retry can create a second document.
 
 `createFromTemplate()` starts one document of a given document type from the project's template set through the same operation. It requires a decided set with a format for that type, installs the format's contract for the project (idempotent), confirms it — library formats ship reviewed requirements, so no separate review step gates the start — and binds it in the root commit beside the milestone. The format's usage decides the content source, never the caller: a form template is imported from its normalized asset and becomes the document itself, so a request carrying an upload is rejected; a formatting reference requires the manuscript upload it should govern and rejects without one. The name defaults to the format's display name.
@@ -43,6 +45,6 @@ Workbench reads and writes do not assemble model requests, so they do not direct
 
 ## Known Limitations and Deferred Work
 
-- Browser editing is plain text, one block (semantic node) at a time; richer style mutations remain an OfficeCLI/domain extension.
+- Browser edits address original semantic nodes and carry text, runs, and paragraph layout; complex inline objects remain protected.
 - Only tracked documents are projected; other files in the project directory are neither listed nor edited by this Remote.
 - The document-type guess is keyword-based over the title and opening text; it is a suggestion the user or an Agent confirms, not a classifier.

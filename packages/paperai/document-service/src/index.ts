@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { DocumentEngine, EngineTextNode } from '@paperai/document-engine'
+import type { DocumentEngine, EngineParagraphStyle, EngineTextNode } from '@paperai/document-engine'
 import {
   DocumentId,
   type CapabilityHealth,
@@ -390,6 +390,18 @@ export class PaperDocumentService extends Service {
   async previewHtml(documentId: DocumentId, signal?: AbortSignal): Promise<string> {
     const document = this.requireDocument(documentId)
     return await this.ctx.documentEngine.previewHtml(document.workingPath, signal)
+  }
+
+  /**
+   * Read paragraph styles defined in the current Working DOCX.
+   * @param documentId - document identity.
+   * @param signal - optional engine cancellation.
+   * @returns stored style IDs and display names in definition order.
+   * @throws PaperDocumentError when the document does not exist, or an engine error when styles cannot be read.
+   */
+  async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+    const document = this.requireDocument(documentId)
+    return await this.ctx.documentEngine.readParagraphStyles(document.workingPath, signal)
   }
 
   /**

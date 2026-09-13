@@ -12,6 +12,7 @@ PaperAI 文档服务通过 `ctx.paperDocuments` 暴露。它将 Word 源文件�
 - `readDocument(documentId)` 从仓库读取元数据和有序节点，不再次读取 Word 文件。
 - `verifyImmutableSource(documentId, signal?)` 校验导入源仍是只读普通文件，且内容与记录的 SHA-256 一致。Consumer 在读取或复制源文件字节前调用该方法。
 - `previewHtml(documentId, signal?)` 渲染当前 Working DOCX；HTML 只用于预览。
+- `readParagraphStyles(documentId, signal?)` 通过文档引擎读取当前 Working DOCX 定义的段落样式 ID 与显示名称。
 - `rebuildIndex(documentId, signal?)` 重新读取 Working DOCX 并替换语义索引，不创建文档提交。
 
 ## 文件与索引语义

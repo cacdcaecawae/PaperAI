@@ -36,7 +36,8 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^",
     "@officecli/officecli": "1.0.145",
-    "@xmldom/xmldom": "0.9.12"
+    "@xmldom/xmldom": "0.9.12",
+    "diff": "^9.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",
@@ -46,6 +47,7 @@
     "@paperai/domain": "workspace:*"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-subprocess": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",

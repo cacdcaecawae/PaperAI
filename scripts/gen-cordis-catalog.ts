@@ -560,6 +560,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   DocumentRecord: 'workspace.md',
   DocumentRole: 'workspace.md',
   EngineMutation: 'workspace.md',
+  EngineParagraphStyle: 'workspace.md',
   EngineTextNode: 'workspace.md',
   EngineValidation: 'workspace.md',
   ExportDocumentRequest: 'workspace.md',

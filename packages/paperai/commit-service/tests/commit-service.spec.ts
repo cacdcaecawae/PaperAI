@@ -187,6 +187,10 @@ class FakeDocumentEngine extends DocumentEngine {
     return `<p>${await readFile(filePath, 'utf8')}</p>`
   }
 
+  override readParagraphStyles(): Promise<[]> {
+    return Promise.resolve([])
+  }
+
   override inspect(): Promise<Record<string, unknown>> {
     return Promise.resolve({})
   }

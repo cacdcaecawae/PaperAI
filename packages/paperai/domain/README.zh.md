@@ -8,7 +8,7 @@ PaperAI 与传输无关的领域词汇，覆盖项目、权威 Working DOCX、�
 
 `deliveryBlocked(report)` 是导出消费方共用的与传输无关解释：只有 `delivery-export` 模式中的有效 hard error 才阻止正式交付。草稿与持续检查可以继续报告，不会隐式成为保存边界。
 
-`DocumentParagraph` 携带一个段落的文字、可选字符片段，以及显式的样式、对齐、缩进或行距设置。`replace-text` 可用非空的 `paragraphs` 序列替换一个原始节点；各段文字以换行符拼接后必须等于 `nextText`，段内垂直制表符表示软换行。字符片段除强调、字号和颜色外，也可以指定字体名称。
+`DocumentParagraph` 携带一个段落的文字、可选字符片段，以及显式的样式、对齐、缩进或行距设置。`replace-text` 可用非空的 `paragraphs` 序列替换一个原始节点；各段文字以换行符拼接后必须等于 `nextText`，段内垂直制表符表示软换行。字符片段除强调、字号和颜色外，也可以指定字体名称。省略的字符字段保留原 Word 属性，客户端显式声明被清除的值。
 
 ## 模型体验
 

@@ -8,7 +8,7 @@ Ids that cross package boundaries are compile-time branded and become ordinary s
 
 `deliveryBlocked(report)` is the one transport-neutral interpretation used by export consumers: only an active hard error in `delivery-export` mode blocks formal delivery. Draft and continuous checks remain reportable without becoming an implicit save boundary.
 
-`DocumentParagraph` carries one paragraph's text, optional character runs, and explicit style, alignment, indentation, or line-spacing overrides. A `replace-text` mutation can replace one original node with a nonempty `paragraphs` sequence; joining their text with newlines must equal `nextText`, and vertical tabs within each paragraph represent soft line breaks. Runs can name a font family as well as emphasis, size, and color.
+`DocumentParagraph` carries one paragraph's text, optional character runs, and explicit style, alignment, indentation, or line-spacing overrides. A `replace-text` mutation can replace one original node with a nonempty `paragraphs` sequence; joining their text with newlines must equal `nextText`, and vertical tabs within each paragraph represent soft line breaks. Runs can name a font family as well as emphasis, size, and color. Omitted character fields preserve original Word properties; clients explicitly state cleared values.
 
 ## Model Experience
 

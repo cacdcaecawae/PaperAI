@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { DocumentPreview } from '../src/client/DocumentPreview.tsx'
 import { zh } from '../src/client/locales.ts'
-import type { PaperAIBlockEdit, PaperAIDocumentNodeId } from '../src/client/types.ts'
+import type { PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentSnapshot } from '../src/client/types.ts'
 import type { PaperAIDocumentWorkbenchProps } from '../src/client/slots.ts'
 import { readParagraphs } from '../src/client/editor-dom.ts'
 import { runsOf } from '../src/client/preview-html.ts'
@@ -21,14 +21,15 @@ const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   return text
 }) as PaperAIDocumentWorkbenchProps['t']
 
-function setup(body = '<p data-path="/body/p[1]" style="font-size:12pt;font-family:Arial">Hello world</p>', texts = ['Hello world'], comparing = false) {
+function setup(body = '<p data-path="/body/p[1]" style="font-size:12pt;font-family:Arial">Hello world</p>', texts = ['Hello world'], comparing = false,
+  paragraphStyles: PaperAIDocumentSnapshot['paragraphStyles'] = [{ id: 'Normal', name: '正文' }, { id: 'SectionTitle', name: '章节标题' }]) {
   const onDraft = vi.fn()
   const onSave = vi.fn()
   const nodes = texts.map((text, index) => ({ nodeId: `node-${index}` as PaperAIDocumentNodeId, text, label: text, kind: 'paragraph' as const, depth: 0, editable: true }))
   function Harness() {
     const [edits, setEdits] = useState<PaperAIBlockEdit[]>([])
     return <DocumentPreview html={body} revision={REVISION_1} nodes={nodes} title="Document" edits={edits} saving={false} t={t} onSave={onSave}
-      comparing={comparing}
+      comparing={comparing} paragraphStyles={paragraphStyles}
       onCancel={() =>{  setEdits([]) }} onDraft={(nodeId, draft) => {
         onDraft(nodeId, draft)
         setEdits(current => [...current.filter(edit => edit.nodeId !== nodeId), ...(draft === null ? [] : [{
@@ -176,6 +177,7 @@ describe('Document editing commands', () => {
     function Live() {
       const state = useSyncExternalStore(listener => store.subscribe(listener), () => store.getSnapshot())
       return <DocumentPreview html={state.document!.previewHtml} revision={state.document!.revision} nodes={state.document!.nodes}
+        paragraphStyles={state.document!.paragraphStyles}
         title="Document" edits={state.edits} saving={false} t={t} onSave={() => {}} onCancel={() => {}}
         onDraft={(id, draft) => { flushSync(() => { controller.updateDraft(SESSION_ID, id, draft) }) }} />
     }
@@ -284,11 +286,13 @@ describe('Document editing commands', () => {
     const block = editor.paragraphs()[0]!
     editor.select(block.firstChild!, 3)
     fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.style'] }), { target: { value: 'Heading2' } })
+    const styles = screen.getByRole('combobox', { name: zh['editor.style'] })
+    expect(within(styles).getAllByRole('option').map(option => option.textContent)).toEqual([zh['editor.applyStyle'], '正文', '章节标题'])
+    fireEvent.change(styles, { target: { value: 'SectionTitle' } })
     fireEvent.change(screen.getByRole('combobox', { name: zh['editor.spacing'] }), { target: { value: '2x' } })
     const indent = screen.getByRole('spinbutton', { name: zh['editor.indent'] })
     fireEvent.change(indent, { target: { value: '24' } })
-    expect(readParagraphs(block)[0]?.format).toEqual({ style: 'Heading2', lineSpacing: '2x', indent: '24pt' })
+    expect(readParagraphs(block)[0]?.format).toEqual({ style: 'SectionTitle', lineSpacing: '2x', indent: '24pt' })
     expect(block.style.marginLeft).toBe('24pt')
     expect(block.style.lineHeight).toBe('2')
     expect(fireEvent.keyDown(indent, { key: 'ArrowLeft' })).toBe(true)
@@ -298,6 +302,20 @@ describe('Document editing commands', () => {
     act(() => { indent.focus() })
     fireEvent.keyDown(indent, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(screen.getByRole('combobox', { name: zh['editor.align'] }))
+  })
+
+  it.each([undefined, 'ImportedStyle'])('disables an empty style catalog while retaining the current reading %s', (style) => {
+    const editor = setup('<p data-path="/body/p[1]">Hello world</p>', ['Hello world'], false, [])
+    const block = editor.paragraphs()[0]!
+    if (style !== undefined) block.dataset.paperaiFormat = JSON.stringify({ style })
+    editor.select(block.firstChild!, 2)
+    fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
+    const styles = screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.style'] })
+    expect(styles.disabled).toBe(true)
+    expect(styles.value).toBe(style ?? '')
+    expect(styles.selectedOptions[0]?.textContent).toBe(style ?? zh['editor.applyStyle'])
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.align'] }).disabled).toBe(false)
+    expect(within(styles).queryByRole('option', { name: 'Heading1' })).toBeNull()
   })
 
   it('navigates version changes in both directions and keeps comparison text read-only', () => {
@@ -330,6 +348,7 @@ describe('Document editing commands', () => {
     function Live() {
       const state = useSyncExternalStore(listener => store.subscribe(listener), () => store.getSnapshot())
       return <DocumentPreview html={state.document!.previewHtml} revision={state.document!.revision} nodes={state.document!.nodes} title="Document"
+        paragraphStyles={state.document!.paragraphStyles}
         edits={state.edits} saving={false} t={t} onSave={() => {}}
         onCancel={() => { controller.cancelEdit(SESSION_ID) }}
         onDraft={(id, draft) => { controller.updateDraft(SESSION_ID, id, draft) }} />

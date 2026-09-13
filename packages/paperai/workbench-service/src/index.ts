@@ -73,6 +73,7 @@ import type {
   PaperAIImportDocumentRequest,
   PaperAIImportDocumentResult,
   PaperAIOpenDocumentRequest,
+  PaperAIParagraphStyle,
   PaperAIOverviewRequest,
   PaperAIProjectOverview,
   PaperAIRecoverWorkingRequest,
@@ -1374,7 +1375,10 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     signal?: AbortSignal,
     preview: 'required' | 'best-effort' | 'skip' = 'required',
   ): Promise<PaperAIDocumentOpenResult> {
-    const previewHtml = await this.previewFor(document.id, signal, preview)
+    const [previewHtml, paragraphStyles] = await Promise.all([
+      this.previewFor(document.id, signal, preview),
+      this.paragraphStylesFor(document.id, signal, preview),
+    ])
     const history = this.ctx.paperCommits.listHistory(document.id)
     const contract = this.contractOf(document)
     const projectSet = project.templatePackId === undefined ? undefined : this.findSet(project.templatePackId)
@@ -1389,6 +1393,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       revision: revisionOf(document),
       headCommitId: headOf(document),
       previewHtml,
+      paragraphStyles,
       nodes: nodes.map(nodeSummary),
       versions: history.map(commit => versionOf(commit, document.headCommitId)),
       template: this.templateSummary(contract),
@@ -1422,6 +1427,20 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         `paperai-workbench: preview unavailable for document '${String(documentId)}' after its root commit: ${String(error)}`,
       )
       return ''
+    }
+  }
+
+  private async paragraphStylesFor(
+    documentId: DocumentId,
+    signal: AbortSignal | undefined,
+    preview: 'required' | 'best-effort' | 'skip',
+  ): Promise<readonly PaperAIParagraphStyle[]> {
+    if (preview === 'skip') return []
+    try {
+      return await this.ctx.paperDocuments.readParagraphStyles(documentId, signal)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(`paperai-workbench: paragraph styles unavailable for document '${String(documentId)}': ${String(error)}`)
+      return []
     }
   }
 

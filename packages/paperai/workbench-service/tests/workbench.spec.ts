@@ -119,6 +119,7 @@ interface Harness {
   readonly importDocument: Mock<(request: MockImportRequest) => Promise<unknown>>
   readonly installPack: Mock<(input: { readonly packId?: string; readonly memberIds?: readonly string[] }) => Promise<TemplateContract[]>>
   readonly previewHtml: Mock<() => Promise<string>>
+  readonly readParagraphStyles: Mock<() => Promise<{ id: string; name: string }[]>>
   readonly readTextNodes: Mock<(path: string) => Promise<{ officePath: string; text: string; kind: 'paragraph' }[]>>
   contracts: TemplateContract[]
   /** Custom template sets the fake template service reports. */
@@ -310,6 +311,7 @@ async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
   }))
   const rollbackImport = vi.fn(async (_documentId: ReturnType<typeof DocumentId>) => {})
   const previewHtml = vi.fn(async () => '<html><body><p>只读预览</p></body></html>')
+  const readParagraphStyles = vi.fn(async () => [{ id: 'a', name: 'Normal' }, { id: '2', name: 'Body Text Indent 2' }])
   const importDocument = vi.fn(async (request: MockImportRequest) => {
     expect(await readFile(request.sourcePath, 'utf8')).toBe('word-upload')
     return {
@@ -356,6 +358,7 @@ async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
       ? { document: structuredClone(harness.document), nodes: structuredClone(harness.nodes) }
       : undefined,
     previewHtml,
+    readParagraphStyles,
     importDocument,
     rollbackImport,
   } as never)
@@ -477,7 +480,7 @@ async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
   const service = ctx.paperaiWorkbench
   Object.assign(harness, {
     ctx, service, submit, rollbackImport, revert, check, exportDocument, importDocument, installPack,
-    previewHtml, readTextNodes,
+    previewHtml, readParagraphStyles, readTextNodes,
   })
   return harness
 }
@@ -656,6 +659,7 @@ describe('PaperAiWorkbenchService', () => {
       resourceId: `document:${DOCUMENT_ID}` as PaperAIResourceId,
     })
     expect(opened.document.previewHtml).toContain('只读预览')
+    expect(opened.document.paragraphStyles).toEqual([{ id: 'a', name: 'Normal' }, { id: '2', name: 'Body Text Indent 2' }])
     expect(opened.document.nodes.find(node => node.nodeId === NODE_ID)).toMatchObject({ editable: true, text: '原始段落' })
 
     const committed = await harness.service.commit({
@@ -676,6 +680,8 @@ describe('PaperAiWorkbenchService', () => {
     expect(committed.document.nodes.find(node => node.nodeId === NODE_ID)?.text).toBe('人工修改后的段落')
     expect(committed.document.versions[0]?.actor.name).toBe('用户')
     expect(committed.createdCommitId).toBe('commit-1')
+    expect(committed.document.paragraphStyles).toEqual([])
+    expect(harness.readParagraphStyles).toHaveBeenCalledOnce()
 
     await expect(harness.service.commit({
       sessionId: SESSION_ID,
@@ -685,6 +691,16 @@ describe('PaperAiWorkbenchService', () => {
       mutations: [{ type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '过期编辑' }],
     })).rejects.toThrow('changed; reload')
     expect(harness.submit).toHaveBeenCalledOnce()
+  })
+
+  it('keeps document opening available when paragraph styles cannot be read', async () => {
+    const harness = await createHarness()
+    harness.readParagraphStyles.mockRejectedValueOnce(new Error('styles unavailable'))
+    const opened = await harness.service.open({
+      workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, resourceId: `document:${DOCUMENT_ID}` as PaperAIResourceId,
+    })
+    expect(opened.document.previewHtml).toContain('只读预览')
+    expect(opened.document.paragraphStyles).toEqual([])
   })
 
   it('saves paragraph splits from later original nodes first and forwards their formatting', async () => {
@@ -796,6 +812,7 @@ describe('PaperAiWorkbenchService', () => {
     roots.push(root)
     const harness = await createHarness(root)
     harness.previewHtml.mockRejectedValueOnce(new Error('OfficeCLI preview crashed'))
+    harness.readParagraphStyles.mockRejectedValueOnce(new Error('OfficeCLI styles crashed'))
     const controller = new AbortController()
     const request = {
       workspaceId: WORKSPACE_ID,
@@ -816,6 +833,7 @@ describe('PaperAiWorkbenchService', () => {
     expect(result).toMatchObject({ status: 'imported', createdCommitId: 'commit-1' })
     if (result.status !== 'imported') throw new Error('expected an imported document')
     expect(result.opened.document.previewHtml).toBe('')
+    expect(result.opened.document.paragraphStyles).toEqual([])
     expect(result.opened.document.headCommitId).toBe('commit-1')
     expect(harness.rollbackImport).not.toHaveBeenCalled()
     expect(harness.previewHtml).toHaveBeenCalledWith(DOCUMENT_ID, undefined)
