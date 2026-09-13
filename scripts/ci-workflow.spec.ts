@@ -147,8 +147,10 @@ describe('CI workflow', () => {
     for (const selection of [
       'packages/client/connection/tests/client-apply.client.spec.ts',
       'packages/client/connection/tests/api-helpers.client.spec.ts',
+      'packages/client/connection/tests/fixture.client.spec.ts',
       'packages/client/ui-paperai-workbench/tests',
-      'packages/client/ui-primitives/tests/tooltip.client.spec.tsx',
+      'packages/client/ui-primitives/tests',
+      'packages/session/session-title/tests',
       'packages/host/apiproxy/tests/rpc-schemas.spec.ts',
       'packages/interaction/permission-presets/tests',
       'packages/paperai',
@@ -182,12 +184,17 @@ describe('CI workflow', () => {
     expect(uiCommands).toContain('snapshot: pwsh-tool-turn matches')
     expect(uiCommands).not.toContain('persistent-pwsh-tool-turn')
     expect(uiCommands).toContain('scripts/translation-prompt.snapshot.ts')
+    expect(uiCommands).toContain('apps/web/tests/paperai-acp-tool-failure.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-permissions.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-workspace-navigation.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
 
     const windowsCommands = commandText(paperaiWindows.steps)
     expect(windowsCommands).toContain('pnpm run test:paperai:windows --maxWorkers=2')
+    expect(windowsCommands).toContain('packages/paperai/document-engine-officecli/tests/officecli.real.spec.ts')
+    expect(paperaiWindows.steps).toContainEqual(expect.objectContaining({
+      env: { DSH_PAPERAI_OFFICECLI_REAL: '1' },
+    }))
     expect(windowsCommands).toContain('snapshot: persistent-pwsh-tool-turn matches')
     expect(windowsCommands).not.toContain('check:ci:windows-complete')
     expect(typeof windowsNative['runs-on']).toBe('string')

@@ -2987,9 +2987,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       },
     },
     settings: {
-      // Only the resolved DeepSeek address needed by first-run readiness is
-      // represented here. Fixture-backed journeys do not open its Models
-      // editor; real schema-driven forms ride the HTTP transport.
+      // Fixture journeys start after onboarding; schema-driven settings and
+      // first-run acknowledgement writes ride the real HTTP transport.
       describe: request => ok(request, {
         writable: true,
         hasDocument: true,
@@ -3000,23 +2999,30 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           applies: 'live',
           secrets: [{ path: ['apiKey'], set: false }],
           revision: 0,
+        }, {
+          ns: 'ui-onboarding',
+          schema: {},
+          value: { welcomeNoticeVersion: '2026-08-13.1' },
+          applies: 'live',
+          secrets: [],
+          revision: 0,
         }],
       }),
       // Native opens are deterministic no-op successes in this fixture, as is host.openPath.
       openDocument: request => ok(request, { opened: true as const }),
       update: request => err(request, {
         code: 'settings-rejected',
-        message: 'fixture: the minimal readiness settings descriptor is read-only',
+        message: 'fixture: readiness settings descriptors are read-only',
         details: { ns: request.payload.ns },
       }),
       replace: request => err(request, {
         code: 'settings-rejected',
-        message: 'fixture: the minimal readiness settings descriptor is read-only',
+        message: 'fixture: readiness settings descriptors are read-only',
         details: { ns: request.payload.ns },
       }),
       mutate: request => err(request, {
         code: 'settings-rejected',
-        message: 'fixture: no settings namespaces are registered',
+        message: 'fixture: readiness settings descriptors are read-only',
         details: { ns: request.payload.ns },
       }),
     },

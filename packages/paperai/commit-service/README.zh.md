@@ -4,7 +4,7 @@
 
 PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperCommits`，是人工或 agent（智能体）修改权威 Working DOCX 的唯一受支持路径。`submit()` 或 `revert()` 成功时，修改已经应用且文档 head 已前移；不要求用户再次确认。
 
-`inspectProject(project)` 只读检查已登记原件、工作文件、当前版本、路径归属和保留快照，返回问题与独立的 `WorkingRecoveryPlan` 候选方案。`recoverMissingWorking(plan)` 与文档提交串行，重新检查当前提交和最新扫描结果，验证快照字节及项目内无符号链接的目标祖先，再原子创建缺失的工作文件，不覆盖已存在目标。过期方案会被拒绝。恢复只是重新实体化已有当前提交，保留历史且不创建内容提交。原件丢失、快照损坏、重复归属和外部修改只报告问题，不自动修复。仅含传输数据的报告和方案类型通过 `/doctor-types` 发布。
+`inspectProject(project)` 只读检查已登记原件、工作文件、当前版本、路径归属和保留快照，返回问题与独立的 `WorkingRecoveryPlan` 候选方案。`recoverMissingWorking(plan)` 与文档提交串行，重新检查当前提交和最新扫描结果，验证快照字节及项目内无符号链接的目标祖先，再原子创建缺失的工作文件，不覆盖已存在目标。过期方案会被拒绝。恢复只是重新实体化已有当前提交，保留历史且不创建内容提交。原件丢失、快照损坏、重复归属和外部修改只报告问题，不自动修复。仅含传输数据的报告和方案类型通过 `/doctor-types` 发布。 `captureExternal(request)` 把与当前版本不一致的工作文件原样记为一个新版本（字节不变），让段落编辑得以继续；工作文件已与当前版本一致时拒绝。
 
 ## 服务：`PaperCommitService`（`ctx.paperCommits`）
 
@@ -17,7 +17,9 @@ PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperC
 
 `submit()` 要求非空消息和至少一项修改。`baseCommitId` 必须等于当前 head；只有首次提交前可以省略。`revert()` 要求调用方提供当前 head，并指定一个不同且从该 head 可达的目标。
 
-编译的修改覆盖 `replace-text`、`insert-node`、`delete-node`、`bind-template`、`unbind-template`、`set-document-type` 与 `milestone`。`bind-template` 会以同一提交要切换到的文档类型调用 `paperTemplates.validateAssociation()`；`unbind-template` 在文档没有绑定模板时失败；`set-document-type` 在类型未变化时失败，并且除非同一提交绑定了另一模板，否则会先记录一条 `unbind-template` 操作，因为一份绑定的格式只适用于一种类型。发布的 `DocumentRecord` 携带最终的类型与模板绑定。
+编译的修改覆盖 `replace-text`、`insert-node`、`delete-node`、`bind-template`、`unbind-template`、`set-document-type` 与 `milestone`。`replace-text` 可携带该块的 `runs`，其文字拼接必须与 `nextText` 完全一致；带 runs 时块的字符格式属于本次修改，因此文字本身可以保持不变。`bind-template` 会以同一提交要切换到的文档类型调用 `paperTemplates.validateAssociation()`；`unbind-template` 在文档没有绑定模板时失败；`set-document-type` 在类型未变化时失败，并且除非同一提交绑定了另一模板，否则会先记录一条 `unbind-template` 操作，因为一份绑定的格式只适用于一种类型。发布的 `DocumentRecord` 携带最终的类型与模板绑定。
+
+`replace-text.paragraphs` 是一个原始节点的完整非空替换内容，与顶层 `runs` 互斥。每段字符片段的文字拼接必须等于该段文字；各段文字以换行符拼接后必须等于 `nextText`。段内文字不含段落分隔符，垂直制表符表示软换行。仅修改格式时允许文字保持不变。
 
 ## 发布与恢复
 

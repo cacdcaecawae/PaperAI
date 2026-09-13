@@ -5,13 +5,16 @@ import {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { resolvePreviewBudget } from '../config.ts'
+import { normalize, patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
+import { commitFormatting } from './format-intent.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
   PaperAIDocumentType, PaperAIExportMode, PaperAIExternalDocumentHead, PaperAIImportDocumentResult, PaperAILibraryAction,
   PaperAILibraryState, PaperAILibraryStore, PaperAIProjectAction, PaperAIProjectDirectoryState,
   PaperAIProjectDirectoryStore, PaperAIProjectOverview, PaperAIProjectState, PaperAIProjectStore,
-  PaperAIResourceId, PaperAIRetainedView, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput, PaperAIWorkbenchAction,
+  PaperAIResourceId, PaperAIRetainedView, PaperAIBlockDraft, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput,
+  PaperAIWorkbenchAction,
   PaperAIWorkbenchPanel, PaperAIWorkbenchRemote, PaperAIWorkbenchState, PaperAIWorkbenchStore,
 } from './types.ts'
 
@@ -28,7 +31,7 @@ const WORKBENCH_INITIAL: PaperAIWorkbenchState = Object.freeze({
   scrollTop: 0,
   phase: 'idle',
   document: null,
-  edit: null,
+  edits: [],
   action: null,
   panel: null,
   diff: null,
@@ -74,13 +77,16 @@ async function callRemote<T>(call: () => Promise<RemoteResult<T>>): Promise<Remo
 }
 
 function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
-  return state.edit !== null && state.edit.draft !== state.edit.baseText
+  return state.edits.length > 0
 }
 
-/** Preserve an evicted or externally changed draft without applying it to a different block. */
-function restoreEdit(document: PaperAIDocumentSnapshot, edit: PaperAIBlockEdit): PaperAIBlockEdit {
-  const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
-  return { ...edit, conflicted: node === undefined || !node.editable || node.text !== edit.baseText }
+/** Preserve evicted or externally changed drafts without applying them to different blocks. */
+function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
+  return edits.map((edit) => {
+    const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
+    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable
+      || node.text !== edit.baseText || (edit.baseRevision !== undefined && edit.baseRevision !== document.revision) }
+  })
 }
 
 /** Commit identity is shared by live notifications and reconnect reads. */
@@ -111,7 +117,7 @@ export class PaperAIWorkbenchController {
     store: createSnapshotStore(LIBRARY_INITIAL), generation: 0, abort: null,
   }
   private readonly workbenches = new Map<SessionId, RequestEntry<PaperAIWorkbenchStore>>()
-  private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, PaperAIBlockEdit>>()
+  private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, readonly PaperAIBlockEdit[]>>()
   private readonly positions = new Map<SessionId, Map<PaperAIResourceId, number>>()
   private readonly targets = new Map<SessionId, {
     readonly workspaceId: WorkspaceId
@@ -383,10 +389,10 @@ export class PaperAIWorkbenchController {
       return
     }
     this.publishOpenResult(entry.store, result.value)
-    const edit = this.drafts.get(sessionId)?.get(resourceId)
+    const edits = this.drafts.get(sessionId)?.get(resourceId)
     entry.store.update((draft) => {
       draft.scrollTop = this.positions.get(sessionId)?.get(resourceId) ?? 0
-      if (edit !== undefined) draft.edit = restoreEdit(result.value.document, edit)
+      if (edits !== undefined) draft.edits = restoreEdits(result.value.document, edits)
     })
   }
 
@@ -417,8 +423,8 @@ export class PaperAIWorkbenchController {
     const retained = state.retained.filter(view => view.document?.resourceId !== opening)
     if (state.document !== null && state.phase === 'ready') {
       const resource = state.document.resourceId
-      const drafts = this.drafts.get(sessionId) ?? new Map<PaperAIResourceId, PaperAIBlockEdit>()
-      if (hasUnsavedEdit(state) && state.edit !== null) drafts.set(resource, state.edit)
+      const drafts = this.drafts.get(sessionId) ?? new Map<PaperAIResourceId, readonly PaperAIBlockEdit[]>()
+      if (hasUnsavedEdit(state)) drafts.set(resource, state.edits)
       else drafts.delete(resource)
       this.drafts.set(sessionId, drafts)
       const positions = this.positions.get(sessionId) ?? new Map<PaperAIResourceId, number>()
@@ -446,62 +452,51 @@ export class PaperAIWorkbenchController {
   }
 
   /**
-   * Start editing one block in place.
+   * Record what one block now reads in the page. The page owns the comparison,
+   * because a block can differ from the document by its formatting alone;
+   * `null` says the block reads as the document has it.
    * @param sessionId - Session owning the open workbench.
-   * @param nodeId - block chosen in the document view.
-   * @returns settled local action result.
+   * @param nodeId - block written into in the document view.
+   * @param draft - the block's text and runs, or `null` to drop its draft.
    */
-  selectBlock(sessionId: SessionId, nodeId: PaperAIDocumentNodeId): PaperAIActionResult {
-    this.assertLive()
-    const entry = this.workbenchEntry(sessionId)
-    const state = entry.store.getSnapshot()
-    if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
-    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.edit?.nodeId === nodeId) return OK
-    if (hasUnsavedEdit(state)) {
-      return { ok: false, error: 'save or cancel the current block first' }
-    }
-    const node = state.document.nodes.find(candidate => candidate.nodeId === nodeId)
-    if (node === undefined || !node.editable) {
-      return { ok: false, error: 'block is not editable' }
-    }
-    entry.store.update((draft) => {
-      draft.edit = { nodeId, baseText: node.text, draft: node.text }
-      draft.actionError = null
-    })
-    return OK
-  }
-
-  /**
-   * Replace the draft of the block being edited.
-   * @param sessionId - Session owning the edit.
-   * @param value - current plain-text draft.
-   */
-  updateDraft(sessionId: SessionId, value: string): void {
+  updateDraft(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null): void {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
-      if (state.edit === null || state.action !== null) return
-      state.edit = { ...state.edit, draft: value }
+      const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
+      if (state.phase !== 'ready' || state.action !== null || state.document === null || node === undefined || !node.editable) return
+      const others = state.edits.filter(edit => edit.nodeId !== nodeId)
+      const previous = state.edits.find(edit => edit.nodeId === nodeId)
+      if (draft !== null && previous?.conflicted === true) return
+      state.edits = draft === null
+        ? others
+        : [...others, {
+          nodeId, baseText: previous?.baseText ?? node.text,
+          baseRevision: previous?.baseRevision ?? state.document.revision,
+          draft: draft.text,
+          ...(draft.runs === undefined ? {} : { runs: draft.runs }),
+          ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
+          ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
+        }]
       state.actionError = null
     })
   }
 
   /**
-   * Leave the block as it was, discarding the draft.
-   * @param sessionId - Session owning the edit.
+   * Leave every block as the document has it, discarding the drafts.
+   * @param sessionId - Session owning the edits.
    */
   cancelEdit(sessionId: SessionId): void {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
       if (state.action !== null) return
-      state.edit = null
+      state.edits = []
       state.actionError = null
     })
   }
 
   /**
-   * Save the block draft as one version.
-   * @param sessionId - Session owning the edit.
+   * Save every block draft as one version.
+   * @param sessionId - Session owning the edits.
    * @returns settled local action result.
    */
   async commitEdit(sessionId: SessionId): Promise<PaperAIActionResult> {
@@ -510,11 +505,12 @@ export class PaperAIWorkbenchController {
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.edit === null) return { ok: false, error: 'no block is being edited' }
-    if (state.edit.conflicted === true) return { ok: false, error: 'block changed externally; local draft retained' }
-    if (state.edit.draft === state.edit.baseText) return { ok: false, error: 'block has no changes' }
+    if (state.edits.length === 0) return { ok: false, error: 'no block has changes' }
+    if (state.edits.some(edit => edit.conflicted === true)) {
+      return { ok: false, error: 'block changed externally; local draft retained' }
+    }
     const document = state.document
-    const edit = state.edit
+    const edits = state.edits
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'committing'
@@ -525,9 +521,26 @@ export class PaperAIWorkbenchController {
       documentId: document.documentId,
       baseRevision: document.revision,
       baseCommitId: document.headCommitId,
-      mutations: [{ type: 'replace-text', nodeId: edit.nodeId, baseText: edit.baseText, nextText: edit.draft }],
+      mutations: edits.map(edit => ({
+        type: 'replace-text' as const,
+        nodeId: edit.nodeId,
+        baseText: edit.baseText,
+        nextText: edit.draft,
+        ...commitFormatting(edit),
+      })),
     }, request.signal))
-    return this.settleCommit(entry, request, document, result)
+    // The preview patch finds each block the way the page maps it: same kind, same text, same ordinal among peers.
+    const patches = edits.map((edit) => {
+      const cell = document.nodes.find(node => node.nodeId === edit.nodeId)?.kind === 'table-cell'
+      const ordinal = document.nodes
+        .filter(node => node.kind !== 'table' && (node.kind === 'table-cell') === cell && normalize(node.text) === normalize(edit.baseText))
+        .findIndex(node => node.nodeId === edit.nodeId)
+      return { baseText: edit.baseText, nextText: edit.draft, cell, ordinal,
+        ...(edit.runs === undefined ? {} : { runs: edit.runs }),
+        ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs }),
+      }
+    })
+    return this.settleCommit(entry, request, document, result, patches)
   }
 
   /**
@@ -631,7 +644,7 @@ export class PaperAIWorkbenchController {
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.diff?.commitId === commitId) {
+    if (state.diff?.commitId === commitId && state.diff.error === null) {
       entry.store.update((draft) => { draft.diff = null })
       return OK
     }
@@ -741,7 +754,7 @@ export class PaperAIWorkbenchController {
       if (state.document?.documentId !== change.documentId
         || state.document.headCommitId === change.headCommitId) continue
       entry.store.update((draft) => { draft.externalUpdate = change })
-      if (state.action === null && (state.edit === null || state.edit.draft === state.edit.baseText)) {
+      if (state.action === null && !hasUnsavedEdit(state)) {
         void this.reloadExternal(sessionId)
       }
     }
@@ -764,12 +777,54 @@ export class PaperAIWorkbenchController {
     if (state.externalUpdate === null) return { ok: false, error: 'no external document update' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
     const pending = state.externalUpdate
-    const edit = state.edit
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'reloading-external'
       draft.actionError = null
     })
+    return await this.reopen(entry, sessionId, target, request, state.edits, pending)
+  }
+
+  /**
+   * Record the Working DOCX, changed outside PaperAI, as a version of its own
+   * and open the document again; an unsaved block draft survives when its
+   * block still reads the same.
+   * @param sessionId - Session showing the document.
+   * @returns ok once the version is recorded and the document reopened; otherwise the displayable failure.
+   */
+  async captureExternal(sessionId: SessionId): Promise<PaperAIActionResult> {
+    this.assertLive()
+    const entry = this.workbenchEntry(sessionId)
+    const state = entry.store.getSnapshot()
+    const target = this.targets.get(sessionId)
+    if (state.phase !== 'ready' || state.document === null || target === undefined) {
+      return { ok: false, error: 'no open document' }
+    }
+    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    const documentId = state.document.documentId
+    const request = this.begin(entry)
+    entry.store.update((draft) => {
+      draft.action = 'capturing-external'
+      draft.actionError = null
+    })
+    const captured = await callRemote(() => this.remote.captureExternal({
+      workspaceId: target.workspaceId,
+      documentId,
+    }, request.signal))
+    if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
+    if (!captured.ok) return this.fail(entry.store, remoteError(captured.error))
+    return await this.reopen(entry, sessionId, target, request, state.edits)
+  }
+
+  /** Open the document again after an outside change; drafts are kept, marked when their blocks read differently. */
+  private async reopen(
+    entry: RequestEntry<PaperAIWorkbenchStore>,
+    sessionId: SessionId,
+    target: { readonly workspaceId: WorkspaceId; readonly resourceId: PaperAIResourceId },
+    request: Request,
+    edits: readonly PaperAIBlockEdit[],
+    consumed?: PaperAIExternalDocumentHead,
+  ): Promise<PaperAIActionResult> {
     const result = await callRemote(() => this.remote.open({
       workspaceId: target.workspaceId,
       sessionId,
@@ -782,10 +837,10 @@ export class PaperAIWorkbenchController {
       || result.value.document.resourceId !== target.resourceId) {
       return this.fail(entry.store, 'paperaiWorkbench returned an invalid external document projection')
     }
-    this.publishOpenResult(entry.store, result.value, pending)
-    if (edit !== null && edit.draft !== edit.baseText) {
+    this.publishOpenResult(entry.store, result.value, consumed)
+    if (edits.length > 0) {
       entry.store.update((draft) => {
-        draft.edit = restoreEdit(result.value.document, edit)
+        draft.edits = restoreEdits(result.value.document, edits)
       })
     }
     return OK
@@ -1045,14 +1100,50 @@ export class PaperAIWorkbenchController {
     request: Request,
     document: PaperAIDocumentSnapshot,
     result: RemoteResult<PaperAIDocumentCommitResult>,
+    patches: readonly PreviewTextPatch[] = [],
   ): PaperAIActionResult {
     if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
     if (!result.ok) return this.fail(entry.store, remoteError(result.error))
     if (!commitMatches(result.value, document)) {
       return this.fail(entry.store, 'paperaiWorkbench returned an invalid commit projection')
     }
-    this.publishOpenResult(entry.store, result.value)
+    // The Host defers the preview after a commit: keep the one on screen with the
+    // committed text written in, and swap in the rendered preview when it arrives.
+    const committed = result.value.document
+    const deferred = committed.previewHtml === '' && document.previewHtml !== ''
+    this.publishOpenResult(entry.store, deferred
+      ? { ...result.value, document: { ...committed, previewHtml: patchPreviewHtml(document.previewHtml, patches),
+        paragraphStyles: committed.paragraphStyles.length === 0 ? document.paragraphStyles : committed.paragraphStyles } }
+      : result.value)
+    if (deferred) void this.refreshPreview(entry, committed)
     return OK
+  }
+
+  /**
+   * Replace the patched preview with the Host's render of the same revision.
+   * A render of another revision never enters this projection: when it carries
+   * a newer head, the external-update notice takes over as for any other
+   * session's commit; the workbench itself may also have moved on meanwhile.
+   */
+  private async refreshPreview(entry: RequestEntry<PaperAIWorkbenchStore>, committed: PaperAIDocumentSnapshot): Promise<void> {
+    const result = await callRemote(() => this.remote.open({
+      workspaceId: committed.workspaceId,
+      sessionId: committed.sessionId,
+      resourceId: committed.resourceId,
+    }))
+    if (!result.ok || this.disposed) return
+    const fresh = result.value.document
+    entry.store.update((draft) => {
+      const view = draft.document?.documentId === committed.documentId ? draft
+        : draft.retained.find(retained => retained.document?.documentId === committed.documentId)
+      if (view?.document?.revision !== committed.revision) return
+      if (fresh.revision === committed.revision) {
+        view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
+          ...(view.edits.length === 0 ? { previewHtml: fresh.previewHtml } : {}) }
+      } else if (fresh.headCommitId !== view.document.headCommitId) {
+        view.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
+      }
+    })
   }
 
   /** Settle a failed action on either store kind: clear the action, keep the reason for the view. */
@@ -1076,7 +1167,7 @@ export class PaperAIWorkbenchController {
       retained: previous.retained,
       scrollTop: sameDocument ? previous.scrollTop : 0,
       document: result.document,
-      edit: null,
+      edits: [],
       action: null,
       panel: sameDocument ? previous.panel : null,
       diff: null,

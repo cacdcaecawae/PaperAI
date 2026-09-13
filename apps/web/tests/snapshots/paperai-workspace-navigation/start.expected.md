@@ -1,8 +1,12 @@
-- text: Paper project
+- heading "Paper project" [level=1]
 - paragraph:
-  - text: 本项目模板：HIT 硕士毕设
-  - button "更换…"
-- button "从本项目模板新建开题报告": 新建开题报告
-- button "从本项目模板新建中期报告": 新建中期报告
-- button "导入 Word 初稿并套用学位论文格式": 导入初稿，套学位论文格式
-- button "导入 Word，自由写"
+  - button "本项目模板：HIT 硕士毕设": HIT 硕士毕设
+  - text: 1 篇文档 今天 编辑
+- list "文档":
+  - listitem:
+    - button "打开 Workspace brief.docx":
+      - text: Workspace brief
+      - time: 今天
+- button "新建或导入文档":
+  - img
+  - text: 新建或导入文档

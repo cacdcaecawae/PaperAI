@@ -173,6 +173,15 @@ abstract health(signal?: AbortSignal): Promise<CapabilityHealth>
 abstract readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]>
 
 /**
+ * Read the paragraph styles defined in the document.
+ * @param filePath - canonical DOCX path to inspect.
+ * @param signal - optional cancellation signal for provider work.
+ * @returns paragraph style IDs and display names in document definition order.
+ * @throws when cancelled or the provider cannot read or parse the styles.
+ */
+abstract readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]>
+
+/**
  * Produce generated HTML preview; HTML is never an editable authority.
  * @param filePath - canonical DOCX path to render.
  * @param signal - optional cancellation signal for provider work.
@@ -195,7 +204,7 @@ abstract inspect(filePath: string, officePath: string, depth?: number, signal?: 
 /**
  * Apply a batch under one exclusive file lease and save before returning.
  * @param filePath - canonical Working DOCX path to mutate.
- * @param mutations - ordered Office-path mutations in the batch.
+ * @param mutations - mutations in application order; Office paths retain their original targets across earlier structure edits.
  * @param signal - optional cancellation signal for provider work.
  * @throws when cancelled or any mutation or save operation fails.
  */
@@ -209,6 +218,14 @@ abstract applyMutations(filePath: string, mutations: readonly EngineMutation[], 
  * @throws when cancelled or the provider cannot produce structured validation evidence.
  */
 abstract validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation>
+
+/**
+ * Release state the provider retains for one file (a resident process, a cache) so
+ * the next operation observes the bytes on disk. Callers replace or delete the file
+ * only after this resolves. Providers that retain nothing keep this no-op.
+ * @param _filePath - canonical DOCX path about to be replaced or removed.
+ */
+release(_filePath: string): Promise<void>
 ```
 
 Source: [`packages/paperai/document-engine/src/index.ts`](../../packages/paperai/document-engine/src/index.ts)
@@ -432,6 +449,16 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 @Remote('recoverWorking') async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>
 
 /**
+ * Record a Working DOCX changed outside PaperAI as a version of its own, so
+ * block edits can continue from it.
+ * @param request - owning Workspace and the document.
+ * @param signal - optional cancellation before publication.
+ * @returns a fresh integrity report after the capture.
+ * @throws when the Workspace is unknown, the document is not the project's, or nothing external is pending.
+ */
+@Remote('captureExternal') async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>
+
+/**
  * Record the template set the project writes against, or the explicit
  * choice to write without one.
  * @param request - Workspace and template set id, or `null` for none.
@@ -619,6 +646,16 @@ submit(request: SubmitDocumentCommitRequest): Promise<DocumentCommit>
 revert(request: RevertDocumentCommitRequest): Promise<DocumentCommit>
 
 /**
+ * Record the Working DOCX as it stands when it no longer matches its head: an
+ * edit made outside PaperAI becomes a version of its own so writing can go
+ * on from it. The bytes stay as they are; a snapshot and a commit are added.
+ * @param request - document, provenance, and optional message.
+ * @returns the new head commit holding the current Working DOCX bytes.
+ * @throws PaperCommitError `INVALID_REQUEST` when the Working DOCX already matches its head.
+ */
+captureExternal(request: CaptureExternalRequest): Promise<DocumentCommit>
+
+/**
  * Read one stored commit object by id, including an unreachable recovery object.
  * @param commitId - exact commit identity.
  * @returns an isolated copy, or `undefined` when no object exists.
@@ -728,6 +765,15 @@ buildCandidateIndex(request: BuildCandidateDocumentIndexRequest): Promise<readon
  * @throws PaperDocumentError when the document does not exist.
  */
 async previewHtml(documentId: DocumentId, signal?: AbortSignal): Promise<string>
+
+/**
+ * Read paragraph styles defined in the current Working DOCX.
+ * @param documentId - document identity.
+ * @param signal - optional engine cancellation.
+ * @returns stored style IDs and display names in definition order.
+ * @throws PaperDocumentError when the document does not exist, or an engine error when styles cannot be read.
+ */
+async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise<EngineParagraphStyle[]>
 
 /**
  * Re-read the Working DOCX and replace its semantic index while preserving

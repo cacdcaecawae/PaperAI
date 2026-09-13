@@ -1,0 +1,5 @@
+- document "文档预览":
+  - paragraph: 第一段
+  - paragraph: 新增段落
+  - paragraph: 多行粘贴 软换行
+  - paragraph: 尾段已修改

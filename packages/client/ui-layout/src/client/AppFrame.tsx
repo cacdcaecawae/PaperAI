@@ -50,15 +50,16 @@ function CenterColumn(props: { children?: ReactNode; inactive: boolean }) {
 }
 
 /** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
-function DetailsColumn(props: { children?: ReactNode }) {
-  return <div className={css.detailsCol}>{props.children}</div>
+function DetailsColumn(props: { children?: ReactNode; inactive: boolean }) {
+  const inertAttribute: Record<string, string> = props.inactive ? { inert: '' } : {}
+  return <div className={css.detailsCol} aria-hidden={props.inactive || undefined} {...inertAttribute}>{props.children}</div>
 }
 
 /**
  * One drag handle: pointer capture, rAF-throttled dx reports against the drag-start origin.
  * `side` keys the hover-reveal CSS to the owning column.
  */
-function DragHandle(props: { side: 'sidebar' | 'details'; left: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void }) {
+function DragHandle(props: { side: 'sidebar' | 'details'; left: number; width: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void }) {
   const [dragging, setDragging] = useState(false)
   const origin = useRef(0)
   const latest = useRef(0)
@@ -94,12 +95,25 @@ function DragHandle(props: { side: 'sidebar' | 'details'; left: number; onStart:
   return (
     <div
       className={css.handle}
+      role="separator"
+      tabIndex={0}
+      aria-orientation="vertical"
+      aria-label={props.side === 'sidebar' ? '调整导航栏宽度 / Resize navigation' : '调整内容栏宽度 / Resize content'}
+      aria-valuenow={Math.round(props.width)}
       style={{ left: props.left }}
       data-side={props.side}
       data-dragging={dragging || undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+        event.preventDefault()
+        props.onStart()
+        props.onDrag((event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 64 : 16))
+        props.onEnd()
+      }}
     />
   )
 }
@@ -226,14 +240,14 @@ export function AppFrame({
         <CenterColumn inactive={cols.detailsFocused}>{renderSlot('conversation', {
           compact: configuration.detailsPosition === 'start' && panels.details > 0,
         })}</CenterColumn>
-        <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
+        <DetailsColumn inactive={cols.details === 0}>{renderSlot('details', {})}</DetailsColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.details > 0 && !cols.detailsFocused && <DragHandle side="details" left={configuration.detailsPosition === 'start' ? cols.sidebar + cols.details : viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {!sidebarCollapsed && <DragHandle side="sidebar" width={cols.sidebar} left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+      {cols.details > 0 && !cols.detailsFocused && <DragHandle side="details" width={cols.details} left={configuration.detailsPosition === 'start' ? cols.sidebar + cols.details : viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
     </div>
   )
 }

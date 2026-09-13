@@ -1,0 +1,6 @@
+- text: 失败
+- 'button "Tool call paperai: paperai_commit_document" [expanded]':
+  - img
+  - text: "Tool call paperai: paperai_commit_document"
+- text: "IN { \"documentId\": \"public-synthetic-document\", \"expectedRevision\": 1 } OUT {\"content\":[{\"type\":\"text\",\"text\":\"{\\\"error\\\":\\\"revision_conflict\\\",\\\"detail\\\":\\\"Read the current revision before retrying.\\\"}\"}],\"isError\":true}"
+- button "Inspect"

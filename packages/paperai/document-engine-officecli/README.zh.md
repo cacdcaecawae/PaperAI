@@ -2,19 +2,31 @@
 
 [English](README.md) | 中文
 
-`ctx.documentEngine` 的 OfficeCLI Service Provider。它解析固定版本 `@officecli/officecli` launcher（或显式命令），通过 DSH `ctx.subprocess` 运行所有进程，限制执行时间和捕获输出，关闭 OfficeCLI 自动更新，并在每个 lease 后关闭常驻文档句柄。关闭清理使用独立 signal 和单独的短超时，因此调用方取消操作也不会跳过清理。
+`ctx.documentEngine` 的 OfficeCLI Service Provider。每个修改批次只读取并解析一次 `/document`，将全部原始 Office 路径绑定到对应 XML 节点，再按调用方顺序修改。插入、拆段和删除不会改变后续原节点引用的目标，无 `paraId` 的文档也适用。引用已在本批次删除的节点会在写入前拒绝修改。显式修改段落样式时，额外读取一次 `/styles` 以解析样式名和 id。
+
+`readParagraphStyles()` 与样式修改共用文件 lease 和 `/styles` 解析器。仅返回已定义的段落样式，缺少显示名称时使用存储 ID，样式部件缺失时返回空目录。精确 ID 优先于同名样式，未知样式在写入前拒绝。
+
+文字差异保留每个存留字符的原 run 属性。插入文字继承相邻 run，替换文字继承被替换范围的首个 run；空段保留字符默认值。显式字符值覆盖受支持字段，省略值保留原属性。东亚字体提示、各文字体系字体、字距调整、字符间距和其他未建模 run 属性在编辑后保留。字体或字号目标存储属性已匹配时，保留不同文字体系的细节。浏览器提交省略未变的预览读数，显式声明改变或清除的字段。
+
+书签、校对标记、手动或渲染分页符保留相对编辑文字的位置。拆分后的段落继承段落属性，分节边界保留在最后一个替换段落。段落格式可以覆盖现有样式、对齐、缩进和行距。域、符号、绘图、公式及其他不支持的段内对象会拒绝文字替换；未修改段落和其他文档部分保留在候选文件中。OfficeCLI 保存时可能规范化 XML 序列化和段落 id，因此按文档语义检查保留情况，不承诺 ZIP 字节完全一致。
+
+纯文本和带格式的编辑共用一次对 `/word/document.xml` 执行 `raw-set` 的 `batch --input` 调用，随后执行 `save`。Provider 要求批次汇总与单项结果确认全部成功，即使进程退出码为零，也会拒绝失败、跳过或缺失的操作。私有命令文件承载修改后的正文，避免正文出现在进程参数中或撞上 Windows 命令行长度限制，并在成功或失败后删除。解析后的 XML 只存在于文件 lease 内；Working DOCX 与提交服务的候选文件及版本事务仍是权威来源。垂直制表符表示软换行，非结构化替换中的换行符创建段落。
 
 每次调用均设置固定版本二进制识别的更新检查禁用选项 `OFFICECLI_SKIP_UPDATE=1`，使文档操作独立于后台二进制替换和已安装技能的刷新。
 
-同一路径文件的全部读写共用 FIFO lease。一个修改批次应用全部 Office path 操作，只保存一次，并在返回前释放 OfficeCLI 文档句柄。失败通过 `OfficeCliError` 保留 stdout/stderr，同时不向领域消费方暴露通用命令 runner。
+同一路径文件的全部读写共用 FIFO lease。Provider 解析固定版本的 npm launcher 或显式可执行文件，通过 DSH `ctx.subprocess` 运行，并限制时间和捕获输出。常驻文档在 lease 之间保持打开，直到 `residentIdleMs`、显式 `release(filePath)` 或销毁。提交发布在替换文件前释放它。关闭清理使用独立 signal 和超时。原生命令失败通过 `OfficeCliError` 保留 stdout/stderr，不向消费方暴露通用命令 runner。
 
 `normalizeLegacyDocument()` 提供 `@paperai/document-service` 按结构检测的可选旧版文档规范化能力。在 Windows 上，它通过 `ctx.subprocess` 直接启动配置的 PowerShell 可执行文件，并运行包内 Word COM 程序，不经过命令 shell。Microsoft Word 以只读方式打开源 `.doc`，再写入独立 DOCX；源文件不会被保存或替换。非 Windows 主机、禁用或无法解析的 PowerShell 命令以及不可用的 Word COM 都返回明确的 degraded 结果。
 
 转换器在 Windows 上默认使用 `powershell.exe`。`legacyDocPowerShellCommand` 可指定其他可执行文件名称或绝对路径，也可设为 `false` 或空字符串以禁用 `.doc` 规范化。`legacyDocTimeoutMs` 默认 120000，`legacyDocOutputMaxBytes` 默认每个流 1048576，`legacyDocTerminateGraceMs` 默认 5000；三个限制都必须是正安全整数。
 
-`cleanupTimeoutMs` 默认为 5000，且必须是正安全整数。读取、检查、修改、预览和验证结束后的独立尽力 `close` 命令受该值约束，调用方取消原操作时也一样。
+`cleanupTimeoutMs` 默认为 5000，且必须是正安全整数。每次独立尽力 `close` 命令受该值约束。`residentIdleMs` 默认为 2000，且必须是正安全整数：最后一次操作之后常驻文档保持多久空闲再关闭。文档常驻期间，其他程序可以读取并就地写入该文件，但不能重命名、替换或删除它，因此这个窗口保持很短，引擎在自己替换或删除文件前也会先释放。
 
 取消、超时、输出截断、非零转换失败以及缺失或无效的 DOCX 输出会抛出带稳定 `code` 的 `LegacyDocConversionError`。每次未成功的转换尝试都会删除生成的目标；已存在的目标会在进程启动前被拒绝且不会被覆盖。若清理失败，错误会同时保留主要转换失败和清理失败。
+
+## 验证
+
+原生回归测试在 Windows CI 中通过 `DSH_PAPERAI_OFFICECLI_REAL=1` 启用，并要求固定的二进制版本。`DSH_PAPERAI_OFFICECLI_COMMAND` 可选择隔离的可执行文件供本地验证；npm 包版本本身不能证明已安装二进制的版本。
 
 ## 模型体验
 

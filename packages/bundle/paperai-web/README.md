@@ -6,7 +6,7 @@ The PaperAI product layer over the pinned DeepSeek Harness Web profile. It is ap
 
 [`cordis.patch.yml`](cordis.patch.yml) disables only the upstream official-brand contribution and inserts the PaperAI brand and document-workbench plugins through the existing client slots. Document services and UI plugins join this layer as independently owned rows; generic DSH behavior is not copied into the product bundle.
 
-The PaperAI workbench configures the existing `ui-layout` service with a 420–960 px details range, a 600 px opening width, a 560 px center floor, and `current-session` details eligibility.
+The PaperAI workbench configures the existing `ui-layout` service with a 480–1280 px details range, an 860 px opening width that shows one A4 page at full size, a 360 px center floor, and `current-session` details eligibility.
 
 Permissions remain owned by `@deepseek-ai/dsh-base`. When neither the user's stored permission default nor a deployment or profile override selects another preset, a fresh PaperAI session starts with `workspace-write` and `ask`: it can edit the selected Workspace, while operations requiring broader authority request approval. Full access remains available through the standard DSH permission selector, including its explicit risk acknowledgement, and through deliberate deployment configuration.
 

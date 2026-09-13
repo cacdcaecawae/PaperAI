@@ -6,6 +6,7 @@ import { Button, IconBrowseOutline16, IconRefreshOutline14 } from '@deepseek-ai/
 import type { PaperAIDocumentRow, PaperAIProjectState } from './types.ts'
 import type { PaperAIWorkspaceContentProps } from './slots.ts'
 import { DOCUMENT_TYPE_KEYS } from './locales.ts'
+import { typeAccent } from './type-accent.ts'
 import css from './WorkspaceContent.module.css'
 import { ProjectDoctor } from './ProjectDoctor.tsx'
 
@@ -14,9 +15,10 @@ const PROJECT_EMPTY: PaperAIProjectState = Object.freeze({
 })
 
 /** One tracked document as a row in the DSH session-row idiom. */
-function DocumentRow({ row, selected, open, t }: {
+function DocumentRow({ row, selected, duplicate, open, t }: {
   row: PaperAIDocumentRow
   selected: boolean
+  duplicate: boolean
   open: () => void
   t: PaperAIWorkspaceContentProps['t']
 }): ReactNode {
@@ -24,13 +26,16 @@ function DocumentRow({ row, selected, open, t }: {
     <button
       type="button"
       className={clsx(css.row, selected && css.selected)}
+      style={typeAccent(row.documentType)}
       aria-current={selected ? 'true' : undefined}
       aria-label={t('documents.open', { name: row.fileName })}
-      title={row.fileName}
+      title={row.workingPath ?? row.fileName}
       onClick={open}
     >
       <span className={css.slot} aria-hidden="true"><IconBrowseOutline16 size={16} /></span>
-      <span className={css.title}>{row.name}</span>
+      <span className={css.title}>{row.name}
+        {duplicate && <small>{row.fileName} · {row.documentId.slice(-8)}</small>}
+      </span>
       {row.documentType !== 'other' && (
         <span className={css.meta}>{t(DOCUMENT_TYPE_KEYS[row.documentType])}</span>
       )}
@@ -40,7 +45,7 @@ function DocumentRow({ row, selected, open, t }: {
 
 /** Render the document list for one project. */
 export function WorkspaceContent({
-  workspaceId, useProjects, useDiagnostics, inspectProject, ensureProject, refreshProject, openDocument, t,
+  workspaceId, useProjects, useDiagnostics, inspectProject, captureExternal, ensureProject, refreshProject, openDocument, t,
 }: PaperAIWorkspaceContentProps): ReactNode {
   const state = useProjects(directory => directory.workspaces[workspaceId] ?? PROJECT_EMPTY)
   const diagnostics = useDiagnostics(value => value.projects[workspaceId])
@@ -81,6 +86,7 @@ export function WorkspaceContent({
             <div role="listitem" key={row.id}>
               <DocumentRow
                 row={row}
+                duplicate={documents.some(other => other.id !== row.id && other.name === row.name)}
                 selected={state.selected === row.id}
                 open={() => { void openDocument(workspaceId, row.id) }}
                 t={t}
@@ -89,7 +95,13 @@ export function WorkspaceContent({
           ))}
         </div>
       )}
-      <ProjectDoctor key={workspaceId} state={diagnostics} inspect={plan => inspectProject(workspaceId, plan)} t={t} />
+      <ProjectDoctor
+        key={workspaceId}
+        state={diagnostics}
+        inspect={plan => inspectProject(workspaceId, plan)}
+        capture={documentId => captureExternal(workspaceId, documentId)}
+        t={t}
+      />
     </section>
   )
 }

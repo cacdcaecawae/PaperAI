@@ -18,6 +18,9 @@ const lease = ctx.paperMcp.issueDescriptor({
   provider: 'openai',
   model: 'gpt-5.6-codex',
   sessionId: String(agent.session.id),
+}, {
+  workspaceRoot: ctx.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot,
+  sandboxMode: () => ctx.sandboxPolicy.resolve({ session: agent.session }).mode,
 })
 
 try {
@@ -41,7 +44,7 @@ try {
 | `maxNodesPerRead` | `200` | 单次调用最多返回的语义节点数。 |
 | `maxMutationsPerCommit` | `64` | 单个文档提交允许的有序修改数。 |
 
-所有数值字段必须是正安全整数，默认读取数不能超过最大值。无效配置会使插件启动失败。
+三个数值限制必须是正安全整数，与路由和服务器名称字符串分别校验；默认读取数不能超过最大值。无效配置会使插件启动失败。
 
 ## 工具
 
@@ -64,7 +67,7 @@ try {
 
 `registerExportAdapter(adapter)` 会按条件增加 `paperai_export_document`。适配器接收已检查的文档、目标路径、模式和 descriptor 绑定的 actor，并且必须返回属于同一文档和 actor 的 commit；否则 MCP 调用返回 `INVALID_EXPORT_PROVENANCE`。正式交付检查失败时不会调用适配器。调用方通过 Cordis effect 注册适配器并持有 disposer。
 
-`createPaperMcpServer(dependencies, actor, limits, exportAdapter?)` 是 Host 路由使用的传输无关服务器工厂。已经拥有 PaperAI 服务的进程也可以把它连接到 SDK stdio transport。独立子进程若没有额外 RPC 载体便无法访问 Host 内存中的服务，因此当前 Agent descriptor 复用已有的认证 HTTP 载体。
+`createPaperMcpServer(dependencies, actor, scope, limits, exportAdapter?)` 是 Host 路由使用的传输无关服务器工厂。已经拥有 PaperAI 服务的进程也可以把它连接到 SDK stdio transport。独立子进程若没有额外 RPC 载体便无法访问 Host 内存中的服务，因此当前 Agent descriptor 复用已有的认证 HTTP 载体。
 
 ## 失败与所有权
 
@@ -90,6 +93,6 @@ try {
 
 ## 已知限制与延后工作
 
-- **交付发布需要提供方** — 当前 PaperAI 服务提供交付检查，但没有文件发布服务。`paperai_prepare_export` 保持只读；只有注册实现 `PaperMcpExportAdapter` 的提供方后，才会出现修改型导出工具。
+- **交付发布需要提供方** — PaperAI bundle 注册 export-service 适配器。其他装配只有注册 `PaperMcpExportAdapter` 后才会出现修改型导出工具；`paperai_prepare_export` 保持只读。
 - **生命周期修改需要持久来源记录** — 项目创建、Word 导入、模板安装、上传和确认目前不会从其领域服务返回持久操作 commit，因此本桥只开放这些对象的查询，不提供无跟踪的 Agent 修改。
 - **Descriptor 依赖 Host WebServer** — WebServer 获得监听端口前调用 `issueDescriptor()` 会失败。descriptor 固定使用回环地址，因此 ACP Agent 与 Host 必须位于同一台机器。

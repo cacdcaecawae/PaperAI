@@ -1,25 +1,36 @@
 /** ACP settings contributions over the shared PaperAI Remote and DSH settings mirror. */
 
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {} from '@paperai/agent-acp/diagnostic-types'
 import { AcpSettingsController } from './controller.ts'
 import { AcpSettingsSection, type AcpSettingsInjected } from './SettingsSection.tsx'
 import { AcpSessionController } from './session-controller.ts'
 import { AcpSessionControls, type AcpSessionInjected } from './SessionControls.tsx'
+import { zh, en, type AcpKey } from './locales.ts'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** PaperAI Agent connection settings and session controls. */
+    'paperai.acp': AcpKey
+  }
+}
 
 export type { AcpChannelMarkOwnerProps } from './brand-slot.ts'
 
 /** Required runtime services; the workbench plugin owns the shared generated Remote mount. */
-export const inject = ['slots', 'sessions', 'settingsScope', 'connection', 'remote', 'remote.paperaiWorkbench']
+export const inject = ['slots', 'locale', 'sessions', 'settingsScope', 'connection', 'remote', 'remote.paperaiWorkbench', 'modelDirectories']
 
 /**
  * Register ACP settings and dispose the controller with its contribution scope.
  * @param ctx - browser plugin context with the shared Host namespace mounted.
  */
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => ctx.locale.register('paperai.acp', { zh, en }), 'paperai-acp: dictionaries')
   const connection = ctx.get('connection') as ConnectionHandle
   const remote = ctx.get('remote.paperaiWorkbench') as TypertClientRemote['paperaiWorkbench']
   const controller = new AcpSettingsController(remote, connection.api, ctx.settingsScope.describe(), {
@@ -31,7 +42,7 @@ export function apply(ctx: ClientContext): void {
       const snapshot = ctx.sessions.list.getSnapshot()
       return snapshot.current === undefined ? undefined : snapshot.byId[snapshot.current]?.cwd
     },
-  })
+  }, ctx.locale.bind('paperai.acp'))
   const sessions = new Map<SessionId, AcpSessionController>()
   const sessionFor = (id: SessionId): AcpSessionController => {
     const existing = sessions.get(id)
@@ -82,8 +93,9 @@ export function apply(ctx: ClientContext): void {
       {
         name: 'settings.section',
         id: 'paperai-acp',
+        locale: 'paperai.acp',
         order: -20,
-        label: 'ACP 渠道',
+        label: 'Agent',
         children: { 'paperai.acp.channel.mark': { kind: 'keyed', scope: 'root' } },
         inject: () => injected,
       },
@@ -95,13 +107,20 @@ export function apply(ctx: ClientContext): void {
       {
         name: 'conversation.session.header.actions',
         id: 'paperai-acp-options',
+        locale: 'paperai.acp',
         order: 0,
         inject: (id): AcpSessionInjected => {
           const session = sessionFor(id)
           return {
             hooks: { acpSession: session.store, acpPreferences: controller.store },
             load: () => session.load(),
-            select: (option, value) => session.select(option, value),
+            select: async (option, value) => {
+              await session.select(option, value)
+              if (sessions.get(id) !== session) return
+              await ctx.modelDirectories.directoryFor(id).load().catch(() => {
+                // The shared model menu retains its last selection and owns refresh-error feedback.
+              })
+            },
             favorite: (provider, model) => controller.favorite(provider, model),
           }
         },
@@ -112,7 +131,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(
     () =>
       ctx.remote.$on('paperai/acp-changed', (id) => {
-        void sessions.get(id)?.load()
+        void sessions.get(id)?.load(false)
         if (controller.store.getSnapshot().entries.length > 0) void controller.load(false)
       }),
     'paperai-acp: provider state',
@@ -120,7 +139,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(
     () =>
       ctx.remote.$on('agent-preset/selected', (id) => {
-        void sessions.get(id)?.load()
+        sessions.get(id)?.reset()
       }),
     'paperai-acp: selected agent',
   )

@@ -747,6 +747,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when cancelled or the provider cannot read or parse the document.'],
       },
       {
+        signature: 'abstract readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]>',
+        description: 'Read the paragraph styles defined in the document.',
+        parameters: [{ name: 'filePath', description: 'canonical DOCX path to inspect.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        returns: 'paragraph style IDs and display names in document definition order.',
+        throws: ['when cancelled or the provider cannot read or parse the styles.'],
+      },
+      {
         signature: 'abstract previewHtml(filePath: string, signal?: AbortSignal): Promise<string>',
         description: 'Produce generated HTML preview; HTML is never an editable authority.',
         parameters: [{ name: 'filePath', description: 'canonical DOCX path to render.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
@@ -763,7 +770,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'abstract applyMutations(filePath: string, mutations: readonly EngineMutation[], signal?: AbortSignal): Promise<void>',
         description: 'Apply a batch under one exclusive file lease and save before returning.',
-        parameters: [{ name: 'filePath', description: 'canonical Working DOCX path to mutate.' }, { name: 'mutations', description: 'ordered Office-path mutations in the batch.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
+        parameters: [{ name: 'filePath', description: 'canonical Working DOCX path to mutate.' }, { name: 'mutations', description: 'mutations in application order; Office paths retain their original targets across earlier structure edits.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
         throws: ['when cancelled or any mutation or save operation fails.'],
       },
       {
@@ -772,6 +779,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'filePath', description: 'canonical DOCX path to validate.' }, { name: 'signal', description: 'optional cancellation signal for provider work.' }],
         returns: 'structural success and the provider\'s complete validation evidence.',
         throws: ['when cancelled or the provider cannot produce structured validation evidence.'],
+      },
+      {
+        signature: 'release(_filePath: string): Promise<void>',
+        description: 'Release state the provider retains for one file (a resident process, a cache) so the next operation observes the bytes on disk. Callers replace or delete the file only after this resolves. Providers that retain nothing keep this no-op.',
+        parameters: [{ name: '_filePath', description: 'canonical DOCX path about to be replaced or removed.' }],
       },
     ],
   },
@@ -1327,6 +1339,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a fresh integrity report after recovery.',
       },
       {
+        signature: '@Remote(\'captureExternal\') async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport>',
+        description: 'Record a Working DOCX changed outside PaperAI as a version of its own, so block edits can continue from it.',
+        parameters: [{ name: 'request', description: 'owning Workspace and the document.' }, { name: 'signal', description: 'optional cancellation before publication.' }],
+        returns: 'a fresh integrity report after the capture.',
+        throws: ['when the Workspace is unknown, the document is not the project\'s, or nothing external is pending.'],
+      },
+      {
         signature: '@Remote(\'setProjectTemplate\') async setProjectTemplate(request: PaperAISetProjectTemplateRequest): Promise<PaperAIProjectOverview>',
         description: 'Record the template set the project writes against, or the explicit choice to write without one.',
         parameters: [{ name: 'request', description: 'Workspace and template set id, or `null` for none.' }],
@@ -1464,6 +1483,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the new revert commit; the historical target remains unchanged.',
       },
       {
+        signature: 'captureExternal(request: CaptureExternalRequest): Promise<DocumentCommit>',
+        description: 'Record the Working DOCX as it stands when it no longer matches its head: an edit made outside PaperAI becomes a version of its own so writing can go on from it. The bytes stay as they are; a snapshot and a commit are added.',
+        parameters: [{ name: 'request', description: 'document, provenance, and optional message.' }],
+        returns: 'the new head commit holding the current Working DOCX bytes.',
+        throws: ['PaperCommitError `INVALID_REQUEST` when the Working DOCX already matches its head.'],
+      },
+      {
         signature: 'getCommit(commitId: DocumentCommitIdType): DocumentCommit | undefined',
         description: 'Read one stored commit object by id, including an unreachable recovery object.',
         parameters: [{ name: 'commitId', description: 'exact commit identity.' }],
@@ -1546,6 +1572,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'documentId', description: 'document identity.' }, { name: 'signal', description: 'optional engine cancellation.' }],
         returns: 'generated preview HTML; it is never an editable authority.',
         throws: ['PaperDocumentError when the document does not exist.'],
+      },
+      {
+        signature: 'async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise<EngineParagraphStyle[]>',
+        description: 'Read paragraph styles defined in the current Working DOCX.',
+        parameters: [{ name: 'documentId', description: 'document identity.' }, { name: 'signal', description: 'optional engine cancellation.' }],
+        returns: 'stored style IDs and display names in definition order.',
+        throws: ['PaperDocumentError when the document does not exist, or an engine error when styles cannot be read.'],
       },
       {
         signature: 'rebuildIndex(documentId: DocumentId, signal?: AbortSignal): Promise<PaperDocumentSnapshot>',
@@ -3940,6 +3973,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CapabilityHealth {\n    status: \'ready\' | \'degraded\' | \'unavailable\';\n    version?: string;\n    detail?: string;\n}',
   },
   {
+    name: 'CaptureExternalRequest',
+    declaration: 'export interface CaptureExternalRequest {\n    readonly documentId: DocumentId;\n    readonly actor: Readonly<ActorIdentity>;\n    readonly message?: string;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
     name: 'ChangeConflict',
     declaration: 'export interface ChangeConflict {\n    id: ChangeConflictId;\n    documentId: DocumentId;\n    nodeId: DocumentNodeId;\n    baseCommitId: DocumentCommitId;\n    headCommitId: DocumentCommitId;\n    baseText: string;\n    currentText: string;\n    incomingText: string;\n    reason: string;\n}',
   },
@@ -4225,7 +4262,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DocumentMutation',
-    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'unbind-template\';\n} | {\n    type: \'set-document-type\';\n    documentType: DocumentRole;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
+    declaration: 'export type DocumentMutation = {\n    type: \'replace-text\';\n    nodeId: DocumentNodeId;\n    baseText: string;\n    nextText: string;\n    runs?: readonly DocumentTextRun[];\n    paragraphs?: readonly DocumentParagraph[];\n} | {\n    type: \'insert-node\';\n    text: string;\n    afterNodeId?: DocumentNodeId;\n    beforeNodeId?: DocumentNodeId;\n    style?: string;\n} | {\n    type: \'delete-node\';\n    nodeId: DocumentNodeId;\n    baseText?: string;\n} | {\n    type: \'set-style\';\n    nodeId: DocumentNodeId;\n    patch: Record<string, unknown>;\n} | {\n    type: \'set-fact\';\n    key: string;\n    value: string;\n} | {\n    type: \'bind-template\';\n    templateId: TemplateContractId;\n} | {\n    type: \'unbind-template\';\n} | {\n    type: \'set-document-type\';\n    documentType: DocumentRole;\n} | {\n    type: \'revert\';\n    targetCommitId: DocumentCommitId;\n} | {\n    type: \'milestone\';\n    label: string;\n};',
   },
   {
     name: 'DocumentNode',
@@ -4244,12 +4281,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DocumentOperation {\n    type: DocumentMutation[\'type\'];\n    nodeId?: DocumentNodeId;\n    officePath?: string;\n    before: unknown;\n    after: unknown;\n}',
   },
   {
+    name: 'DocumentParagraph',
+    declaration: 'export interface DocumentParagraph {\n    text: string;\n    runs?: readonly DocumentTextRun[];\n    format?: DocumentParagraphFormat;\n}',
+  },
+  {
+    name: 'DocumentParagraphFormat',
+    declaration: 'export interface DocumentParagraphFormat {\n    style?: string;\n    align?: \'left\' | \'center\' | \'right\' | \'justify\';\n    indent?: string;\n    lineSpacing?: string;\n}',
+  },
+  {
     name: 'DocumentRecord',
     declaration: 'export interface DocumentRecord {\n    id: DocumentId;\n    projectId: ProjectId;\n    documentKind?: \'working\' | \'template-source\';\n    name: string;\n    role: DocumentRole;\n    immutableSourcePath: string;\n    workingPath: string;\n    mediaType: \'application/vnd.openxmlformats-officedocument.wordprocessingml.document\';\n    sourceSha256: string;\n    templateId?: TemplateContractId;\n    headCommitId?: DocumentCommitId;\n    nodeCount: number;\n    createdAt: string;\n    updatedAt: string;\n}',
   },
   {
     name: 'DocumentRole',
     declaration: 'export type DocumentRole = \'manuscript\' | \'proposal\' | \'midterm\' | \'final\' | \'other\';',
+  },
+  {
+    name: 'DocumentTextRun',
+    declaration: 'export interface DocumentTextRun {\n    text: string;\n    bold?: boolean;\n    italic?: boolean;\n    underline?: boolean;\n    size?: string;\n    color?: string;\n    font?: string;\n}',
   },
   {
     name: 'Domain',
@@ -4333,11 +4382,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineMutation',
-    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    text: string;\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n};',
+    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    text: string;\n    runs?: readonly EngineTextRun[];\n    paragraphs?: readonly DocumentParagraph[];\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n};',
+  },
+  {
+    name: 'EngineParagraphStyle',
+    declaration: 'export interface EngineParagraphStyle {\n    id: string;\n    name: string;\n}',
   },
   {
     name: 'EngineTextNode',
     declaration: 'export interface EngineTextNode {\n    officePath: string;\n    text: string;\n    kind: \'paragraph\' | \'table\' | \'unknown\';\n}',
+  },
+  {
+    name: 'EngineTextRun',
+    declaration: 'export interface EngineTextRun {\n    text: string;\n    bold?: boolean;\n    italic?: boolean;\n    underline?: boolean;\n    size?: string;\n    color?: string;\n    font?: string;\n}',
   },
   {
     name: 'EngineValidation',
@@ -4860,6 +4917,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIApplyTemplateRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly documentType: PaperAIDocumentType;\n}',
   },
   {
+    name: 'PaperAICaptureExternalRequest',
+    declaration: 'export interface PaperAICaptureExternalRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly documentId: PaperAIDocumentId;\n}',
+  },
+  {
     name: 'PaperAICommitDocumentRequest',
     declaration: 'export interface PaperAICommitDocumentRequest {\n    readonly sessionId: SessionId;\n    readonly documentId: PaperAIDocumentId;\n    readonly baseRevision: PaperAIDocumentRevision;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly mutations: readonly PaperAIDocumentMutation[];\n}',
   },
@@ -4920,16 +4981,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIDocumentOpenResult {\n    readonly document: PaperAIDocumentSnapshot;\n}',
   },
   {
+    name: 'PaperAIDocumentParagraph',
+    declaration: 'export interface PaperAIDocumentParagraph {\n    readonly text: string;\n    readonly runs?: readonly PaperAIDocumentTextRun[];\n    readonly format?: PaperAIParagraphFormat;\n}',
+  },
+  {
     name: 'PaperAIDocumentRevision',
     declaration: 'export type PaperAIDocumentRevision = Branded<\'PaperAI.DocumentRevision\'>;',
   },
   {
     name: 'PaperAIDocumentRow',
-    declaration: 'export interface PaperAIDocumentRow {\n    readonly id: PaperAIResourceId;\n    readonly documentId: PaperAIDocumentId;\n    readonly name: string;\n    readonly fileName: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly templateName: string | null;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface PaperAIDocumentRow {\n    readonly id: PaperAIResourceId;\n    readonly documentId: PaperAIDocumentId;\n    readonly name: string;\n    readonly fileName: string;\n    readonly workingPath?: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly templateName: string | null;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'PaperAIDocumentSnapshot',
-    declaration: 'export interface PaperAIDocumentSnapshot {\n    readonly documentId: PaperAIDocumentId;\n    readonly resourceId: PaperAIResourceId;\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly title: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly path: string;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly previewHtml: string;\n    readonly nodes: readonly PaperAIDocumentNodeSummary[];\n    readonly versions: readonly PaperAIDocumentVersion[];\n    readonly template: PaperAITemplateSummary | null;\n    readonly projectFormatAvailable: boolean;\n    readonly gate: PaperAITemplateGateReport;\n}',
+    declaration: 'export interface PaperAIDocumentSnapshot {\n    readonly documentId: PaperAIDocumentId;\n    readonly resourceId: PaperAIResourceId;\n    readonly workspaceId: WorkspaceId;\n    readonly sessionId: SessionId;\n    readonly title: string;\n    readonly documentType: PaperAIDocumentType;\n    readonly path: string;\n    readonly revision: PaperAIDocumentRevision;\n    readonly headCommitId: PaperAIDocumentCommitId | null;\n    readonly previewHtml: string;\n    readonly paragraphStyles: readonly PaperAIParagraphStyle[];\n    readonly nodes: readonly PaperAIDocumentNodeSummary[];\n    readonly versions: readonly PaperAIDocumentVersion[];\n    readonly template: PaperAITemplateSummary | null;\n    readonly projectFormatAvailable: boolean;\n    readonly gate: PaperAITemplateGateReport;\n}',
+  },
+  {
+    name: 'PaperAIDocumentTextRun',
+    declaration: 'export interface PaperAIDocumentTextRun {\n    readonly text: string;\n    readonly bold?: boolean;\n    readonly italic?: boolean;\n    readonly underline?: boolean;\n    readonly size?: string;\n    readonly color?: string;\n    readonly font?: string;\n}',
   },
   {
     name: 'PaperAIDocumentType',
@@ -4996,6 +5065,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperAIOverviewRequest {\n    readonly workspaceId: WorkspaceId;\n}',
   },
   {
+    name: 'PaperAIParagraphFormat',
+    declaration: 'export interface PaperAIParagraphFormat {\n    readonly style?: string;\n    readonly align?: \'left\' | \'center\' | \'right\' | \'justify\';\n    readonly indent?: string;\n    readonly lineSpacing?: string;\n}',
+  },
+  {
+    name: 'PaperAIParagraphStyle',
+    declaration: 'export interface PaperAIParagraphStyle {\n    readonly id: string;\n    readonly name: string;\n}',
+  },
+  {
     name: 'PaperAIProbeAgentRequest',
     declaration: 'export interface PaperAIProbeAgentRequest {\n    readonly provider: string;\n    readonly force: boolean;\n}',
   },
@@ -5013,7 +5090,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIReplaceTextMutation',
-    declaration: 'export interface PaperAIReplaceTextMutation {\n    readonly type: \'replace-text\';\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly baseText: string;\n    readonly nextText: string;\n}',
+    declaration: 'export interface PaperAIReplaceTextMutation {\n    readonly type: \'replace-text\';\n    readonly nodeId: PaperAIDocumentNodeId;\n    readonly baseText: string;\n    readonly nextText: string;\n    readonly runs?: readonly PaperAIDocumentTextRun[];\n    readonly paragraphs?: readonly PaperAIDocumentParagraph[];\n}',
   },
   {
     name: 'PaperAIResourceId',
@@ -5077,7 +5154,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIVersionDiff',
-    declaration: 'export interface PaperAIVersionDiff {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly parentCommitId: PaperAIDocumentCommitId | null;\n    readonly changes: readonly PaperAIVersionChange[];\n    readonly unchangedCount: number;\n}',
+    declaration: 'export interface PaperAIVersionDiff {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly parentCommitId: PaperAIDocumentCommitId | null;\n    readonly changes: readonly PaperAIVersionChange[];\n    readonly unchangedCount: number;\n    readonly formattingEditCount?: number;\n}',
   },
   {
     name: 'PaperAIWordUpload',

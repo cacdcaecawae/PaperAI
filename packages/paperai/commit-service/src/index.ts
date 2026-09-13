@@ -48,6 +48,7 @@ import {
   PaperCommitError,
 } from './errors.ts'
 import type {
+  CaptureExternalRequest,
   DocumentCommitHistory,
   PaperDocumentIndexPeer,
   PaperTemplateCommitPeer,
@@ -61,6 +62,7 @@ export {
   PaperCommitError,
 } from './errors.ts'
 export type {
+  CaptureExternalRequest,
   DocumentCommitHistory,
   DocumentIndexRebuildRequest,
   PaperCommitErrorCode,
@@ -239,6 +241,18 @@ export class PaperCommitService extends Service {
   }
 
   /**
+   * Record the Working DOCX as it stands when it no longer matches its head: an
+   * edit made outside PaperAI becomes a version of its own so writing can go
+   * on from it. The bytes stay as they are; a snapshot and a commit are added.
+   * @param request - document, provenance, and optional message.
+   * @returns the new head commit holding the current Working DOCX bytes.
+   * @throws PaperCommitError `INVALID_REQUEST` when the Working DOCX already matches its head.
+   */
+  captureExternal(request: CaptureExternalRequest): Promise<DocumentCommit> {
+    return this.enqueue(request.documentId, request.signal, () => this.captureLocked(request))
+  }
+
+  /**
    * Read one stored commit object by id, including an unreachable recovery object.
    * @param commitId - exact commit identity.
    * @returns an isolated copy, or `undefined` when no object exists.
@@ -397,6 +411,43 @@ export class PaperCommitService extends Service {
     })
   }
 
+  private async captureLocked(request: CaptureExternalRequest): Promise<DocumentCommit> {
+    request.signal?.throwIfAborted()
+    const document = this.requireDocument(request.documentId)
+    const project = this.requireProject(document)
+    const paths = resolveCommitFilePaths(project.rootPath, document.workingPath)
+    const original = await readFileImage(paths.workingPath, 'WORKING_COPY_CHANGED', 'Working DOCX')
+    const head = document.headCommitId === undefined
+      ? undefined
+      : this.dependencies.paperRepository.getCommit(document.headCommitId)
+    if (head !== undefined && head.documentSha256 === original.sha256) {
+      throw new PaperCommitError(
+        'INVALID_REQUEST',
+        `document '${document.id}' Working DOCX matches head '${head.id}'; nothing external to capture`,
+      )
+    }
+    const currentNodes = structuredClone(
+      await this.dependencies.paperDocuments.readNodes(document.id),
+    ) as DocumentNode[]
+    return await this.withCandidate(paths, original.bytes, async candidatePath => (
+      await this.prepareAndPublish({
+        document,
+        paths,
+        original,
+        candidatePath,
+        expectedHead: document.headCommitId,
+        message: request.message ?? '载入外部修改',
+        actor: request.actor,
+        operations: [],
+        currentNodes,
+        templateChanged: false,
+        templateId: document.templateId,
+        role: document.role,
+        signal: request.signal,
+      })
+    ))
+  }
+
   private async revertLocked(request: ResolvedRevertRequest): Promise<DocumentCommit> {
     request.signal?.throwIfAborted()
     const document = this.requireDocument(request.documentId)
@@ -466,6 +517,7 @@ export class PaperCommitService extends Service {
       throw error
     } finally {
       try {
+        await this.dependencies.documentEngine.release(candidatePath)
         await removeCandidateFile(paths, candidatePath)
       } catch (cleanupError) {
         if (failed) {
@@ -514,10 +566,34 @@ export class PaperCommitService extends Service {
               `node '${node.id}' text changed since the mutation was prepared`,
             )
           }
-          if (mutation.nextText === mutation.baseText) {
+          if (mutation.nextText === mutation.baseText && mutation.runs === undefined && mutation.paragraphs === undefined) {
             throw new PaperCommitError('INVALID_REQUEST', `replace-text for node '${node.id}' is a no-op`)
           }
-          engineMutations.push({ type: 'replace-text', officePath: node.officePath, text: mutation.nextText })
+          if (mutation.runs !== undefined && mutation.runs.map(run => run.text).join('') !== mutation.nextText) {
+            throw new PaperCommitError(
+              'INVALID_REQUEST',
+              `replace-text runs for node '${node.id}' do not spell its text`,
+            )
+          }
+          if (mutation.paragraphs !== undefined) {
+            if (mutation.runs !== undefined || mutation.paragraphs.length === 0
+              || mutation.paragraphs.map(paragraph => paragraph.text).join('\n') !== mutation.nextText) {
+              throw new PaperCommitError('INVALID_REQUEST', `replace-text paragraphs for node '${node.id}' do not spell its text`)
+            }
+            for (const paragraph of mutation.paragraphs) {
+              if (/[\r\n]/u.test(paragraph.text)
+                || (paragraph.runs !== undefined && paragraph.runs.map(run => run.text).join('') !== paragraph.text)) {
+                throw new PaperCommitError('INVALID_REQUEST', `replacement paragraph for node '${node.id}' has invalid text or runs`)
+              }
+            }
+          }
+          engineMutations.push({
+            type: 'replace-text',
+            officePath: node.officePath,
+            text: mutation.nextText,
+            ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
+            ...(mutation.paragraphs === undefined ? {} : { paragraphs: mutation.paragraphs }),
+          })
           operations.push({
             type: mutation.type,
             nodeId: node.id,
@@ -797,6 +873,7 @@ export class PaperCommitService extends Service {
     await repository.putCommitPublication(structuredClone(publication))
     try {
       await this.ensurePublicationCommit(publication)
+      await this.dependencies.documentEngine.release(request.paths.workingPath)
       await replaceRegularFile(request.paths.workingPath, candidate.bytes, request.original.mode)
       await this.replaceIndex(currentNodes, nextNodes)
       await repository.updateDocument(request.document.id, (current) => {
@@ -891,6 +968,7 @@ export class PaperCommitService extends Service {
       try {
         if (working.sha256 !== original.sha256
           || (working.mode & 0o777) !== (publication.before.working.mode & 0o777)) {
+          await this.dependencies.documentEngine.release(paths.workingPath)
           await replaceRegularFile(paths.workingPath, original.bytes, publication.before.working.mode)
         }
       } catch (error) {

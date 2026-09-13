@@ -554,6 +554,7 @@ jobs:
         run: >-
           pnpm exec vitest run --config vitest.web.config.ts
           apps/web/tests/paperai-dsh-preset.e2e.ts
+          apps/web/tests/paperai-acp-tool-failure.e2e.ts
           apps/web/tests/paperai-permissions.e2e.ts
           apps/web/tests/paperai-workspace-navigation.e2e.ts
           apps/web/tests/built-boot.snapshot.ts
@@ -597,6 +598,15 @@ jobs:
       - name: Run focused Windows integration tests
         shell: pwsh
         run: pnpm run test:paperai:windows --maxWorkers=2 --testTimeout=30000
+
+      - name: Verify real Word editing and template preservation
+        shell: pwsh
+        env:
+          DSH_PAPERAI_OFFICECLI_REAL: '1'
+        run: >-
+          pnpm exec vitest run
+          packages/paperai/document-engine-officecli/tests/officecli.real.spec.ts
+          --maxWorkers=1 --testTimeout=120000
 
       - name: Replay persistent PowerShell ACP snapshot
         shell: pwsh

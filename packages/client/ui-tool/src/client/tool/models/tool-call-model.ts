@@ -93,7 +93,7 @@ export interface ToolRowModel {
   body: string | null
   /** Flattened result text ({@link resultText}); null while running or when the result carries no text. */
   output: string | null
-  /** First line of the result text on an error row; null for every other state. */
+  /** Error result's first line unless a generic presenter owns the summary; null outside the error state. */
   errorSummary: string | null
   state: ToolRowState
 }
@@ -232,15 +232,19 @@ export function toolRowModel(toolName: string, block: ToolCallBlock, cwd?: strin
   const fallbackSummary = variant === 'others' && toolName !== '' && toolTitle === undefined
     ? `${toolName} · ${base}`
     : base
+  const view = done ? block.resultView ?? block.callView : block.callView
+  const genericTitle = variant === 'others' && view?.card === 'generic'
+    ? view.title?.trim() || generic?.title.trim() || undefined
+    : undefined
   const summary = variant === 'others'
-    ? (done ? block.resultView?.title : undefined) ?? block.callView?.title ?? fallbackSummary
+    ? genericTitle ?? (done ? block.resultView?.title : undefined) ?? block.callView?.title ?? fallbackSummary
     : fallbackSummary
   // The empty string is "no text" for both derived result fields: a settled
   // call with blank content has nothing to expand, and a blank first line
   // would erase the collapsed error row's summary slot.
   const output = done ? (resultText(block) || null)
     : generic?.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') || null
-  const errorSummary = state === 'error' && output !== null ? firstLine(output) : null
+  const errorSummary = state === 'error' && output !== null && genericTitle === undefined ? firstLine(output) : null
   return {
     variant,
     title: toolTitle ?? VARIANT_TITLES[variant],

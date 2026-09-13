@@ -44,9 +44,11 @@ import type { TemplateLibraryPack, TemplatePackSummary } from '@paperai/template
 import { diffParagraphs } from './diff.ts'
 import type {
   PaperAIAddTemplateFormatRequest,
+  PaperAICaptureExternalRequest,
   PaperAIProbeAgentRequest,
   PaperAIApplyTemplateRequest,
   PaperAICommitDocumentRequest,
+  PaperAIDocumentMutation,
   PaperAICreateFromTemplateRequest,
   PaperAICreateTemplateSetRequest,
   PaperAIDeleteTemplateSetRequest,
@@ -71,6 +73,7 @@ import type {
   PaperAIImportDocumentRequest,
   PaperAIImportDocumentResult,
   PaperAIOpenDocumentRequest,
+  PaperAIParagraphStyle,
   PaperAIOverviewRequest,
   PaperAIProjectOverview,
   PaperAIRecoverWorkingRequest,
@@ -199,6 +202,14 @@ function compactLabel(text: string, fallback: string): string {
   const compact = text.replace(/\s+/gu, ' ').trim()
   if (compact.length === 0) return fallback
   return compact.length <= 56 ? compact : `${compact.slice(0, 55)}…`
+}
+
+/** Name one browser commit by what it changed: a block's text, its formatting alone, or several blocks. */
+function commitMessage(mutations: readonly PaperAIDocumentMutation[]): string {
+  const first = mutations[0]
+  const formatting = mutations.every(mutation => mutation.nextText === mutation.baseText)
+  if (mutations.length > 1) return `${formatting ? '排版' : '修改'} ${mutations.length} 个段落`
+  return `${formatting ? '排版' : '修改'}：${compactLabel(first?.nextText ?? '', '段落')}`
 }
 
 function nodeSummary(node: DocumentNode): PaperAIDocumentNodeSummary {
@@ -552,6 +563,27 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   /**
+   * Record a Working DOCX changed outside PaperAI as a version of its own, so
+   * block edits can continue from it.
+   * @param request - owning Workspace and the document.
+   * @param signal - optional cancellation before publication.
+   * @returns a fresh integrity report after the capture.
+   * @throws when the Workspace is unknown, the document is not the project's, or nothing external is pending.
+   */
+  @Remote('captureExternal')
+  async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
+    const project = this.existingProject(request.workspaceId)
+    const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.documentId)))
+    if (document?.projectId !== project.id) throw new Error('paperai-workbench: the document does not belong to this project')
+    await this.ctx.paperCommits.captureExternal({
+      documentId: document.id,
+      actor: { kind: 'human', name: '用户', client: 'paperai' },
+      ...(signal === undefined ? {} : { signal }),
+    })
+    return this.ctx.paperCommits.inspectProject(project, signal)
+  }
+
+  /**
    * Record the template set the project writes against, or the explicit
    * choice to write without one.
    * @param request - Workspace and template set id, or `null` for none.
@@ -839,12 +871,15 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     ])
     const paragraphs = (nodes: readonly { text: string }[]): string[] => nodes.map(node => node.text)
     const diff = diffParagraphs(paragraphs(before), paragraphs(after))
+    const formattingEditCount = commit.operations.filter(operation => operation.type === 'replace-text'
+      && typeof operation.before === 'string' && operation.before === operation.after).length
     return {
       documentId,
       commitId: commit.id,
       parentCommitId: parent?.id ?? null,
       changes: diff.changes,
       unchangedCount: diff.unchangedCount,
+      ...(formattingEditCount === 0 ? {} : { formattingEditCount }),
     }
   }
 
@@ -962,23 +997,27 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const id = DocumentId(String(request.documentId))
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
+    // Positional Office paths remain valid when later paragraphs split first.
+    const order = new Map(before.nodes.map((node, index) => [String(node.id), index]))
+    const mutations = [...request.mutations].sort((left, right) =>
+      (order.get(String(right.nodeId)) ?? -1) - (order.get(String(left.nodeId)) ?? -1))
     const commit = await this.ctx.paperCommits.submit({
       documentId: id,
       ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
-      message: request.mutations.length === 1
-        ? `修改：${compactLabel(firstMutation.nextText, '段落')}`
-        : `修改 ${request.mutations.length} 个段落`,
+      message: commitMessage(request.mutations),
       actor: {
         kind: 'human',
         name: '用户',
         client: 'paperai',
         sessionId: String(request.sessionId),
       },
-      mutations: request.mutations.map(mutation => ({
+      mutations: mutations.map(mutation => ({
         type: 'replace-text' as const,
         nodeId: DocumentNodeId(String(mutation.nodeId)),
         baseText: mutation.baseText,
         nextText: mutation.nextText,
+        ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
+        ...(mutation.paragraphs === undefined ? {} : { paragraphs: mutation.paragraphs }),
       })),
       ...(signal === undefined ? {} : { signal }),
     })
@@ -1072,6 +1111,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         documentId: document.id,
         name: document.name,
         fileName: basename(document.workingPath),
+        workingPath: document.workingPath,
         documentType: document.role,
         templateName: this.contractOf(document)?.name ?? null,
         updatedAt: document.updatedAt,
@@ -1217,7 +1257,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const after = this.requireDocument(id)
     this.fenceGateMutation(after.document, baseRevision)
     const project = this.requireProject(after.document.projectId)
-    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal)
+    const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal, 'skip')
     return { ...opened, createdCommitId: commit.id }
   }
 
@@ -1333,9 +1373,12 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     nodes: readonly DocumentNode[],
     sessionId: SessionId,
     signal?: AbortSignal,
-    preview: 'required' | 'best-effort' = 'required',
+    preview: 'required' | 'best-effort' | 'skip' = 'required',
   ): Promise<PaperAIDocumentOpenResult> {
-    const previewHtml = await this.previewFor(document.id, signal, preview)
+    const [previewHtml, paragraphStyles] = await Promise.all([
+      this.previewFor(document.id, signal, preview),
+      this.paragraphStylesFor(document.id, signal, preview),
+    ])
     const history = this.ctx.paperCommits.listHistory(document.id)
     const contract = this.contractOf(document)
     const projectSet = project.templatePackId === undefined ? undefined : this.findSet(project.templatePackId)
@@ -1350,6 +1393,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       revision: revisionOf(document),
       headCommitId: headOf(document),
       previewHtml,
+      paragraphStyles,
       nodes: nodes.map(nodeSummary),
       versions: history.map(commit => versionOf(commit, document.headCommitId)),
       template: this.templateSummary(contract),
@@ -1364,13 +1408,17 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    * Render the read-only preview. After a commit point the projection must
    * still describe the document the caller now owns, so `best-effort` turns a
    * preview failure into an empty preview (the browser shows its unavailable
-   * notice) and logs the cause instead of failing the whole result.
+   * notice) and logs the cause instead of failing the whole result. `skip`
+   * answers a block commit without rendering: the browser keeps the preview it
+   * shows, writes the committed text into it, and opens the document again in
+   * the background for the rendered one.
    */
   private async previewFor(
     documentId: DocumentId,
     signal: AbortSignal | undefined,
-    preview: 'required' | 'best-effort',
+    preview: 'required' | 'best-effort' | 'skip',
   ): Promise<string> {
+    if (preview === 'skip') return ''
     if (preview === 'required') return await this.ctx.paperDocuments.previewHtml(documentId, signal)
     try {
       return await this.ctx.paperDocuments.previewHtml(documentId, signal)
@@ -1379,6 +1427,20 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         `paperai-workbench: preview unavailable for document '${String(documentId)}' after its root commit: ${String(error)}`,
       )
       return ''
+    }
+  }
+
+  private async paragraphStylesFor(
+    documentId: DocumentId,
+    signal: AbortSignal | undefined,
+    preview: 'required' | 'best-effort' | 'skip',
+  ): Promise<readonly PaperAIParagraphStyle[]> {
+    if (preview === 'skip') return []
+    try {
+      return await this.ctx.paperDocuments.readParagraphStyles(documentId, signal)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(`paperai-workbench: paragraph styles unavailable for document '${String(documentId)}': ${String(error)}`)
+      return []
     }
   }
 

@@ -10,7 +10,7 @@ export const WORKSPACE_ID = 'workspace-paper' as WorkspaceId
 export const SESSION_ID = 'session-paper' as SessionId
 export const RESOURCE_ID = 'document:document-paper' as PaperAIResourceId
 export const DOCUMENT_ID = 'document-paper' as PaperAIDocumentId
-const REVISION_1 = 'revision-1' as PaperAIDocumentRevision
+export const REVISION_1 = 'revision-1' as PaperAIDocumentRevision
 export const REVISION_2 = 'revision-2' as PaperAIDocumentRevision
 const REVISION_3 = 'revision-3' as PaperAIDocumentRevision
 export const COMMIT_0 = 'commit-0' as PaperAIDocumentCommitId
@@ -100,6 +100,7 @@ export function documentSnapshot(
     revision,
     headCommitId,
     previewHtml: PREVIEW_HTML,
+    paragraphStyles: [{ id: 'Normal', name: '正文' }, { id: 'SectionTitle', name: '章节标题' }],
     nodes: [
       { nodeId: NODE_HEADING, kind: 'heading', label: 'Introduction', depth: 0, editable: true, text: 'Introduction' },
       { nodeId: NODE_PARAGRAPH, kind: 'paragraph', label: 'Research background', depth: 0, editable: true, text: 'Research background' },
@@ -186,10 +187,9 @@ export const DIFF: PaperAIVersionDiff = {
 
 export function successfulRemote(): PaperAIWorkbenchRemote {
   return {
-    agentDiagnostics: async () => ({ ok: true, value: [] }),
-    probeAgent: async request => ({ ok: true, value: { provider: request.provider, status: 'discovered', executable: 'node', adapterVersion: null, agentVersion: null, checkedAt: null, retryAt: null, elapsedMs: null, error: null, models: [] } }),
     inspectProject: async () => ({ ok: true, value: { checkedAt: '2026-09-05T00:00:00Z', documents: 1, issues: [], repairs: [] } }),
     recoverWorking: async () => ({ ok: true, value: { checkedAt: '2026-09-05T00:00:00Z', documents: 1, issues: [], repairs: [] } }),
+    captureExternal: async () => ({ ok: true, value: { checkedAt: '2026-09-05T00:00:00Z', documents: 1, issues: [], repairs: [] } }),
     overview: async () => ({ ok: true, value: OVERVIEW }),
     setProjectTemplate: async request => ({
       ok: true,

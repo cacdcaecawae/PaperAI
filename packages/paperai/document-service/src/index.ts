@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { DocumentEngine, EngineTextNode } from '@paperai/document-engine'
+import type { DocumentEngine, EngineParagraphStyle, EngineTextNode } from '@paperai/document-engine'
 import {
   DocumentId,
   type CapabilityHealth,
@@ -224,7 +224,7 @@ export class PaperDocumentService extends Service {
         project.rootPath, staged, stem, sourceSha256,
         this.listDocuments(project.id).map(document => document.name), signal,
       )
-      await cleanupStagedDocument(staged)
+      await this.discardStaged(staged)
       staged = undefined
       const document: DocumentRecord = {
         id,
@@ -249,8 +249,14 @@ export class PaperDocumentService extends Service {
       }
       throw error
     } finally {
-      if (staged !== undefined) await cleanupStagedDocument(staged)
+      if (staged !== undefined) await this.discardStaged(staged)
     }
+  }
+
+  /** The engine may still hold the staged Working DOCX open; it lets go before the staging directory is removed. */
+  private async discardStaged(staged: StagedDocumentFiles): Promise<void> {
+    await this.ctx.documentEngine.release(staged.workingPath)
+    await cleanupStagedDocument(staged)
   }
 
   /**
@@ -384,6 +390,18 @@ export class PaperDocumentService extends Service {
   async previewHtml(documentId: DocumentId, signal?: AbortSignal): Promise<string> {
     const document = this.requireDocument(documentId)
     return await this.ctx.documentEngine.previewHtml(document.workingPath, signal)
+  }
+
+  /**
+   * Read paragraph styles defined in the current Working DOCX.
+   * @param documentId - document identity.
+   * @param signal - optional engine cancellation.
+   * @returns stored style IDs and display names in definition order.
+   * @throws PaperDocumentError when the document does not exist, or an engine error when styles cannot be read.
+   */
+  async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+    const document = this.requireDocument(documentId)
+    return await this.ctx.documentEngine.readParagraphStyles(document.workingPath, signal)
   }
 
   /**

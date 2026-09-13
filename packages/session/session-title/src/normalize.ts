@@ -18,7 +18,7 @@ function assertPositiveInteger(name: string, value: number): void {
   }
 }
 
-/** Remove controls and produce one trimmed, whitespace-normalized line. */
+/** Remove controls and trim outer whitespace while retaining line boundaries. */
 function cleanTitleText(input: string): string {
   return input
     .replace(OSC_SEQUENCE, '')
@@ -26,7 +26,6 @@ function cleanTitleText(input: string): string {
     .replace(ESC_SEQUENCE, '')
     .replace(CONTROL_CHARACTER, '')
     .replace(DIRECTIONAL_CONTROL, '')
-    .replace(/\s+/gu, ' ')
     .trim()
 }
 
@@ -57,11 +56,11 @@ export function truncateTitleUtf8(input: string, maxBytes: number): string {
  * @returns a terminal-safe one-line title, possibly empty after sanitization.
  */
 export function normalizeSessionTitle(input: string, maxBytes: number): string {
-  return truncateTitleUtf8(cleanTitleText(input), maxBytes).trimEnd()
+  return truncateTitleUtf8(cleanTitleText(input).replace(/\s+/gu, ' '), maxBytes).trimEnd()
 }
 
 /**
- * Derive the deterministic first-prompt fallback.
+ * Derive the deterministic fallback from the first non-empty line of the first prompt.
  * @param input - text from the first eligible human message.
  * @param maxWords - positive whitespace-delimited word cap.
  * @param maxBytes - positive UTF-8 byte cap.
@@ -69,6 +68,7 @@ export function normalizeSessionTitle(input: string, maxBytes: number): string {
  */
 export function fallbackSessionTitle(input: string, maxWords: number, maxBytes: number): string {
   assertPositiveInteger('maxWords', maxWords)
-  const words = cleanTitleText(input).split(' ').filter(Boolean).slice(0, maxWords)
+  const line = cleanTitleText(input).split(/[\r\n]/u, 1)[0] ?? ''
+  const words = line.split(/\s+/u).filter(Boolean).slice(0, maxWords)
   return truncateTitleUtf8(words.join(' '), maxBytes).trimEnd()
 }

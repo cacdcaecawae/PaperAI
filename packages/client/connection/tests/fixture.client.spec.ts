@@ -211,7 +211,7 @@ describe('createFixtureApi', () => {
     expect(JSON.stringify(after.result.value.events)).toContain('openai/gpt-5')
   })
 
-  it('serves configured DeepSeek readiness and keeps credential values write-only', async () => {
+  it('serves completed onboarding and configured DeepSeek readiness while keeping credentials write-only', async () => {
     const api = createFixtureApi()
     const settings = await api.settings.describe(req({}))
     if (!settings.result.ok) throw new Error('settings describe failed')
@@ -219,6 +219,10 @@ describe('createFixtureApi', () => {
       ns: 'llm-deepseek',
       value: { apiKeyEnv: 'DEEPSEEK_API_KEY' },
       secrets: [{ path: ['apiKey'], set: false }],
+    }, {
+      ns: 'ui-onboarding',
+      value: { welcomeNoticeVersion: '2026-08-13.1' },
+      secrets: [],
     }])
 
     const initial = await api.credentials.describe(req({ refs: ['DEEPSEEK_API_KEY', 'TEST_API_KEY'] }))

@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ThemeTokenOverrides } from '@deepseek-ai/dsh-client-ui-theme/client'
 import { apply, inject, PROJECT_COPY } from '../src/client/index.ts'
+import { PAPERAI_THEME_SOURCE, PAPERAI_TOKENS } from '../src/client/theme.ts'
 import {
   ClaudeAgentMark,
   CodexAgentMark,
@@ -36,6 +38,14 @@ async function bench(declare = true) {
   locale.register('conversation', 'zh', { 'hero.chooseWorkspace': '选择工作区', 'hero.headline': '探索未至之境' })
   locale.register('conversation', 'en', { 'hero.chooseWorkspace': 'Choose workspace', 'hero.headline': 'Explore' })
   ctx.provide('locale', locale)
+  // The theme registry as the token layer sees it: one override layer per source.
+  const layers = new Map<string, ThemeTokenOverrides>()
+  ctx.provide('theme', {
+    overrideTokens(source: string, tokens: ThemeTokenOverrides) {
+      layers.set(source, tokens)
+      return () => { layers.delete(source) }
+    },
+  } as never)
   const declareHoles = () => slots.register({
     name: 'root',
     children: {
@@ -45,12 +55,34 @@ async function bench(declare = true) {
     },
   } as never, () => null)
   const disposeHoles = declare ? declareHoles() : undefined
-  return { ctx, slots, locale, declareHoles, disposeHoles }
+  return { ctx, slots, locale, layers, declareHoles, disposeHoles }
 }
 
 describe('PaperAI browser-brand plugin', () => {
-  it('declares the slot and locale services it uses and leaves the theme alone', () => {
-    expect(inject).toEqual(['slots', 'locale'])
+  it('declares the slot, locale, and theme services it uses', () => {
+    expect(inject).toEqual(['slots', 'locale', 'theme'])
+  })
+
+  it('stacks the ink-and-gold token layer over the shipped palette and lifts it on teardown', async () => {
+    const { ctx, layers } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    expect(layers.get(PAPERAI_THEME_SOURCE)).toBe(PAPERAI_TOKENS)
+    // Every token names both palettes, so neither scheme inherits a value meant for the other.
+    for (const [name, modes] of Object.entries(PAPERAI_TOKENS)) {
+      expect(name).toMatch(/^--(?:dsw-|paperai-)/u)
+      expect(modes.light).not.toBe('')
+      expect(modes.dark).not.toBe('')
+    }
+    // Ink primary on paper, gold primary on slate.
+    expect(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.light).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
+    // The workbench badges read one accent and one tint per document type.
+    for (const type of ['proposal', 'midterm', 'manuscript', 'final', 'other']) {
+      expect(PAPERAI_TOKENS[`--paperai-type-${type}`]).toBeDefined()
+      expect(PAPERAI_TOKENS[`--paperai-type-${type}-tint`]).toBeDefined()
+    }
+    await fiber.dispose()
+    expect(layers.has(PAPERAI_THEME_SOURCE)).toBe(false)
   })
 
   it('renames the shell\'s workspace vocabulary to projects in both locales and lifts it on teardown', async () => {

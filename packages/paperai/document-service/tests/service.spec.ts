@@ -88,7 +88,9 @@ class FakeDocumentEngine {
   healthResult: CapabilityHealth = { status: 'ready', version: 'test' }
   nodes: EngineTextNode[] = []
   previews: string[] = []
+  stylePaths: string[] = []
   readPaths: string[] = []
+  released: string[] = []
   readFailure: Error | undefined
 
   health(): Promise<CapabilityHealth> {
@@ -106,6 +108,11 @@ class FakeDocumentEngine {
     return Promise.resolve(`<article>${filePath}</article>`)
   }
 
+  readParagraphStyles(filePath: string): Promise<{ id: string; name: string }[]> {
+    this.stylePaths.push(filePath)
+    return Promise.resolve([{ id: 'a', name: 'Normal' }])
+  }
+
   inspect(): Promise<Record<string, unknown>> {
     return Promise.resolve({})
   }
@@ -116,6 +123,11 @@ class FakeDocumentEngine {
 
   validate(): Promise<EngineValidation> {
     return Promise.resolve({ success: true, details: {} })
+  }
+
+  release(filePath: string): Promise<void> {
+    this.released.push(filePath)
+    return Promise.resolve()
   }
 }
 
@@ -189,6 +201,7 @@ describe('PaperDocumentService', () => {
 
     const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'proposal' })
     imported(result)
+    expect(engine.released).toEqual(engine.readPaths)
     expect(result.document).toMatchObject({
       name: '硕士学位论文开题报告',
       workingPath: join(projectRoot, 'documents', 'working', '硕士学位论文开题报告.docx'),
@@ -227,6 +240,8 @@ describe('PaperDocumentService', () => {
     const preview = await ctx.paperDocuments.previewHtml(result.document.id)
     expect(preview).toContain(result.document.workingPath)
     expect(engine.previews).toEqual([result.document.workingPath])
+    await expect(ctx.paperDocuments.readParagraphStyles(result.document.id)).resolves.toEqual([{ id: 'a', name: 'Normal' }])
+    expect(engine.stylePaths).toEqual([result.document.workingPath])
 
     await chmod(result.document.immutableSourcePath, 0o600)
     await writeFile(result.document.immutableSourcePath, 'tampered source')
@@ -624,6 +639,7 @@ describe('PaperDocumentService', () => {
     await expect(ctx.paperDocuments.previewHtml(missing)).rejects.toMatchObject({
       code: 'DOCUMENT_NOT_FOUND',
     } satisfies Partial<PaperDocumentError>)
+    await expect(ctx.paperDocuments.readParagraphStyles(missing)).rejects.toMatchObject({ code: 'DOCUMENT_NOT_FOUND' })
     await expect(ctx.paperDocuments.rebuildIndex(missing)).rejects.toMatchObject({
       code: 'DOCUMENT_NOT_FOUND',
     } satisfies Partial<PaperDocumentError>)

@@ -12,7 +12,7 @@
  * history outside the direct-parent continuation path.
  */
 // Type-only: the carrier types, the forwarded Host-event face and the ctx.remote merge.
-import type { ModelSelection, SessionModels } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.model seat).
@@ -45,7 +45,7 @@ function rowId(providerId: string, modelId: string): string {
 }
 
 /** Flatten the directory into popup rows; failure rows are listed for visibility but never selectable. */
-function optionsOf(directory: SessionModels, t: TranslateNS<'model'>): SelectOption[] {
+function optionsOf(directory: ModelDirectoryState, t: TranslateNS<'model'>): SelectOption[] {
   const rows: SelectOption[] = []
   for (const group of directory.groups) {
     for (const model of group.models) {
@@ -53,7 +53,7 @@ function optionsOf(directory: SessionModels, t: TranslateNS<'model'>): SelectOpt
         id: rowId(group.id, model.id),
         label: model.name,
         detail: model.description !== undefined ? `${group.name} · ${model.description}` : group.name,
-        ...(directory.current.provider === group.id && directory.current.model === model.id
+        ...(directory.current?.provider === group.id && directory.current.model === model.id
           ? { active: true } : {}),
       })
     }
@@ -134,7 +134,9 @@ export function apply(ctx: ClientContext): void {
             throw new Error('model selection is unavailable for addressed subagent sessions')
           }
           try {
-            return optionsOf(await models.directoryFor(session.sessionId).load(), t)
+            const directory = models.directoryFor(session.sessionId)
+            await directory.load()
+            return optionsOf(directory.store.getSnapshot(), t)
           } catch {
             throw new Error(t('error.load'))
           }

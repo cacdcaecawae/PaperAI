@@ -28,6 +28,7 @@ import SessionPersistence, {
   type SessionPersistenceSnapshot,
 } from '@deepseek-ai/dsh-session-persistence'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionTitleService from '@deepseek-ai/dsh-session-title'
 import {
   SettingsProvider,
   type SettingsNamespace,
@@ -458,9 +459,10 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
   it.each(['raw', 'terminal-delta'])('flushes throttled %s output before completion and stops its timer after the turn', async (format) => {
     const harness = await mountHarness({ settingsDocument: {} })
     const gate = join(harness.root, 'stream-gate')
+    const intervalMs = 100
     await writeFile(gate, 'hold')
     await harness.ctx.settings.update(ACP_AGENT_SETTINGS_NAMESPACE, {
-      toolProgressIntervalMs: 100,
+      toolProgressIntervalMs: intervalMs,
       providers: { codex: { env: { FAKE_ACP_STREAM_TOOL: 'completed', FAKE_ACP_STREAM_GATE_FILE: gate, FAKE_ACP_STREAM_FORMAT: format } } },
     })
     const handle = await createAgent(harness, 'throttled-output')
@@ -470,17 +472,24 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       await expect.poll(() => progress().some(event => event.data.arguments.includes('399 '))).toBe(true)
       expect(handle.agent.session.events.some(event => event.type === 'turn/end')).toBe(false)
       expect(JSON.parse(progress().at(-1)!.data.arguments)).toMatchObject({ status: 'in_progress', truncated: true })
-      expect(progress().length).toBeLessThan(5)
+      const updates = progress()
+      for (let index = 1; index < updates.length; index++) {
+        // Session timestamps and native timers have integer-millisecond resolution.
+        expect(updates[index]!.time - updates[index - 1]!.time).toBeGreaterThanOrEqual(intervalMs - 1)
+      }
       expect(JSON.stringify(handle.agent.session.events)).not.toMatch(/unrelated-output|no longer available/u)
     } finally {
       await rm(gate)
       await running
     }
-    const final = JSON.parse(progress().at(-1)!.data.arguments) as { status: string; output: string }
+    const finalProgress = progress().at(-1)!
+    const final = JSON.parse(finalProgress.data.arguments) as { status: string; output: string }
     expect(final.status).toBe('completed')
     expect(final.output).toContain('399 ')
+    expect(finalProgress.seq).toBeLessThan(handle.agent.session.events.findLast(event => event.type === 'tool/result')!.seq)
+    expect(finalProgress.seq).toBeLessThan(handle.agent.session.events.findLast(event => event.type === 'turn/end')!.seq)
     const count = handle.agent.session.events.length
-    await new Promise(resolve => setTimeout(resolve, 150))
+    await new Promise(resolve => setTimeout(resolve, intervalMs * 1.5))
     expect(handle.agent.session.events).toHaveLength(count)
   })
 
@@ -2084,6 +2093,35 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     session.append('session/title', { title: 'My paper', source: { kind: 'user' }, messageSeqs: [] })
     await runTurn(handle, 'Continue')
     expect(session.events.findLast(event => event.type === 'session/title')?.data.title).toBe('My paper')
+  })
+
+  it.each([false, true])('keeps multi-line prompt echoes out of titles with title service mounted: %s', async (withTitleService) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_TITLE_ECHO: '1' } })
+    if (withTitleService) await harness.ctx.plugin(SessionTitleService, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
+    const handle = await createAgent(harness, `title-echo-${withTitleService}`)
+    const text = 'Paper review\n[Word selection]\n{"document":"d","path":"private.docx","text":"Original wording"}\n[/Word selection]\nRevise this passage.'
+    await runTurn(handle, text)
+    const session = handle.agent.session
+    const expected = withTitleService ? 'Paper review' : null
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(session.id)?.state.title).toBe(expected)
+    expect(session.events.findLast(event => event.type === 'session/title')?.data.title ?? null).toBe(expected)
+    expect(session.events.filter(event => event.type === 'session/title')).toHaveLength(withTitleService ? 1 : 0)
+    expect(session.events.find(event => event.type === 'user/message')?.data.content).toEqual([{ type: 'text', text }])
+    const log = await readLog(harness.logPath)
+    expect(log.find(entry => entry.event === 'prompt')?.['prompt']).toEqual([{ type: 'text', text }])
+    expect(log.find(entry => entry.event === 'title-echo')?.['title']).toBe(text.replace(/\s+/gu, ' '))
+    session.append('session/title', { title: 'My paper', source: { kind: 'user' }, messageSeqs: [] })
+    await runTurn(handle, 'Continue')
+    expect(session.events.findLast(event => event.type === 'session/title')?.data.title).toBe('My paper')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(session.id)?.state.title).toBe('My paper')
+  })
+
+  it('accepts a single-line prompt as a native title without a title service', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_TITLE_ECHO: '1' } })
+    const handle = await createAgent(harness, 'single-line-native-title')
+    await runTurn(handle, '\n  Edit introduction\n\t')
+    expect(handle.agent.session.events.findLast(event => event.type === 'session/title')?.data.title).toBe('Edit introduction')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.state.title).toBe('Edit introduction')
   })
 
   it('keeps preset contributions synchronized with enabled channels and releases them on plugin teardown', async () => {

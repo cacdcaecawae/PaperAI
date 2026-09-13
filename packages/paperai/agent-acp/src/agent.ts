@@ -51,7 +51,7 @@ import { AcpTerminals } from './terminals.ts'
 import { invokedSkillNames } from '@deepseek-ai/dsh-tool-skill'
 import { isUserInvocable, renderSkillContent } from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-commands'
-import { SessionTitleProviderId } from '@deepseek-ai/dsh-session-title'
+import { collectSessionTitleMessages, normalizeSessionTitle, SessionTitleProviderId } from '@deepseek-ai/dsh-session-title'
 import type { AcpSessionDetails, AcpSessionState } from './diagnostic-types.ts'
 import { diagnosticCapabilities } from './diagnostics.ts'
 import { isAcpPermissionOption } from './catalog.ts'
@@ -1230,13 +1230,18 @@ export class AcpAgent implements Agent {
         }
     }
     if (update.sessionUpdate === 'session_info_update') {
+      const previous = this.session.events.findLast(event => event.type === 'session/title')?.data
+      const first = collectSessionTitleMessages(this.session.events)[0]
+      const candidate = update.title?.trim()
+      const echoesPrompt = candidate !== undefined && first !== undefined
+        && first.text.split(/[\r\n]/u).filter(line => normalizeSessionTitle(line, Number.MAX_SAFE_INTEGER) !== '').length > 1
+        && normalizeSessionTitle(candidate, Number.MAX_SAFE_INTEGER) === normalizeSessionTitle(first.text, Number.MAX_SAFE_INTEGER)
+      const title = echoesPrompt ? previous?.title : candidate
       this.providerState = {
         ...this.providerState,
-        ...(update.title === undefined ? {} : { title: update.title }),
+        ...(update.title === undefined ? {} : { title: title ?? null }),
         ...(update.updatedAt === undefined ? {} : { updatedAt: update.updatedAt }),
       }
-      const title = update.title?.trim()
-      const previous = this.session.events.findLast(event => event.type === 'session/title')?.data
       if (this.sessionLive && title && previous?.source.kind !== 'user' && previous?.title !== title) {
         this.session.append('session/title', {
           title,

@@ -381,6 +381,7 @@ describe('Remote Agent and Session lookup policy', () => {
     } as never)
     ctx.provide('agentPresets', {
       defaultId: 'codex',
+      factoryRoute: () => 'codex',
       resolve: () => Promise.resolve({ id: 'codex', trust: 'system', path: '/presets/codex' }),
       mount: () => Promise.resolve({ id: 'codex', trust: 'system', path: '/presets/codex' }),
     } as never)

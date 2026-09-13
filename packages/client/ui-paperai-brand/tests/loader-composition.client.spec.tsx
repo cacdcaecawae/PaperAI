@@ -47,6 +47,13 @@ const LocaleStub = {
   },
 }
 
+/** The theme registry reduced to the override seam the brand layer stacks on. */
+const ThemeStub = {
+  apply(ctx: Context): void {
+    ctx.provide('theme', { overrideTokens: () => () => {} } as never)
+  },
+}
+
 /** Boot a test-only client composition through the real Cordis Loader. */
 async function loadComposition(): Promise<SlotRegistry> {
   root = await mkdtemp(join(tmpdir(), 'paperai-ui-brand-loader-'))
@@ -54,6 +61,7 @@ async function loadComposition(): Promise<SlotRegistry> {
   await writeFile(configPath, [
     "- name: 'test-slot-registry'",
     "- name: 'test-locale'",
+    "- name: 'test-theme'",
     "- name: 'test-brand-holes'",
     "- name: '@paperai/ui-brand'",
     '',
@@ -66,6 +74,7 @@ async function loadComposition(): Promise<SlotRegistry> {
   const modules = new Map<string, unknown>([
     ['test-slot-registry', SlotRegistry],
     ['test-locale', LocaleStub],
+    ['test-theme', ThemeStub],
     ['test-brand-holes', BrandHoles],
     ['@paperai/ui-brand', { inject: brandInject, apply: brandApply }],
   ])

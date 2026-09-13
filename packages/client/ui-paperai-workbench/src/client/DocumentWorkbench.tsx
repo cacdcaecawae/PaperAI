@@ -1,15 +1,16 @@
 /** The document view: the document itself, a toolbar of secondary entries, and one open panel. */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  Button, DetailsViewShell, IconChevronDownOutline14, IconDownloadOutline16, IconFullscreenOutline16,
-  IconRefreshOutline14, Menu, StateDot,
+  Button, DetailsViewShell, IconBranchOutline16, IconChevronDownOutline14, IconDownloadOutline16,
+  IconFullscreenOutline16, IconListPenOutline16, IconRefreshOutline14, Menu, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaperAIDocumentSnapshot, PaperAIExportMode, PaperAIWorkbenchPanel, PaperAIWorkbenchState } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import { DocumentPreview } from './DocumentPreview.tsx'
 import { fixPromptText, GatePanel, TemplatePanel, VersionsPanel } from './panels.tsx'
+import { markDiffHtml } from './preview-html.ts'
 import { TemplateDialog } from './TemplateLibrary.tsx'
 import type { PaperAIWorkbenchKey } from './locales.ts'
 import css from './DocumentWorkbench.module.css'
@@ -20,6 +21,8 @@ const EXPORT_MODES: readonly PaperAIExportMode[] = ['draft-export', 'delivery-ex
 
 /** Actionable controller failures have specific guidance; other failures offer a retry. */
 function actionErrorKey(error: string): PaperAIWorkbenchKey {
+  if (error.includes('UNSUPPORTED_DOCUMENT_CONTENT:')) return 'workbench.unsupportedContent'
+  if (error.includes('Working DOCX differs from head')) return 'workbench.workingChanged'
   if (error.startsWith('delivery blocked')) return 'export.blocked'
   if (error.startsWith('block changed externally')) return 'block.conflicted'
   if (error === 'save or cancel the current block first') return 'block.busy'
@@ -39,6 +42,7 @@ function Toolbar({ document, state, panel, showPanel, exportDocument, focusActiv
 }): ReactNode {
   const [exportOpen, setExportOpen] = useState(false)
   const busy = state.action !== null
+  const dirty = state.edits.length > 0
   const exporting = state.action === 'exporting-draft' || state.action === 'exporting-delivery'
   const failing = document.gate.findings.filter(finding => !finding.passed).length
   const gateKey: PaperAIWorkbenchKey = document.gate.status === 'passed'
@@ -58,69 +62,86 @@ function Toolbar({ document, state, panel, showPanel, exportDocument, focusActiv
   )
   return (
     <div className={css.toolbar} data-paperai-toolbar>
-      {chip('template', document.template?.name ?? t('toolbar.templateNone'), {
-        'data-attached': document.template !== null ? 'true' : 'false',
-        title: t('toolbar.template'),
-      })}
-      {document.template !== null && chip('gate', (
-        <>
-          <StateDot
-            state={document.gate.status === 'passed' ? 'done' : document.gate.status === 'failed' ? 'error' : 'warning'}
-            size={8}
-          />
-          <span>{t(gateKey, { count: failing })}</span>
-        </>
-      ), { 'data-status': document.gate.status, title: t('toolbar.gate') })}
-      {chip('versions', t('toolbar.versions', { count: document.versions.length }))}
-      <Menu
-        compact
-        open={exportOpen}
-        items={EXPORT_MODES.map(mode => ({
-          id: mode,
-          label: t(mode === 'draft-export' ? 'toolbar.exportDraft' : 'toolbar.exportDelivery'),
-          icon: <IconDownloadOutline16 size={14} />,
-        }))}
-        anchor={(
-          <button
-            type="button"
-            className={css.chip}
-            data-kind="export"
-            aria-haspopup="menu"
-            aria-expanded={exportOpen}
-            disabled={busy}
-            onClick={() => { setExportOpen(open => !open) }}
-          >
-            <span>{exporting ? t('toolbar.exporting') : t('toolbar.export')}</span>
-            <IconChevronDownOutline14 />
-          </button>
-        )}
-        onSelect={(id) => {
-          setExportOpen(false)
-          void exportDocument(id as PaperAIExportMode)
-        }}
-        onClose={() => { setExportOpen(false) }}
-      />
-      <button
-        type="button"
-        className={clsx(css.chip, css.focusChip)}
-        data-kind="focus"
-        aria-pressed={focusActive}
-        title={t(focusActive ? 'workbench.focusExit' : 'workbench.focus')}
-        onClick={toggleFocus}
-      >
-        <IconFullscreenOutline16 size={14} />
-        <span>{t(focusActive ? 'workbench.focusExit' : 'workbench.focus')}</span>
-      </button>
+      <span className={css.facts}>
+        {chip('template', (
+          <>
+            <IconListPenOutline16 size={14} />
+            <span>{t('toolbar.template')}</span>
+          </>
+        ), {
+          'data-attached': document.template !== null ? 'true' : 'false',
+          title: document.template?.name ?? t('toolbar.templateNone'),
+        })}
+        {document.template !== null && chip('gate', (
+          <>
+            <StateDot
+              state={document.gate.status === 'passed' ? 'done' : document.gate.status === 'failed' ? 'error' : 'warning'}
+              size={8}
+            />
+            <span>{t(gateKey, { count: failing })}</span>
+          </>
+        ), { 'data-status': document.gate.status, title: t('toolbar.gate') })}
+        {chip('versions', (
+          <>
+            <IconBranchOutline16 size={14} />
+            <span>{t('toolbar.versions', { count: document.versions.length })}</span>
+          </>
+        ))}
+      </span>
+      <span className={css.tools}>
+        <Menu
+          portal
+          open={exportOpen}
+          items={EXPORT_MODES.map(mode => ({
+            id: mode,
+            label: t(mode === 'draft-export' ? 'toolbar.exportDraft' : 'toolbar.exportDelivery'),
+            icon: <IconDownloadOutline16 size={14} />,
+          }))}
+          anchor={(
+            <button
+              type="button"
+              className={css.chip}
+              data-kind="export"
+              aria-haspopup="menu"
+              aria-expanded={exportOpen}
+              disabled={busy || dirty}
+              title={t(dirty ? 'export.saveFirst' : 'export.description')}
+              onClick={() => { setExportOpen(open => !open) }}
+            >
+              <IconDownloadOutline16 size={14} />
+              <span>{exporting ? t('toolbar.exporting') : t('toolbar.export')}</span>
+              <IconChevronDownOutline14 />
+            </button>
+          )}
+          onSelect={(id) => {
+            setExportOpen(false)
+            void exportDocument(id as PaperAIExportMode)
+          }}
+          onClose={() => { setExportOpen(false) }}
+        />
+        <button
+          type="button"
+          className={clsx(css.chip, css.focusChip)}
+          data-kind="focus"
+          aria-pressed={focusActive}
+          title={t(focusActive ? 'workbench.collaborate' : 'workbench.focus')}
+          onClick={toggleFocus}
+        >
+          <IconFullscreenOutline16 size={14} />
+          <span>{t(focusActive ? 'workbench.collaborate' : 'workbench.focus')}</span>
+        </button>
+      </span>
     </div>
   )
 }
 
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
-  closeDetails, setDraft, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
-  retryOpen, showPanel, selectBlock, updateDraft, cancelEdit, commitEdit, validate, suggestType,
-  applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal,
-  setDetailsFocus, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
+  closeDetails, prepareAgentFix, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
+  retryOpen, showPanel, updateDraft, cancelEdit, commitEdit, validate, suggestType,
+  applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal, captureExternal,
+  setDetailsFocus, showConversation, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
+  useStore, actions,
 }: PaperAIDocumentWorkbenchProps): ReactNode {
   const state = useWorkbench(value => value)
   const document = state.document
@@ -128,23 +149,26 @@ export function DocumentWorkbench({
     document === null ? null : directory.workspaces[document.workspaceId]?.overview ?? null
   ))
   const library = useLibrary(value => value)
-  const [focusActive, setFocusActive] = useState(false)
+  const focusActive = useStore(value => value.writing)
+  const zoom = useStore(value => value.zoom)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [blockNotice, setBlockNotice] = useState<PaperAIWorkbenchKey | null>(null)
-  // Unmount releases a still-active focus demand so the split returns.
-  useEffect(() => () => { setDetailsFocus(false) }, [setDetailsFocus])
-  // A block notice answers one click. Once the workbench moves on — another
-  // block opened or closed, an action settled, a new revision arrives — the
-  // reason it named is gone, so the line goes with it.
-  const editingNodeId = state.edit?.nodeId ?? null
-  useEffect(() => { setBlockNotice(null) }, [document?.documentId, document?.revision, editingNodeId, state.action])
+  // The picked version's changes marked on the current preview while the versions panel is open.
+  const changes = state.panel === 'versions' ? state.diff?.result?.changes ?? null : null
+  const compare = useMemo(
+    () => (document === null || changes === null ? null : markDiffHtml(document.previewHtml, changes)),
+    [document, changes],
+  )
+  const panelOpen = state.phase === 'ready' && document !== null && state.panel !== null
+  useEffect(() => {
+    setDetailsFocus(focusActive || panelOpen)
+    return () => { setDetailsFocus(false) }
+  }, [focusActive, panelOpen, setDetailsFocus])
   useEffect(() => {
     if (dialogOpen) void loadLibrary()
   }, [dialogOpen, loadLibrary])
   const toggleFocus = (): void => {
-    const next = !focusActive
-    setFocusActive(next)
-    setDetailsFocus(next)
+    if (focusActive || panelOpen) showConversation()
+    else actions.setWriting(true)
   }
   const receiptKey: PaperAIWorkbenchKey | null = state.exportReceipt === null
     ? null
@@ -154,7 +178,7 @@ export function DocumentWorkbench({
     <DetailsViewShell
       className={css.root ?? ''}
       title={document?.title ?? t('workbench.title')}
-      {...document === null ? {} : { subtitle: document.path }}
+      {...document === null ? {} : { titleHint: document.path }}
       closeLabel={t('workbench.close')}
       onClose={closeDetails}
     >
@@ -165,7 +189,7 @@ export function DocumentWorkbench({
           panel={state.panel}
           showPanel={showPanel}
           exportDocument={exportDocument}
-          focusActive={focusActive}
+          focusActive={focusActive || panelOpen}
           toggleFocus={toggleFocus}
           t={t}
         />
@@ -195,13 +219,21 @@ export function DocumentWorkbench({
           </div>
         </div>
       )}
-      {state.actionError !== null && (
+      {state.actionError !== null && actionErrorKey(state.actionError) === 'workbench.workingChanged' && (
+        <div className={css.notice} role="alert">
+          <div>
+            <strong>{t('workbench.workingChanged')}</strong>
+            <span>{t('workbench.workingChangedHint')}</span>
+          </div>
+          <Button variant="outline" size="sm" disabled={state.action !== null} onClick={() => { void captureExternal() }}>
+            {state.action === 'capturing-external' ? t('workbench.capturing') : t('workbench.capture')}
+          </Button>
+        </div>
+      )}
+      {state.actionError !== null && actionErrorKey(state.actionError) !== 'workbench.workingChanged' && (
         <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError))}</p>
       )}
-      {blockNotice !== null && (
-        <p className={css.actionError} role="status">{t(blockNotice)}</p>
-      )}
-      <main className={css.body}>
+      <main className={css.body} data-panel={panelOpen || undefined}>
         {state.phase === 'idle' && <p className={css.centerMessage}>{t('workbench.idle')}</p>}
         {state.phase === 'loading' && <p className={css.centerMessage} aria-live="polite">{t('workbench.loading')}</p>}
         {state.phase === 'error' && (
@@ -218,23 +250,20 @@ export function DocumentWorkbench({
             : (
               <DocumentPreview
                 key={view.document.documentId}
-                html={view.document.previewHtml}
+                html={view === state && compare !== null ? compare.html : view.document.previewHtml}
+                revision={view.document.revision}
                 nodes={view.document.nodes}
+                paragraphStyles={view.document.paragraphStyles}
                 active={view === state}
                 scrollTop={view.scrollTop}
                 onScroll={setScroll}
                 onQuote={(excerpt) => { if (view.document !== null) quoteSelection(view.document, excerpt) }}
                 title={t('preview.title')}
-                editing={view.edit}
+                edits={view.edits}
+                comparing={view === state && compare !== null}
                 saving={state.action === 'committing'}
-                onSelectBlock={(nodeId) => {
-                  if (nodeId === null) {
-                    setBlockNotice('block.unmapped')
-                    return
-                  }
-                  const result = selectBlock(nodeId)
-                  setBlockNotice(result.ok ? null : 'block.busy')
-                }}
+                busy={state.action !== null}
+                zoom={zoom}
                 onDraft={updateDraft}
                 onSave={() => { void commitEdit() }}
                 onCancel={cancelEdit}
@@ -260,7 +289,7 @@ export function DocumentWorkbench({
             document={document}
             state={state}
             validate={validate}
-            onSendFix={() => { setDraft(fixPromptText(document, t)) }}
+            onSendFix={() => { prepareAgentFix(fixPromptText(document, t)) }}
             onClose={() => { showPanel(null) }}
             t={t}
           />
@@ -269,6 +298,7 @@ export function DocumentWorkbench({
           <VersionsPanel
             document={document}
             state={state}
+            unplaced={compare?.unplaced ?? []}
             showDiff={showDiff}
             restore={restore}
             onClose={() => { showPanel(null) }}
@@ -276,6 +306,25 @@ export function DocumentWorkbench({
           />
         )}
       </main>
+      {state.phase === 'ready' && document !== null && (
+        <footer className={css.statusBar} aria-label={t('status.title')}>
+          <span role="status" aria-live="polite" className={css.saveStatus}>
+            {t(state.action === 'committing' ? 'block.saving'
+              : state.actionError !== null ? 'status.failed'
+                : state.edits.length > 0 ? 'status.unsaved' : 'status.saved', { count: state.edits.length })}
+          </span>
+          <span className={css.statusHint}>{t(state.edits.length > 0 ? 'status.memory' : 'status.pagination')}</span>
+          <label className={css.zoom}>
+            <span>{t('status.zoom')}</span>
+            <select aria-label={t('status.zoom')} value={zoom} onChange={(event) => {
+              actions.setZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))
+            }}>
+              <option value="fit">{t('status.fit')}</option>
+              {[50, 75, 100, 125, 150, 200].map(value => <option key={value} value={value}>{value}%</option>)}
+            </select>
+          </label>
+        </footer>
+      )}
       {document !== null && (
         <TemplateDialog
           open={dialogOpen}

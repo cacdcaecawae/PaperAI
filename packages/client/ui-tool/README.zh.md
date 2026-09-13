@@ -16,7 +16,7 @@ Client 工具展示插件。`ui-conversation` 通过 `conversation.chat.node` �
 
 通用行把已知工具名称归类为 search、read、shell、write、edit、code 或 generic 变体。运行中、成功、失败和中断状态只来自冻结的 call/result slice。只有用户调用 Host 打开文件回调时，文件路径才相对会话 `cwd` 解析；展示代码不读取会话服务。
 
-通用 presenter 选择显示的输入、实时进度文本和最终输出。提供方工具在摘要中使用声明的标题，避免暴露传输层元数据。持久化结果图片通过 conversation 现有的图片 slot 显示在所属调用旁，包含终端或差异卡片的结果也使用同一通道。
+通用 presenter 选择显示的输入、实时进度文本和最终输出。提供方工具调用失败时，在摘要中保留通用 presenter 声明的非空标题，并显示失败状态；展开后可查看完整错误输出。没有该标题的调用继续使用错误首行作为失败摘要。持久化结果图片通过 conversation 现有的图片 slot 显示在所属调用旁，包含终端或差异卡片的结果也使用同一通道。
 
 ## 原子工具视图
 

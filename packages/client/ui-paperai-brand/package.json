@@ -37,6 +37,7 @@
         "@deepseek-ai/dsh-client-ui-agent-preset",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-theme",
         "@deepseek-ai/dsh-client-ui-workspace",
         "@paperai/ui-acp",
         "@paperai/ui-workbench"
@@ -59,6 +60,7 @@
     "@deepseek-ai/dsh-client-ui-agent-preset": "workspace:^",
     "@deepseek-ai/dsh-client-ui-conversation": "workspace:^",
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@paperai/ui-acp": "workspace:*",
@@ -73,6 +75,7 @@
     "@deepseek-ai/dsh-client-ui-agent-preset": "workspace:^",
     "@deepseek-ai/dsh-client-ui-conversation": "workspace:^",
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@paperai/ui-acp": "workspace:*",
