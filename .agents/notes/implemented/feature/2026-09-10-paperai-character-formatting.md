@@ -4,7 +4,7 @@ Status: implemented
 
 English | [中文](2026-09-10-paperai-character-formatting.zh.md)
 
-Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns the persistent toolbar and structural drafts. The [Word edit preservation decision](../bug-fix/2026-09-13-paperai-word-edit-preservation.md) owns engine writes, original run metadata, and explicit clearing. Resolved browser formatting and transport validation remain active here.
+Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns the persistent toolbar and structural drafts. The [Word edit preservation decision](../bug-fix/2026-09-13-paperai-word-edit-preservation.md) owns engine writes and original run metadata; the [format-intent decision](../bug-fix/2026-09-13-paperai-rendered-format-intent.md) owns draft serialization and clearing. Resolved browser formatting and transport validation remain active here.
 
 ## Problem
 
@@ -16,9 +16,9 @@ Plain-text paragraph setters replace the original runs, so correcting a typo can
 
 Plain text and formatted edits share the XML preservation path owned by the [Word edit preservation decision](../bug-fix/2026-09-13-paperai-word-edit-preservation.md).
 
-The browser reads resolved styles from the Host's rendered run spans. `runsOf` walks each block's text nodes and merges neighbours with equal formatting; a block with no override serializes to one run and commits as plain text. Selected text is formatted by wrapping it in a span stating the change and clearing that same declaration inside it, so the resolved value reflects the edit. The editor intercepts paste and inserts text alone. The persistent toolbar and Ctrl/Cmd+B, I, and U apply character formatting.
+The browser reads resolved styles from the Host's rendered run spans. `runsOf` walks each block's text nodes and merges neighbours with equal formatting for draft rendering. Selected text is formatted by wrapping it in a span stating the change and clearing that same declaration inside it, so the resolved value reflects the edit. The editor intercepts paste and inserts text alone. The persistent toolbar and Ctrl/Cmd+B, I, and U apply character formatting.
 
-A declaration above selected text cannot be turned off solely inside it: text decoration draws onto descendants without inheriting. A change removes that declaration between the block and selection, retaining it on either side. The browser explicitly restates cleared properties from the block’s resolved values for every affected run, so preserved source metadata cannot reinstate a removed override.
+A declaration above selected text cannot be turned off solely inside it: text decoration draws onto descendants without inheriting. A change removes that declaration between the block and selection, retaining it on either side. Submission of the changed readings follows the format-intent decision.
 
 ## Alternatives considered
 

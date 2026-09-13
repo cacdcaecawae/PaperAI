@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
-  applyRuns, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, textOf, wordDiff,
+  applyRuns, effectiveRunsOf, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, textOf, wordDiff,
 } from '../src/client/preview-html.ts'
 
 const HTML = '<html><head></head><body>'
@@ -81,6 +81,24 @@ describe('patchPreviewHtml', () => {
 })
 
 describe('block runs', () => {
+  it('reads empty insertion formatting from its placeholder span and preserves it through repaint', () => {
+    const element = block('<span style="font-weight:normal"></span>'
+      + '<span style="font-family:Arial;font-size:18pt;font-weight:bold"><br data-paperai-placeholder></span>'
+      + '<span style="font-weight:normal"></span>')
+    const reading = effectiveRunsOf(element)
+    expect(reading).toEqual([expect.objectContaining({ text: '', bold: true, font: 'Arial', size: '18pt' })])
+    applyRuns(element, reading)
+    expect(element.querySelectorAll('br[data-paperai-placeholder]')).toHaveLength(1)
+    expect(element.querySelector('br')?.parentElement?.style.fontWeight).toBe('bold')
+    expect(textOf(element)).toBe('')
+    expect(runsOf(element)).toEqual([])
+    expect(effectiveRunsOf(element)).toEqual(reading)
+  })
+
+  it('uses a native empty formatted span as a baseline before the editor has a placeholder', () => {
+    const element = block('<span style="font-family:宋体;font-weight:bold"></span>')
+    expect(effectiveRunsOf(element)).toEqual([expect.objectContaining({ text: '', font: '宋体', bold: true })])
+  })
   it('keeps real soft breaks while omitting the browser caret placeholder', () => {
     const element = block('<span>first<br><br data-paperai-placeholder></span>')
     expect(textOf(element)).toBe('first\v')

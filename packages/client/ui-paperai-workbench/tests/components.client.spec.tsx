@@ -663,6 +663,7 @@ describe('DocumentWorkbench', () => {
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true }, { text: ' background' }],
+      formatting: expect.objectContaining({ after: expect.arrayContaining([expect.objectContaining({ text: 'Research', bold: true })]) as unknown }) as unknown,
     })
     expect(screen.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('true')
 
@@ -670,11 +671,13 @@ describe('DocumentWorkbench', () => {
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true, size: '16pt' }, { text: ' background' }],
+      formatting: expect.objectContaining({ after: expect.arrayContaining([expect.objectContaining({ text: 'Research', size: '16pt' })]) as unknown }) as unknown,
     })
     fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '' } })
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true }, { text: ' background' }],
+      formatting: expect.objectContaining({ after: expect.arrayContaining([expect.objectContaining({ text: 'Research', bold: true })]) as unknown }) as unknown,
     })
   })
 
@@ -701,6 +704,7 @@ describe('DocumentWorkbench', () => {
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', italic: true, underline: true }, { text: ' background' }],
+      formatting: expect.objectContaining({ after: expect.arrayContaining([expect.objectContaining({ text: 'Research', underline: true })]) as unknown }) as unknown,
     })
 
     // The persistent controls describe insertion formatting at a collapsed caret.
@@ -767,6 +771,9 @@ describe('DocumentWorkbench', () => {
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research background', bold: false }],
+      formatting: expect.objectContaining({
+        before: [expect.objectContaining({ bold: true })], after: [expect.objectContaining({ bold: false })],
+      }) as unknown,
     })
   })
 

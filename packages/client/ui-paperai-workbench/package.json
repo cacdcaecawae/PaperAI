@@ -51,7 +51,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "clsx": "2.1.1"
+    "clsx": "2.1.1",
+    "diff": "^9.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

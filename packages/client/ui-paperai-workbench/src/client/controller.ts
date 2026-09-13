@@ -6,6 +6,7 @@ import {
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { resolvePreviewBudget } from '../config.ts'
 import { normalize, patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
+import { commitFormatting } from './format-intent.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
@@ -474,6 +475,7 @@ export class PaperAIWorkbenchController {
           draft: draft.text,
           ...(draft.runs === undefined ? {} : { runs: draft.runs }),
           ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
+          ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
         }]
       state.actionError = null
     })
@@ -524,8 +526,7 @@ export class PaperAIWorkbenchController {
         nodeId: edit.nodeId,
         baseText: edit.baseText,
         nextText: edit.draft,
-        ...(edit.runs === undefined ? {} : { runs: edit.runs }),
-        ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs }),
+        ...commitFormatting(edit),
       })),
     }, request.signal))
     // The preview patch finds each block the way the page maps it: same kind, same text, same ordinal among peers.

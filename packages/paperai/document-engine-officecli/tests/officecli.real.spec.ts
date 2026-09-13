@@ -242,6 +242,32 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     await ctx.documentEngine.release(file)
   }, 120_000)
 
+  it('preserves an hAnsi-only font through text edits and bold-only overrides', async () => {
+    const properties = '<w:rPr><w:rFonts w:hAnsi="宋体"/><w:sz w:val="24"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr>'
+    await setBody(`<w:body xmlns:w="${WORD}"><w:p>${pPr}<w:r>${properties}<w:t>中文ABC</w:t></w:r></w:p><w:sectPr/></w:body>`)
+    const before = paragraphs(await raw())[0]!
+    await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[1]', text: '中文ABC测' }])
+    const typed = paragraphs(await raw())[0]!
+    expect(characters(typed).slice(0, -1)).toEqual(characters(before))
+    expect(characters(typed).at(-1)?.properties).toEqual(characters(before).at(-1)?.properties)
+    await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[1]', text: '中文ABC测',
+      runs: [{ text: '中文', bold: true }, { text: 'ABC测' }],
+    }])
+    const after = paragraphs(await raw())[0]!
+    expect(plainText(after)).toBe('中文ABC测')
+    const selected = children(after).filter(run => run.localName === 'r' && run.getElementsByTagNameNS(WORD, 'b').length > 0)
+    expect(selected.map(run => run.getElementsByTagNameNS(WORD, 't')[0]?.textContent).join('')).toBe('中文')
+    for (const font of Array.from(after.getElementsByTagNameNS(WORD, 'rFonts'))) {
+      expect(Array.from(font.attributes).map(attribute => [attribute.localName, attribute.value])).toEqual([['hAnsi', '宋体']])
+    }
+    await ctx.documentEngine.release(file)
+    expect(canonical(paragraphs(await raw())[0]!)).toEqual(canonical(after))
+    for (const bold of Array.from(after.getElementsByTagNameNS(WORD, 'b'))) bold.parentNode!.removeChild(bold)
+    expect(characters(after)).toEqual(characters(typed))
+    expect(paragraphProperties(after)).toEqual(paragraphProperties(before))
+    await ctx.documentEngine.release(file)
+  }, 120_000)
+
   it('binds original ordinal targets before splitting, keeps page and bookmark anchors, and refuses an edited field', async () => {
     await setBody(`<w:body xmlns:w="${WORD}"><w:p>${pPr}<w:bookmarkStart w:id="12345" w:name="split"/>`
       + `<w:r>${rPr}<w:br w:type="page"/><w:t>甲乙丙丁</w:t><w:lastRenderedPageBreak/></w:r><w:bookmarkEnd w:id="12345"/></w:p>`

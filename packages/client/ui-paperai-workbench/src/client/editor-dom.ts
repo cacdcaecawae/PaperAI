@@ -239,6 +239,14 @@ export function insertParagraphText(range: Range, block: HTMLElement, lines: rea
   const ending = inserted.at(-1)
   if (ending === undefined) return range
   ending.part.append(after)
+  for (const { part, textNode } of inserted) {
+    for (const placeholder of part.querySelectorAll('br[data-paperai-placeholder]')) placeholder.remove()
+    if (part.textContent !== '' || part.querySelector('br') !== null) continue
+    // A visible caret position keeps native typing inside the inherited formatting span.
+    const placeholder = block.ownerDocument.createElement('br')
+    placeholder.dataset.paperaiPlaceholder = ''
+    textNode.after(placeholder)
+  }
   const marker = last.nextSibling
   for (const part of parts.slice(startIndex, endIndex + 1)) part.remove()
   for (const { part } of inserted) block.insertBefore(part, marker)

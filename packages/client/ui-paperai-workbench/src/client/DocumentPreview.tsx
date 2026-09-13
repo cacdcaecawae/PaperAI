@@ -4,7 +4,7 @@ import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaperAIBlockDraft, PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary, PaperAIDocumentSnapshot, PaperAIDocumentTextRun, PaperAIParagraphFormat } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import css from './DocumentWorkbench.module.css'
-import { applyParagraphs, applyRuns, blocksOf, fontOf, normalize, paragraphsOf, restateCleared, runsOf, sameRuns, textOf } from './preview-html.ts'
+import { applyParagraphs, applyRuns, blocksOf, effectiveRunsOf, fontOf, normalize, paragraphsOf, restateCleared, runsOf, sameRuns, textOf } from './preview-html.ts'
 import { formatParagraphs, formatRange, insertParagraphText, readParagraphs, selectedParagraphs, selectionReading } from './editor-dom.ts'
 import { EditorRibbon, type EditorFormat } from './EditorRibbon.tsx'
 import type { WordExcerpt } from './selection-context.ts'
@@ -136,7 +136,11 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
-  const originals = useRef(new Map<HTMLElement, { image: BlockImage; runs: readonly PaperAIDocumentTextRun[] }>())
+  const originals = useRef(new Map<HTMLElement, {
+    image: BlockImage
+    runs: readonly PaperAIDocumentTextRun[]
+    effective: readonly PaperAIDocumentTextRun[]
+  }>())
   const latest = useRef(new Map<HTMLElement, BlockImage>())
   const history = useRef<{ past: HistoryEntry[]; future: HistoryEntry[] }>({ past: [], future: [] })
   const publishing = useRef(false)
@@ -206,7 +210,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       if (![...mapping.current.keys()].some(block => block.contains(element) || element.contains(block))) element.dataset.paperaiProtected = ''
     }
     shadow.replaceChildren(style, container)
-    originals.current = new Map([...mapping.current.keys()].map(block => [block, { image: imageOf(block), runs: runsOf(block) }]))
+    originals.current = new Map([...mapping.current.keys()].map(block => [block, {
+      image: imageOf(block), runs: runsOf(block), effective: effectiveRunsOf(block),
+    }]))
     latest.current = new Map([...mapping.current.keys()].map(block => [block, imageOf(block)]))
     history.current = { past: [], future: [] }; updateHistory(); target.current = null
     setCaret(null); setExcerpt(null)
@@ -282,10 +288,18 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       const formatted = stated(runs) || (original !== undefined && stated(original.runs))
       const stating = original === undefined ? runs : restateCleared(runs, original.runs, block)
       return [{ block, nodeId, draft: unchanged ? null : { text,
-        ...(structured ? { paragraphs: parts.map(part => ({ ...part,
-          runs: original === undefined ? part.runs ?? [] : restateCleared(part.runs ?? [], original.runs, block),
+        ...(structured ? { paragraphs: parts.map((part, index) => ({ ...part,
+          runs: part.text === '' ? effectiveRunsOf(paragraphsOf(block)[index] as HTMLElement)
+            : original === undefined ? part.runs ?? [] : restateCleared(part.runs ?? [], original.runs, block),
         })) }
           : formatted ? { runs: stating } : {}),
+        ...((structured || formatted) && original !== undefined ? { formatting: {
+          before: original.effective,
+          after: paragraphsOf(block).flatMap((part, index) => {
+            const reading = effectiveRunsOf(part)
+            return index === 0 ? reading : [{ ...reading[0], text: '\n' }, ...reading]
+          }),
+        } } : {}),
       } }]
     })
     // Synchronous store subscribers must not repaint a later block from its previous draft.
@@ -424,7 +438,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         const edge = range.cloneRange()
         if (backward) edge.setStart(block, 0)
         else edge.setEnd(block, block.childNodes.length)
-        if (atEdge && edge.toString() === '' && edge.cloneContents().querySelector('br') === null) {
+        if (atEdge && edge.toString() === '' && edge.cloneContents().querySelector('br:not([data-paperai-placeholder])') === null) {
           event.preventDefault(); setNotice('editor.structureProtected'); return
         }
       }

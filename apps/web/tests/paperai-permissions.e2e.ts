@@ -1055,6 +1055,93 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-saved.expected.md'), await preview.ariaSnapshot(), MODE)
   }, 180_000)
 
+  it('preserves Word fonts during typing and bold changes and carries the native Enter insertion style', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-format-intent'))
+    const entries = unzipSync(Buffer.from(fixtureDocxBase64(), 'base64'))
+    const font = '<w:rFonts w:hAnsi="宋体" w:hint="eastAsia"/>'
+    const run = (text: string, bold = false): string => `<w:r><w:rPr>${font}${bold ? '<w:b/>' : ''}</w:rPr><w:t>${text}</w:t></w:r>`
+    entries['[Content_Types].xml'] = strToU8(strFromU8(entries['[Content_Types].xml']!).replace('</Types>',
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>'))
+    entries['word/_rels/document.xml.rels'] = strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+      + '</Relationships>')
+    entries['word/styles.xml'] = strToU8('<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+      + '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr>'
+      + '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="宋体" w:cs="Times New Roman"/>'
+      + '</w:rPr></w:style></w:styles>')
+    entries['word/document.xml'] = strToU8('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+      + `<w:p>${run('层次')}${run('代号')}${run('及说明')}</w:p><w:p>${run('Bold only control')}</w:p>`
+      + `<w:p>${run('Bold insertion seed', true)}</w:p><w:sectPr/></w:body></w:document>`)
+    const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('format-intent-import'), fileName: 'Formatting preservation.docx',
+      contentBase64: Buffer.from(zipSync(entries)).toString('base64'), name: 'Formatting preservation',
+    })
+    expect(imported.status).toBe('imported')
+    await sidebarDocument('Formatting preservation.docx').click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    const blocks = preview.locator('[data-paperai-block][contenteditable="true"]').filter({ visible: true })
+    const toolbar = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
+    await expect.poll(() => blocks.first().textContent(), { timeout: 20_000 }).toBe('层次代号及说明')
+    expect(await blocks.first().locator('span').first().evaluate(element => getComputedStyle(element).fontFamily)).toContain('Times New Roman')
+    await blocks.first().locator('span').last().click()
+    await page.keyboard.press('End')
+    await page.keyboard.insertText('（验收）')
+    await selectBlockText(blocks.nth(1))
+    await toolbar.getByRole('button', { name: '加粗', exact: true }).click()
+    const seedFont = await blocks.nth(2).locator('span').last().evaluate(element => getComputedStyle(element).fontFamily)
+    await blocks.nth(2).locator('span').last().click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.insertText('Native Enter inherits formatting')
+    const inserted = blocks.nth(2).locator('[data-paperai-paragraph]').nth(1)
+    expect(await inserted.textContent()).toBe('Native Enter inherits formatting')
+    const insertionReading = await inserted.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      const readings = []
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        if (node.nodeValue === '') continue
+        const style = getComputedStyle(node.parentElement!)
+        readings.push({ font: style.fontFamily, bold: style.fontWeight === '700' })
+      }
+      return readings
+    })
+    expect(insertionReading.length).toBeGreaterThan(0)
+    expect(seedFont).toContain('Times New Roman')
+    for (const reading of insertionReading) expect(reading).toEqual({ font: seedFont, bold: true })
+    await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+    await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === 'Formatting preservation.docx')!
+    const xml = strFromU8(unzipSync(await readFile(row.workingPath!))['word/document.xml']!)
+    const paragraphs = await page.evaluate((xml) => {
+      const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+      const document = new DOMParser().parseFromString(xml, 'application/xml')
+      return [...document.getElementsByTagNameNS(ns, 'p')].map(paragraph => [...paragraph.getElementsByTagNameNS(ns, 'r')].map((run) => {
+        const props = run.getElementsByTagNameNS(ns, 'rPr')[0]!
+        const font = props.getElementsByTagNameNS(ns, 'rFonts')[0]!
+        const bold = props.getElementsByTagNameNS(ns, 'b')[0]
+        return {
+          text: [...run.getElementsByTagNameNS(ns, 't')].map(text => text.textContent).join(''),
+          font: Object.fromEntries([...font.attributes].map(attribute => [attribute.localName, attribute.value])),
+          size: props.getElementsByTagNameNS(ns, 'sz')[0]?.getAttributeNS(ns, 'val') ?? null,
+          bold: bold !== undefined && !['0', 'false'].includes(bold.getAttributeNS(ns, 'val') ?? ''),
+        }
+      }))
+    }, xml)
+    expect(paragraphs.map(paragraph => paragraph.map(run => run.text).join(''))).toEqual([
+      '层次代号及说明（验收）', 'Bold only control', 'Bold insertion seed', 'Native Enter inherits formatting',
+    ])
+    for (const [index, paragraph] of paragraphs.entries()) {
+      for (const run of paragraph) expect(run).toMatchObject({ font: { hAnsi: '宋体', hint: 'eastAsia' }, size: null, bold: index > 0 })
+      for (const run of paragraph) expect(Object.keys(run.font).sort()).toEqual(['hAnsi', 'hint'])
+    }
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+    await sidebarDocument('Formatting preservation.docx').click()
+    await expect.poll(() => blocks.count(), { timeout: 20_000 }).toBe(4)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'format-intent.expected.md'), [
+      await preview.ariaSnapshot(), 'Word run properties:', JSON.stringify(paragraphs, null, 2),
+    ].join('\n'), MODE)
+  }, 90_000)
+
   it('offers the document paragraph styles and saves Normal over an existing template style', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-paragraph-styles'))
     const entries = unzipSync(Buffer.from(fixtureDocxBase64(false, ['Template body paragraph']), 'base64'))
@@ -1299,6 +1386,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'draft-export.expected.md',
       'external-update.expected.md',
       'formatting-comparison.expected.md',
+      'format-intent.expected.md',
       'header-footer.expected.md',
       'import-draft.expected.md',
       'model-failure.expected.md',

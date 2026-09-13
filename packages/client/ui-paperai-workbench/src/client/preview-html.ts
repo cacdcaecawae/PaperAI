@@ -183,13 +183,26 @@ function readingOf(block: HTMLElement): Required<Omit<PaperAIDocumentTextRun, 't
 }
 
 /**
- * Make cleared overrides explicit because the engine preserves omitted run
- * properties. A missing override reads as the block's own value, including
- * after text edits merge or split runs.
+ * Read effective formatting for comparison without converting inherited values into Word overrides.
+ * @param block - attached rendered paragraph, including an empty insertion paragraph.
+ * @returns absolute character readings, with one empty seed when the paragraph has no text.
+ */
+export function effectiveRunsOf(block: HTMLElement): PaperAIDocumentTextRun[] {
+  const own = readingOf(block)
+  const runs = runsOf(block)
+  if (runs.length > 0) return runs.map(run => ({ ...own, ...run }))
+  const seed = block.querySelector('br[data-paperai-placeholder]')?.parentElement
+    ?? [...block.querySelectorAll('span')].at(-1) ?? block
+  const view = block.ownerDocument.defaultView
+  return [{ text: '', ...own, ...(view === null ? {} : overridesOf(seed, block, view.getComputedStyle(block))) }]
+}
+
+/**
+ * Restate resolved properties when span changes would otherwise lose the draft's displayed formatting.
  * @param runs - the block's runs as it reads now.
- * @param previous - the block's runs as the document has them.
+ * @param previous - original rendered runs.
  * @param block - the block, whose own reading replaces what is no longer stated.
- * @returns runs with cleared properties set to the block's rendered values.
+ * @returns complete local render runs; commitFormatting separately selects changed Word properties.
  */
 export function restateCleared(
   runs: readonly PaperAIDocumentTextRun[],
@@ -216,7 +229,8 @@ export function restateCleared(
  * @param runs - runs in reading order.
  */
 export function applyRuns(block: HTMLElement, runs: readonly PaperAIDocumentTextRun[]): void {
-  block.replaceChildren(...runs.map((run) => {
+  const empty = runs.every(run => run.text === '')
+  block.replaceChildren(...runs.map((run, position) => {
     const span = block.ownerDocument.createElement('span')
     if (run.bold !== undefined) span.style.fontWeight = run.bold ? 'bold' : 'normal'
     if (run.italic !== undefined) span.style.fontStyle = run.italic ? 'italic' : 'normal'
@@ -228,6 +242,11 @@ export function applyRuns(block: HTMLElement, runs: readonly PaperAIDocumentText
       if (index > 0) span.append(block.ownerDocument.createElement('br'))
       span.append(block.ownerDocument.createTextNode(text))
     })
+    if (empty && position === runs.length - 1) {
+      const placeholder = block.ownerDocument.createElement('br')
+      placeholder.dataset.paperaiPlaceholder = ''
+      span.append(placeholder)
+    }
     return span
   }))
 }

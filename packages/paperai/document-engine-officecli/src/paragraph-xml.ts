@@ -302,7 +302,9 @@ export function replaceParagraphXml(
       }
     }
     flush()
-    if (length === 0) target.appendChild(runCopy(target, characters[start - 1]?.run ?? emptyRun, replacement.runs?.[0]))
+    if (length === 0) {
+      target.appendChild(runCopy(target, characters[start - 1]?.run ?? characters[start]?.run ?? emptyRun, replacement.runs?.[0]))
+    }
     start += length + 1
     previous = target
   }

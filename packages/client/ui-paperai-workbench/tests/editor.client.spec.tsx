@@ -5,11 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { DocumentPreview } from '../src/client/DocumentPreview.tsx'
 import { zh } from '../src/client/locales.ts'
-import type { PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentSnapshot } from '../src/client/types.ts'
+import type { PaperAIBlockDraft, PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentSnapshot } from '../src/client/types.ts'
 import type { PaperAIDocumentWorkbenchProps } from '../src/client/slots.ts'
 import { readParagraphs } from '../src/client/editor-dom.ts'
 import { runsOf } from '../src/client/preview-html.ts'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
+import { commitFormatting } from '../src/client/format-intent.ts'
 import { NODE_HEADING, NODE_PARAGRAPH, RESOURCE_ID, REVISION_1, SESSION_ID, WORKSPACE_ID, successfulRemote } from './fixtures.client.ts'
 
 afterEach(cleanup)
@@ -36,6 +37,7 @@ function setup(body = '<p data-path="/body/p[1]" style="font-size:12pt;font-fami
           nodeId, baseText: nodes.find(node => node.nodeId === nodeId)?.text ?? '', draft: draft.text,
           ...(draft.runs === undefined ? {} : { runs: draft.runs }),
           ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
+          ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
         }])])
       }} />
   }
@@ -60,6 +62,63 @@ function setup(body = '<p data-path="/body/p[1]" style="font-size:12pt;font-fami
 }
 
 describe('Document editing commands', () => {
+  it.each(['typing', 'bold', 'unbold'] as const)('keeps rendered fonts in the draft but sends only %s intent through the controller', async (action) => {
+    const editor = setup('<p data-path="/body/p[1]" style="font-family:Calibri;font-size:12pt">'
+      + `<span style="font-family:Times New Roman;${action === 'unbold' ? 'font-weight:bold;' : ''}">Research</span>`
+      + '<span style="font-family:Times New Roman"> back</span><span style="font-family:Times New Roman">ground</span></p>', ['Research background'])
+    const block = editor.paragraphs()[0]!
+    const last = block.lastChild!.firstChild!
+    editor.select(last, last.textContent!.length)
+    last.nodeValue = `${last.nodeValue!}!`
+    fireEvent.input(block)
+    if (action !== 'typing') {
+      editor.select(block.firstChild!.firstChild!, 0, block.firstChild!.firstChild!, 3)
+      fireEvent.click(screen.getByRole('button', { name: zh['block.bold'] }))
+      const formatted = editor.onDraft.mock.lastCall?.[1] as PaperAIBlockDraft
+      fireEvent.click(screen.getByRole('button', { name: zh['editor.undo'] }))
+      fireEvent.click(screen.getByRole('button', { name: zh['editor.redo'] }))
+      expect(editor.onDraft.mock.lastCall?.[1]).toEqual(formatted)
+    }
+    const draft = editor.onDraft.mock.lastCall?.[1] as PaperAIBlockDraft
+    expect(draft.runs?.every(run => run.font === 'Times New Roman')).toBe(true)
+    const remote = successfulRemote()
+    const commit = vi.spyOn(remote, 'commit')
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, draft)
+    expect(controller.workbenchStore(SESSION_ID).getSnapshot().edits[0]?.formatting).toEqual(draft.formatting)
+    await controller.commitEdit(SESSION_ID)
+    const mutation = commit.mock.calls[0]![0].mutations[0]!
+    expect(mutation.nextText).toBe('Research background!')
+    expect(mutation.runs).toEqual(action === 'typing' ? undefined : [
+      { text: 'Res', bold: action === 'bold' }, { text: 'earch background!' },
+    ])
+    expect(mutation).not.toHaveProperty('formatting')
+    controller.dispose()
+  })
+
+  it('retains an empty insertion seed through a complete draft repaint before further typing', () => {
+    const editor = setup('<p data-path="/body/p[1]"><span style="font-family:Arial;font-size:18pt;font-weight:bold">Hello world</span></p>')
+    const block = editor.paragraphs()[0]!
+    editor.select(block.querySelector('span')!.firstChild!, 11)
+    fireEvent.keyDown(block, { key: 'Enter' })
+    const empty = block.querySelectorAll<HTMLElement>('[data-paperai-paragraph]')[1]!
+    act(() => { block.blur(); fireEvent.input(block) })
+    const repainted = block.querySelectorAll<HTMLElement>('[data-paperai-paragraph]')[1]!
+    expect(repainted).not.toBe(empty)
+    const seed = repainted.querySelector('br[data-paperai-placeholder]')!.parentElement!
+    expect(seed.style.fontWeight).toBe('bold')
+    expect(seed.style.fontFamily).toBe('Arial')
+    expect(seed.style.fontSize).toBe('18pt')
+    editor.select(seed.firstChild!, 0)
+    seed.firstChild!.nodeValue = 'Continued'
+    fireEvent.input(block)
+    const draft = editor.onDraft.mock.lastCall?.[1] as PaperAIBlockDraft
+    expect(draft.paragraphs?.[1]?.runs).toEqual([expect.objectContaining({ text: 'Continued', bold: true, font: 'Arial' })])
+    expect(commitFormatting({ nodeId: NODE_PARAGRAPH, baseText: 'Hello world', draft: draft.text,
+      paragraphs: draft.paragraphs!, formatting: draft.formatting! })).toEqual({ paragraphs: [{ text: 'Hello world' }, { text: 'Continued' }] })
+  })
+
   it('routes shared-host input, composition and keyboard commands to the selected original block', () => {
     const editor = setup('<p data-path="/body/p[1]">Hello</p><p data-path="/body/p[2]">World</p>', ['Hello', 'World'])
     const [first, second] = editor.paragraphs()

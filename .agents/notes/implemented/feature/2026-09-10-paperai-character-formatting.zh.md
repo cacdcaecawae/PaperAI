@@ -4,7 +4,7 @@ Status: implemented
 
 [English](2026-09-10-paperai-character-formatting.md) | 中文
 
-部分取代：[写作流程决策](2026-09-12-paperai-writing-workflow.zh.md)拥有常驻工具栏和结构草稿；[Word 编辑保留决策](../bug-fix/2026-09-13-paperai-word-edit-preservation.zh.md)拥有引擎写入、原 run 元数据和显式清除。本记录的浏览器解析格式与传输校验继续有效。
+部分取代：[写作流程决策](2026-09-12-paperai-writing-workflow.zh.md)拥有常驻工具栏和结构草稿；[Word 编辑保留决策](../bug-fix/2026-09-13-paperai-word-edit-preservation.zh.md)拥有引擎写入和原 run 元数据；[格式意图决策](../bug-fix/2026-09-13-paperai-rendered-format-intent.zh.md)拥有草稿序列化与清除。本记录的浏览器解析格式与传输校验继续有效。
 
 ## 问题
 
@@ -16,9 +16,9 @@ Status: implemented
 
 纯文本与带格式编辑共用 [Word 编辑保留决策](../bug-fix/2026-09-13-paperai-word-edit-preservation.zh.md)拥有的 XML 保留路径。
 
-浏览器从 Host 渲染的 run span 读取解析后的样式。`runsOf` 遍历块内的文本节点，合并格式相同的相邻部分；没有覆盖的块序列化为一个 run，按纯文本提交。选中的文字通过包一层声明该变化的 span 来格式化，并清除其内部的同名声明，使解析值反映此次编辑。编辑器拦截粘贴并只插入文字。常驻工具栏与 Ctrl/Cmd+B、I、U 应用字符格式。
+浏览器从 Host 渲染的 run span 读取解析后的样式。`runsOf` 遍历块内的文本节点，合并格式相同的相邻部分供草稿渲染。选中的文字通过包一层声明该变化的 span 来格式化，并清除其内部的同名声明，使解析值反映此次编辑。编辑器拦截粘贴并只插入文字。常驻工具栏与 Ctrl/Cmd+B、I、U 应用字符格式。
 
-选中文字上方的声明无法仅从内部关闭：文本装饰不继承，却会绘制到后代上。修改会清除块与选区之间的该声明，并保留两侧文字的格式。浏览器按块自身的解析值，在每个受影响 run 上显式重述被清除的属性，避免保留的源元数据重新带回已取消的覆盖。
+选中文字上方的声明无法仅从内部关闭：文本装饰不继承，却会绘制到后代上。修改会清除块与选区之间的该声明，并保留两侧文字的格式。改变后的读数按格式意图决策提交。
 
 ## 考虑过的替代方案
 

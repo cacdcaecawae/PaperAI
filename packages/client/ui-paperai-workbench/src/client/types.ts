@@ -106,6 +106,14 @@ export interface PaperAIBlockDraft {
   readonly runs?: readonly PaperAIDocumentTextRun[]
   /** Paragraphs replacing this original block after a split or paragraph-format edit. */
   readonly paragraphs?: readonly PaperAIDocumentParagraph[]
+  /** Local rendered readings used to omit unchanged formatting from the Word mutation. */
+  readonly formatting?: PaperAIFormatComparison
+}
+
+/** Effective browser formatting before and after an edit; empty paragraphs retain a zero-text reading. */
+export interface PaperAIFormatComparison {
+  readonly before: readonly PaperAIDocumentTextRun[]
+  readonly after: readonly PaperAIDocumentTextRun[]
 }
 
 /** The block being edited in place: its node, the text it started from, and the draft. */
@@ -115,9 +123,10 @@ export interface PaperAIBlockEdit {
   /** The original revision is retained until save or discard, including after an external reload. */
   readonly baseRevision?: PaperAIDocumentRevision
   readonly draft: string
-  /** The block's runs, present when its character formatting differs from the document's. */
+  /** Local character runs for draft repaint; may include unchanged rendered properties. */
   readonly runs?: readonly PaperAIDocumentTextRun[]
   readonly paragraphs?: readonly PaperAIDocumentParagraph[]
+  readonly formatting?: PaperAIFormatComparison
   /** The current document changed this block; retain the draft for copying or discarding. */
   readonly conflicted?: boolean
 }

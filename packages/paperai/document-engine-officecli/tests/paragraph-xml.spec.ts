@@ -201,6 +201,30 @@ describe('paragraph markers and splits', () => {
     expect(all(typed, 'b')).toHaveLength(1)
   })
 
+  it.each([
+    ['mixed formatting', RPR],
+    ['hAnsi-only font metadata', '<w:rPr><w:rFonts w:hAnsi="宋体" w:hint="eastAsia"/>'
+      + '<w:kern w:val="28"/><w:spacing w:val="15"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr>'],
+  ])('inherits the adjacent original run into leading and trailing empty splits with %s', (_name, firstProperties) => {
+    const lastProperties = '<w:rPr><w:rFonts w:hAnsi="黑体" w:hint="default"/>'
+      + '<w:kern w:val="10"/><w:lang w:val="fr-FR"/></w:rPr>'
+    const root = document(`<w:p><w:r>${firstProperties}<w:t>A</w:t></w:r>`
+      + `<w:r>${lastProperties}<w:t>B</w:t></w:r></w:p>`)
+    const originalProperties = all(root, 'rPr').map(xml)
+    edit(all(root, 'p')[0]!, {
+      text: '\n\nAB\n', paragraphs: [{ text: '' }, { text: '' }, { text: 'AB' }, { text: '' }],
+    })
+    const paragraphs = all(root, 'p')
+    expect(paragraphs.map(text)).toEqual(['', '', 'AB', ''])
+    expect(paragraphs.map(paragraph => all(paragraph, 'rPr').map(xml))).toEqual([
+      [originalProperties[0]], [originalProperties[0]], originalProperties, [originalProperties[1]],
+    ])
+    edit(paragraphs[0]!, { text: 'typed' })
+    expect(text(paragraphs[0]!)).toBe('typed')
+    const typed = all(paragraphs[0]!, 'r').find(run => text(run) === 'typed')!
+    expect(xml(all(typed, 'rPr')[0]!)).toBe(originalProperties[0])
+  })
+
   it('inherits paragraph character properties when an empty paragraph has no run', () => {
     const root = document('<w:p><w:pPr><w:rPr><w:i/></w:rPr></w:pPr></w:p>')
     const paragraph = all(root, 'p')[0]!
