@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { DocumentWorkbench } from '../src/client/DocumentWorkbench.tsx'
+import { patchPreviewHtml } from '../src/client/preview-html.ts'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
 import { createWorkbenchViewStore } from '../src/client/view-store.ts'
 import { StartPage } from '../src/client/StartPage.tsx'
@@ -481,6 +482,33 @@ describe('DocumentWorkbench', () => {
     body.textContent = 'Rewritten background'
     fireEvent.input(body)
     expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+  })
+
+  it('maps each saved split paragraph for continued editing before the Host preview arrives', () => {
+    const snapshot = documentSnapshot()
+    const original = snapshot.nodes.find(node => node.nodeId === NODE_PARAGRAPH)!
+    const ids = [NODE_PARAGRAPH, NODE_HEADING]
+    const paragraphs = [{ text: 'First saved paragraph', format: { align: 'center' as const } },
+      { text: 'Second saved paragraph', format: { align: 'right' as const } }]
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: {
+      ...snapshot,
+      previewHtml: patchPreviewHtml('<p data-path="/body/p[2]">Research background</p>', [{
+        baseText: original.text, nextText: paragraphs.map(part => part.text).join('\n'),
+        paragraphs, cell: false, ordinal: 0,
+      }]),
+      nodes: paragraphs.map((part, index) => ({ ...original, nodeId: ids[index]!, text: part.text })),
+    } }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const blocks = [...shadow.querySelectorAll<HTMLElement>('p[data-path]')]
+    expect(blocks).toHaveLength(2)
+    blocks.forEach((block, index) => {
+      expect(block.getAttribute('contenteditable')).toBe('true')
+      expect(block.style.textAlign).toBe(paragraphs[index]!.format.align)
+      block.textContent += ' edited'
+      fireEvent.input(block)
+      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], { text: `${paragraphs[index]!.text} edited` })
+    })
   })
 
   it('does not consume body matches for unaddressed preview content', () => {

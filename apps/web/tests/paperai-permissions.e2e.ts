@@ -1190,6 +1190,110 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(afterXml).not.toContain('w:pStyle w:val="SchoolBody"')
   }, 90_000)
 
+  it('keeps a formatted paragraph editable and preserves new drafts while saved previews arrive late', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-paragraph-refresh'))
+    const original = '段落格式保存后继续编辑'
+    const secondSave = `${original}，预览等待期间输入`
+    const finalText = `${secondSave}，再次保存后继续输入`
+    const fileName = 'Delayed paragraph preview.docx'
+    const imported = await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('paragraph-refresh-import'), fileName,
+      contentBase64: fixtureDocxBase64(false, [original, 'Untouched companion']), name: 'Delayed paragraph preview',
+    })
+    expect(imported.status).toBe('imported')
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === fileName)!
+    await sidebarDocument(fileName).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    const blocks = preview.locator('[data-paperai-block][contenteditable="true"]').filter({ visible: true })
+    const paragraph = blocks.first()
+    const toolbar = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
+    await expect.poll(() => paragraph.textContent(), { timeout: 20_000 }).toBe(original)
+    const officePath = await paragraph.getAttribute('data-path')
+    expect(officePath).toBe('/body/p[1]')
+    await selectBlockText(paragraph)
+    await toolbar.getByRole('button', { name: '段落', exact: true }).click()
+    await toolbar.getByLabel('段落对齐', { exact: true }).selectOption('center')
+
+    const refreshes = Array.from({ length: 2 }, () => ({
+      ready: Promise.withResolvers<undefined>(),
+      release: Promise.withResolvers<undefined>(),
+      finished: Promise.withResolvers<undefined>(),
+    }))
+    let intercepted = 0
+    const pattern = '**/api/paperaiWorkbench/open'
+    await page.route(pattern, async (route) => {
+      const refresh = refreshes[intercepted++]
+      if (refresh === undefined) {
+        await route.continue()
+        return
+      }
+      const response = await route.fetch()
+      refresh.ready.resolve(undefined)
+      await refresh.release.promise
+      await route.fulfill({ response })
+      refresh.finished.resolve(undefined)
+    })
+    const readWord = async () => await page.evaluate((xml) => {
+      const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+      const document = new DOMParser().parseFromString(xml, 'application/xml')
+      return [...document.getElementsByTagNameNS(ns, 'p')].map(paragraph => ({
+        text: [...paragraph.getElementsByTagNameNS(ns, 't')].map(text => text.textContent).join(''),
+        align: paragraph.getElementsByTagNameNS(ns, 'jc')[0]?.getAttributeNS(ns, 'val') ?? null,
+      }))
+    }, strFromU8(unzipSync(await readFile(row.workingPath!))['word/document.xml']!))
+    try {
+      await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+      await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+      await refreshes[0]!.ready.promise
+      expect(await paragraph.textContent()).toBe(original)
+      expect(await paragraph.getAttribute('data-path')).toBe(officePath)
+      expect(await paragraph.evaluate(element => (element as HTMLElement).isContentEditable)).toBe(true)
+      expect(await paragraph.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
+      await paragraph.click()
+      await page.keyboard.press('End')
+      await page.keyboard.insertText('，预览等待期间输入')
+      await expect.poll(() => paragraph.textContent()).toBe(secondSave)
+      await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+      await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+      await refreshes[1]!.ready.promise
+      await paragraph.click()
+      await page.keyboard.press('End')
+      await page.keyboard.insertText('，再次保存后继续输入')
+      await expect.poll(() => paragraph.textContent()).toBe(finalText)
+      expect(await readWord()).toEqual([{ text: secondSave, align: 'center' }, { text: 'Untouched companion', align: null }])
+
+      for (const refresh of refreshes) {
+        const received = page.waitForResponse(pattern)
+        refresh.release.resolve(undefined)
+        await refresh.finished.promise
+        await (await received).finished()
+      }
+      await page.evaluate(async () => {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => { requestAnimationFrame(() => { resolve() }) })
+        })
+      })
+      expect(await blocks.count()).toBe(2)
+      expect(await paragraph.getAttribute('data-path')).toBe(officePath)
+      expect(await paragraph.textContent()).toBe(finalText)
+      expect(await preview.locator('[data-paperai-changed]').count()).toBe(1)
+      const retainedDraft = [
+        await preview.ariaSnapshot(),
+        await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd),
+      ].join('\n')
+      await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+      await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
+      const saved = await readWord()
+      expect(saved).toEqual([{ text: finalText, align: 'center' }, { text: 'Untouched companion', align: null }])
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-refresh.expected.md'), [
+        'Draft retained after delayed previews:', retainedDraft, 'Working DOCX after final save:', JSON.stringify(saved, null, 2),
+      ].join('\n'), MODE)
+    } finally {
+      for (const refresh of refreshes) refresh.release.resolve(undefined)
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  }, 120_000)
+
   it('keeps writing controls reachable across desktop viewports, themes, locales and document zoom', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-writing-viewports'))
     const fileName = '毕业论文_公开合成长文档_方法结果与讨论_Methods_Results_Discussion_Appendix_Review_Draft_2026.docx'
@@ -1395,6 +1499,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'permission-failure.expected.md',
       'permission-read-only.expected.md',
       'paragraph-draft.expected.md',
+      'paragraph-refresh.expected.md',
       'paragraph-saved.expected.md',
       'paragraph-styles.expected.md',
       'project-doctor.expected.md',

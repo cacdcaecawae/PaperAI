@@ -280,7 +280,7 @@ export interface PreviewTextPatch {
  * mapping cannot name stays as it was until the rendered preview arrives.
  * @param html - preview currently on screen.
  * @param patches - committed replacements in commit order.
- * @returns the preview with matching blocks retyped; run formatting inside them flattens until the refresh.
+ * @returns parseable semantic blocks for the committed nodes, with supplied runs and paragraph layout.
  */
 export function patchPreviewHtml(html: string, patches: readonly PreviewTextPatch[]): string {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
@@ -290,10 +290,20 @@ export function patchPreviewHtml(html: string, patches: readonly PreviewTextPatc
     .filter(candidate => (candidate.closest('td, th') !== null) === patch.cell)[patch.ordinal]] as const)
   for (const [patch, block] of located) {
     if (block === undefined) continue
-    if (patch.paragraphs !== undefined) applyParagraphs(block, patch.paragraphs)
+    if (patch.paragraphs !== undefined) {
+      block.replaceWith(...patch.paragraphs.map((paragraph, index) => {
+        const part = block.cloneNode(false) as HTMLElement
+        if (index > 0) part.removeAttribute('id')
+        applyRuns(part, paragraph.runs ?? [{ text: paragraph.text }])
+        if (paragraph.format !== undefined) applyParagraphFormat(part, paragraph.format)
+        return part
+      }))
+    }
     else if (patch.runs === undefined) applyRuns(block, [{ text: patch.nextText }])
     else applyRuns(block, patch.runs)
   }
+  // Caret placeholders belong to live drafts; sanitizing a committed preview would turn them into soft breaks.
+  for (const placeholder of parsed.querySelectorAll('br[data-paperai-placeholder]')) placeholder.remove()
   return parsed.documentElement.outerHTML
 }
 
@@ -333,7 +343,7 @@ export function paragraphFormatOf(block: HTMLElement): PaperAIParagraphFormat | 
 }
 
 /**
- * Paint one original block's replacement paragraphs until the DOCX preview arrives.
+ * Paint editable draft parts inside their original block; committed previews use separate semantic blocks.
  * @param block - original mapped block.
  * @param paragraphs - draft paragraphs, including the original first paragraph.
  */

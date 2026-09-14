@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { cleanup, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DocumentPreview, type DocumentPreviewProps } from '../src/client/DocumentPreview.tsx'
+import { zh } from '../src/client/locales.ts'
+import { NODE_HEADING, NODE_PARAGRAPH, REVISION_2 } from './fixtures.client.ts'
 import {
-  applyRuns, effectiveRunsOf, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, textOf, wordDiff,
+  applyRuns, blocksOf, effectiveRunsOf, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, textOf, wordDiff,
 } from '../src/client/preview-html.ts'
+
+afterEach(cleanup)
 
 const HTML = '<html><head></head><body>'
   + '<h1 data-path="/body/p[1]">Introduction</h1><p data-path="/body/p[2]">Research background</p>'
@@ -59,6 +66,93 @@ describe('markDiffHtml', () => {
 })
 
 describe('patchPreviewHtml', () => {
+  it('keeps a formatted paragraph addressable after the committed HTML is parsed again', () => {
+    const patched = patchPreviewHtml(HTML, [{
+      baseText: 'Research background', nextText: 'Research background', cell: false, ordinal: 0,
+      paragraphs: [{ text: 'Research background', format: { align: 'center', indent: '12pt', lineSpacing: '1.5x' } }],
+    }])
+    const parsed = new DOMParser().parseFromString(patched, 'text/html')
+    const paragraph = blocksOf(parsed.body).find(element => element.dataset.path === '/body/p[2]')!
+    expect(textOf(paragraph)).toBe('Research background')
+    expect(paragraph.style.textAlign).toBe('center')
+    expect(paragraph.style.marginLeft).toBe('12pt')
+    expect(paragraph.style.lineHeight).toBe('1.5')
+    expect(parsed.querySelector('td')?.textContent).toBe('Research background')
+  })
+
+  it.each(['p', 'h2'])('keeps each committed split of a %s available to the refreshed node mapping', (tag) => {
+    const source = `<${tag} data-path="/body/p[1]" style="font-family:Arial;font-size:12pt">Research background</${tag}>`
+      + '<p data-path="/body/p[2]">Closing remarks</p>'
+    const patched = patchPreviewHtml(source, [{
+      baseText: 'Research background', nextText: 'Research\nbackground', cell: false, ordinal: 0,
+      paragraphs: [
+        { text: 'Research', runs: [{ text: 'Research', bold: true }], format: { align: 'center' } },
+        { text: 'background', format: { align: 'right' } },
+      ],
+    }])
+    const parsed = new DOMParser().parseFromString(patched, 'text/html')
+    const addressed = blocksOf(parsed.body).filter(element => element.dataset.path !== undefined)
+    expect(addressed.map(textOf)).toEqual(['Research', 'background', 'Closing remarks'])
+    expect(addressed.slice(0, 2).map(element => element.style.textAlign)).toEqual(['center', 'right'])
+    expect(addressed[0]?.querySelector('span')?.style.fontWeight).toBe('bold')
+    expect(addressed[2]?.dataset.path).toBe('/body/p[2]')
+  })
+
+  it('keeps original duplicate-text targets and gives each split its own paragraph format', () => {
+    const source = '<p id="first" data-path="/body/p[1]" style="text-align:left;font-size:12pt">Same</p>'
+      + '<p id="second" data-path="/body/p[2]">Same</p>'
+    const patched = patchPreviewHtml(source, [
+      { baseText: 'Same', nextText: 'Same\nSame', cell: false, ordinal: 0,
+        paragraphs: [{ text: 'Same', format: { align: 'center' } }, { text: 'Same' }] },
+      { baseText: 'Same', nextText: 'Second same', cell: false, ordinal: 1,
+        paragraphs: [{ text: 'Second same', format: { align: 'right' } }] },
+    ])
+    const parsed = new DOMParser().parseFromString(patched, 'text/html')
+    const blocks = blocksOf(parsed.body)
+    expect(blocks.map(textOf)).toEqual(['Same', 'Same', 'Second same'])
+    expect(blocks.map(element => element.style.textAlign)).toEqual(['center', 'left', 'right'])
+    expect(blocks.slice(0, 2).map(element => element.style.fontSize)).toEqual(['12pt', '12pt'])
+    expect(parsed.querySelectorAll('#first')).toHaveLength(1)
+    expect(parsed.querySelector('#second')?.textContent).toBe('Second same')
+  })
+
+  it.each(['p', 'td', 'th'])('keeps a single formatted table %s inside its existing cell structure', (tag) => {
+    const content = `<${tag} data-path="/body/tbl[1]/tr[1]/tc[1]/p[1]">Cell</${tag}>`
+    const source = `<table><tr>${tag === 'p' ? `<td>${content}</td>` : content}</tr></table>`
+    const patched = patchPreviewHtml(source, [{ baseText: 'Cell', nextText: 'Cell', cell: true, ordinal: 0,
+      paragraphs: [{ text: 'Cell', format: { align: 'center' } }] }])
+    const parsed = new DOMParser().parseFromString(patched, 'text/html')
+    const blocks = blocksOf(parsed.body)
+    expect(blocks.map(textOf)).toEqual(['Cell'])
+    expect(blocks[0]?.tagName).toBe(tag.toUpperCase())
+    expect(blocks[0]?.closest('td, th')).not.toBeNull()
+    expect(blocks[0]?.style.textAlign).toBe('center')
+    expect(parsed.querySelectorAll('tr')).toHaveLength(1)
+    expect(parsed.querySelectorAll('td, th')).toHaveLength(1)
+  })
+
+  it.each(['paragraphs', 'runs', 'plain'])('keeps committed empty %s empty through the actual preview sanitizer and node mapping', (mode) => {
+    const texts = mode === 'paragraphs' ? ['Research\vmore', ''] : ['']
+    const html = patchPreviewHtml('<p data-path="/body/p[1]">Research</p>', [{
+      baseText: 'Research', nextText: texts.join('\n'), cell: false, ordinal: 0,
+      ...(mode === 'paragraphs' ? {
+        paragraphs: [{ text: texts[0]! }, { text: '', runs: [{ text: '', font: 'Arial', bold: true }] }],
+      } : mode === 'runs' ? { runs: [{ text: '', font: 'Arial', bold: true }] } : {}),
+    }])
+    const t = ((key: keyof typeof zh) => zh[key]) as DocumentPreviewProps['t']
+    const view = render(createElement(DocumentPreview, {
+      html, revision: REVISION_2, title: 'Document', paragraphStyles: [], edits: [], saving: false,
+      onDraft: vi.fn(), onSave: vi.fn(), onCancel: vi.fn(), t,
+      nodes: texts.map((text, index) => ({ nodeId: index === 0 ? NODE_HEADING : NODE_PARAGRAPH,
+        text, label: text || 'Empty paragraph', kind: 'paragraph' as const, depth: 0, editable: true })),
+    }))
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const blocks = [...shadow.querySelectorAll<HTMLElement>('[data-paperai-block]')]
+    expect(blocks.map(element => element.getAttribute('contenteditable'))).toEqual(texts.map(() => 'true'))
+    expect(blocks.map(textOf)).toEqual(texts)
+    if (mode !== 'plain') expect(effectiveRunsOf(blocks.at(-1)!)).toEqual([expect.objectContaining({ text: '', font: 'Arial', bold: true })])
+  })
+
   it('retypes the block the editor mapping names: same kind, same text, same ordinal', () => {
     const patched = new DOMParser().parseFromString(patchPreviewHtml(HTML, [
       { baseText: 'Research background', nextText: 'Research context', cell: false, ordinal: 0 },
