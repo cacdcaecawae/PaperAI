@@ -73,6 +73,18 @@ export interface SubmitDocumentCommitRequest {
   readonly signal?: AbortSignal
 }
 
+/** Request to record a Working DOCX changed outside PaperAI as a version of its own. */
+export interface CaptureExternalRequest {
+  /** Document whose current Working DOCX bytes become the new head. */
+  readonly documentId: DocumentId
+  /** Human or Agent identity retained without inference. */
+  readonly actor: Readonly<ActorIdentity>
+  /** User-visible version message; defaults to the product's external-edit label. */
+  readonly message?: string
+  /** Cancellation is admitted until durable publication starts. */
+  readonly signal?: AbortSignal
+}
+
 /** Request to restore one reachable snapshot as a new child commit. */
 export interface RevertDocumentCommitRequest {
   /** Document whose Working DOCX will receive the historical snapshot. */

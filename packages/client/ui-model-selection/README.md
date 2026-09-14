@@ -12,7 +12,7 @@ Directories are per-session, resolved lazily through `ctx.modelDirectories.direc
 
 Every resident directory refetches directly on forwarded `llm/adapters-updated` and `settings/document-updated` owner events. Provider topology, provider catalogs, and the default selection therefore converge without the Host or client runtime deriving a separate model-change alias.
 
-A forwarded `agent-preset/selected` refreshes only that session’s resident directory. Its new request generation supersedes earlier driver observations; unopened sessions do not create a directory or launch an Agent.
+A forwarded `agent-preset/selected` immediately clears that session's current model, choices, effort, switches, and errors before refreshing its resident directory. Pending loads and selections from the previous Agent cannot restore those values. A failed refresh leaves the choices empty and offers Retry; ordinary refreshes within the same Agent retain the last successful directory. Unopened sessions do not create a directory or launch an Agent.
 
 The `/client` exports are the plugin body (`apply`/`inject`), `ModelDirectoryResolver`, `ModelDirectory` with its state fields, and the seat's injected face type.
 

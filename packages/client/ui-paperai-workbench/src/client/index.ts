@@ -1,7 +1,6 @@
 /** DSH-native PaperAI plugin: sidebar documents, project start page, template library, and document view. */
 
 import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Config as LayoutConfig } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -14,8 +13,9 @@ import { PaperAIWorkbenchController } from './controller.ts'
 import { resolvePreviewBudget, type Config } from '../config.ts'
 import { selectionSource, wordSelectionReference } from './selection-context.ts'
 import { DiagnosticsController } from './diagnostics-controller.ts'
-import { AgentDiagnostics } from './AgentDiagnostics.tsx'
 import { WordSelectionMessage } from './WordSelectionMessage.tsx'
+import { createWorkbenchViewStore } from './view-store.ts'
+import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 
 export type { Config } from '../config.ts'
 import { DocumentWorkbench } from './DocumentWorkbench.tsx'
@@ -55,7 +55,7 @@ export const PAPERAI_TEMPLATES_SECTION_ID = 'paperai-templates'
 export const PAPERAI_LAYOUT_CONFIG: Readonly<LayoutConfig> = Object.freeze({
   centerMin: 360,
   detailsMin: 480,
-  detailsDefault: 760,
+  detailsDefault: 860,
   detailsMax: 1280,
   detailsVisibility: 'current-session',
   detailsNarrowMode: 'focus',
@@ -68,17 +68,6 @@ export const inject = [
   'modelsOnboarding', 'remote', 'connection',
   'conversation', 'inputTriggers',
 ]
-
-/**
- * Reopen the product details view after React has committed a possible
- * Session switch.  AppFrame intentionally closes the previous Session's
- * panel in a layout effect; yielding one task prevents that cleanup from
- * winning over the explicit document-open gesture.
- */
-async function settleDetailsSelection(ctx: ClientContext, sessionId: SessionId): Promise<void> {
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
-  ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
-}
 
 /** Register the generated Remote and the four PaperAI entries. */
 export async function apply(ctx: ClientContext, config: Config = {}): Promise<() => Promise<void>> {
@@ -97,6 +86,15 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
   }
   const controller = new PaperAIWorkbenchController(remote, previewBudget)
   const diagnostics = new DiagnosticsController(remote)
+  const viewStore = createWorkbenchViewStore()
+  let detailsFocus = false
+
+  /** Reopen after a Session switch and restore the mounted view's focus demand. */
+  const settleDetailsSelection = async (sessionId: SessionId): Promise<void> => {
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
+    ctx.layout.setDetailsFocus(detailsFocus)
+  }
 
   try {
     ctx.effect(() => ctx.inputTriggers.registerSource(selectionSource()), 'paperai-ui-workbench: Word selection codec')
@@ -116,14 +114,6 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       'paperai-ui-workbench: local Agent onboarding profile',
     )
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'paperai-ui-workbench: dictionaries')
-    ctx.slots.inject('conversation.hero.agentPreset.status', () => ctx.slots.register({
-      name: 'conversation.hero.agentPreset.status', locale: NS,
-      inject: () => ({
-        hooks: { diagnostics: diagnostics.store },
-        loadAgents: () => diagnostics.loadAgents(),
-        probe: (provider: string, force: boolean) => diagnostics.probe(provider, force),
-      }),
-    }, AgentDiagnostics))
     const t = ctx.locale.bind(NS)
     // A DSH Workspace is the shell-level account, while a PaperAI project is
     // the product-level account that also owns the standard folders,
@@ -140,12 +130,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       'paperai-ui-workbench: eager project initialization',
     )
     initializeWorkspaces()
-    ctx.on('connection/reset', () => { controller.refreshLoaded(); void diagnostics.loadAgents() })
-    const connection = ctx.get('connection') as ConnectionHandle
-    ctx.effect(() => connection.hostDescription.subscribe(() => {
-      if (connection.hostDescription.getSnapshot() === undefined) diagnostics.disconnected()
-    }), 'paperai-ui-workbench: Host connection loss')
-    ctx.effect(() => ctx.remote.$on('paperai/acp-changed', () => { void diagnostics.loadAgents() }), 'paperai-ui-workbench: ACP connection status')
+    ctx.on('connection/reset', () => { controller.refreshLoaded() })
     ctx.effect(
       () => ctx.remote.$on('paperai/document-changed', (change) => {
         controller.handleDocumentChanged(change)
@@ -172,7 +157,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
         ctx.sessions.open(sessionId)
         ctx.conversationDetails.open(PAPERAI_DETAILS_VIEW_ID, sessionId)
         const result = await establish(sessionId)
-        await settleDetailsSelection(ctx, sessionId)
+        await settleDetailsSelection(sessionId)
         return result
       } catch (error: unknown) {
         controller.failWorkspace(workspaceId, error)
@@ -195,20 +180,24 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
         await diagnostics.inspect(workspaceId, plan)
         if (plan !== undefined) controller.refreshLoaded()
       },
+      captureExternal: async (workspaceId, documentId) => {
+        await diagnostics.capture(workspaceId, documentId)
+        controller.refreshLoaded()
+      },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
       refreshProject: workspaceId => controller.loadProject(workspaceId),
       openDocument: async (workspaceId, resourceId) => {
         try {
           const sessionId = await documentSession(workspaceId)
           ctx.sessions.open(sessionId)
-          await settleDetailsSelection(ctx, sessionId)
+          await settleDetailsSelection(sessionId)
           await controller.openDocument(workspaceId, sessionId, resourceId)
           // A Session switch and a details-open gesture may land in the same
           // render turn.  The generic frame closes the previous Session's
           // details in its layout effect; reopen after the document request so
           // that cleanup cannot accidentally hide the newly selected
           // PaperAI view.
-          await settleDetailsSelection(ctx, sessionId)
+          await settleDetailsSelection(sessionId)
         } catch (error: unknown) {
           controller.failWorkspace(workspaceId, error)
         }
@@ -219,6 +208,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       ...libraryInjected,
       hooks: { library: controller.libraryStore(), projects: controller.projectDirectoryStore() },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
+      openDocument: workspaceInjected.openDocument,
       setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
       createFromTemplate: (workspaceId, input) => startDocument(
         workspaceId,
@@ -259,42 +249,65 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       id: PAPERAI_DETAILS_VIEW_ID,
       order: 10,
       locale: NS,
-      inject: (sessionId: SessionId): PaperAIDocumentWorkbenchInjected => ({
-        ...libraryInjected,
-        hooks: {
-          library: controller.libraryStore(),
-          workbench: controller.workbenchStore(sessionId),
-          projects: controller.projectDirectoryStore(),
-        },
-        retryOpen: () => controller.retryOpen(sessionId),
-        setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
-        quoteSelection: (document, excerpt) => {
+      store: viewStore,
+      inject: (sessionId: SessionId, actions: BoundActions<typeof viewStore>): PaperAIDocumentWorkbenchInjected => {
+        const sessionInput = () => {
           const scope = ctx.sessions.scope(sessionId)
-          if (scope === undefined) return
-          const input = ctx.conversation.input.for(scope)
-          const state = input.state.getSnapshot()
-          const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
-            start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
-          })
-          if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
-          if (accepted) ctx.layout.revealConversation()
-        },
-        showPanel: (panel) => { controller.showPanel(sessionId, panel) },
-        selectBlock: nodeId => controller.selectBlock(sessionId, nodeId),
-        updateDraft: (value) => { controller.updateDraft(sessionId, value) },
-        cancelEdit: () => { controller.cancelEdit(sessionId) },
-        commitEdit: () => controller.commitEdit(sessionId),
-        validate: () => controller.validate(sessionId),
-        suggestType: () => controller.suggestType(sessionId),
-        applyTemplate: documentType => controller.applyTemplate(sessionId, documentType),
-        detachTemplate: () => controller.detachTemplate(sessionId),
-        setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
-        showDiff: commitId => controller.showDiff(sessionId, commitId),
-        restore: commitId => controller.restore(sessionId, commitId),
-        exportDocument: mode => controller.exportDocument(sessionId, mode),
-        reloadExternal: () => controller.reloadExternal(sessionId),
-        setDetailsFocus: (active) => { ctx.layout.setDetailsFocus(active) },
-      }),
+          return scope === undefined ? undefined : ctx.conversation.input.for(scope)
+        }
+        const showConversation = (): void => {
+          controller.showPanel(sessionId, null)
+          actions.setWriting(false)
+          detailsFocus = false
+          ctx.layout.revealConversation()
+        }
+        return {
+          ...libraryInjected,
+          hooks: {
+            library: controller.libraryStore(),
+            workbench: controller.workbenchStore(sessionId),
+            projects: controller.projectDirectoryStore(),
+          },
+          retryOpen: () => controller.retryOpen(sessionId),
+          showConversation,
+          prepareAgentFix: (text) => {
+            const input = sessionInput()
+            if (input === undefined) return
+            const { draft } = input.state.getSnapshot()
+            input.setDraft(draft === '' ? text : `${draft}\n\n${text}`)
+            showConversation()
+          },
+          setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
+          quoteSelection: (document, excerpt) => {
+            const input = sessionInput()
+            if (input === undefined) return
+            const state = input.state.getSnapshot()
+            const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
+              start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
+            })
+            if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
+            if (accepted) showConversation()
+          },
+          showPanel: (panel) => { controller.showPanel(sessionId, panel) },
+          updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
+          cancelEdit: () => { controller.cancelEdit(sessionId) },
+          commitEdit: () => controller.commitEdit(sessionId),
+          validate: () => controller.validate(sessionId),
+          suggestType: () => controller.suggestType(sessionId),
+          applyTemplate: documentType => controller.applyTemplate(sessionId, documentType),
+          detachTemplate: () => controller.detachTemplate(sessionId),
+          setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
+          showDiff: commitId => controller.showDiff(sessionId, commitId),
+          restore: commitId => controller.restore(sessionId, commitId),
+          exportDocument: mode => controller.exportDocument(sessionId, mode),
+          reloadExternal: () => controller.reloadExternal(sessionId),
+          captureExternal: () => controller.captureExternal(sessionId),
+          setDetailsFocus: (active) => {
+            detailsFocus = active
+            ctx.layout.setDetailsFocus(active)
+          },
+        }
+      },
     }, DocumentWorkbench))
   } catch (error) {
     diagnostics.dispose()

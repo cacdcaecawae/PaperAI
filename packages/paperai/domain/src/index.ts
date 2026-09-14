@@ -143,9 +143,43 @@ export interface DocumentNode {
   updatedAt: string
 }
 
+/**
+ * Explicit character overrides for a run of text. Omitted fields retain
+ * original Word properties; clients restate cleared values explicitly.
+ */
+export interface DocumentTextRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  /** Font size in points, for example `14pt`. */
+  size?: string
+  /** Text color as `#RRGGBB`. */
+  color?: string
+  /** Font family applied to Latin and East Asian text; an empty string removes explicit run fonts. */
+  font?: string
+}
+
+/** Explicit paragraph layout overrides accepted by document commits. */
+export interface DocumentParagraphFormat {
+  style?: string
+  align?: 'left' | 'center' | 'right' | 'justify'
+  /** Left indentation with a unit, for example `24pt`. */
+  indent?: string
+  /** Line-height multiplier or fixed height, for example `1.5x` or `18pt`. */
+  lineSpacing?: string
+}
+
+/** One replacement paragraph; vertical tabs represent soft line breaks. */
+export interface DocumentParagraph {
+  text: string
+  runs?: readonly DocumentTextRun[]
+  format?: DocumentParagraphFormat
+}
+
 /** Operations accepted by the single document-commit path. */
 export type DocumentMutation =
-  | { type: 'replace-text'; nodeId: DocumentNodeId; baseText: string; nextText: string }
+  | { type: 'replace-text'; nodeId: DocumentNodeId; baseText: string; nextText: string; runs?: readonly DocumentTextRun[]; paragraphs?: readonly DocumentParagraph[] }
   | { type: 'insert-node'; text: string; afterNodeId?: DocumentNodeId; beforeNodeId?: DocumentNodeId; style?: string }
   | { type: 'delete-node'; nodeId: DocumentNodeId; baseText?: string }
   | { type: 'set-style'; nodeId: DocumentNodeId; patch: Record<string, unknown> }

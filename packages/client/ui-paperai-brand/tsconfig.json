@@ -37,6 +37,9 @@
     },
     {
       "path": "../ui-paperai-acp"
+    },
+    {
+      "path": "../ui-theme"
     }
   ]
 }

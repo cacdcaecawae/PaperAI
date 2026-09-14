@@ -1,6 +1,6 @@
 /** The three panels that open beside the document: template, gate, versions. */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   Button, DisclosureRow, IconCheckOutline14, IconChecklistOutline14, IconChevronDownOutline14,
@@ -23,11 +23,22 @@ export function Panel({ title, onClose, children, t }: {
   children: ReactNode
   t: Translate
 }): ReactNode {
+  const close = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const origin = window.document.activeElement
+    close.current?.focus()
+    return () => { if (origin instanceof HTMLElement && origin.isConnected) origin.focus() }
+  }, [])
   return (
-    <aside className={css.panel} aria-label={title}>
+    <aside className={css.panel} aria-label={title} onKeyDown={(event) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.stopPropagation()
+        onClose()
+      }
+    }}>
       <div className={css.panelHeader}>
         <h2>{title}</h2>
-        <button type="button" className={css.panelClose} aria-label={t('panel.close')} onClick={onClose}>
+        <button ref={close} type="button" className={css.panelClose} aria-label={t('panel.close')} onClick={onClose}>
           <IconCloseOutline16 />
         </button>
       </div>
@@ -43,14 +54,14 @@ export function fixPromptText(document: PaperAIDocumentSnapshot, t: Translate): 
   return [t('gate.fixPrompt', { count: failing.length }), ...lines].join('\n')
 }
 
-/** Browser-local date formatting; the Host retains the exact ISO timestamp. */
+/** Browser-local time of a version: the clock today, the calendar day otherwise; the Host retains the exact ISO timestamp. */
 function versionDate(value: string): string {
   const date = new Date(value)
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    }).format(date)
+  if (Number.isNaN(date.getTime())) return value
+  const today = new Date().toDateString() === date.toDateString()
+  return new Intl.DateTimeFormat(undefined, today
+    ? { hour: '2-digit', minute: '2-digit' }
+    : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
 /** Ledger badge id for one version author; drives the badge accent. */
@@ -101,7 +112,7 @@ export function TemplatePanel({
   onClose: () => void
   t: Translate
 }): ReactNode {
-  const busy = state.action !== null
+  const busy = state.action !== null || state.edits.length > 0
   const projectFormats = overview?.template?.formats ?? []
   const available = DOCUMENT_TYPE_ORDER.filter(type => projectFormats.some(format => format.documentType === type))
   const suggested = state.typeSuggestion?.documentType
@@ -113,8 +124,10 @@ export function TemplatePanel({
   useEffect(() => { setChosen(initial) }, [initial])
   // Ask once what the document looks like, so the type chooser starts on the likely answer.
   useEffect(() => {
-    if (document.template === null && state.typeSuggestion === null && state.action === null) void suggestType()
-  }, [document.template, state.typeSuggestion, state.action, suggestType])
+    if (document.template === null && state.typeSuggestion === null && state.action === null && state.actionError === null) {
+      void suggestType()
+    }
+  }, [document.template, state.typeSuggestion, state.action, state.actionError, suggestType])
   const [requirementsOpen, setRequirementsOpen] = useState(false)
   const template = document.template
   // The Host's guess, while it is still the chooser's value: the caption says where the default came from.
@@ -197,7 +210,7 @@ export function TemplatePanel({
                 <span className={css.panelCaption}>{t('template.typeQuestion')}</span>
                 <div className={css.applyRow}>
                   <Menu
-                    compact
+                    portal
                     open={typeOpen}
                     selectedId={chosen}
                     items={available.map(type => ({ id: type, label: t(DOCUMENT_TYPE_KEYS[type]) }))}
@@ -254,7 +267,7 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
   onClose: () => void
   t: Translate
 }): ReactNode {
-  const busy = state.action !== null
+  const busy = state.action !== null || state.edits.length > 0
   const failing = document.gate.findings.filter(finding => !finding.passed).length
   const statusKey: PaperAIWorkbenchKey = document.gate.status === 'passed'
     ? 'gate.passed'
@@ -290,92 +303,104 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
   )
 }
 
-function ChangeRow({ change }: { change: PaperAIVersionChange }): ReactNode {
-  return (
-    <li className={css.change} data-kind={change.kind}>
-      {change.before !== undefined && <del>{change.before === '' ? ' ' : change.before}</del>}
-      {change.after !== undefined && <ins>{change.after === '' ? ' ' : change.after}</ins>}
-    </li>
-  )
-}
-
-/** Versions panel: the timeline, each version's changes on demand, and restore. */
-export function VersionsPanel({ document, state, showDiff, restore, onClose, t }: {
+/**
+ * Versions panel: the history as a timeline in the panel column. Picking a
+ * version shows its text changes on the document; unplaced changes remain in
+ * the panel, alongside recorded formatting operations and version restoration.
+ */
+export function VersionsPanel({ document, state, unplaced, showDiff, restore, onClose, t }: {
   document: PaperAIDocumentSnapshot
   state: PaperAIWorkbenchState
+  unplaced: readonly PaperAIVersionChange[]
   showDiff: PaperAIDocumentWorkbenchProps['showDiff']
   restore: PaperAIDocumentWorkbenchProps['restore']
   onClose: () => void
   t: Translate
 }): ReactNode {
   const busy = state.action !== null
+  const [confirmRestore, setConfirmRestore] = useState(false)
+  const diff = state.diff
+  const formattingEditCount = diff?.result?.formattingEditCount ?? 0
+  const picked = diff === null ? null : document.versions.find(version => version.commitId === diff.commitId) ?? null
+  const caption = picked === null
+    ? t('versions.select')
+    : diff?.result !== null && diff?.result !== undefined
+      ? diff.result.changes.length === 0
+        ? t('versions.diffEmpty')
+        : t('versions.compare', { count: diff.result.changes.length, unchanged: diff.result.unchangedCount })
+      : diff?.error !== null ? t('versions.diffError') : t('versions.diffLoading')
   return (
     <Panel title={t('versions.title')} onClose={onClose} t={t}>
       {document.versions.length === 0
         ? <p className={css.panelNote}>{t('versions.empty')}</p>
         : (
-          <ol className={css.versionList}>
-            {document.versions.map((version) => {
-              const current = version.commitId === document.headCommitId
-              const open = state.diff?.commitId === version.commitId
-              const diff = open ? state.diff : null
-              return (
-                <li key={version.commitId} className={clsx(css.version, current && css.versionCurrent)}>
-                  <div className={css.versionMain}>
-                    <strong>{version.summary}</strong>
-                    <span>
-                      <span className={css.actorBadge} data-client={actorClient(version)}>{actorBadge(version, t)}</span>
-                      <time dateTime={version.createdAt}>{versionDate(version.createdAt)}</time>
-                      {current && <em>{t('versions.current')}</em>}
-                    </span>
-                  </div>
-                  <div className={css.versionActions}>
-                    <Button
-                      variant="toolbar"
-                      size="sm"
-                      aria-expanded={open}
+          <>
+            <p className={css.panelNote} aria-live="polite">{caption}</p>
+            {formattingEditCount > 0 && (
+              <p className={css.panelNote}>{t('versions.formatting', { count: formattingEditCount })}</p>
+            )}
+            {diff?.error != null && <Button variant="outline" size="sm" onClick={() => {
+              void showDiff(diff.commitId)
+            }}>{t('versions.retry')}</Button>}
+            {unplaced.length > 0 && (
+              <div className={css.unplaced}>
+                <span className={css.panelCaption}>{t('versions.unplaced', { count: unplaced.length })}</span>
+                <ul>
+                  {unplaced.map((change, index) => (
+                    <li key={`${change.kind}:${index}`}>
+                      {change.before !== undefined && <del>{change.before === '' ? ' ' : change.before}</del>}
+                      {change.after !== undefined && <ins>{change.after === '' ? ' ' : change.after}</ins>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <ol className={css.versionList}>
+              {document.versions.map((version) => {
+                const current = version.commitId === document.headCommitId
+                const open = diff?.commitId === version.commitId
+                return (
+                  <li key={version.commitId} className={clsx(css.version, current && css.versionCurrent)}>
+                    <button
+                      type="button"
+                      className={css.versionRow}
+                      aria-pressed={open}
                       disabled={busy && !open}
-                      onClick={() => { void showDiff(version.commitId) }}
+                      title={version.summary}
+                      onClick={() => { setConfirmRestore(false); void showDiff(version.commitId) }}
                     >
-                      {open ? t('versions.diffHide') : t('versions.diff')}
-                    </Button>
-                    {version.restorable && (
-                      <Button variant="outline" size="sm" disabled={busy} onClick={() => { void restore(version.commitId) }}>
-                        {state.action === 'restoring' ? t('versions.restoring') : t('versions.restore')}
-                      </Button>
-                    )}
-                  </div>
-                  {diff !== null && (
-                    <div className={css.diff}>
-                      {diff.result === null && diff.error === null && (
-                        <p className={css.panelNote} aria-live="polite">{t('versions.diffLoading')}</p>
-                      )}
-                      {diff.error !== null && <p className={css.panelError} role="alert">{t('versions.diffError')}</p>}
-                      {diff.result !== null && (
-                        <>
-                          {diff.result.parentCommitId === null && (
-                            <span className={css.panelCaption}>{t('versions.root')}</span>
-                          )}
-                          {diff.result.changes.length === 0
-                            ? <p className={css.panelNote}>{t('versions.diffEmpty')}</p>
-                            : (
-                              <ul className={css.changeList}>
-                                {diff.result.changes.map((change, index) => (
-                                  <ChangeRow key={`${change.kind}:${index}`} change={change} />
-                                ))}
-                              </ul>
-                            )}
-                          <span className={css.panelCaption}>
-                            {t('versions.diffUnchanged', { count: diff.result.unchangedCount })}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ol>
+                      <span className={css.versionMain}>
+                        <strong>{version.summary}</strong>
+                        <span>
+                          <span className={css.actorBadge} data-client={actorClient(version)}>{actorBadge(version, t)}</span>
+                          {version.parentCommitId === null && <span>{t('versions.root')}</span>}
+                          {current && <em>{t('versions.current')}</em>}
+                        </span>
+                      </span>
+                      <time dateTime={version.createdAt} title={new Date(version.createdAt).toLocaleString()}>
+                        {versionDate(version.createdAt)}
+                      </time>
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+            {picked?.restorable === true && (
+              <div className={css.versionFooter}>
+                <span className={css.panelCaption}>{t('versions.restoreNote')}</span>
+                {confirmRestore
+                  ? <>
+                    <Button variant="outline" disabled={busy || state.edits.length > 0} onClick={() => {
+                      void restore(picked.commitId).then((result) => { if (result.ok) setConfirmRestore(false) })
+                    }}>{state.action === 'restoring' ? t('versions.restoring') : t('versions.confirmRestore')}</Button>
+                    <Button variant="toolbar" disabled={busy} onClick={() => { setConfirmRestore(false) }}>{t('versions.cancelRestore')}</Button>
+                  </>
+                  : <Button variant="outline" disabled={busy || state.edits.length > 0} onClick={() => { setConfirmRestore(true) }}>
+                    {t('versions.restore')}
+                  </Button>}
+              </div>
+            )}
+          </>
         )}
     </Panel>
   )

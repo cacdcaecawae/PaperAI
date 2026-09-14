@@ -12,12 +12,14 @@ Status: implemented
 
 **所有可展开工具行共享同一交互——整行即开关（点击 / Enter / 空格），图标 hover 时渐变为 chevron 预览——以及同一展开体：带 IN/OUT 侧栏标签的卡片，各分区独立滚动上限；hover 显示的 Inspect 胶囊通过 store 的一次性交接跳到该调用的 trajectory 记录；聊天视图用内存态的按会话 Map 在视图切换间保留语义阅读位置。**
 
-- `toolRowModel` 在 args 之外同时派生结果材料：`output`（`resultText` 拍平逻辑从 DetailsPanel 移入 contract）和 `errorSummary`（失败首行，作为折叠摘要并以错误色显示）。有 body、output 或 terminal 材料的行即可展开；行本身是开关（`role="button"`、`aria-expanded`），文件路径摘要通过 `stopPropagation` 保持独立链接。
+- `toolRowModel` 在 args 之外同时派生结果材料：`output`（拍平后的 `resultText`）和 `errorSummary`（没有通用 presenter 标题拥有摘要时使用的错误首行）。有 body、output 或 terminal 材料的行即可展开；行本身是开关（`role="button"`、`aria-expanded`），文件路径摘要通过 `stopPropagation` 保持独立链接。
 - 展开卡片（figma 1249:35657）是 IN/OUT 分区列：每个分区是独立滚动区（max-height 150px），侧栏标签 sticky 固定，l2 分割线横贯整卡宽度。Think 的推理文本和 run_code 的 CodeBlock 保持非卡片体；上下文注入复用此行并以无标签的 `plainBody` 卡片展开。
 - `terminalFailed` 读取已结算 terminal 卡片的退出状态，让 BashRow 和 GenericToolCard 把失败命令显示为行的红色状态点——这是折叠行唯一的失败信号，因为调用本身结算为 `isError:false`。
 - TerminalBlock 的横幅并入同一阅读模型：与卡片共用同一表面（不再用 banner token），与正文之间是 l2 细线，命令列上限 150px 内部滚动，复制/状态控件 sticky 且顶对齐第一行提示符。
 - Inspect：`ToolCallOwnerProps.inspect`（无调用身份的行不提供）在展开体左下角的正常布局流中渲染胶囊，hover 到工具调用的任意位置时显示。点击将 `{ callId }` 写入 chat store 的一次性 `inspect` 字段并切换到 trajectory 视图；TrajectoryTable 找到记录、打开其摘要，并通过清空字段确认。
 - 滚动保留：每次非贴底滚动时，聊天视图把 `{ anchorKey, anchorTop, scrollTop }` 保存到 apply 作用域的按会话 Map，并以 `chatScroll` 暴露；重挂载时先用 `scrollTop` 到达近似窗口，再按稳定 node／call 锚点的矩形差值校正，因此宽度重排后仍把同一阅读行保持在原位。包括「回到底部」在内的每条贴底路径都会在切换 tab 或会话前同步清除该项。Map 仍刻意不持久化——新页面加载保持打开即贴底的默认行为。
+
+采用通用展示的提供方工具行在失败时保留非空的结果标题或运行阶段标题。失败状态仍可见，展开后保留完整输出。提供方可以用单行 JSON 封装错误；若将该行用作折叠摘要，工具身份就会被传输数据替代。这项展示规则不改变持久化事件和模型可见结果。终端及其他专用卡片保持既有的失败摘要。
 
 ## 曾考虑的替代方案
 
@@ -28,6 +30,12 @@ Status: implemented
 **持久化聊天滚动偏移。** 否决：把几天前的偏移恢复到已经增长的会话里读起来像 bug；内存 Map 把记忆精确限定在会丢位置的视图切换场景。
 
 **从详情面板的材料为每行单独取展开 OUTPUT。** 不必要：已结算结果节点本就在快照的冻结调用切片上，contract 层的 `resultText` 拍平让行和面板共用一份派生。
+
+**将任意提供方 JSON 解析成错误标题。** 通用工具展示没有共享的错误封装格式。声明的标题能够标识调用，无需猜测提供方字段或丢弃诊断详情。
+
+## 测试
+
+模型和组件回归覆盖没有运行阶段调用的结果标题、运行阶段标题回退、空白标题、终端结果，以及失败提供方调用的 JSON 输出仅在展开后出现。没有通用 presenter 标题的调用保持错误首行摘要。
 
 ## 后果
 

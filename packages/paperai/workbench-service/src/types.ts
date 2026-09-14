@@ -14,6 +14,12 @@ export interface PaperAIRecoverWorkingRequest {
   readonly plan: import('@paperai/commit-service/doctor-types').WorkingRecoveryPlan
 }
 
+/** A Working DOCX changed outside PaperAI: the document whose current bytes become a version. */
+export interface PaperAICaptureExternalRequest {
+  readonly workspaceId: WorkspaceId
+  readonly documentId: PaperAIDocumentId
+}
+
 export type { AcpDiagnostic as PaperAIAgentDiagnostic } from '@paperai/agent-acp/diagnostic-types'
 
 /** An explicit prompt-free diagnostic request for one configured peer Agent. */
@@ -87,6 +93,8 @@ export interface PaperAIDocumentRow {
   readonly documentId: PaperAIDocumentId
   readonly name: string
   readonly fileName: string
+  /** Authoritative Working DOCX path for disambiguation and file details. */
+  readonly workingPath?: string
   readonly documentType: PaperAIDocumentType
   /** Display name of the bound format, or `null` while the document writes freely. */
   readonly templateName: string | null
@@ -169,12 +177,47 @@ export interface PaperAIDocumentNodeSummary {
   readonly text: string
 }
 
-/** Replace the text of exactly one semantic node. */
+/** Replace one semantic node; additional paragraphs split that original node. */
 export interface PaperAIReplaceTextMutation {
   readonly type: 'replace-text'
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
   readonly nextText: string
+  /** The block's runs in reading order, present when its character formatting is part of the change. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+  /** Complete replacement paragraphs; nonempty and joined by newlines to spell nextText. */
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
+}
+
+/** One run of a block's text, carrying only the character formatting that overrides the block's own. */
+export interface PaperAIDocumentTextRun {
+  readonly text: string
+  readonly bold?: boolean
+  readonly italic?: boolean
+  readonly underline?: boolean
+  /** Font size in points, for example `14pt`. */
+  readonly size?: string
+  /** Text color as `#RRGGBB`. */
+  readonly color?: string
+  /** Font family applied to Latin and East Asian text; an empty string removes explicit run fonts. */
+  readonly font?: string
+}
+
+/** Explicit paragraph layout overrides. */
+export interface PaperAIParagraphFormat {
+  readonly style?: string
+  readonly align?: 'left' | 'center' | 'right' | 'justify'
+  /** Left indentation with a unit, for example `24pt`. */
+  readonly indent?: string
+  /** Line-height multiplier or fixed height, for example `1.5x` or `18pt`. */
+  readonly lineSpacing?: string
+}
+
+/** One replacement paragraph; vertical tabs represent soft line breaks. */
+export interface PaperAIDocumentParagraph {
+  readonly text: string
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+  readonly format?: PaperAIParagraphFormat
 }
 
 /** Only node-addressed text mutations are admitted by the browser workbench. */
@@ -243,6 +286,12 @@ export interface PaperAITemplateGateReport {
   readonly findings: readonly PaperAIGateFinding[]
 }
 
+/** A paragraph style defined in the current Word document. */
+export interface PaperAIParagraphStyle {
+  readonly id: string
+  readonly name: string
+}
+
 /** Read-only projection of one authoritative Working DOCX. */
 export interface PaperAIDocumentSnapshot {
   readonly documentId: PaperAIDocumentId
@@ -256,6 +305,8 @@ export interface PaperAIDocumentSnapshot {
   readonly headCommitId: PaperAIDocumentCommitId | null
   /** Derived document preview; never accepted as an edit source. */
   readonly previewHtml: string
+  /** Defined paragraph styles; empty while the preview is deferred or styles are unavailable. */
+  readonly paragraphStyles: readonly PaperAIParagraphStyle[]
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
   readonly versions: readonly PaperAIDocumentVersion[]
   readonly template: PaperAITemplateSummary | null
@@ -407,6 +458,8 @@ export interface PaperAIVersionDiff {
   readonly changes: readonly PaperAIVersionChange[]
   /** Paragraphs that did not change; lets the reader judge the scale of an edit. */
   readonly unchangedCount: number
+  /** Recorded text-preserving formatting operations; not an exhaustive formatting diff. */
+  readonly formattingEditCount?: number
 }
 
 /** User-facing export mode: draft remains available, delivery runs the gate. */

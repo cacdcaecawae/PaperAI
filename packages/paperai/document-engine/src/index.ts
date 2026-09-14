@@ -6,7 +6,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { CapabilityHealth } from '@paperai/domain'
+import type { CapabilityHealth, DocumentParagraph } from '@paperai/domain'
 
 /** Text-bearing Word node projected by the engine. */
 export interface EngineTextNode {
@@ -15,9 +15,29 @@ export interface EngineTextNode {
   kind: 'paragraph' | 'table' | 'unknown'
 }
 
-/** Office-path mutation applied atomically inside one engine document lease. */
+/** Paragraph style defined by the Word document, with its stored ID and display name. */
+export interface EngineParagraphStyle {
+  id: string
+  name: string
+}
+
+/** Explicit character overrides; omitted fields retain the original run properties. */
+export interface EngineTextRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  /** Font size in points, for example `14pt`. */
+  size?: string
+  /** Text color as `#RRGGBB`. */
+  color?: string
+  /** Font family applied to Latin and East Asian text; an empty string removes explicit run fonts. */
+  font?: string
+}
+
+/** Ordered mutation whose Office paths identify nodes in the document at batch start; insertion indices address the body at that step. */
 export type EngineMutation =
-  | { type: 'replace-text'; officePath: string; text: string }
+  | { type: 'replace-text'; officePath: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }
   | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; index?: number }
   | { type: 'remove'; officePath: string }
 
@@ -57,6 +77,14 @@ export abstract class DocumentEngine extends Service {
    */
   abstract readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]>
   /**
+   * Read the paragraph styles defined in the document.
+   * @param filePath - canonical DOCX path to inspect.
+   * @param signal - optional cancellation signal for provider work.
+   * @returns paragraph style IDs and display names in document definition order.
+   * @throws when cancelled or the provider cannot read or parse the styles.
+   */
+  abstract readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]>
+  /**
    * Produce generated HTML preview; HTML is never an editable authority.
    * @param filePath - canonical DOCX path to render.
    * @param signal - optional cancellation signal for provider work.
@@ -77,7 +105,7 @@ export abstract class DocumentEngine extends Service {
   /**
    * Apply a batch under one exclusive file lease and save before returning.
    * @param filePath - canonical Working DOCX path to mutate.
-   * @param mutations - ordered Office-path mutations in the batch.
+   * @param mutations - mutations in application order; Office paths retain their original targets across earlier structure edits.
    * @param signal - optional cancellation signal for provider work.
    * @throws when cancelled or any mutation or save operation fails.
    */
@@ -90,6 +118,15 @@ export abstract class DocumentEngine extends Service {
    * @throws when cancelled or the provider cannot produce structured validation evidence.
    */
   abstract validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation>
+  /**
+   * Release state the provider retains for one file (a resident process, a cache) so
+   * the next operation observes the bytes on disk. Callers replace or delete the file
+   * only after this resolves. Providers that retain nothing keep this no-op.
+   * @param _filePath - canonical DOCX path about to be replaced or removed.
+   */
+  release(_filePath: string): Promise<void> {
+    return Promise.resolve()
+  }
 }
 
 export default DocumentEngine

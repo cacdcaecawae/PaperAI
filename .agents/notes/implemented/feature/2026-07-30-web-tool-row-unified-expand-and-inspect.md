@@ -12,12 +12,14 @@ The chat view's tool rows had drifted into per-surface interaction dialects: Too
 
 **Every expandable tool row shares one interaction — the whole row toggles (click / Enter / Space) with an icon→chevron hover preview — and one expanded body: an IN/OUT gutter-labeled card with per-section scroll caps; a hover-revealed Inspect pill jumps to the call's trajectory record through a one-shot store handoff; the chat view preserves its semantic reading position across view switches through an in-memory per-session map.**
 
-- `toolRowModel` now derives result material alongside args: `output` (the `resultText` flatten, moved from DetailsPanel into the contract), and `errorSummary` (the failure's first line, shown as the collapsed summary in the error color). A row with body, output, or terminal material is expandable; the row itself is the toggle (`role="button"`, `aria-expanded`), and file-path summaries stay independent links via `stopPropagation`.
+- `toolRowModel` derives result material alongside args: `output` (the flattened `resultText`), and `errorSummary` (a failure's first line when no generic presenter title owns the summary). A row with body, output, or terminal material is expandable; the row itself is the toggle (`role="button"`, `aria-expanded`), and file-path summaries stay independent links via `stopPropagation`.
 - The expanded card (figma 1249:35657) is a column of IN/OUT sections: each section is its own scrollport (max-height 150px) with a sticky gutter label, and the l2 divider spans the full card width. Think prose and the run_code CodeBlock keep their non-card bodies; context injection reuses the row with a label-less `plainBody` card.
 - `terminalFailed` reads a settled terminal card's exit status so BashRow and GenericToolCard surface a failing command as the row's red state dot — the only failure signal the collapsed row has, since the call itself settles `isError:false`.
 - TerminalBlock's banner joins the same reading model: it shares the card surface (no banner token), an l2 hairline separates it from the body, the command column caps at 150px and scrolls with sticky copy/status controls top-aligned to the first prompt row.
 - Inspect: `ToolCallOwnerProps.inspect` (absent for rows without a call identity) renders a pill in real flow under the expanded body's bottom-left, revealed by hovering anywhere on the tool call. Clicking writes `{ callId }` to the chat store's one-shot `inspect` field and switches to the trajectory view; TrajectoryTable finds the record, opens its summary, and acknowledges by clearing the field.
 - Scroll preservation: on every non-bottom scroll, the chat view saves `{ anchorKey, anchorTop, scrollTop }` into an apply-scope per-session map exposed as `chatScroll`; a remount first uses `scrollTop` to reach the approximate window, then corrects by the stable node/call anchor's rectangle delta so width reflow keeps the same reading row in place. Every pinned path, including Back to bottom, clears the entry synchronously before a tab or session switch. The map remains deliberately unpersisted — a fresh page load keeps the open-jump-to-bottom default.
+
+Provider rows with a generic presentation retain a nonblank result title or pending title when they fail. The failed state remains visible, and expansion retains the full output. A provider can return its error as a one-line JSON envelope; using that line as the collapsed summary would replace the tool's identity with transport data. This presentation rule leaves durable events and model-visible results unchanged. Terminal and other specific card kinds retain their existing failure summaries.
 
 ## Alternatives considered
 
@@ -28,6 +30,12 @@ The chat view's tool rows had drifted into per-surface interaction dialects: Too
 **Persisting the chat scroll offset.** Rejected: restoring a days-old offset into a conversation that has since grown reads as a bug; the in-memory map scopes the memory to exactly the view-switch case that loses it.
 
 **A per-row expanded OUTPUT fetched from the details panel's material.** Unnecessary: the settled result node already rides the snapshot's frozen call slice, so the contract-level `resultText` flatten serves both the row and the panel from one derivation.
+
+**Parse arbitrary provider JSON into an error headline.** Generic tool presentation has no shared error-envelope schema. The declared title identifies the call without guessing provider fields or discarding diagnostic detail.
+
+## Testing
+
+Model and component regressions cover result titles without pending calls, pending-title fallback, blank titles, terminal results, and a failed provider call whose JSON output is available only after expansion. Calls without a generic presenter title retain their error-first-line behavior.
 
 ## Consequences
 

@@ -3,6 +3,6 @@
 - text: 正在使用
 - text: 检测通过
 - text: 未使用
-- combobox "默认 Agent 用于新建会话；当前会话保留自己的配置。":
+- combobox "默认 Agent 用于新建会话；进行中的会话保持它开始时的选择":
   - option "Codex" [selected]
   - option "Claude"

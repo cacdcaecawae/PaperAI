@@ -1,6 +1,9 @@
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PaperMcpService from '../src/index.ts'
 import type { PaperMcpAgentIdentity, PaperMcpExportAdapter } from '../src/types.ts'
@@ -13,7 +16,7 @@ afterEach(async () => {
   context = undefined
 })
 
-async function mountService(host: '127.0.0.1' | '0.0.0.0' = '0.0.0.0') {
+async function mountService(host: '127.0.0.1' | '0.0.0.0' = '0.0.0.0', port = 33_211) {
   const ctx = context = new Context()
   const domain = fakeDomain()
   let route: WebRoute | undefined
@@ -22,7 +25,7 @@ async function mountService(host: '127.0.0.1' | '0.0.0.0' = '0.0.0.0') {
     route = next
     return unregister
   })
-  ctx.provide('webServer', { host, port: 33_211, register } as never)
+  ctx.provide('webServer', { host, port, register } as never)
   ctx.provide('paperProjects', domain.dependencies.projects as never)
   ctx.provide('paperDocuments', domain.dependencies.documents as never)
   ctx.provide('paperTemplates', domain.dependencies.templates as never)
@@ -53,6 +56,48 @@ function unauthorizedResponse() {
 }
 
 describe('PaperMcpService', () => {
+  it('initializes an authenticated HTTP connection and lists callable PaperAI tools', async () => {
+    let route: WebRoute | undefined
+    const failures: unknown[] = []
+    const http = createServer((request, response) => {
+      if (route === undefined) throw new Error('expected registered MCP route')
+      Promise.resolve(route.handler(request, response)).catch((error: unknown) => {
+        failures.push(error)
+        response.writeHead(400)
+        response.end()
+      })
+    })
+    const client = new Client({ name: 'paperai-http-test', version: '1.0.0' })
+    try {
+      await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve))
+      const address = http.address()
+      if (address === null || typeof address === 'string') throw new Error('expected TCP listener')
+      const harness = await mountService('127.0.0.1', address.port)
+      route = harness.route()
+      const lease = harness.ctx.paperMcp.issueDescriptor(actor, workspaceScope())
+      const transport = new StreamableHTTPClientTransport(new URL(lease.descriptor.url), {
+        requestInit: { headers: Object.fromEntries(lease.descriptor.headers.map(({ name, value }) => [name, value])) },
+      })
+      // The SDK getter allows undefined before initialization; Transport declares sessionId optional.
+      await client.connect(transport as Transport)
+      const tools = await client.listTools()
+      expect(tools.tools.map(tool => tool.name)).toContain('paperai_list_projects')
+      expect(tools.tools.map(tool => tool.name)).toContain('paperai_commit_document')
+      const result = await client.callTool({ name: 'paperai_list_projects', arguments: {} })
+      expect(result.isError).not.toBe(true)
+      expect(JSON.stringify(result.content)).toContain('project-1')
+      expect(failures).toEqual([])
+      await lease.dispose()
+    } finally {
+      await client.close()
+      http.closeAllConnections()
+      await new Promise<void>((resolve, reject) => http.close((error) => {
+        if (error === undefined) resolve()
+        else reject(error)
+      }))
+    }
+  })
+
   it('registers one exact route and issues a loopback ACP descriptor', async () => {
     const harness = await mountService()
     expect(harness.register).toHaveBeenCalledWith(expect.objectContaining({

@@ -5,6 +5,7 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { AcpSessionDetails } from '@paperai/agent-acp/diagnostic-types'
 import { AcpSessionController } from '../src/client/session-controller.ts'
 import { AcpSessionControls, type AcpSessionProps } from '../src/client/SessionControls.tsx'
+import { t, english } from './translations.client.ts'
 
 afterEach(cleanup)
 const id = 'acp-controls' as SessionId
@@ -65,7 +66,45 @@ it('serializes option changes and retains provider rejection after refreshing th
   remote.acpSession.mockRejectedValueOnce(new Error('Disconnected'))
   await controller.load()
   expect(controller.store.getSnapshot().error).toContain('Disconnected')
+  await controller.load()
+  expect(controller.store.getSnapshot().error).toBeNull()
   controller.dispose()
+})
+
+it('clears the old Agent choices immediately and ignores its pending option rejection after a switch', async () => {
+  const pending = Promise.withResolvers<unknown>()
+  const fresh = Promise.withResolvers<unknown>()
+  const remote = { acpSession: vi.fn().mockResolvedValue({ ok: true, value: details }),
+    acpSelectOption: vi.fn().mockReturnValue(pending.promise) }
+  const controller = new AcpSessionController(remote, id)
+  await controller.load()
+  const selecting = controller.select('model', 'bad')
+  remote.acpSession.mockReturnValueOnce(fresh.promise)
+  controller.reset()
+  expect(controller.store.getSnapshot()).toMatchObject({ details: null, busy: false, loading: true, error: null })
+  pending.resolve({ ok: false, error: { message: 'Old Agent rejected' } })
+  await selecting
+  fresh.resolve({ ok: true, value: { ...details, provider: 'claude', name: 'Claude' } })
+  await vi.waitFor(() =>{  expect(controller.store.getSnapshot().details?.provider).toBe('claude') })
+  expect(controller.store.getSnapshot().error).toBeNull()
+  controller.dispose()
+})
+
+it('offers an English retry after the first load fails without exposing stale provider choices', () => {
+  const load = vi.fn()
+  const state = { details: null, loading: false, busy: false, error: 'Host unavailable' }
+  const props = { sessionId: id, load, t: english,
+    useSessions: (fn: (value: unknown) => unknown) => fn({ byId: { [id]: { agentPreset: 'claude' } } }),
+    useAcpSession: (fn: (value: unknown) => unknown) => fn(state),
+    useAcpPreferences: (fn: (value: unknown) => unknown) => fn({ favorites: {}, writable: true, error: null }),
+  } as unknown as AcpSessionProps
+  const view = render(<AcpSessionControls {...props} />)
+  expect(screen.getByRole('status').textContent).toContain('Could not load Agent options')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(load).toHaveBeenCalledTimes(2)
+  view.rerender(<AcpSessionControls {...props} useAcpSession={fn => fn({ ...state, details, loading: true })} />)
+  expect(screen.getByRole('status').textContent).toContain('Loading Agent options')
+  expect(screen.queryByRole('button', { name: /Codex/ })).toBeNull()
 })
 
 it('shows model search, favorites, native options, usage and plans while keeping permission changes locked', async () => {
@@ -74,7 +113,7 @@ it('shows model search, favorites, native options, usage and plans while keeping
   const favorite = vi.fn().mockResolvedValue(undefined)
   const state = { details, loading: false, busy: false, error: null as string | null }
   const preferences = { favorites: { codex: ['b'] }, writable: true, error: null as string | null }
-  const props = { sessionId: id, load, select, favorite, useSessions: (fn: (value: unknown) => unknown) =>
+  const props = { sessionId: id, load, select, favorite, t, useSessions: (fn: (value: unknown) => unknown) =>
     fn({ byId: { [id]: { agentPreset: 'codex' } } }), useAcpSession: (fn: (value: unknown) => unknown) => fn(state),
   useAcpPreferences: (fn: (value: unknown) => unknown) => fn(preferences) } as unknown as AcpSessionProps
   const view = render(<AcpSessionControls {...props} />)

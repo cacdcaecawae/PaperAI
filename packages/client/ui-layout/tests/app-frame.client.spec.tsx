@@ -11,7 +11,7 @@
  * resizes are driven through the ResizeObserver stub.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
@@ -127,6 +127,7 @@ function drag(handle: Element, fromX: number, toX: number): void {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   frameWidth = 1920
   selectedSession.current = 's-test' as SessionId
   selectedSessionBlank.current = false
@@ -153,6 +154,19 @@ afterEach(() => {
 })
 
 describe('AppFrame', () => {
+  it('resizes panels from the keyboard and hides closed details from keyboard navigation', () => {
+    const { instance, getByRole, getByTestId } = mountFrame()
+    const sidebar = getByRole('separator', { name: '调整导航栏宽度 / Resize navigation' })
+    fireEvent.keyDown(sidebar, { key: 'ArrowRight' })
+    expect(instance.getSnapshot().sidebar).toBe(296)
+    expect(sidebar.getAttribute('aria-valuenow')).toBe('296')
+    expect(getByTestId('details-content').parentElement?.hasAttribute('inert')).toBe(true)
+    act(() => { instance.actions.openDetails() })
+    const details = getByRole('separator', { name: '调整内容栏宽度 / Resize content' })
+    fireEvent.keyDown(details, { key: 'ArrowLeft', shiftKey: true })
+    expect(instance.getSnapshot().details).toBe(424)
+    expect(getByTestId('details-content').parentElement?.hasAttribute('inert')).toBe(false)
+  })
   it('renders three tracks from store state', () => {
     const { frame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])

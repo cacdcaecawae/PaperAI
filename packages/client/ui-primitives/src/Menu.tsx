@@ -110,6 +110,9 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null)
   const [fixedPos, setFixedPos] = useState<CSSProperties | null>(null)
   const { arm: armClose, cancel: cancelClose } = usePointerGrace(onClose)
+  const restoreTrigger = () => {
+    rootRef.current?.querySelector<HTMLElement>('button, [tabindex]')?.focus({ preventScroll: true })
+  }
 
   // Portal mode: fixed-position the list from the anchor rect before paint;
   // track the anchor while open (capture-phase scroll catches nested panes).
@@ -118,6 +121,10 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
   // effect measures stale here — the host callback owns the truth instead.
   useLayoutEffect(() => {
     if (!open || !portal) { setFixedPos(null); return }
+    const modal = rootRef.current?.closest('[data-dsw-modal]')?.getAttribute('data-dsw-modal')
+    if (typeof modal === 'string' && listRef.current !== null) {
+      listRef.current.dataset.dswModalOwner = modal
+    }
     const place = () => {
       let r: DOMRect | null
       if (getAnchorRect !== undefined) {
@@ -177,13 +184,17 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
       onClose()
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      onClose()
+      restoreTrigger()
     }
     document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [open, onClose])
 
@@ -230,6 +241,7 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
               return
             }
             onSelect(entry.id)
+            restoreTrigger()
           }}
         >
           {entry.icon !== undefined && <span className={css.itemIcon}>{entry.icon}</span>}
@@ -246,7 +258,7 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
                 role="menuitem"
                 className={css.item}
                 disabled={sub.disabled}
-                onClick={() => { onSelect(sub.id) }}
+                onClick={() => { onSelect(sub.id); restoreTrigger() }}
               >
                 {sub.icon !== undefined && <span className={css.itemIcon}>{sub.icon}</span>}
                 <span className={css.itemLabel}>{sub.label}</span>
@@ -268,6 +280,20 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
       className={clsx(css.list, dense && css.denseList, compact && css.compactList, scrollable && css.scrollable, portal && css.portal, side === 'top' && !portal && css.sideTop, align === 'end' && !portal && css.alignEnd)}
       style={portal ? fixedPos ?? MEASURE_STYLE : undefined}
       role="menu"
+      data-dsw-modal-owner={rootRef.current?.closest('[data-dsw-modal]')?.getAttribute('data-dsw-modal') ?? undefined}
+      onKeyDown={(event) => {
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        const menu = (event.target as HTMLElement).closest('[role="menu"]')
+        if (menu === null) return
+        const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+          .filter(item => !item.disabled && item.closest('[role="menu"]') === menu)
+        if (items.length === 0) return
+        const index = items.indexOf(document.activeElement as HTMLButtonElement)
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+          : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+        event.preventDefault()
+        items[next]?.focus({ preventScroll: true })
+      }}
       // React portals bubble synthetic events through the REACT tree: without
       // this stop, an item click re-fires the anchor row's own onClick
       // (open/toggle) after onSelect.
@@ -292,6 +318,14 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
     <span
       ref={rootRef}
       className={clsx(css.root, className)}
+      onKeyDown={(event) => {
+        if (!open || event.defaultPrevented || !['ArrowDown', 'ArrowUp'].includes(event.key)) return
+        const items = listRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+        const item = event.key === 'ArrowDown' ? items?.[0] : items?.[items.length - 1]
+        if (item === undefined) return
+        event.preventDefault()
+        item.focus({ preventScroll: true })
+      }}
       onPointerEnter={closeOnPointerLeave ? cancelClose : undefined}
       onPointerLeave={closeOnPointerLeave ? () => { if (open) armClose() } : undefined}
     >

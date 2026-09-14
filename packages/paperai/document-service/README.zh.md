@@ -12,11 +12,12 @@ PaperAI 文档服务通过 `ctx.paperDocuments` 暴露。它将 Word 源文件�
 - `readDocument(documentId)` 从仓库读取元数据和有序节点，不再次读取 Word 文件。
 - `verifyImmutableSource(documentId, signal?)` 校验导入源仍是只读普通文件，且内容与记录的 SHA-256 一致。Consumer 在读取或复制源文件字节前调用该方法。
 - `previewHtml(documentId, signal?)` 渲染当前 Working DOCX；HTML 只用于预览。
+- `readParagraphStyles(documentId, signal?)` 通过文档引擎读取当前 Working DOCX 定义的段落样式 ID 与显示名称。
 - `rebuildIndex(documentId, signal?)` 重新读取 Working DOCX 并替换语义索引，不创建文档提交。
 
 ## 文件与索引语义
 
-导入过程使用 `<project>/.paperai/documents/v1` 下的同文件系统私有暂存目录。发布后的不可变原件位于 `documents/source/`，权威 Working DOCX 位于 `documents/working/`。不可变源文件会复制到排他的最终路径，与暂存内容核对哈希，并在发布记录前设为只读。Working DOCX 是独立的可写文件；修改任一文件都不会影响另一个。已追踪文档的名称即使在文件缺失时仍被占用；遇到这些名称或已有文件时，依次追加 ` (2)`、` (3)` 等后缀。已有记录继续使用其记载的路径。节点身份依次根据语义哈希、相关文本和 Office 路径证据保留；成功匹配的节点继续保留 lineage、样式元数据和最近提交归属。
+导入过程使用 `<project>/.paperai/documents/v1` 下的同文件系统私有暂存目录。发布后的不可变原件位于 `documents/source/`，权威 Working DOCX 位于 `documents/working/`。不可变源文件会复制到排他的最终路径，与暂存内容核对哈希，并在发布记录前设为只读。Working DOCX 是独立的可写文件；修改任一文件都不会影响另一个。文档引擎在索引后可能仍让暂存的 Working DOCX 常驻；服务会在删除暂存目录前先释放它。已追踪文档的名称即使在文件缺失时仍被占用；遇到这些名称或已有文件时，依次追加 ` (2)`、` (3)` 等后缀。已有记录继续使用其记载的路径。节点身份依次根据语义哈希、相关文本和 Office 路径证据保留；成功匹配的节点继续保留 lineage、样式元数据和最近提交归属。
 
 当前锁定的 OfficeCLI 支持 `.docx`、`.xlsx` 和 `.pptx`，不支持旧版二进制 `.doc`。文档引擎 Provider 可以实现 `LegacyDocumentNormalizer`；否则 `.doc` 导入会明确返回 `legacy-doc-normalization` 降级结果。服务只有在得到一个新生成且非空的 DOCX 后才会报告 `.doc` 导入成功。
 

@@ -1,4 +1,5 @@
-- textbox "编辑段落": 浏览器中的本地草稿
-- text: 编辑段落
-- button "取消"
-- button "保存"
+- group "已修改 1 段":
+  - text: 已修改 1 段
+  - alert: 文档版本已更新。草稿已保留，请复制需要的内容后放弃修改，再编辑最新版本。
+  - button "放弃修改"
+  - button "保存" [disabled]

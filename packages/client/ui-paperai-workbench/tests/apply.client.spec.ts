@@ -2,9 +2,11 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore, SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import type { IConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { SessionInputShell } from '@deepseek-ai/dsh-client-ui-conversation/src/client/input/facade.ts'
 import paperAIWorkbenchRemote from '@paperai/workbench-service/remote'
 import { DocumentWorkbench } from '../src/client/DocumentWorkbench.tsx'
-import { AgentDiagnostics, type AgentDiagnosticsInjected } from '../src/client/AgentDiagnostics.tsx'
+import { createWorkbenchViewStore } from '../src/client/view-store.ts'
 import { WordSelectionMessage } from '../src/client/WordSelectionMessage.tsx'
 import {
   apply, inject, NS, PAPERAI_DETAILS_VIEW_ID, PAPERAI_LAYOUT_CONFIG, PAPERAI_TEMPLATES_SECTION_ID,
@@ -27,10 +29,10 @@ vi.mock('@paperai/workbench-service/remote', () => ({
 
 const SLOTS = [
   'sidebar.workspaces.content', 'conversation.hero.content', 'settings.section', 'conversation.details.view',
-  'conversation.hero.agentPreset.status', 'conversation.message.userText',
+  'conversation.message.userText',
 ] as const
 
-async function bench(mountError?: Error) {
+async function bench(mountError?: Error, conversationInput?: IConversation['input']) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
@@ -57,7 +59,7 @@ async function bench(mountError?: Error) {
   const configureOnboarding = vi.fn(() => disposeOnboardingProfile)
   ctx.provide('workspaces', { connectWorkspace, list: workspaceList } as never)
   ctx.provide('sessions', { open: openSession, list: sessionList, scope } as never)
-  ctx.provide('conversation', { input: { for: () => input } } as never)
+  ctx.provide('conversation', { input: conversationInput ?? { for: () => input } } as never)
   ctx.provide('inputTriggers', { registerSource: vi.fn(() => () => {}) } as never)
   ctx.provide('conversationDetails', { open: openDetails, close: closeDetails })
   ctx.provide('layout', { configure: configureLayout, setDetailsFocus, revealConversation } as never)
@@ -133,16 +135,15 @@ function declare(slots: SlotRegistry): () => void {
       'conversation.hero.content': { kind: 'single', scope: 'root' },
       'settings.section': { kind: 'list', scope: 'root' },
       'conversation.details.view': { kind: 'list', scope: 'session' },
-      'conversation.hero.agentPreset.status': { kind: 'single', scope: 'root' },
       'conversation.message.userText': { kind: 'chain', scope: 'session' },
     },
   } as never, () => null)
 }
 
-function injected(slots: SlotRegistry, name: typeof SLOTS[number]): unknown {
+function injected(slots: SlotRegistry, name: typeof SLOTS[number], actions = createWorkbenchViewStore().create().actions): unknown {
   const entry = slots.entries(name)[0]
   if (entry === undefined) throw new Error(`no ${name} entry`)
-  return (entry.inject as unknown as (...args: unknown[]) => unknown)(SESSION_ID)
+  return (entry.inject as unknown as (...args: unknown[]) => unknown)(SESSION_ID, actions)
 }
 
 describe('PaperAI workbench browser plugin', () => {
@@ -166,7 +167,6 @@ describe('PaperAI workbench browser plugin', () => {
       expect(b.slots.entries('conversation.hero.content')[0]?.component).toBe(StartPage)
       expect(b.slots.entries('settings.section')[0]?.component).toBe(TemplatesSection)
       expect(b.slots.entries('conversation.details.view')[0]?.component).toBe(DocumentWorkbench)
-      expect(b.slots.entries('conversation.hero.agentPreset.status')[0]?.component).toBe(AgentDiagnostics)
       expect(b.slots.entries('conversation.message.userText')[0]?.component).toBe(WordSelectionMessage)
     })
     expect(b.slots.entries('sidebar.workspaces.content')[0]?.options).toMatchObject({ id: PAPERAI_DETAILS_VIEW_ID, order: 10 })
@@ -200,17 +200,22 @@ describe('PaperAI workbench browser plugin', () => {
     const b = await bench()
     declare(b.slots)
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    const details = injected(b.slots, 'conversation.details.view') as PaperAIDocumentWorkbenchInjected
+    const view = createWorkbenchViewStore().create()
+    const details = injected(b.slots, 'conversation.details.view', view.actions) as PaperAIDocumentWorkbenchInjected
+    details.showPanel('versions')
     const document = documentSnapshot()
     const excerpt = { nodeIds: [NODE_HEADING], text: 'Introduction' }
     b.scope.mockReturnValueOnce(undefined)
     details.quoteSelection(document, excerpt)
     expect(b.input.insertReference).not.toHaveBeenCalled()
+    expect(details.hooks.workbench.getSnapshot().panel).toBe('versions')
     details.quoteSelection(document, excerpt)
     expect(b.input.insertReference).toHaveBeenCalledWith(expect.objectContaining({
       source: 'paperai-selection', clipboardText: expect.stringContaining('"text":"Introduction"') as unknown,
     }), { start: 13, end: 13, draftRev: 4 })
     expect(b.revealConversation).toHaveBeenCalledOnce()
+    expect(details.hooks.workbench.getSnapshot().panel).toBeNull()
+    expect(view.getSnapshot().writing).toBe(false)
     b.input.insertReference.mockReturnValueOnce(false)
     details.quoteSelection(document, excerpt)
     expect(b.input.notify).toHaveBeenCalledWith('error', b.locale.bind(NS)('selection.busy'))
@@ -222,25 +227,65 @@ describe('PaperAI workbench browser plugin', () => {
     await b.ctx.fiber.dispose()
   })
 
-  it('keeps provider discovery and reviewed recovery behind their own explicit actions', async () => {
+  it('reveals collaboration after closing a document panel and leaving writing mode', async () => {
     const b = await bench()
     declare(b.slots)
-    const discover = vi.spyOn(b.remote, 'agentDiagnostics')
-    const probe = vi.spyOn(b.remote, 'probeAgent')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const view = createWorkbenchViewStore().create()
+    const details = injected(b.slots, 'conversation.details.view', view.actions) as PaperAIDocumentWorkbenchInjected
+    details.showPanel('gate')
+    details.setDetailsFocus(true)
+    details.showConversation()
+    expect(details.hooks.workbench.getSnapshot().panel).toBeNull()
+    expect(view.getSnapshot().writing).toBe(false)
+    expect(b.revealConversation).toHaveBeenCalledOnce()
+    await b.ctx.fiber.dispose()
+  })
+
+  it('appends a repair request while retaining composer text, images, and reference occurrences', async () => {
+    const b = await bench(undefined, { for: () => input })
+    const submit = vi.fn(async () => ({ kind: 'success' as const }))
+    const input: SessionInputShell = new SessionInputShell({ actx: b.ctx, defaultSink: submit, commandImages: {
+      serialize: async () => [], release: () => {}, unsupportedNotice: token => token,
+    } })
+    declare(b.slots)
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const view = createWorkbenchViewStore().create()
+    const details = injected(b.slots, 'conversation.details.view', view.actions) as PaperAIDocumentWorkbenchInjected
+    input.setDraft('Existing instructions ')
+    expect(input.insertReference({ source: 'reference', ref: 'research', label: 'Research', clipboardText: '@research' }, {
+      start: input.snapshot.draft.length, end: input.snapshot.draft.length, draftRev: input.snapshot.draftRev,
+    })).toBe(true)
+    expect(input.addImages(['synthetic-image' as Parameters<SessionInputShell['addImages']>[0][number]])).toBe(true)
+    const before = input.snapshot
+    details.showPanel('gate')
+    details.prepareAgentFix('Repair these findings')
+    expect(input.snapshot.draft).toBe(`${before.draft}\n\nRepair these findings`)
+    expect(input.snapshot.imageIds).toEqual(before.imageIds)
+    expect(input.snapshot.occurrences).toEqual(before.occurrences)
+    expect(input.snapshot.occurrences).toHaveLength(1)
+    expect(details.hooks.workbench.getSnapshot().panel).toBeNull()
+    expect(view.getSnapshot().writing).toBe(false)
+    expect(b.revealConversation).toHaveBeenCalledOnce()
+    expect(submit).not.toHaveBeenCalled()
+    input.setDraft('')
+    details.prepareAgentFix('Only this request')
+    expect(input.snapshot.draft).toBe('Only this request')
+    b.scope.mockReturnValueOnce(undefined)
+    details.prepareAgentFix('Closed session')
+    expect(input.snapshot.draft).toBe('Only this request')
+    expect(b.revealConversation).toHaveBeenCalledTimes(2)
+    await b.ctx.fiber.dispose()
+  })
+
+  it('keeps reviewed recovery behind its own explicit action', async () => {
+    const b = await bench()
+    declare(b.slots)
     const inspect = vi.spyOn(b.remote, 'inspectProject')
     const recover = vi.spyOn(b.remote, 'recoverWorking')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    const status = injected(b.slots, 'conversation.hero.agentPreset.status') as AgentDiagnosticsInjected
     const workspace = injected(b.slots, 'sidebar.workspaces.content') as PaperAIWorkspaceContentInjected
-    expect(discover).not.toHaveBeenCalled()
     expect(inspect).not.toHaveBeenCalled()
-    await status.loadAgents()
-    expect(discover).toHaveBeenCalledOnce()
-    expect(probe).not.toHaveBeenCalled()
-    await status.probe('claude', true)
-    expect(probe).toHaveBeenCalledWith({ provider: 'claude', force: true })
-    expect(discover).toHaveBeenCalledTimes(2)
-    expect(status.hooks.diagnostics.getSnapshot().probing).toEqual([])
     await workspace.inspectProject(WORKSPACE_ID)
     expect(inspect).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID })
     expect(recover).not.toHaveBeenCalled()
@@ -261,7 +306,7 @@ describe('PaperAI workbench browser plugin', () => {
     await b.ctx.fiber.dispose()
   })
 
-  it('keeps document navigation in the selected project session', async () => {
+  it.each([true, false])('reopens the cached document with its focus demand %s in the selected project session', async (focus) => {
     const b = await bench()
     b.workspaceList.set({ items: [{ workspaceId: WORKSPACE_ID, sessionIds: [SESSION_ID] }] })
     b.sessionList.set({ current: SESSION_ID })
@@ -270,7 +315,12 @@ describe('PaperAI workbench browser plugin', () => {
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     const workspace = injected(b.slots, 'sidebar.workspaces.content') as PaperAIWorkspaceContentInjected
     await workspace.openDocument(WORKSPACE_ID, RESOURCE_ID)
+    const details = injected(b.slots, 'conversation.details.view') as PaperAIDocumentWorkbenchInjected
+    details.setDetailsFocus(focus)
+    // Closing the shell releases its focus demand while retaining this document view.
+    b.setDetailsFocus(false)
     await workspace.openDocument(WORKSPACE_ID, RESOURCE_ID)
+    expect(b.setDetailsFocus).toHaveBeenLastCalledWith(focus)
     expect(b.connectWorkspace).not.toHaveBeenCalled()
     expect(open).toHaveBeenCalledOnce()
     expect(b.openSession).toHaveBeenLastCalledWith(SESSION_ID)
@@ -299,10 +349,10 @@ describe('PaperAI workbench browser plugin', () => {
     expect(details.hooks.projects.getSnapshot().workspaces[WORKSPACE_ID]).toMatchObject({ selected: RESOURCE_ID })
     details.showPanel('versions')
     expect(details.hooks.workbench.getSnapshot().panel).toBe('versions')
-    expect(details.selectBlock(NODE_HEADING)).toEqual({ ok: true })
-    details.updateDraft('Local draft')
+    details.updateDraft(NODE_HEADING, { text: 'Local draft' })
+    expect(details.hooks.workbench.getSnapshot().edits).toHaveLength(1)
     details.cancelEdit()
-    await expect(details.commitEdit()).resolves.toEqual({ ok: false, error: 'no block is being edited' })
+    await expect(details.commitEdit()).resolves.toEqual({ ok: false, error: 'no block has changes' })
     await expect(details.validate()).resolves.toEqual({ ok: true })
     await expect(details.suggestType()).resolves.toEqual({ ok: true })
     await expect(details.applyTemplate('midterm')).resolves.toEqual({ ok: true })

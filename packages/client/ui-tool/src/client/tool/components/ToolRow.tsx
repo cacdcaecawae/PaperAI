@@ -14,8 +14,8 @@
 // scannable; the details panel is the single-call full-height reading surface.
 // Expand state is component-local view state. File-tool summaries are path
 // links that open through the host (stopPropagation keeps the two gestures
-// independent); an error row's collapsed summary is the failure's first line in
-// the error color.
+// independent). An explicitly supplied failure summary replaces the collapsed
+// summary and uses the error color.
 
 import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
@@ -46,7 +46,7 @@ export interface ToolRowProps {
    * a narrow row clips the summary before this. For a fragment whose whole
    * value is surviving that clip — the todo row's parallel-active count.
    * null/absent = the summary is the whole collapsed content. Dropped on an
-   * error row, whose collapsed summary is the failure line instead.
+   * error row when an explicit failure summary replaces the normal summary.
    */
   summarySuffix?: string | null | undefined
   /** Expanded-body input text; null = no input section. */
@@ -162,8 +162,7 @@ export function ToolRow({
   // The run-state label AT needs: the StateDot and the running sweep are both
   // aria-hidden / colour-only, so a stopped or running row is otherwise silent.
   const status = stateStatus(state, t)
-  // An error row's collapsed summary IS the failure: the first error line in
-  // the error color outranks both the args summary and a terminal description.
+  // A supplied failure summary outranks both the args summary and a terminal description.
   const failureLine = state === 'error' ? errorSummary ?? null : null
   const summaryText = failureLine ?? summary
   // The failure line replaces the summary wholesale, so a suffix derived from

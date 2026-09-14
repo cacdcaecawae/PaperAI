@@ -6,12 +6,18 @@
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, rm, rmdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { DOMParser, onWarningStopParsing, XMLSerializer, type Element as XmlElement } from '@xmldom/xmldom'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import { DocumentEngine } from '@paperai/document-engine'
-import type { EngineMutation, EngineTextNode, EngineValidation } from '@paperai/document-engine'
+import type { EngineMutation, EngineParagraphStyle, EngineTextNode, EngineValidation } from '@paperai/document-engine'
 import type { CapabilityHealth } from '@paperai/domain'
+import { applyDocumentMutations } from './document-mutations.ts'
+import { resolveOfficePath } from './office-path.ts'
+import { replaceParagraphXml } from './paragraph-xml.ts'
 import {
   convertLegacyDocument,
   LegacyDocConversionError,
@@ -39,6 +45,17 @@ export class OfficeCliError extends Error {
   }
 }
 
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
+function parseWordXml(xml: unknown, part: string): XmlElement {
+  if (typeof xml !== 'string') throw new OfficeCliError(`OfficeCLI did not return ${part} XML`)
+  const root = new DOMParser({ onError: onWarningStopParsing }).parseFromString(xml, 'application/xml').documentElement
+  if (root === null || root.namespaceURI !== WORD_NS || root.localName !== part) {
+    throw new OfficeCliError(`OfficeCLI returned invalid ${part} XML`)
+  }
+  return root
+}
+
 /** Provider configuration; every deployment-sensitive limit is explicit. */
 export interface Config {
   /** Explicit OfficeCLI executable; omitting it uses the pinned npm package. */
@@ -49,8 +66,10 @@ export interface Config {
   outputMaxBytes?: number
   /** Positive TERM-to-KILL grace delegated to the subprocess Provider. */
   terminateGraceMs?: number
-  /** Positive independent deadline for closing a resident document after an operation. */
+  /** Positive independent deadline for one best-effort `close` of a resident document. */
   cleanupTimeoutMs?: number
+  /** Positive idle time after the last operation before a resident document is closed. */
+  residentIdleMs?: number
   /** PowerShell executable for Word COM conversion; false or an empty string disables legacy `.doc` import. */
   legacyDocPowerShellCommand?: string | false
   /** Positive deadline for one legacy `.doc` conversion. */
@@ -67,6 +86,7 @@ interface ResolvedConfig {
   outputMaxBytes: number
   terminateGraceMs: number
   cleanupTimeoutMs: number
+  residentIdleMs: number
   legacyDocPowerShellCommand: string | false | undefined
   legacyDocTimeoutMs: number
   legacyDocOutputMaxBytes: number
@@ -77,6 +97,7 @@ const DEFAULT_TIMEOUT_MS = 120_000
 const DEFAULT_OUTPUT_MAX_BYTES = 32 * 1024 * 1024
 const DEFAULT_TERMINATE_GRACE_MS = 2_000
 const DEFAULT_CLEANUP_TIMEOUT_MS = 5_000
+const DEFAULT_RESIDENT_IDLE_MS = 2_000
 const DEFAULT_LEGACY_DOC_TIMEOUT_MS = 120_000
 const DEFAULT_LEGACY_DOC_OUTPUT_MAX_BYTES = 1024 * 1024
 const DEFAULT_LEGACY_DOC_TERMINATE_GRACE_MS = 5_000
@@ -108,7 +129,7 @@ function packagedCommand(): { command: string; prefix: string[] } {
   return { command: process.execPath, prefix: [join(dirname(packagePath), bin)] }
 }
 
-/** OfficeCLI-backed Word engine with one FIFO lease per exact file path. */
+/** OfficeCLI-backed `ctx.documentEngine`: every operation runs through the pinned launcher under one per-file lease. */
 export class OfficeCliDocumentEngine extends DocumentEngine {
   static inject = ['subprocess']
   static Config: z<Config> = z.object({
@@ -117,6 +138,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
     terminateGraceMs: z.number().default(DEFAULT_TERMINATE_GRACE_MS),
     cleanupTimeoutMs: z.number().default(DEFAULT_CLEANUP_TIMEOUT_MS),
+    residentIdleMs: z.number().default(DEFAULT_RESIDENT_IDLE_MS),
     legacyDocPowerShellCommand: z.union([z.const(false), z.string()]),
     legacyDocTimeoutMs: z.number().default(DEFAULT_LEGACY_DOC_TIMEOUT_MS),
     legacyDocOutputMaxBytes: z.number().default(DEFAULT_LEGACY_DOC_OUTPUT_MAX_BYTES),
@@ -125,6 +147,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   private readonly config: ResolvedConfig
   private readonly leases = new Map<string, Promise<void>>()
+  private readonly idle = new Map<string, ReturnType<typeof setTimeout>>()
   private resolvedCommand?: Promise<{ command: string; prefix: string[] }>
 
   constructor(ctx: Context, config: Config) {
@@ -135,6 +158,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       outputMaxBytes: config.outputMaxBytes ?? DEFAULT_OUTPUT_MAX_BYTES,
       terminateGraceMs: config.terminateGraceMs ?? DEFAULT_TERMINATE_GRACE_MS,
       cleanupTimeoutMs: config.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS,
+      residentIdleMs: config.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS,
       legacyDocPowerShellCommand: config.legacyDocPowerShellCommand,
       legacyDocTimeoutMs: config.legacyDocTimeoutMs ?? DEFAULT_LEGACY_DOC_TIMEOUT_MS,
       legacyDocOutputMaxBytes: config.legacyDocOutputMaxBytes ?? DEFAULT_LEGACY_DOC_OUTPUT_MAX_BYTES,
@@ -144,10 +168,12 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     positiveSafeInteger(resolved.outputMaxBytes, 'outputMaxBytes')
     positiveSafeInteger(resolved.terminateGraceMs, 'terminateGraceMs')
     positiveSafeInteger(resolved.cleanupTimeoutMs, 'cleanupTimeoutMs')
+    positiveSafeInteger(resolved.residentIdleMs, 'residentIdleMs')
     positiveSafeInteger(resolved.legacyDocTimeoutMs, 'legacyDocTimeoutMs')
     positiveSafeInteger(resolved.legacyDocOutputMaxBytes, 'legacyDocOutputMaxBytes')
     positiveSafeInteger(resolved.legacyDocTerminateGraceMs, 'legacyDocTerminateGraceMs')
     this.config = resolved
+    ctx.effect(() => () => this.releaseAll(), 'document-engine-officecli: resident documents')
   }
 
   override async health(signal?: AbortSignal): Promise<CapabilityHealth> {
@@ -191,86 +217,102 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   override readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
     return this.withLease(filePath, async () => {
-      try {
-        const result = await this.run(['view', filePath, 'text', '--max-lines', '100000'], signal)
-        return result.stdout.split(/\r?\n/u).flatMap((line): EngineTextNode[] => {
-          const parsed = this.parseTextLine(line)
-          if (parsed === undefined) return []
-          return [{
-            officePath: parsed.officePath,
-            text: parsed.text,
-            kind: parsed.officePath.includes('/tbl[')
-              ? 'table'
-              : parsed.officePath.includes('/p[') ? 'paragraph' : 'unknown',
-          }]
-        })
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+      const result = await this.run(['view', filePath, 'text', '--max-lines', '100000'], signal)
+      return result.stdout.split(/\r?\n/u).flatMap((line): EngineTextNode[] => {
+        const parsed = this.parseTextLine(line)
+        if (parsed === undefined) return []
+        return [{
+          officePath: parsed.officePath,
+          text: parsed.text,
+          kind: parsed.officePath.includes('/tbl[')
+            ? 'table'
+            : parsed.officePath.includes('/p[') ? 'paragraph' : 'unknown',
+        }]
+      })
     })
   }
 
   override previewHtml(filePath: string, signal?: AbortSignal): Promise<string> {
-    return this.withLease(filePath, async () => {
-      try {
-        return (await this.run(['view', filePath, 'html'], signal)).stdout
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+    return this.withLease(filePath, async () => (await this.run(['view', filePath, 'html'], signal)).stdout)
+  }
+
+  override readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+    return this.withLease(filePath, () => this.paragraphStyles(filePath, signal))
+  }
+
+  private async paragraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+    const result = await this.run(['raw', filePath, '/styles', '--json'], signal)
+    const data = this.parseEnvelope(result.stdout).data
+    if (data === '(no styles)') return []
+    const root = parseWordXml(data, 'styles')
+    return Array.from(root.getElementsByTagNameNS(WORD_NS, 'style')).flatMap((style) => {
+      if (style.getAttributeNS(WORD_NS, 'type') !== 'paragraph') return []
+      const id = style.getAttributeNS(WORD_NS, 'styleId')
+      if (id === null || id === '') return []
+      const name = style.getElementsByTagNameNS(WORD_NS, 'name')[0]?.getAttributeNS(WORD_NS, 'val')
+      return [{ id, name: name || id }]
     })
   }
 
   override inspect(filePath: string, officePath: string, depth = 2, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.withLease(filePath, async () => {
-      try {
-        const result = await this.run(['get', filePath, officePath, '--depth', String(depth), '--json'], signal)
-        return this.parseEnvelope(result.stdout)
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+      const result = await this.run(['get', filePath, officePath, '--depth', String(depth), '--json'], signal)
+      return this.parseEnvelope(result.stdout)
     })
   }
 
   override applyMutations(filePath: string, mutations: readonly EngineMutation[], signal?: AbortSignal): Promise<void> {
     return this.withLease(filePath, async () => {
+      if (mutations.length === 0) return
+      const raw = await this.run(['raw', filePath, '/document', '--json'], signal)
+      const data = this.parseEnvelope(raw.stdout).data
+      const root = parseWordXml(data, 'document')
+      const stylesNeeded = mutations.some(mutation => mutation.type === 'insert-paragraph'
+        ? mutation.style !== undefined
+        : mutation.type === 'replace-text' && mutation.paragraphs?.some(paragraph => paragraph.format?.style !== undefined))
+      const styles = stylesNeeded ? await this.paragraphStyles(filePath, signal) : []
+      const resolveStyle = (name: string): string => {
+        const style = styles.find(style => style.id === name)
+          ?? styles.find(style => style.id.toLowerCase() === name.toLowerCase())
+          ?? styles.find(style => style.name.toLowerCase() === name.toLowerCase())
+        if (style === undefined) throw new OfficeCliError(`UNKNOWN_PARAGRAPH_STYLE: '${name}' is not a paragraph style in this document`)
+        return style.id
+      }
+      applyDocumentMutations(root, mutations,
+        (paragraph, mutation) => { replaceParagraphXml(paragraph, mutation, resolveStyle) }, resolveStyle)
+      const body = resolveOfficePath(root, '/body')
+      // The package part preserves legacy attributes; the /document alias reparses typed OpenXML and renames them.
+      const commands = [{ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace',
+        xml: new XMLSerializer().serializeToString(body) }]
+      const directory = await mkdtemp(join(tmpdir(), 'paperai-officecli-'))
+      const input = join(directory, 'commands.json')
       try {
-        for (const mutation of mutations) {
-          await this.run(this.mutationArgs(filePath, mutation), signal)
+        await writeFile(input, JSON.stringify(commands), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+        const batch = await this.run(['batch', filePath, '--input', input, '--json'], signal)
+        const response = this.parseEnvelope(batch.stdout)
+        const summary = response.summary as Record<string, unknown> | null | undefined
+        const results = response.results as Array<Record<string, unknown> | null> | undefined
+        if (summary?.total !== 1 || summary.executed !== 1 || summary.succeeded !== 1
+          || summary.failed !== 0 || summary.skipped !== 0
+          || !Array.isArray(results) || results.length !== 1 || results[0]?.index !== 0 || results[0].success !== true) {
+          throw new OfficeCliError('OfficeCLI did not apply the complete document batch', batch)
         }
         await this.run(['save', filePath, '--json'], signal)
       } finally {
-        await this.closeBestEffort(filePath)
+        await rm(input, { force: true })
+        await rmdir(directory)
       }
     })
   }
-
   override validate(filePath: string, signal?: AbortSignal): Promise<EngineValidation> {
     return this.withLease(filePath, async () => {
-      try {
-        const result = await this.run(['validate', filePath, '--json'], signal, true)
-        const details = result.stdout.trim() === ''
-          ? { stderr: result.stderr }
-          : this.parseEnvelope(result.stdout)
-        const declared = typeof details.success === 'boolean' ? details.success : undefined
-        return { success: declared ?? result.outcome.exitCode === 0, details }
-      } finally {
-        await this.closeBestEffort(filePath)
-      }
+      const result = await this.run(['validate', filePath, '--json'], signal, true)
+      const details = result.stdout.trim() === ''
+        ? { stderr: result.stderr }
+        : this.parseEnvelope(result.stdout)
+      const declared = typeof details.success === 'boolean' ? details.success : undefined
+      return { success: declared ?? result.outcome.exitCode === 0, details }
     })
-  }
-
-  private mutationArgs(filePath: string, mutation: EngineMutation): string[] {
-    if (mutation.type === 'replace-text') {
-      return ['set', filePath, mutation.officePath, '--prop', `text=${mutation.text}`, '--json']
-    }
-    if (mutation.type === 'remove') return ['remove', filePath, mutation.officePath, '--json']
-    const args = ['add', filePath, '/body', '--type', 'paragraph', '--prop', `text=${mutation.text}`]
-    if (mutation.style !== undefined) args.push('--prop', `style=${mutation.style}`)
-    if (mutation.after !== undefined) args.push('--after', mutation.after)
-    if (mutation.before !== undefined) args.push('--before', mutation.before)
-    if (mutation.index !== undefined) args.push('--index', String(mutation.index))
-    args.push('--json')
-    return args
   }
 
   private async command(): Promise<{ command: string; prefix: string[] }> {
@@ -336,13 +378,40 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
     }
   }
 
-  private withLease<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  /**
+   * Close the resident OfficeCLI process for one file so the next operation reads the bytes on disk.
+   * Callers replace or delete the file only after this resolves; without a resident there is nothing to do.
+   * @param filePath - canonical DOCX path about to be replaced or removed.
+   */
+  override release(filePath: string): Promise<void> {
+    if (!this.idle.has(filePath) && !this.leases.has(filePath)) return Promise.resolve()
+    return this.withLease(filePath, () => this.closeBestEffort(filePath), false)
+  }
+
+  private async releaseAll(): Promise<void> {
+    const paths = new Set([...this.idle.keys(), ...this.leases.keys()])
+    await Promise.all([...paths].map(filePath => this.release(filePath)))
+  }
+
+  /**
+   * Serialize operations per file. Every OfficeCLI command leaves a resident process holding the
+   * document in memory, so the lease keeps it running between operations and closes it after
+   * `residentIdleMs` without work; `release` closes it immediately and schedules nothing.
+   */
+  private withLease<T>(filePath: string, operation: () => Promise<T>, retain = true): Promise<T> {
+    clearTimeout(this.idle.get(filePath))
+    this.idle.delete(filePath)
     const prior = this.leases.get(filePath) ?? Promise.resolve()
     const run = prior.then(operation)
     const tail = run.then(() => undefined, () => undefined)
     this.leases.set(filePath, tail)
     return run.finally(() => {
-      if (this.leases.get(filePath) === tail) this.leases.delete(filePath)
+      if (this.leases.get(filePath) !== tail) return
+      this.leases.delete(filePath)
+      if (!retain) return
+      const timer = setTimeout(() => { void this.release(filePath) }, this.config.residentIdleMs)
+      timer.unref()
+      this.idle.set(filePath, timer)
     })
   }
 

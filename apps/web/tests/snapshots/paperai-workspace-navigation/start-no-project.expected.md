@@ -1,4 +1,4 @@
-- text: PaperAI
+- heading "PaperAI" [level=1]
 - paragraph: 选择一个文件夹。已有项目会保留文档和模板选择。
 - button "新建或打开项目":
   - img

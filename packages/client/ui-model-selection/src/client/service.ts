@@ -47,7 +47,7 @@ export class ModelDirectoryResolver extends Service {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
     ctx.on('connection/reset', () => {
-      for (const directory of this.live.directories.values()) directory.resetConnected()
+      for (const directory of this.live.directories.values()) directory.reset()
     })
     // Either source can change the directory: registry topology commits and
     // settings documents that carry provider catalogs or default selection.
@@ -59,8 +59,7 @@ export class ModelDirectoryResolver extends Service {
     ctx.remote.$on('llm/adapters-updated', refresh)
     ctx.remote.$on('settings/document-updated', refresh)
     ctx.remote.$on('agent-preset/selected', (sessionId) => {
-      const directory = this.live.directories.get(sessionId)
-      if (directory !== undefined) void directory.load().catch(() => { /* surfaced by the directory store */ })
+      this.live.directories.get(sessionId)?.reset()
     })
   }
 

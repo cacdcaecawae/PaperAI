@@ -135,11 +135,11 @@ export class ModelDirectory {
   }
 
   /**
-   * Drop the previous Host generation's projection and repull it. Clearing
-   * first prevents an unconsumed process-local selection from being displayed
-   * while the restarted Host has restored the last logged model selection.
+   * Clear choices after the Host or Agent changes and reload them.
+   * Pending responses cannot restore the discarded directory; a failed load
+   * leaves it empty until an explicit retry succeeds.
    */
-  resetConnected(): void {
+  reset(): void {
     if (this.disposed) return
     ++this.generation
     this.store.update((s) => {

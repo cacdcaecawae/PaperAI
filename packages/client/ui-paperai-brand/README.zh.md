@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-本包通过既有的 `sidebar.brand.mark`、`sidebar.brand.name`、`conversation.hero.brand.mark` slot 以及 `@paperai/ui-workbench` 在起始页上声明的 `paperai.start.mark` seat 提供 PaperAI 品牌标识，并通过带键的 `conversation.hero.agentPreset.mark` slot 提供装饰性的 Codex、Claude 与内置 DSH 引擎图标。标志是按产品 logo 描摹的图形——机器人头的钢笔尖落在一本翻开的书上，书压成黄金矩形——以 `brand-paths.ts` 中的一条 even-odd 路径交付并用 `currentColor` 填色：宿主预留一个正方形边长，竖向的图形以高度填满该边长、宽度按图形比例得出，因此侧边栏、hero 与起始页显示的是同一枚标志，各按自己的尺寸。字标是 `PaperAI` 的轮廓，与 DSH 字标同为 24px 高、使用主标签墨色，以 `data-brand-name="PaperAI"` 供测试与工具识别，而不是渲染文本。没有说明行、没有 hero 文案，也没有主题层：颜色保持出厂的 DSH 主题，只有标志与字标属于 PaperAI。所有图标都对辅助技术隐藏，无障碍名称由相邻的字标或预设名称提供。
+本包通过既有的 `sidebar.brand.mark`、`sidebar.brand.name`、`conversation.hero.brand.mark` slot 以及 `@paperai/ui-workbench` 在起始页上声明的 `paperai.start.mark` seat 提供 PaperAI 品牌标识，并通过带键的 `conversation.hero.agentPreset.mark` slot 提供装饰性的 Codex、Claude 与内置 DSH 引擎图标。标志是按产品 logo 描摹的图形——机器人头的钢笔尖落在一本翻开的书上，书压成黄金矩形——以 `brand-paths.ts` 中的一条 even-odd 路径交付并用 `currentColor` 填色：宿主预留一个正方形边长，竖向的图形以高度填满该边长、宽度按图形比例得出，因此侧边栏、hero 与起始页显示的是同一枚标志，各按自己的尺寸。字标是 `PaperAI` 的轮廓，与 DSH 字标同为 24px 高、使用主标签墨色，以 `data-brand-name="PaperAI"` 供测试与工具识别，而不是渲染文本。没有说明行、没有 hero 文案。配色由本包的“墨金”token 层负责：`theme.ts` 通过 `ctx.theme.overrideTokens` 在出厂 DSH 调色板之上叠加一层别名 token（浅色为暖纸面、墨色主按钮与旧金强调色；深色为深灰蓝表面、金色主按钮与香槟色细线），并定义工作台文档类型徽标使用的 `--paperai-type-*` 强调色。每个 token 都同时给出浅色与深色两个值，因此用户的浅色/深色/跟随系统偏好照常决定应用哪一侧，插件卸载即撤除该层。所有图标都对辅助技术隐藏，无障碍名称由相邻的字标或预设名称提供。
 
 插件同时把产品语言覆盖到 shell 上。`PROJECT_COPY` 以 `zh` 和 `en` 两种语言把 `workspace` 与 `conversation` 命名空间里所有称呼“工作区”的键——从侧边栏区段、分组、添加、返回、详情与会话标签，到选择器、冲突、重命名与删除文案、操作菜单，以及 hero 的工作区占位与选择片——改写为“项目”，并通过 `ctx.locale.override` 安装。未列出的键保持 DSH 文案，两种语言携带相同的键集合，因此不会有一种语言回退到另一种；插件卸载即撤除覆盖。
 

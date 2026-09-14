@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/paperai/commit-service/README.md
-README.md: d816f37ce39f4da2155850ab7e8d5ab9163dad45
-README.zh.md: 3dc16c1b5fb4c767b78118d2ad0bfe39fb3462fb
+README.md: f4a00a50606c0ee1d145eb10a574d215dafc8372
+README.zh.md: 430b6f088b164a4a337b0a621e67d70fd8d9537d

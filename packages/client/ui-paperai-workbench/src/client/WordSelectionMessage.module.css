@@ -3,5 +3,8 @@
 .citation blockquote { margin: 0; padding: 4px 12px; border-left: 2px solid var(--dsw-alias-border-l3); }
 .citation details { margin-top: 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .citation summary { cursor: pointer; }
-.citation pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.citation summary:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
+.citation dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; }
+.citation dd { margin: 0; overflow-wrap: anywhere; }
+.citation > strong { display: block; margin-bottom: 6px; font-size: 13px; line-height: 20px; }
 .path { display: block; margin-top: 8px; }

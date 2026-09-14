@@ -12,7 +12,7 @@ Host 报告的 `ModelSelection` 是唯一的选择事实，其中包含提供方
 
 每一份常驻目录都会直接在转发的 owner 事件 `llm/adapters-updated` 与 `settings/document-updated` 上重拉。因此提供方拓扑、提供方目录与默认选择都能收敛，Host 与 client runtime 无需再派生一个单独的模型变更别名。
 
-转发的 `agent-preset/selected` 仅刷新该会话已有的目录。新请求代次取代旧驱动的观测结果；尚未打开的会话不会创建目录或启动 Agent。
+转发的 `agent-preset/selected` 会立即清除该会话当前模型、选项、推理强度、开关与错误，再刷新其已有目录。旧 Agent 尚未完成的加载与选择不能恢复这些值。刷新失败时选项保持为空，并提供“重试”；同一 Agent 内的普通刷新仍保留最后成功加载的目录。尚未打开的会话不会创建目录或启动 Agent。
 
 `/client` 导出面为插件本体（`apply`/`inject`）、`ModelDirectoryResolver`、`ModelDirectory` 及其状态形状、slot 注入面类型。
 

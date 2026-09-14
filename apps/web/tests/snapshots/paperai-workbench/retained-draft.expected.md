@@ -1,4 +1,4 @@
-- textbox "编辑段落": 切换文档保留的草稿
-- text: 编辑段落
-- button "取消"
-- button "保存"
+- group "已修改 1 段":
+  - text: 已修改 1 段
+  - button "放弃修改"
+  - button "保存"

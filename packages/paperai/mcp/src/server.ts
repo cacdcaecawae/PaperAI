@@ -269,7 +269,8 @@ function toMutation(input: z.infer<typeof documentMutation>): DocumentMutation {
 }
 
 function assertLimits(limits: PaperMcpToolLimits): void {
-  for (const [name, value] of Object.entries(limits)) {
+  for (const name of ['defaultNodesPerRead', 'maxNodesPerRead', 'maxMutationsPerCommit'] as const) {
+    const value = limits[name]
     if (!Number.isSafeInteger(value) || value <= 0) {
       throw new Error(`paperai-mcp: ${name} must be a positive safe integer`)
     }

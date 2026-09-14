@@ -9,6 +9,10 @@
   gap: 12px;
 }
 
+.view :where(button) { min-height: 32px; }
+.confirmation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.confirmation p { flex-basis: 100%; margin: 0; font-size: 13px; line-height: 20px; }
+
 .settings {
   display: flex;
   max-width: 720px;
@@ -76,6 +80,7 @@
   min-width: 0;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .identity {
@@ -160,8 +165,8 @@
 
 .formatRemove {
   display: inline-grid;
-  width: 18px;
-  height: 18px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 50%;
   padding: 0;
@@ -198,7 +203,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 32px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
   padding: 0 10px;
@@ -206,8 +211,8 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .select:hover:not(:disabled),
@@ -221,9 +226,11 @@
 }
 
 .select:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--dsw-alias-border-l3);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
 }
+
+.formatRemove:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
 
 .message {
   margin: 0;

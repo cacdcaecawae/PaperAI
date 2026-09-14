@@ -14,7 +14,7 @@ import { createScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
-import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ConnectionHandle, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import type { CommandContribution, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ModelSelectInjected } from '../src/client/slots.ts'
 import { apply, inject } from '../src/client/index.ts'
@@ -301,7 +301,7 @@ describe('ui-model-selection dual entry', () => {
     expect(b.blockOf('s1')).toBeUndefined()
   })
 
-  it('refreshes only a resident directory when its Agent preset changes', async () => {
+  it('clears only the changed Agent session directory before reloading its models', async () => {
     const b = await bench()
     b.mint('s1')
     const face = b.seat().inject!(sid('s1'))
@@ -310,7 +310,38 @@ describe('ui-model-selection dual entry', () => {
     b.ctx.remote.$dispatch('agent-preset/selected', [sid('unopened'), 'claude'])
     expect(face.directory.getSnapshot().current?.model).not.toBe('replacement-model')
     b.ctx.remote.$dispatch('agent-preset/selected', [sid('s1'), 'claude'])
+    expect(face.directory.getSnapshot()).toMatchObject({
+      current: null, groups: [], switches: [], failures: [], routable: null, error: null, status: 'loading',
+    })
     await vi.waitFor(() => { expect(face.directory.getSnapshot().current?.model).toBe('replacement-model') })
+  })
+
+  it('withholds stale popup rows and selections while the new Agent directory is pending', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const api = (b.ctx.get('connection') as ConnectionHandle).api.sessions
+    const response = await api.models({ sessionId: sid('s1') })
+    if (!response.result.ok) throw new Error('model fixture did not load')
+    const oldOptions = await b.contribution().ui.options(projection('s1'), new AbortController().signal)
+    const obsolete = Promise.withResolvers<typeof response>()
+    const current = Promise.withResolvers<typeof response>()
+    const models = vi.spyOn(api, 'models').mockReturnValueOnce(obsolete.promise).mockReturnValueOnce(current.promise)
+    const opening = b.contribution().ui.options(projection('s1'), new AbortController().signal)
+    b.ctx.remote.$dispatch('agent-preset/selected', [sid('s1'), 'claude'])
+    obsolete.resolve(response)
+    expect(await opening).toEqual([])
+    await expect(b.contribution().ui.onSelect(oldOptions[0]!, projection('s1'))).rejects.toThrow('未能切换模型，请重试。')
+    expect(b.calls.select).toBe(0)
+    const replacement = { ...response, result: { ok: true as const, value: {
+      ...response.result.value,
+      current: { provider: 'claude', model: 'new-model' },
+      groups: [{ id: 'claude', name: 'Claude', models: [{ id: 'new-model', name: 'New Claude model' }] }],
+    } } }
+    current.resolve(replacement)
+    models.mockResolvedValue(replacement)
+    await vi.waitFor(() => { expect(b.ctx.modelDirectories.directoryFor(sid('s1')).store.getSnapshot().current?.provider).toBe('claude') })
+    const nextOptions = await b.contribution().ui.options(projection('s1'), new AbortController().signal)
+    expect(nextOptions.map(option => option.label)).toEqual(['New Claude model'])
   })
 
   it('never blocks on catalog membership alone', async () => {

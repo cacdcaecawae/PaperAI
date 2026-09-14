@@ -187,6 +187,10 @@ class FakeDocumentEngine extends DocumentEngine {
     return `<p>${await readFile(filePath, 'utf8')}</p>`
   }
 
+  override readParagraphStyles(): Promise<[]> {
+    return Promise.resolve([])
+  }
+
   override inspect(): Promise<Record<string, unknown>> {
     return Promise.resolve({})
   }
@@ -838,6 +842,35 @@ describe('PaperCommitService', () => {
       .rejects.toMatchObject({ code: 'NODE_TEXT_CONFLICT' })
     await expect(compile(harness, [replaceMutation(harness.nodeId, 'alpha', 'alpha')]))
       .rejects.toThrow('no-op')
+
+    // Runs carry the block's character formatting, so its text alone may stay as it is.
+    const formatted = await compile(harness, [{
+      ...replaceMutation(harness.nodeId, 'alpha', 'alpha'),
+      runs: [{ text: 'al', bold: true }, { text: 'pha' }],
+    }])
+    expect(formatted.engineMutations).toEqual([{
+      type: 'replace-text',
+      officePath: '/body/p[1]',
+      text: 'alpha',
+      runs: [{ text: 'al', bold: true }, { text: 'pha' }],
+    }])
+    await expect(compile(harness, [{
+      ...replaceMutation(harness.nodeId, 'alpha', 'beta'),
+      runs: [{ text: 'other' }],
+    }])).rejects.toThrow('do not spell its text')
+    const paragraphs = [{ text: 'al', runs: [{ text: 'al', font: 'Arial' }] }, { text: 'pha', format: { align: 'center' as const } }]
+    expect((await compile(harness, [{ ...replaceMutation(harness.nodeId, 'alpha', 'al\npha'), paragraphs }])).engineMutations)
+      .toEqual([{ type: 'replace-text', officePath: '/body/p[1]', text: 'al\npha', paragraphs }])
+    for (const invalid of [
+      { nextText: '', paragraphs: [] },
+      { nextText: 'alpha', paragraphs: [{ text: 'beta' }] },
+      { nextText: 'alpha', paragraphs: [{ text: 'alpha', runs: [{ text: 'beta' }] }] },
+      { nextText: 'al\npha', paragraphs: [{ text: 'al\npha' }] },
+      { nextText: 'alpha', paragraphs: [{ text: 'alpha' }], runs: [{ text: 'alpha' }] },
+    ]) {
+      await expect(compile(harness, [{ ...replaceMutation(harness.nodeId, 'alpha', 'alpha'), ...invalid }]))
+        .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    }
     await expect(compile(harness, [{ type: 'delete-node', nodeId: harness.nodeId, baseText: 'stale' }]))
       .rejects.toMatchObject({ code: 'NODE_TEXT_CONFLICT' })
     await expect(compile(harness, [{ type: 'milestone', label: ' ' }]))
@@ -1257,4 +1290,43 @@ describe('PaperCommitService', () => {
     expect(() => harness.ctx.paperCommits.listHistory(harness.documentId))
       .toThrow('references missing commit')
   })
+
+  it('captures a Working DOCX changed outside PaperAI as a version of its own', async () => {
+    const harness = await createHarness()
+    const first = await harness.ctx.paperCommits.submit({
+      documentId: harness.documentId,
+      message: 'First revision',
+      actor: codexActor,
+      mutations: [replaceMutation(harness.nodeId, 'alpha', 'beta')],
+    })
+    await expect(harness.ctx.paperCommits.captureExternal({ documentId: harness.documentId, actor: humanActor }))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+
+    await writeFile(harness.workingPath, 'gamma')
+    await expect(harness.ctx.paperCommits.submit({
+      documentId: harness.documentId,
+      baseCommitId: first.id,
+      message: 'Blocked',
+      actor: humanActor,
+      mutations: [replaceMutation(harness.nodeId, 'beta', 'delta')],
+    })).rejects.toMatchObject({ code: 'WORKING_COPY_CHANGED' })
+
+    const captured = await harness.ctx.paperCommits.captureExternal({ documentId: harness.documentId, actor: humanActor })
+    expect(captured.parentId).toBe(first.id)
+    expect(captured.message).toBe('载入外部修改')
+    expect(captured.operations).toEqual([])
+    expect(captured.documentSha256).not.toBe(first.documentSha256)
+    expect(await readFile(harness.workingPath, 'utf8')).toBe('gamma')
+    expect(harness.ctx.paperCommits.listHistory(harness.documentId).map(commit => commit.id))
+      .toEqual([captured.id, first.id])
+    const next = await harness.ctx.paperCommits.submit({
+      documentId: harness.documentId,
+      baseCommitId: captured.id,
+      message: 'Continues',
+      actor: humanActor,
+      mutations: [replaceMutation(harness.nodeId, 'gamma', 'delta')],
+    })
+    expect(next.parentId).toBe(captured.id)
+  })
+
 })

@@ -23,13 +23,13 @@ describe('PaperAI DSH-native styling', () => {
   })
 
   it('follows the sidebar row and heading metrics of the DSH session list', () => {
-    expect(sidebar).toContain('height: 32px')
+    expect(sidebar).toContain('min-height: 36px')
     expect(sidebar).toContain('border-radius: 8px')
     expect(sidebar).toContain('font-size: 14px')
     expect(sidebar).toContain('min-height: 34px')
     expect(sidebar).toContain('var(--dsw-alias-interactive-bg-hover)')
-    expect(start).toContain('grid-template-columns: 34px auto')
-    expect(start).toContain('font-size: 26px')
+    expect(start).toContain('font-size: 20px')
+    expect(start).toContain('min-height: 48px')
   })
 
   it('paints only through theme tokens, with no drop shadows, literal colors, or product accent overrides', () => {
@@ -49,8 +49,7 @@ describe('PaperAI DSH-native styling', () => {
     expect(preview).toMatch(/script, iframe, object, embed/u)
     expect(preview).toContain("name.startsWith('on')")
     expect(preview).not.toContain('dangerouslySetInnerHTML')
-    expect(preview).not.toContain('contentEditable')
-    expect(preview).toContain('<textarea')
+    expect(preview).toContain("getData('text/plain')")
   })
 
   it('composes from DSH primitives and never reaches for a primary button or card vocabulary', () => {

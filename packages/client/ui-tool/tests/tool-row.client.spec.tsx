@@ -217,6 +217,29 @@ describe('tool-call-model', () => {
     expect(toolRowModel('bash', running()).errorSummary).toBeNull()
   })
 
+  it.each([
+    { callView: null, resultView: { card: 'generic' as const, title: 'Read document' } },
+    { callView: { card: 'generic' as const, title: 'Read document' }, resultView: null },
+    { callView: { card: 'generic' as const, title: 'Read document' }, resultView: { card: 'generic' as const } },
+    { callView: { card: 'generic' as const, title: 'Read document' }, resultView: { card: 'generic' as const, title: ' ' } },
+    { callView: { card: 'generic' as const, title: 'Pending title' }, resultView: { card: 'generic' as const, title: 'Read document' } },
+  ])('keeps a generic presenter title on a failed result with $callView and $resultView', (views) => {
+    const output = '{"error":{"code":"invalid_arguments","message":"limit must be at most 200"}}'
+    expect(toolRowModel('external_tool', result({
+      ...views, content: [{ type: 'text', text: output }], isError: true,
+    }))).toMatchObject({ summary: 'Read document', errorSummary: null, output, state: 'error' })
+  })
+
+  it.each([
+    { callView: null, resultView: { card: 'generic' as const } },
+    { callView: { card: 'generic' as const, title: ' ' }, resultView: { card: 'generic' as const, title: '' } },
+    { callView: { card: 'generic' as const, title: 'Run command' }, resultView: { card: 'terminal' as const, title: 'Command failed' } },
+  ])('keeps the failure first line without an effective generic title with $callView and $resultView', (views) => {
+    expect(toolRowModel('external_tool', result({
+      ...views, content: [{ type: 'text', text: 'boom\ndetail' }], isError: true,
+    }))).toMatchObject({ errorSummary: 'boom', output: 'boom\ndetail', state: 'error' })
+  })
+
   it('gives Cordis lifecycle tools action titles over their generic variants', () => {
     expect(toolRowModel('cordis_runtime_inspect', running({
       name: 'cordis_runtime_inspect',
@@ -422,6 +445,24 @@ describe('ToolRow', () => {
 describe('GenericToolCard', () => {
   const props = (toolName: string, block: RunningToolCall | ToolResultNode): GenericToolCardProps => ({
     callId: 'c1', toolName, block, openFile: vi.fn(), t,
+  })
+
+  it('keeps a failed provider call identifiable while its complete error output stays expandable', () => {
+    const output = '{"result":{"content":[{"type":"text","text":"MCP error -32602: limit must be at most 200"}]},"error":null}'
+    const view = render(<GenericToolCard {...props('paperai_acp_tool', result({
+      call: null, callTime: null,
+      content: [{ type: 'text', text: output }],
+      resultView: { card: 'generic', title: 'mcp.paperai.paperai_read_document', content: [{ type: 'text', text: output }] },
+      isError: true,
+    }))} />)
+    const button = view.getByRole('button', { name: /^Tool call\s*mcp\.paperai\.paperai_read_document$/ })
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(view.getByText('失败')).toBeTruthy()
+    expect(view.queryByText(output)).toBeNull()
+    fireEvent.click(button)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(view.getByText(output)).toBeTruthy()
+    expect(button.textContent).not.toContain(output)
   })
 
   it('renders the classified variant row from the frozen slice', () => {

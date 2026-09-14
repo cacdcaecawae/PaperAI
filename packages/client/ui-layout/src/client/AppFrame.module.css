@@ -71,6 +71,12 @@
   transition: left var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
 
+.handle:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
 .frame[data-dragging] .handle {
   transition: none;
 }

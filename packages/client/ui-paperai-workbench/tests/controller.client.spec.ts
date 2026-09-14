@@ -1,10 +1,11 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
-import type { PaperAIDocumentCommitResult, PaperAITemplateLibrary, PaperAIWorkbenchRemote } from '../src/client/types.ts'
+import type { PaperAIDocumentCommitResult, PaperAIDocumentOpenResult, PaperAITemplateLibrary, PaperAIWorkbenchRemote } from '../src/client/types.ts'
 import {
   COMMIT_0, COMMIT_1, COMMIT_2, CUSTOM_PACK_ID, DIFF, DOCUMENT_ID, documentOpenResult, HIT_PACK_ID,
-  NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE, OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, successfulRemote,
+  NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE, OVERVIEW, RESOURCE_ID, REVISION_1, REVISION_2, SESSION_ID, successfulRemote,
   WORKSPACE_ID,
 } from './fixtures.client.ts'
 
@@ -26,8 +27,7 @@ describe('PaperAIWorkbenchController projects', () => {
       resourceId: request.resourceId, documentId: String(request.resourceId).slice('document:'.length) as never,
     }) }))
     const { controller, store } = await openedController(remote)
-    controller.selectBlock(SESSION_ID, NODE_HEADING)
-    controller.updateDraft(SESSION_ID, 'Survives eviction')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Survives eviction' })
     controller.setScroll(SESSION_ID, 420)
     const second = 'document:second' as typeof RESOURCE_ID
     const third = 'document:third' as typeof RESOURCE_ID
@@ -36,7 +36,7 @@ describe('PaperAIWorkbenchController projects', () => {
     expect(store.getSnapshot().retained.map(view => view.document?.resourceId)).toEqual([second])
     await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
     expect(remote.open).toHaveBeenCalledTimes(4)
-    expect(store.getSnapshot()).toMatchObject({ scrollTop: 420, edit: { draft: 'Survives eviction', conflicted: false } })
+    expect(store.getSnapshot()).toMatchObject({ scrollTop: 420, edits: [{ draft: 'Survives eviction', conflicted: false }] })
     expect(store.getSnapshot().retained.map(view => view.document?.resourceId)).toEqual([third])
     controller.handleDocumentChanged({ documentId: 'third' as never, headCommitId: COMMIT_2, updatedAt: '2026-09-05T00:00:00Z' })
     expect(store.getSnapshot().retained).toHaveLength(0)
@@ -164,8 +164,7 @@ describe('PaperAIWorkbenchController projects', () => {
     const starting = method === 'importDocument'
       ? controller.importDocument(WORKSPACE_ID, SESSION_ID, { fileName: 'new.docx', contentBase64: 'd29yZA==' })
       : controller.createFromTemplate(WORKSPACE_ID, SESSION_ID, { documentType: 'proposal' })
-    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: true })
-    controller.updateDraft(SESSION_ID, 'Written during import')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Written during import' })
     const current = store.getSnapshot()
     pending.resolve({ ok: true, value: {
       status: 'imported', createdCommitId: COMMIT_2,
@@ -198,8 +197,7 @@ describe('PaperAIWorkbenchController projects', () => {
     const commit = vi.spyOn(remote, 'commit')
     commit.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const { controller } = await openedController(remote)
-    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: true })
-    controller.updateDraft(SESSION_ID, 'Changed')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Changed' })
     const committing = controller.commitEdit(SESSION_ID)
     await expect(controller.createFromTemplate(WORKSPACE_ID, SESSION_ID, { documentType: 'midterm' }))
       .resolves.toEqual({ ok: false, error: 'workbench is busy' })
@@ -253,21 +251,37 @@ describe('PaperAIWorkbenchController template library', () => {
 })
 
 describe('PaperAIWorkbenchController documents', () => {
-  it('opens a document, edits one block in place, and saves it as a version', async () => {
+  it('retains draft text and the unsupported-content diagnostic when Word preservation rejects a save', async () => {
+    const remote = successfulRemote()
+    const message = "UNSUPPORTED_DOCUMENT_CONTENT: paragraph '/body/p[2]' contains objects that require editing in Word"
+    vi.spyOn(remote, 'commit').mockResolvedValueOnce({ ok: false, error: { code: 'internal', message, details: {} } })
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Keep my words' })
+    const original = store.getSnapshot().document
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: false, error: `internal: ${message}` })
+    expect(store.getSnapshot()).toMatchObject({ action: null, actionError: `internal: ${message}`, edits: [{ draft: 'Keep my words' }] })
+    expect(store.getSnapshot().document).toBe(original)
+    controller.dispose()
+  })
+
+  it('opens a document, retypes blocks in place, and saves them as one version', async () => {
     const remote = successfulRemote()
     const commit = vi.spyOn(remote, 'commit')
     const { controller, store } = await openedController(remote)
-    expect(store.getSnapshot()).toMatchObject({ phase: 'ready', edit: null, panel: null })
+    expect(store.getSnapshot()).toMatchObject({ phase: 'ready', edits: [], panel: null })
     expect(controller.projectStore(WORKSPACE_ID).getSnapshot().selected).toBe(RESOURCE_ID)
 
-    expect(controller.selectBlock(SESSION_ID, NODE_TABLE)).toEqual({ ok: false, error: 'block is not editable' })
-    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: true })
-    expect(store.getSnapshot().edit).toEqual({ nodeId: NODE_HEADING, baseText: 'Introduction', draft: 'Introduction' })
-    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: false, error: 'block has no changes' })
-    controller.updateDraft(SESSION_ID, 'Rewritten introduction')
-    expect(controller.selectBlock(SESSION_ID, NODE_PARAGRAPH)).toEqual({ ok: false, error: 'save or cancel the current block first' })
-    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: true })
-    expect(store.getSnapshot().edit?.draft).toBe('Rewritten introduction')
+    controller.updateDraft(SESSION_ID, NODE_TABLE, { text: 'Cells without a node stay as rendered' })
+    expect(store.getSnapshot().edits).toEqual([])
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: false, error: 'no block has changes' })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Rewritten introduction' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Rewritten background' })
+    // The page owns the comparison, because a block can differ by its formatting alone; null drops its draft.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(store.getSnapshot().edits).toEqual([{ nodeId: NODE_HEADING, baseText: 'Introduction', baseRevision: REVISION_1, draft: 'Rewritten introduction' }])
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Rewritten background', runs: [
+      { text: 'Rewritten ' }, { text: 'background', bold: true },
+    ] })
 
     await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
     expect(commit).toHaveBeenCalledWith({
@@ -275,14 +289,22 @@ describe('PaperAIWorkbenchController documents', () => {
       documentId: DOCUMENT_ID,
       baseRevision: 'revision-1',
       baseCommitId: COMMIT_1,
-      mutations: [{ type: 'replace-text', nodeId: NODE_HEADING, baseText: 'Introduction', nextText: 'Rewritten introduction' }],
+      mutations: [
+        { type: 'replace-text', nodeId: NODE_HEADING, baseText: 'Introduction', nextText: 'Rewritten introduction' },
+        {
+          type: 'replace-text',
+          nodeId: NODE_PARAGRAPH,
+          baseText: 'Research background',
+          nextText: 'Rewritten background',
+          runs: [{ text: 'Rewritten ' }, { text: 'background', bold: true }],
+        },
+      ],
     }, expect.any(AbortSignal))
-    expect(store.getSnapshot()).toMatchObject({ edit: null, action: null, document: { revision: REVISION_2, headCommitId: COMMIT_2 } })
+    expect(store.getSnapshot()).toMatchObject({ edits: [], action: null, document: { revision: REVISION_2, headCommitId: COMMIT_2 } })
 
-    controller.selectBlock(SESSION_ID, NODE_PARAGRAPH)
-    controller.updateDraft(SESSION_ID, 'Draft')
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Draft' })
     controller.cancelEdit(SESSION_ID)
-    expect(store.getSnapshot().edit).toBeNull()
+    expect(store.getSnapshot().edits).toEqual([])
   })
 
   it('retains an unsaved draft across document navigation while excluding competing document mutations', async () => {
@@ -291,8 +313,7 @@ describe('PaperAIWorkbenchController documents', () => {
     const importDocument = vi.spyOn(remote, 'importDocument')
     const createFromTemplate = vi.spyOn(remote, 'createFromTemplate')
     const validate = vi.spyOn(remote, 'validate')
-    controller.selectBlock(SESSION_ID, NODE_HEADING)
-    controller.updateDraft(SESSION_ID, 'Unsaved introduction')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Unsaved introduction' })
     controller.setScroll(SESSION_ID, 240)
     open.mockResolvedValueOnce({ ok: true, value: documentOpenResult(undefined, {
       resourceId: 'document:other' as typeof RESOURCE_ID, documentId: 'other' as typeof DOCUMENT_ID,
@@ -301,7 +322,7 @@ describe('PaperAIWorkbenchController documents', () => {
     expect(store.getSnapshot().document?.documentId).toBe('other')
     await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
     expect(open).toHaveBeenCalledOnce()
-    expect(store.getSnapshot()).toMatchObject({ edit: { draft: 'Unsaved introduction' }, scrollTop: 240 })
+    expect(store.getSnapshot()).toMatchObject({ edits: [{ draft: 'Unsaved introduction' }], scrollTop: 240 })
     expect(controller.projectStore(WORKSPACE_ID).getSnapshot().selected).toBe(RESOURCE_ID)
 
     const blocked = { ok: false, error: 'save or cancel the current block first' }
@@ -315,7 +336,7 @@ describe('PaperAIWorkbenchController documents', () => {
     expect(validate).not.toHaveBeenCalled()
     expect(store.getSnapshot()).toMatchObject({
       document: { documentId: DOCUMENT_ID },
-      edit: { draft: 'Unsaved introduction' },
+      edits: [{ draft: 'Unsaved introduction' }],
       actionError: blocked.error,
     })
 
@@ -329,24 +350,23 @@ describe('PaperAIWorkbenchController documents', () => {
   it('preserves edits across reconnect and offers a missed external version for explicit refresh', async () => {
     const { controller, remote, store } = await openedController()
     const open = vi.spyOn(remote, 'open')
-    controller.selectBlock(SESSION_ID, NODE_HEADING)
-    controller.updateDraft(SESSION_ID, 'Unsaved introduction')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Unsaved introduction' })
 
     controller.refreshLoaded()
     await vi.waitFor(() => { expect(open).toHaveBeenCalledOnce() })
     expect(store.getSnapshot()).toMatchObject({
-      edit: { draft: 'Unsaved introduction' }, document: { headCommitId: COMMIT_1 }, externalUpdate: null,
+      edits: [{ draft: 'Unsaved introduction' }], document: { headCommitId: COMMIT_1 }, externalUpdate: null,
     })
 
     open.mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
     controller.refreshLoaded()
     await vi.waitFor(() => { expect(store.getSnapshot().externalUpdate).toMatchObject({ headCommitId: COMMIT_2 }) })
     expect(store.getSnapshot()).toMatchObject({
-      edit: { draft: 'Unsaved introduction' }, document: { headCommitId: COMMIT_1 },
+      edits: [{ draft: 'Unsaved introduction' }], document: { headCommitId: COMMIT_1 },
     })
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
     expect(store.getSnapshot()).toMatchObject({
-      edit: { draft: 'Unsaved introduction' }, document: { headCommitId: COMMIT_2 }, externalUpdate: null,
+      edits: [{ draft: 'Unsaved introduction' }], document: { headCommitId: COMMIT_2 }, externalUpdate: null,
     })
   })
 
@@ -354,14 +374,13 @@ describe('PaperAIWorkbenchController documents', () => {
     const { controller, remote, store } = await openedController()
     let finish!: (value: RemoteResult<ReturnType<typeof documentOpenResult>>) => void
     vi.spyOn(remote, 'open').mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
-    controller.selectBlock(SESSION_ID, NODE_HEADING)
-    controller.updateDraft(SESSION_ID, 'Unsaved introduction')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Unsaved introduction' })
     controller.refreshLoaded()
     controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: 'commit-newest' as typeof COMMIT_2, updatedAt: '2026-09-03T00:00:00.000Z' })
     finish({ ok: true, value: documentOpenResult(REVISION_2) })
     await new Promise<void>(resolve => setTimeout(resolve, 0))
     expect(store.getSnapshot()).toMatchObject({
-      externalUpdate: { headCommitId: 'commit-newest' }, edit: { draft: 'Unsaved introduction' },
+      externalUpdate: { headCommitId: 'commit-newest' }, edits: [{ draft: 'Unsaved introduction' }],
     })
   })
 
@@ -385,6 +404,9 @@ describe('PaperAIWorkbenchController documents', () => {
     diffVersion.mockResolvedValueOnce(REMOTE_FAILURE)
     await expect(controller.showDiff(SESSION_ID, COMMIT_0)).resolves.toEqual({ ok: false, error: 'internal: Host capability unavailable' })
     expect(store.getSnapshot().diff).toEqual({ commitId: COMMIT_0, result: null, error: 'internal: Host capability unavailable' })
+    diffVersion.mockResolvedValueOnce({ ok: true, value: { ...DIFF, commitId: COMMIT_0 } })
+    await expect(controller.showDiff(SESSION_ID, COMMIT_0)).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().diff?.result?.commitId).toBe(COMMIT_0)
     controller.showPanel(SESSION_ID, 'versions')
     expect(store.getSnapshot()).toMatchObject({ panel: null, diff: null })
   })
@@ -456,7 +478,8 @@ describe('PaperAIWorkbenchController documents', () => {
     await controller.retryOpen(SESSION_ID)
     expect(store.getSnapshot()).toMatchObject({ phase: 'error', error: 'paperaiWorkbench returned another document' })
     await expect(controller.validate(SESSION_ID)).resolves.toEqual({ ok: false, error: 'no open document' })
-    expect(controller.selectBlock(SESSION_ID, NODE_HEADING)).toEqual({ ok: false, error: 'no open document' })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Nothing to edit' })
+    expect(store.getSnapshot().edits).toEqual([])
   })
 
   it('reloads external heads and retains a conflicting draft without allowing it to overwrite the block', async () => {
@@ -480,18 +503,156 @@ describe('PaperAIWorkbenchController documents', () => {
     expect(store.getSnapshot().externalUpdate).toBeNull()
 
     // A dirty draft waits for the user; the block still reads the same, so the draft survives.
-    controller.selectBlock(SESSION_ID, NODE_HEADING)
-    controller.updateDraft(SESSION_ID, 'Local draft')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Local draft' })
     controller.handleDocumentChanged({ ...change, headCommitId: 'commit-9' as never })
     expect(store.getSnapshot().externalUpdate).toMatchObject({ headCommitId: 'commit-9' })
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
     expect(store.getSnapshot()).toMatchObject({
       externalUpdate: null,
       actionError: null,
-      edit: { draft: 'Local draft', conflicted: true },
+      edits: [{ draft: 'Local draft', conflicted: true }],
     })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Local draft with more typing' })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', conflicted: true }])
     await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
     expect(remote.commit).not.toHaveBeenCalled()
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'no external document update' })
   })
+
+  it('retains formatting drafts as conflicts after an external revision changes no plain text', async () => {
+    const remote = successfulRemote()
+    const commit = vi.spyOn(remote, 'commit')
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Introduction', runs: [{ text: 'Introduction', bold: true }] })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-12T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    expect(store.getSnapshot().edits).toMatchObject([{ baseRevision: REVISION_1, conflicted: true, runs: [{ bold: true }] }])
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Changed again' })
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
+    expect(commit).not.toHaveBeenCalled()
+  })
+})
+
+describe('PaperAIWorkbenchController deferred previews', () => {
+  it('paints a commit into the current preview and swaps in the rendered one', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async request => ({
+      ok: true,
+      value: {
+        createdCommitId: COMMIT_2,
+        ...documentOpenResult(REVISION_2, {
+          previewHtml: '',
+          paragraphStyles: [],
+          nodes: documentOpenResult().document.nodes.map(node => node.nodeId === request.mutations[0]?.nodeId
+            ? { ...node, text: request.mutations[0].nextText, label: request.mutations[0].nextText }
+            : node),
+        }),
+      },
+    }))
+    const { controller, store } = await openedController(remote)
+    let finish!: (value: RemoteResult<PaperAIDocumentOpenResult>) => void
+    remote.open = vi.fn<typeof remote.open>(() => new Promise((resolve) => { finish = resolve }))
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Rewritten' })
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    const patched = store.getSnapshot().document?.previewHtml ?? ''
+    expect(new DOMParser().parseFromString(patched, 'text/html').querySelector('h1')?.textContent).toBe('Rewritten')
+    expect(patched).toContain('Research background')
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual(documentOpenResult().document.paragraphStyles)
+    expect(remote.open).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, resourceId: RESOURCE_ID })
+    const rendered = '<html><head></head><body><h1 data-path="/body/p[1]">Rewritten</h1></body></html>'
+    const paragraphStyles = [{ id: 'Normal', name: 'Normal' }, { id: 'TemplateBody', name: 'Template body' }]
+    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: rendered, paragraphStyles }) })
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe(rendered) })
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual(paragraphStyles)
+  })
+
+  it('keeps a new draft and its preview while an earlier commit render completes', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    let finish!: (value: RemoteResult<PaperAIDocumentOpenResult>) => void
+    remote.open = vi.fn<typeof remote.open>(() => new Promise((resolve) => { finish = resolve }))
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed text' })
+    await controller.commitEdit(SESSION_ID)
+    const painted = store.getSnapshot().document?.previewHtml
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Typing during preview rendering' })
+    const paragraphStyles = [{ id: 'Normal', name: 'Normal' }]
+    finish({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>', paragraphStyles }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.getSnapshot().document?.previewHtml).toBe(painted)
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Typing during preview rendering' }])
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual(paragraphStyles)
+  })
+
+  it.each([false, true])('refreshes only the retained original document and preserves a subsequent draft: %s', async (drafting) => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '', paragraphStyles: [] }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed in A' })
+    await controller.commitEdit(SESSION_ID)
+    const patched = store.getSnapshot().document?.previewHtml
+    if (drafting) controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'New draft in A' })
+    const secondResource = 'document:second' as typeof RESOURCE_ID
+    const second = documentOpenResult(REVISION_2, {
+      documentId: 'second' as typeof DOCUMENT_ID, resourceId: secondResource,
+      previewHtml: '<p>Document B</p>', paragraphStyles: [{ id: 'StyleB', name: 'Style in B' }],
+    })
+    vi.mocked(remote.open).mockResolvedValueOnce({ ok: true, value: second })
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, secondResource)
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, {
+      previewHtml: '<p>Document A</p>', paragraphStyles: [{ id: 'StyleA', name: 'Style in A' }],
+    }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.getSnapshot().document).toEqual(second.document)
+    expect(store.getSnapshot().externalUpdate).toBeNull()
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    expect(remote.open).toHaveBeenCalledTimes(2)
+    expect(store.getSnapshot().document?.previewHtml).toBe(drafting ? patched : '<p>Document A</p>')
+    expect(store.getSnapshot().document?.paragraphStyles).toEqual([{ id: 'StyleA', name: 'Style in A' }])
+    expect(store.getSnapshot().edits).toMatchObject(drafting ? [{ draft: 'New draft in A' }] : [])
+  })
+
+  it('records an outside working edit as a version and reopens the document with the draft kept', async () => {
+    const remote = successfulRemote()
+    const { controller, store } = await openedController(remote)
+    const documentId = store.getSnapshot().document?.documentId
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Unsaved introduction' })
+    const capture = vi.spyOn(remote, 'captureExternal')
+    vi.spyOn(remote, 'open').mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    await expect(controller.captureExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(capture).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, documentId }, expect.any(AbortSignal))
+    expect(store.getSnapshot()).toMatchObject({
+      action: null, edits: [{ draft: 'Unsaved introduction' }], document: { headCommitId: COMMIT_2 },
+    })
+    vi.spyOn(remote, 'captureExternal').mockResolvedValue({ ok: false, error: { code: 'internal', message: 'nothing external to capture', details: {} } })
+    await expect(controller.captureExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'internal: nothing external to capture' })
+    expect(store.getSnapshot().actionError).toBe('internal: nothing external to capture')
+  })
+
+
+  it('keeps the painted preview and raises the external-update notice when the render belongs to another version', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true,
+      value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    remote.open = vi.fn<typeof remote.open>(async () => ({
+      ok: true,
+      value: documentOpenResult(REVISION_1, { previewHtml: '<html><head></head><body><p data-path="/body/p[2]">Elsewhere</p></body></html>' }),
+    }))
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Rewritten' })
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    await vi.waitFor(() => { expect(store.getSnapshot().externalUpdate).toMatchObject({ headCommitId: COMMIT_1 }) })
+    expect(store.getSnapshot().document?.previewHtml).toContain('Rewritten')
+    expect(store.getSnapshot().document?.previewHtml).not.toContain('Elsewhere')
+  })
+
 })

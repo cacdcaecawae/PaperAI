@@ -4,9 +4,9 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@paperai/workbench-service/remote'
 import type {
-  PaperAIDocumentNodeId, PaperAIDocumentSnapshot, PaperAIDocumentType,
+  PaperAIDocumentNodeId, PaperAIDocumentSnapshot, PaperAIDocumentTextRun, PaperAIDocumentType,
   PaperAIDocumentTypeSuggestion, PaperAIExportMode, PaperAIProjectOverview, PaperAIResourceId,
-  PaperAITemplateLibrary, PaperAIVersionDiff,
+  PaperAITemplateLibrary, PaperAIVersionDiff, PaperAIDocumentParagraph, PaperAIDocumentRevision,
 } from '@paperai/workbench-service/types'
 
 export type * from '@paperai/workbench-service/types'
@@ -15,10 +15,9 @@ export type * from '@paperai/workbench-service/types'
 export type PaperAIWorkbenchRemote = Pick<
   TypertClientRemote['paperaiWorkbench'],
   | 'overview'
-  | 'agentDiagnostics'
-  | 'probeAgent'
   | 'inspectProject'
   | 'recoverWorking'
+  | 'captureExternal'
   | 'setProjectTemplate'
   | 'listTemplateLibrary'
   | 'createTemplateSet'
@@ -99,12 +98,35 @@ export type PaperAIWorkbenchAction =
   | 'exporting-draft'
   | 'exporting-delivery'
   | 'reloading-external'
+  | 'capturing-external'
+
+/** What one block now reads: its plain text, and its runs when character formatting is part of the change. */
+export interface PaperAIBlockDraft {
+  readonly text: string
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+  /** Paragraphs replacing this original block after a split or paragraph-format edit. */
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
+  /** Local rendered readings used to omit unchanged formatting from the Word mutation. */
+  readonly formatting?: PaperAIFormatComparison
+}
+
+/** Effective browser formatting before and after an edit; empty paragraphs retain a zero-text reading. */
+export interface PaperAIFormatComparison {
+  readonly before: readonly PaperAIDocumentTextRun[]
+  readonly after: readonly PaperAIDocumentTextRun[]
+}
 
 /** The block being edited in place: its node, the text it started from, and the draft. */
 export interface PaperAIBlockEdit {
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
+  /** The original revision is retained until save or discard, including after an external reload. */
+  readonly baseRevision?: PaperAIDocumentRevision
   readonly draft: string
+  /** Local character runs for draft repaint; may include unchanged rendered properties. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+  readonly paragraphs?: readonly PaperAIDocumentParagraph[]
+  readonly formatting?: PaperAIFormatComparison
   /** The current document changed this block; retain the draft for copying or discarding. */
   readonly conflicted?: boolean
 }
@@ -134,7 +156,8 @@ export interface PaperAIWorkbenchState {
   scrollTop: number
   phase: PaperAIWorkbenchPhase
   document: PaperAIDocumentSnapshot | null
-  edit: PaperAIBlockEdit | null
+  /** Blocks retyped in the page and not yet saved, each with the text it started from. */
+  edits: readonly PaperAIBlockEdit[]
   action: PaperAIWorkbenchAction | null
   panel: PaperAIWorkbenchPanel | null
   diff: PaperAIVersionDiffState | null

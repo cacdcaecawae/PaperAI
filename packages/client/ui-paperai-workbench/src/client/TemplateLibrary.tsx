@@ -79,7 +79,7 @@ function AddFormatForm({ set, state, addTemplateFormat, close, t }: {
   return (
     <div className={css.addFormat}>
       <Menu
-        compact
+        portal
         open={typeOpen}
         selectedId={documentType}
         items={DOCUMENT_TYPE_ORDER.map(type => ({ id: type, label: t(DOCUMENT_TYPE_KEYS[type]) }))}
@@ -104,7 +104,7 @@ function AddFormatForm({ set, state, addTemplateFormat, close, t }: {
         onClose={() => { setTypeOpen(false) }}
       />
       <Menu
-        compact
+        portal
         open={usageOpen}
         selectedId={usage}
         items={USAGES.map(value => ({
@@ -145,9 +145,10 @@ function AddFormatForm({ set, state, addTemplateFormat, close, t }: {
         }}
       />
       <Button variant="outline" size="sm" disabled={busy} onClick={() => { fileInput.current?.click() }}>
-        {busy ? t('library.working') : t('library.formatFile')}
+        {busy ? t('library.working') : covered.has(documentType) ? t('library.formatReplace') : t('library.formatFile')}
       </Button>
       <Button variant="toolbar" size="sm" disabled={busy} onClick={close}>{t('library.cancel')}</Button>
+      {covered.has(documentType) && <p className={css.description}>{t('library.replaceHint')}</p>}
       {invalid && <p className={css.error} role="alert">{t('start.invalidFile')}</p>}
     </div>
   )
@@ -163,6 +164,7 @@ function SetCard({ set, state, project, actions, t }: {
 }): ReactNode {
   const [addingFormat, setAddingFormat] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [removing, setRemoving] = useState<PaperAIDocumentType | null>(null)
   const busy = state.action !== null
   const current = project !== undefined && project.packId === set.packId
   const formats = [...set.formats].sort((left, right) => (
@@ -223,6 +225,7 @@ function SetCard({ set, state, project, actions, t }: {
         </div>
       </div>
       {set.description !== '' && <p className={css.description}>{set.description}</p>}
+      {confirmingDelete && <p className={css.description}>{t('library.deleteHint')}</p>}
       <div className={css.formats}>
         <span className={css.formatsLabel}>{t('library.formats')}</span>
         {formats.length === 0 && <span className={css.noFormats}>{t('library.noFormats')}</span>}
@@ -238,7 +241,7 @@ function SetCard({ set, state, project, actions, t }: {
                   className={css.formatRemove}
                   aria-label={`${t('library.formatRemove')}：${typeLabel}`}
                   disabled={busy}
-                  onClick={() => { void actions.removeTemplateFormat(set.packId, format.documentType) }}
+                  onClick={() => { setRemoving(format.documentType) }}
                 >
                   ×
                 </button>
@@ -247,6 +250,13 @@ function SetCard({ set, state, project, actions, t }: {
           )
         })}
       </div>
+      {removing !== null && <div className={css.confirmation} role="group" aria-label={t('library.confirmRemove')}>
+        <p>{t('library.removeHint')}</p>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => {
+          void actions.removeTemplateFormat(set.packId, removing).then((result) => { if (result.ok) setRemoving(null) })
+        }}>{t('library.confirmRemove')}</Button>
+        <Button variant="toolbar" size="sm" disabled={busy} onClick={() => { setRemoving(null) }}>{t('library.cancel')}</Button>
+      </div>}
       {set.kind === 'custom' && (addingFormat
         ? (
           <AddFormatForm

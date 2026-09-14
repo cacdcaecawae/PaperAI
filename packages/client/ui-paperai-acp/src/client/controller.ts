@@ -12,6 +12,7 @@ import type {
   AcpManagementRequest,
   AcpManagementResult,
 } from '@paperai/agent-acp/diagnostic-types'
+import type { AcpTranslate } from './locales.ts'
 
 /** The generated ACP management methods, independent of document editing. */
 export type AcpRemote = Pick<
@@ -61,9 +62,9 @@ export interface AcpSettingsState {
 
 const NS = 'paperai-acp-agents'
 
-function jsonRecord(source: string, field: string): Record<string, unknown> {
+function jsonRecord(source: string, field: string, t: AcpTranslate): Record<string, unknown> {
   const parsed: unknown = JSON.parse(source)
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${field}须为 JSON 对象`)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(t('recordError', { field }))
   return parsed as Record<string, unknown>
 }
 
@@ -99,6 +100,7 @@ export class AcpSettingsController {
       open: (id: SessionId) => void
       localDirectory: () => string | undefined
     },
+    private readonly t: AcpTranslate,
   ) {
     this.stop = settings.subscribe(() => {
       this.readSettings()
@@ -160,6 +162,8 @@ export class AcpSettingsController {
    * @param id - one instance, or undefined for all enabled/discovered channels.
    */
   async probe(id?: string): Promise<void> {
+    if (this.isDisposed()) return
+    this.store.update((state) => { state.error = null })
     const entries = this.store
       .getSnapshot()
       .entries.filter(entry => (id === undefined ? entry.enabled || entry.adapter !== null : entry.id === id))
@@ -211,11 +215,12 @@ export class AcpSettingsController {
    * Run account, routing, or history actions with channel-owned progress.
    * @param id - configured instance id.
    * @param action - user-selected management action.
+   * @returns whether the action and dependent refresh completed successfully.
    */
-  async manage(id: string, action: AcpManagementRequest): Promise<void> {
-    await this.operation(id, async () => {
+  async manage(id: string, action: AcpManagementRequest): Promise<boolean> {
+    return this.operation(id, async () => {
       if (action.kind === 'history' && action.cursor !== undefined && this.historyDirectories.get(id) !== action.cwd)
-        throw new Error('工作目录已改变，请重新读取历史')
+        throw new Error(this.t('directoryChanged'))
       const result = await this.remote.acpManage({ provider: id, action })
       if (!result.ok) throw new Error(result.error.message)
       if (this.isDisposed()) return
@@ -289,7 +294,7 @@ export class AcpSettingsController {
       }
       const remoteHost = this.store.getSnapshot().entries.find(entry => entry.id === id)?.source === 'remote'
       const cwd = remoteHost ? this.navigation.localDirectory() : history.cwd
-      if (cwd === undefined) throw new Error('导入远程历史前请先打开一个本地论文项目')
+      if (cwd === undefined) throw new Error(this.t('localProjectRequired'))
       const created = await this.navigation.create({ cwd, agentPreset: id })
       const imported = await this.remote.acpImportHistory({
         sessionId: created,
@@ -305,8 +310,8 @@ export class AcpSettingsController {
     return opened
   }
 
-  private async operation(id: string, run: () => Promise<void>): Promise<void> {
-    if (this.isDisposed() || this.store.getSnapshot().busy.includes(id)) return
+  private async operation(id: string, run: () => Promise<void>): Promise<boolean> {
+    if (this.isDisposed() || this.store.getSnapshot().busy.includes(id)) return false
     this.store.update((state) => {
       state.busy = [...state.busy, id]
       state.error = null
@@ -321,11 +326,13 @@ export class AcpSettingsController {
     }, 1000)
     try {
       await run()
+      return !this.isDisposed()
     } catch (error: unknown) {
       if (!this.isDisposed())
         this.store.update((state) => {
           state.error = String(error)
         })
+      return false
     } finally {
       clearInterval(progress)
       if (!this.isDisposed()) {
@@ -419,6 +426,7 @@ export class AcpSettingsController {
    * @param id - enabled ACP instance or the native DSH Agent.
    */
   async setDefault(id: string): Promise<void> {
+    this.store.update((state) => { state.error = null })
     try {
       await this.mutate('agent-presets', [{ op: 'set', path: ['default'], value: id }])
     } catch (error: unknown) {
@@ -435,6 +443,7 @@ export class AcpSettingsController {
    * @param model - provider model id.
    */
   async favorite(provider: string, model: string): Promise<void> {
+    this.store.update((state) => { state.error = null })
     try {
       await this.mutate(NS, () => {
         const current = this.store.getSnapshot().favorites[provider] ?? []
@@ -460,14 +469,14 @@ export class AcpSettingsController {
     try {
       const args: unknown = JSON.parse(draft.args)
       if (!Array.isArray(args) || args.some(value => typeof value !== 'string'))
-        throw new Error('启动参数须为 JSON 字符串数组')
+        throw new Error(this.t('argsError'))
       const values: Record<string, unknown> = {
         template: draft.template,
         name: draft.name,
         enabled: draft.enabled,
         args,
-        configOptions: jsonRecord(draft.configOptions, '会话选项'),
-        permissionModes: jsonRecord(draft.permissionModes, '权限模式'),
+        configOptions: jsonRecord(draft.configOptions, this.t('optionsField'), this.t),
+        permissionModes: jsonRecord(draft.permissionModes, this.t('permissionsField'), this.t),
       }
       for (const field of [
         'command',
@@ -479,7 +488,7 @@ export class AcpSettingsController {
         'personalPrompt',
       ] as const)
         values[field] = draft[field] || undefined
-      values.ssh = draft.ssh.trim() === '' ? undefined : jsonRecord(draft.ssh, 'SSH 配置')
+      values.ssh = draft.ssh.trim() === '' ? undefined : jsonRecord(draft.ssh, this.t('sshField'), this.t)
       const ops: SettingsPathOpView[] = Object.entries(values).map(([field, value]) =>
         value === undefined
           ? { op: 'unset', path: ['providers', draft.id, field] }
@@ -490,11 +499,11 @@ export class AcpSettingsController {
         ops.push({ op: 'set', path: ['providers', draft.id, 'apiKey'], value: draft.apiKey })
       if (draft.clearEnv) ops.push({ op: 'unset', path: ['providers', draft.id, 'env'] })
       else if (draft.env !== '')
-        ops.push({ op: 'set', path: ['providers', draft.id, 'env'], value: jsonRecord(draft.env, '环境变量') })
+        ops.push({ op: 'set', path: ['providers', draft.id, 'env'], value: jsonRecord(draft.env, this.t('envField'), this.t) })
       // Clear legacy copies atomically so a failed migration cannot restore an edited field or cleared secret.
       ops.push(...ops.map(({ path }) => ({ op: 'unset' as const, path: path.slice(1) })))
       if (!draft.enabled && this.store.getSnapshot().defaultProvider === draft.id)
-        throw new Error('请先更换默认 Agent，再停用此渠道')
+        throw new Error(this.t('disableDefaultError'))
       await this.mutate(NS, ops)
       if (this.isDisposed()) return
       this.store.update((state) => {

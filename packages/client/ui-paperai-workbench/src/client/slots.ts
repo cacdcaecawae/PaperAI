@@ -1,6 +1,7 @@
 /** Component-side contracts for the PaperAI slot entries. */
 
-import type { HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { createWorkbenchViewStore } from './view-store.ts'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the SlotMap merges of the entries this plugin occupies.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -53,6 +54,8 @@ export interface PaperAILibraryInjected {
 export interface PaperAIWorkspaceContentInjected {
   /** Read project integrity, or apply an explicit recovery plan and read it again. */
   inspectProject: (workspaceId: WorkspaceId, plan?: import('./types.ts').PaperAIWorkingRecoveryPlan) => Promise<void>
+  /** Record one document's Working DOCX, changed outside PaperAI, as a version of its own. */
+  captureExternal: (workspaceId: WorkspaceId, documentId: import('./types.ts').PaperAIDocumentId) => Promise<void>
   hooks: {
     /** Independent diagnostics, scoped by the sidebar's project id. */
     diagnostics: HostObservable<import('./diagnostics-controller.ts').DiagnosticsState>
@@ -81,6 +84,8 @@ export interface PaperAIStartPageInjected extends PaperAILibraryInjected {
   }
   /** Load an unread project or retry its failed read. */
   ensureProject: (workspaceId: WorkspaceId) => Promise<void>
+  /** Open one tracked document of the project in the details view. */
+  openDocument: PaperAIWorkspaceContentInjected['openDocument']
   /** Record the project's template set, or the choice of none. */
   setProjectTemplate: (workspaceId: WorkspaceId, packId: string | null) => Promise<PaperAIActionResult>
   /** Connect the Workspace and start one document of a type from the project template. */
@@ -107,6 +112,10 @@ export type PaperAITemplatesSectionProps =
 
 /** Operations and sources injected into the document view. */
 export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected {
+  /** Close the document panel, leave writing mode, and reveal the Session conversation. */
+  showConversation: () => void
+  /** Append a repair request to the existing composer draft and reveal the Session conversation. */
+  prepareAgentFix: (text: string) => void
   /** Add a frozen Word excerpt to the Session's composer. */
   quoteSelection: (document: import('./types.ts').PaperAIDocumentSnapshot, excerpt: import('./selection-context.ts').WordExcerpt) => void
   /** Remember the active document's scroll offset. */
@@ -121,13 +130,11 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   retryOpen: () => Promise<void>
   /** Open one secondary panel, or close it when it is already open. */
   showPanel: (panel: PaperAIWorkbenchPanel | null) => void
-  /** Start editing one block in place. */
-  selectBlock: (nodeId: PaperAIDocumentNodeId) => PaperAIActionResult
-  /** Replace the block draft. */
-  updateDraft: (value: string) => void
-  /** Discard the block draft. */
+  /** Record what one block now reads in the page; `null` drops its draft. */
+  updateDraft: (nodeId: PaperAIDocumentNodeId, draft: import('./types.ts').PaperAIBlockDraft | null) => void
+  /** Discard every block draft. */
   cancelEdit: () => void
-  /** Save the block draft as one version. */
+  /** Save every block draft as one version. */
   commitEdit: () => Promise<PaperAIActionResult>
   /** Run the template gate. */
   validate: () => Promise<PaperAIActionResult>
@@ -147,6 +154,8 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   exportDocument: (mode: PaperAIExportMode) => Promise<PaperAIActionResult>
   /** Replace the current projection with a pending durable head. */
   reloadExternal: () => Promise<PaperAIActionResult>
+  /** Record the open document's Working DOCX, changed outside PaperAI, as a version and reopen it. */
+  captureExternal: () => Promise<PaperAIActionResult>
   /** Demand or release the layout's whole-content-area details focus. */
   setDetailsFocus: (active: boolean) => void
 }
@@ -154,6 +163,7 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
 /** Full props assembled for the PaperAI details view entry. */
 export type PaperAIDocumentWorkbenchProps =
   PropsRuntime<'conversation.details.view'>
+  & PropsStore<ReturnType<typeof createWorkbenchViewStore>>
   & InjectFace<PaperAIDocumentWorkbenchInjected>
   & PropsLocale<'paperai.workbench'>
 

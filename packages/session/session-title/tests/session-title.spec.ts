@@ -33,6 +33,13 @@ describe('session title normalization', () => {
     expect(() => truncateTitleUtf8('title', 0)).toThrow(/maxBytes must be a positive integer/)
     expect(() => fallbackSessionTitle('title', 1.5, 10)).toThrow(/maxWords must be a positive integer/)
   })
+
+  it('takes the first visible line before applying word and UTF-8 limits', () => {
+    expect(fallbackSessionTitle('\n \r\n\u001B]0;ignored\u0007\r\n  Paper review\r\n[Reference]\n{"path":"private.docx"}', 5, 80)).toBe('Paper review')
+    expect(fallbackSessionTitle('One two three\nFour five', 2, 80)).toBe('One two')
+    expect(fallbackSessionTitle('\u001B]0;hidden\ncaption\u0007\n  😀中文\nBody', 5, 7)).toBe('😀中')
+    expect(fallbackSessionTitle(' \n\t\r\n ', 5, 80)).toBe('')
+  })
 })
 
 describe('SessionTitleService', () => {
@@ -56,19 +63,20 @@ describe('SessionTitleService', () => {
       type: 'session/title',
       seq: 2,
       data: {
-        title: 'Build log-backed session titles please',
+        title: 'Build',
         messageSeqs: [message.seq],
         source: { kind: 'fallback' },
       },
     })
     expect(ctx.sessionTitle.get(session)).toEqual({
-      title: 'Build log-backed session titles please',
+      title: 'Build',
       messageSeqs: [message.seq],
       source: { kind: 'fallback' },
       eventSeq: 2,
       updatedAt: titleEvent?.time,
     })
     expect(session.deriveMessages()).toHaveLength(1)
+    expect(session.deriveMessages()[0]?.content).toEqual([{ type: 'text', text: '  Build\nlog-backed session titles please  ' }])
     expect(session.surface.nodes).toEqual([message.seq])
   })
 

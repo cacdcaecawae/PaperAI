@@ -10,9 +10,13 @@ Saving edited fields also removes their legacy copies atomically, so a pending m
 
 The settings section supports per-channel launch configuration, write-only credentials, default Agent/model, proxy, personal instructions, model favorites, explicit probes, and managed installation actions. Available account, provider-routing, and external-history operations follow the adapter's advertised capabilities. Import opens an existing local association or creates a separate conversation; failure preserves the currently selected conversation and its draft.
 
-The conversation header exposes the connected adapter's current model and other session options. Model search and favorites do not change the live catalog. An explicit custom model ID is sent to the provider for validation. Permission-owned options remain under the existing permission selector.
+The conversation header exposes the connected adapter's current model and other session options. Applying an option refreshes the same session's shared model directory, so the composer and `/model` reflect the Host-confirmed model, effort, and switches. Model search and favorites do not change the live catalog. An explicit custom model ID is sent to the provider for validation. Permission-owned options remain under the existing permission selector.
 
 The plugin reads the shared settings mirror and uses the generated PaperAI Remote mounted by the workbench. Controllers own asynchronous operations, stale-response rejection, and session-scoped disposal. It introduces neither another settings store on disk nor another Remote mount. [The ACP service](../../paperai/agent-acp/README.md) owns process, permission, history, and protocol semantics.
+
+Settings use the shared DSH controls and Chinese/English locale, grouped by connection setup, credentials/network, models/permissions, and advanced preferences. Installation progress and conversation usage remain separate; raw failure details expand beneath an actionable message. Failed channel-configuration and provider-routing saves preserve their inputs for retry. Credentials remain write-only and destructive account or installation actions retain their confirmation.
+
+Selecting another Agent immediately clears the previous Agent's session options and invalidates its pending responses. Loading and first-load failure remain visible even before session details exist, with an explicit retry. Background refreshes retain a rejected option's reason; explicit refresh clears it. Options are locked while refreshing, applying, or disconnected, including provider-declared read-only model options.
 
 ## Model Experience
 

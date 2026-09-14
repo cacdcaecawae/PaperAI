@@ -21,12 +21,14 @@ describe('logged Word quotations', () => {
     const reference = wordSelectionReference(documentSnapshot(), { nodeIds: [NODE_PARAGRAPH], text: 'A <quote>\n中文' })
     const { container } = show(`Please revise\n${reference.ref}\nKeep its meaning.`)
     expect(container.querySelector('blockquote')?.textContent).toBe('A <quote>\n中文')
+    expect(container.querySelector('strong')?.textContent).toBe('硕士学位论文开题报告.docx')
     expect(container.textContent).toContain('Please revise')
     expect(container.textContent).toContain('Keep its meaning.')
     expect(screen.getByText('查看引用来源')).toBeTruthy()
     const disclosure = container.querySelector('details')!
     expect(disclosure.open).toBe(false)
     expect(disclosure.textContent).toContain(NODE_PARAGRAPH)
+    expect(disclosure.textContent).toContain(documentSnapshot().documentId)
     expect(container.querySelector('quote')).toBeNull()
   })
 

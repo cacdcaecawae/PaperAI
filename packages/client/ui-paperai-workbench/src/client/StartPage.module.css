@@ -1,50 +1,54 @@
-/* The start page stands where the DSH headline stood: the same 34px mark
-   seat and 26/32 wt500 title (figma 34:10412), then one caption line and one
-   row of outlined capsule buttons. It paints no card and no accent of its
-   own; the composer card below stays the visual anchor. */
+/* The start page is the blank session's headline: the mark in the brand's gold,
+   the project name at 20/28, one line of facts, then the documents as a
+   hairline list whose last row creates or imports. It paints no card and no
+   glow; the composer below stays the visual anchor. */
 
 .root {
   display: flex;
+  width: 100%;
   min-width: 0;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 24px;
   color: var(--dsw-alias-label-primary);
 }
 
+.root :where(button) { min-height: 36px; }
+
 .headline {
-  display: grid;
-  grid-template-columns: 34px auto;
-  align-items: center;
-  justify-content: center;
-  column-gap: 10px;
+  display: flex;
   min-width: 0;
-  font-size: 26px;
-  font-weight: 500;
-  line-height: 32px;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 .markSeat {
   display: inline-flex;
-  width: 34px;
-  height: 34px;
+  height: 40px;
   align-items: center;
   justify-content: center;
+  margin-bottom: 8px;
 }
 
 .mark {
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
-.headlineText {
-  min-width: 0;
+.title {
+  max-width: 100%;
+  margin: 0;
   overflow: hidden;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .lead,
-.templateLine {
+.facts {
   margin: 0;
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
@@ -52,48 +56,141 @@
   text-align: center;
 }
 
-.templateLine {
+.facts {
   display: inline-flex;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 2px 8px;
+  gap: 0 6px;
 }
 
-/* The change affordance is a text link in the caption's own line; a button
-   there would outrank the document actions below. */
-.changeTemplate {
+/* The template is one fact among the others; only its dotted underline says
+   it can be changed. */
+.templateLink {
   border: 0;
   border-radius: 6px;
-  padding: 0 4px;
+  padding: 0;
   background: transparent;
-  color: var(--dsw-alias-state-business-primary);
+  color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  line-height: 20px;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
-.changeTemplate:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+.templateLink:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
 }
 
-.changeTemplate:focus-visible {
+.templateLink:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
-.changeTemplate:disabled {
+.templateLink:disabled {
   color: var(--dsw-alias-label-dimmed);
   cursor: default;
 }
 
-.actions {
+.documents {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.listHead {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.docRow,
+.createRow {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding: 0 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.docName small { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+
+.docRow:hover,
+.createRow:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.docRow:focus-visible,
+.createRow:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+.docIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--paperai-row-accent, var(--dsw-alias-label-tertiary));
+}
+
+.docName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  flex: none;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: var(--paperai-row-tint, var(--dsw-alias-interactive-bg-hover));
+  color: var(--paperai-row-accent, var(--dsw-alias-label-tertiary));
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.docDate {
+  width: 72px;
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The create row is a menu anchor; the menu's inline wrapper spans the row. */
+.menu,
+.menu > span {
+  display: block;
+  width: 100%;
+}
+
+.createRow {
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.createRow:disabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: default;
 }
 
 .failure {
