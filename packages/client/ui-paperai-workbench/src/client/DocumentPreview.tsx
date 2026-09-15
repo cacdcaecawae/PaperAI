@@ -48,6 +48,7 @@ const PREVIEW_STYLE = `
 [data-paperai-conflicted]::before { content: '!'; font-weight: bold; color: var(--dsw-alias-state-error-primary); }
 [data-paperai-conflicted] { border-inline-start: 2px dashed var(--dsw-alias-state-error-primary); }
 [data-paperai-change][data-paperai-current] { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+[data-paperai-removed] { opacity: 0.85; }
 [data-paperai-change] del { background: var(--dsw-alias-state-error-tertiary); color: var(--dsw-alias-state-error-primary); text-decoration: line-through; }
 [data-paperai-change] ins { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); text-decoration: underline; }
 [data-paperai-block][contenteditable="true"] { cursor: text; outline: none; min-height: 1em; caret-color: var(--dsw-alias-state-business-primary); }

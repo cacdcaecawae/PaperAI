@@ -1017,13 +1017,20 @@ describe('DocumentWorkbench', () => {
     expect(within(panel).getByText('点一版，在文档上查看它的改动。')).toBeTruthy()
     fireEvent.click(within(panel).getByRole('button', { name: /Improve the introduction/u }))
     expect(timeline.showDiff).toHaveBeenCalledWith(documentSnapshot().headCommitId)
+    // The second reading measures the current head from the picked version.
+    fireEvent.click(within(panel).getByRole('button', { name: '和现在比差多少' }))
+    fireEvent.click(within(panel).getByRole('button', { name: /从模板新建/u }))
+    expect(timeline.showDiff).toHaveBeenLastCalledWith(documentSnapshot().headCommitId, COMMIT_0)
     cleanup()
     expect(timeline.setDetailsFocus).toHaveBeenLastCalledWith(false)
 
     // The root version diffs against nothing: the panel says so and the page stays unmarked.
     const b = workbenchProps(workbenchState({
       phase: 'ready', panel: 'versions', document: documentSnapshot(),
-      diff: { commitId: COMMIT_0, result: { ...DIFF, commitId: COMMIT_0, parentCommitId: null }, error: null },
+      diff: {
+        commitId: COMMIT_0, baseCommitId: null, error: null,
+        result: { ...DIFF, commitId: COMMIT_0, parentCommitId: null, baseCommitId: null },
+      },
     }))
     const rootView = render(<DocumentWorkbench {...b.props} />)
     const compared = screen.getByRole('complementary', { name: '版本' })
@@ -1039,7 +1046,7 @@ describe('DocumentWorkbench', () => {
 
     // A later version shows its changes in place and offers to walk them.
     const later = workbenchProps(workbenchState({
-      phase: 'ready', panel: 'versions', document: documentSnapshot(), diff: { commitId: COMMIT_1, result: DIFF, error: null },
+      phase: 'ready', panel: 'versions', document: documentSnapshot(), diff: { commitId: COMMIT_1, baseCommitId: null, result: DIFF, error: null },
     }))
     const view = render(<DocumentWorkbench {...later.props} />)
     expect(within(screen.getByRole('complementary', { name: '版本' })).getByText('2 处变化 · 3 段未变')).toBeTruthy()

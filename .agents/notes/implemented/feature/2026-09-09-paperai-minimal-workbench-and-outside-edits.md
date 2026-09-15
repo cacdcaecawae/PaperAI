@@ -4,7 +4,7 @@ Status: implemented
 
 English | [中文](2026-09-09-paperai-minimal-workbench-and-outside-edits.zh.md)
 
-Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns editor commands, draft conflicts, writing defaults, and panel behavior. Resident-engine lifecycle, version publication, outside-file capture, and theme ownership below remain active.
+Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns editor commands, draft conflicts, writing defaults, and panel behavior. Resident-engine lifecycle, version publication, outside-file capture, and theme ownership below remain active. Version comparison is now governed by the [visual-grammar decision](2026-09-15-paperai-workbench-visual-grammar.md): the page shows the compared version with every change marked in place.
 
 ## Problem
 

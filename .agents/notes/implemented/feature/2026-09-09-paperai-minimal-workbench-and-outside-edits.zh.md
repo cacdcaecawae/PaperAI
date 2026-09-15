@@ -4,7 +4,7 @@ Status: implemented
 
 [English](2026-09-09-paperai-minimal-workbench-and-outside-edits.md) | 中文
 
-部分取代：[写作流程决策](2026-09-12-paperai-writing-workflow.zh.md)拥有编辑命令、草稿冲突、默认写作模式及面板行为。下述常驻引擎生命周期、版本发布、外部文件捕获与主题归属继续有效。
+部分取代：[写作流程决策](2026-09-12-paperai-writing-workflow.zh.md)拥有编辑命令、草稿冲突、默认写作模式及面板行为。下述常驻引擎生命周期、版本发布、外部文件捕获与主题归属继续有效。版本比较现由[视觉语法决策](2026-09-15-paperai-workbench-visual-grammar.zh.md)决定：页面显示被比较的版本，所有改动就地标记。
 
 ## 问题
 

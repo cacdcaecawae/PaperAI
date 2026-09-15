@@ -134,6 +134,8 @@ export interface PaperAIBlockEdit {
 /** One version's diff loaded into the versions panel. */
 export interface PaperAIVersionDiffState {
   readonly commitId: PaperAIVersionDiff['commitId']
+  /** The requested base; `null` measures the version from its parent. */
+  readonly baseCommitId: PaperAIVersionDiff['commitId'] | null
   readonly result: PaperAIVersionDiff | null
   readonly error: string | null
 }

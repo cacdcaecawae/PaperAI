@@ -1425,7 +1425,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: '@Remote(\'diffVersion\') async diffVersion(request: PaperAIDiffVersionRequest, signal?: AbortSignal): Promise<PaperAIVersionDiff>',
         description: 'Diff one version against its parent at paragraph level, reading both immutable snapshots through the document engine.',
         parameters: [{ name: 'request', description: 'document and version to explain.' }, { name: 'signal', description: 'optional cancellation signal for engine reads.' }],
-        returns: 'paragraph changes in document order plus the snapshot\'s rendering; a root version lists every paragraph as added.',
+        returns: 'the paragraph alignment and changes in document order plus the snapshot\'s rendering; a root version measured from nothing lists every paragraph as added.',
         throws: ['when the version does not belong to the document.'],
       },
       {
@@ -4942,7 +4942,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIDiffVersionRequest',
-    declaration: 'export interface PaperAIDiffVersionRequest {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n}',
+    declaration: 'export interface PaperAIDiffVersionRequest {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly baseCommitId?: PaperAIDocumentCommitId | null;\n}',
   },
   {
     name: 'PaperAIDocumentChangedEvent',
@@ -5154,7 +5154,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIVersionDiff',
-    declaration: 'export interface PaperAIVersionDiff {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly parentCommitId: PaperAIDocumentCommitId | null;\n    readonly changes: readonly PaperAIVersionChange[];\n    readonly unchangedCount: number;\n    readonly previewHtml: string;\n    readonly formattingEditCount?: number;\n}',
+    declaration: 'export interface PaperAIVersionDiff {\n    readonly documentId: PaperAIDocumentId;\n    readonly commitId: PaperAIDocumentCommitId;\n    readonly parentCommitId: PaperAIDocumentCommitId | null;\n    readonly baseCommitId: PaperAIDocumentCommitId | null;\n    readonly steps: readonly PaperAIVersionStep[];\n    readonly changes: readonly PaperAIVersionChange[];\n    readonly unchangedCount: number;\n    readonly previewHtml: string;\n    readonly formattingEditCount?: number;\n}',
+  },
+  {
+    name: 'PaperAIVersionStep',
+    declaration: 'export interface PaperAIVersionStep {\n    readonly kind: \'equal\' | \'added\' | \'removed\' | \'changed\';\n    readonly before?: string;\n    readonly after?: string;\n}',
   },
   {
     name: 'PaperAIWordUpload',

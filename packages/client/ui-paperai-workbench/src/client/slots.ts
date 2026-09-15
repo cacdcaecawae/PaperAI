@@ -146,8 +146,8 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   detachTemplate: () => Promise<PaperAIActionResult>
   /** Record the project's template set, or the choice of none. */
   setProjectTemplate: (workspaceId: WorkspaceId, packId: string | null) => Promise<PaperAIActionResult>
-  /** Show or hide one version's diff. */
-  showDiff: (commitId: PaperAIDocumentCommitId) => Promise<PaperAIActionResult>
+  /** Show or hide one version's diff, measured from its parent or from `baseCommitId`. */
+  showDiff: (commitId: PaperAIDocumentCommitId, baseCommitId?: PaperAIDocumentCommitId | null) => Promise<PaperAIActionResult>
   /** Restore one version through a new version. */
   restore: (commitId: PaperAIDocumentCommitId) => Promise<PaperAIActionResult>
   /** Export an immutable draft or gate-checked formal delivery. */

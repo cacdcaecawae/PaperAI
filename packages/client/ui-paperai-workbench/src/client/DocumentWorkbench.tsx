@@ -161,11 +161,11 @@ export function DocumentWorkbench({
   const focusActive = useStore(value => value.writing)
   const zoom = useStore(value => value.zoom)
   const [dialogOpen, setDialogOpen] = useState(false)
-  // The picked version's own page while the versions panel is open, its changes marked; the root
-  // version diffs against nothing, so its page shows unmarked.
+  // The compared version's own page while the versions panel is open, its changes marked in place; a
+  // root version measured from nothing shows its page unmarked.
   const result = state.panel === 'versions' ? state.diff?.result ?? null : null
   const compare = useMemo(
-    () => (result === null ? null : markDiffHtml(result.previewHtml, result.parentCommitId === null ? [] : result.changes)),
+    () => (result === null ? null : markDiffHtml(result.previewHtml, result.baseCommitId === null ? [] : result.steps)),
     [result],
   )
   // The banner names the version on the page while it is not the current one.
@@ -322,7 +322,6 @@ export function DocumentWorkbench({
           <VersionsPanel
             document={document}
             state={state}
-            unplaced={compare?.unplaced ?? []}
             showDiff={showDiff}
             restore={restore}
             onClose={() => { showPanel(null) }}

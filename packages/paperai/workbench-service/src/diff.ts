@@ -1,13 +1,15 @@
 /** Paragraph-level diff between two text sequences for the version timeline. */
 
 import { diffArrays } from 'diff'
-import type { PaperAIVersionChange } from './types.ts'
+import type { PaperAIVersionChange, PaperAIVersionStep } from './types.ts'
 
 /** Above this many paragraph pairs the diff falls back to position alignment. */
 const MAX_PARAGRAPH_PAIRS = 4_000_000
 
 /** Result of diffing two paragraph sequences. */
 export interface ParagraphDiff {
+  /** The alignment in document order, equal paragraphs included, for marking a page. */
+  readonly steps: readonly PaperAIVersionStep[]
   readonly changes: readonly PaperAIVersionChange[]
   readonly unchangedCount: number
 }
@@ -18,23 +20,25 @@ export interface ParagraphDiff {
  * a delete plus an insert; leftover removals and additions stay separate.
  * @param before - paragraphs of the parent version in document order.
  * @param after - paragraphs of the version in document order.
- * @returns the changes in document order plus the count of untouched paragraphs.
+ * @returns the alignment and the changes in document order plus the count of untouched paragraphs.
  */
 export function diffParagraphs(before: readonly string[], after: readonly string[]): ParagraphDiff {
   const script = before.length * after.length > MAX_PARAGRAPH_PAIRS
     ? alignByPosition(before, after)
     : alignByDiff(before, after)
+  const steps: PaperAIVersionStep[] = []
   const changes: PaperAIVersionChange[] = []
+  const emit = (change: PaperAIVersionChange): void => { changes.push(change); steps.push(change) }
   let unchangedCount = 0
   let removed: string[] = []
   let added: string[] = []
   const flush = (): void => {
     const paired = Math.min(removed.length, added.length)
     for (let pair = 0; pair < paired; pair++) {
-      changes.push({ kind: 'changed', before: removed[pair] ?? '', after: added[pair] ?? '' })
+      emit({ kind: 'changed', before: removed[pair] ?? '', after: added[pair] ?? '' })
     }
-    for (const text of removed.slice(paired)) changes.push({ kind: 'removed', before: text })
-    for (const text of added.slice(paired)) changes.push({ kind: 'added', after: text })
+    for (const text of removed.slice(paired)) emit({ kind: 'removed', before: text })
+    for (const text of added.slice(paired)) emit({ kind: 'added', after: text })
     removed = []
     added = []
   }
@@ -42,6 +46,7 @@ export function diffParagraphs(before: readonly string[], after: readonly string
   for (const step of script) {
     if (step.kind === 'equal') {
       flush()
+      steps.push({ kind: 'equal', before: step.text, after: step.text })
       unchangedCount++
     } else if (step.kind === 'removed') {
       removed.push(step.text)
@@ -50,7 +55,7 @@ export function diffParagraphs(before: readonly string[], after: readonly string
     }
   }
   flush()
-  return { changes, unchangedCount }
+  return { steps, changes, unchangedCount }
 }
 
 type EditStep =
