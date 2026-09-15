@@ -1,7 +1,8 @@
 /**
  * PaperAI's ink-and-gold token layer. Light keeps the page metaphor: warm
- * paper surfaces, ink text, an ink primary button, old-gold accents. Dark moves
- * to deep slate surfaces with a gold primary and champagne hairlines. The layer
+ * paper surfaces, ink text, one gold primary button, old-gold accents. Dark
+ * moves to deep slate surfaces with the same gold primary and champagne
+ * hairlines. The layer
  * also names the document-type accents the workbench badges paint with. It
  * stacks over the shipped DSH palette through `ctx.theme.overrideTokens`, so
  * the base stylesheets stay untouched and the user's light/dark/system
@@ -46,13 +47,14 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-border-l3': pair('rgba(78, 60, 24, 0.18)', 'rgba(226, 196, 140, 0.2)'),
   '--dsw-alias-border-l4': pair('rgba(78, 60, 24, 0.24)', 'rgba(226, 196, 140, 0.28)'),
 
-  // Brand and primary action: ink on paper, gold on slate. The shipped
-  // primary-foreground tokens already give white-on-ink and ink-on-gold.
+  // Brand stays ink on paper. The one filled action per screen is gold on both
+  // sides; the shipped primary-foreground tokens give white-on-gold in light and
+  // ink-on-gold in dark.
   '--dsw-alias-brand-primary': pair('#1c1a17', '#e2b457'),
   '--dsw-alias-brand-primary-invert': pair('#fbfaf7', '#0f1318'),
   '--dsw-alias-brand-text': pair('#1c1a17', '#f3d99a'),
-  '--dsw-alias-button-primary-fill': pair('#1c1a17', '#e2b457'),
-  '--dsw-alias-button-primary-hover': pair('#3a352d', '#edc26e'),
+  '--dsw-alias-button-primary-fill': pair('#9a6a1a', '#e2b457'),
+  '--dsw-alias-button-primary-hover': pair('#7a5410', '#edc26e'),
   '--dsw-alias-button-primary-dimmed': pair('#e6e1d5', '#2a333f'),
 
   // Accent for selected, linked, and focused states: old gold both ways.
@@ -87,6 +89,10 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-scrollbar-bg-l2': pair('#dcd6c8', '#2c3541'),
   '--dsw-alias-scrollbar-hover-l1': pair('#c9c1ae', '#3b4654'),
   '--dsw-alias-scrollbar-hover-l2': pair('#c9c1ae', '#3b4654'),
+
+  // Elevation: the page over the desk, and the pills floating over the page.
+  '--paperai-page-shadow': pair('0 1px 2px rgba(28, 26, 23, 0.06), 0 12px 32px rgba(28, 26, 23, 0.08)', '0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.5)'),
+  '--paperai-float-shadow': pair('0 4px 16px rgba(28, 26, 23, 0.08)', '0 4px 16px rgba(0, 0, 0, 0.4)'),
 
   // Document-type accents the workbench badges and icons read.
   '--paperai-type-proposal': pair('#2563eb', '#7fb0ff'),

@@ -23,27 +23,42 @@
 .heading {
   display: flex;
   min-width: 0;
+  flex: 1;
   flex-direction: column;
   gap: 1px;
 }
 
-.heading strong,
-.heading span {
+.heading > strong,
+.heading > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.heading strong {
+.heading > strong {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
 }
 
-.heading span {
+.heading > span {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   line-height: 16px;
+}
+
+/* A node subtitle lays out its own facts; the shell only keeps it to one line. */
+.subtitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
 }
 
 .close {

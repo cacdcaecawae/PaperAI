@@ -8,7 +8,7 @@ English | [中文](README.zh.md)
 
 <p align="center"><strong>A local-first AI workspace for Word-native academic writing.</strong></p>
 
-<p align="center">Write with Codex, Claude, or DeepSeek Harness. Keep every revision recoverable. Deliver against the required template.</p>
+<p align="center">Write on the page as in Word. Let Codex, Claude, or DeepSeek Harness write with you. Keep every revision recoverable. Deliver against the required template.</p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827?style=flat-square"></a>
@@ -17,15 +17,33 @@ English | [中文](README.zh.md)
   <img alt="Pre-release" src="https://img.shields.io/badge/status-pre--release-EA580C?style=flat-square">
 </p>
 
+<p align="center">
+  <img src="docs/assets/workbench.png" width="960" alt="The PaperAI workbench: a thesis proposal page with the command row above it, the document facts in the header, and the Agent conversation beside the page">
+</p>
+<p align="center"><sub>The page is the workspace: type into it, format from one row of menus, and the Agent works on the same versioned document. Dark theme: <a href="docs/assets/workbench-dark.png">workbench-dark.png</a>.</sub></p>
+
 PaperAI treats a Working DOCX—not Markdown or generated HTML—as the editable authority for an academic document. Human edits and local Agents use the same versioned document services, while confirmed institutional templates define the checks required for formal delivery.
 
 The product is built on a pinned [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) foundation and integrates [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) for Word inspection, preview, and structured mutation.
+
+## Why PaperAI
+
+- **The `.docx` is the truth.** No conversion round trip: the browser renders the Word file, your edits and the Agent's become Word runs and paragraphs, and Word opens the result exactly as it was saved.
+- **One history for people and Agents.** Every save is a version with its author, client, provider, and model. Compare any version on the page itself, or restore it as a new version.
+- **Templates gate delivery.** Attach your institution's format, see the parsed requirements, and let the format check decide when a formal export may leave.
+
+## Screens
+
+| Start page | Editing | Version comparison |
+|---|---|---|
+| <img src="docs/assets/start-page.png" alt="The project start page: the mark, the project name with its template and document count, and the tracked documents as a hairline list" width="300"> | <img src="docs/assets/editing.png" alt="Typing into a paragraph: the header reads unsaved with one draft block, the command row shows the caret's font and size, and a floating bar offers discard or save" width="300"> | <img src="docs/assets/versions.png" alt="The versions panel beside the page: a timeline of versions, with the picked version's one change marked on the page" width="300"> |
+| A project opens on its documents; every format in the template set starts from one menu. | Type on the page as in Word; retyped blocks wait in one bar until you save them as a version. | Pick a version and its changes appear on the page: deletions struck, insertions marked, one jump at a time. |
 
 ## What PaperAI provides
 
 | Capability | What it means |
 |---|---|
-| Word-native editing | Import `.docx`, preserve the original source, and edit a separate authoritative Working DOCX. |
+| Word-native editing | Import `.docx`, preserve the original source, and type, format, and split paragraphs directly on the rendered page of a separate authoritative Working DOCX. |
 | Template-aware delivery | Use the built-in HIT master's thesis pack or upload a custom Word template, inspect the parsed requirements, and confirm them before use. |
 | Multiple Agent routes | Use the built-in DeepSeek Harness Agent or local Codex and Claude adapters through ACP. |
 | Human and Agent parity | The workbench and authenticated PaperAI MCP tools call the same document, template, version, restore, and export services. |
@@ -38,8 +56,8 @@ The product is built on a pinned [DeepSeek Harness](https://github.com/deepseek-
 1. **Create or adopt a workspace.** PaperAI initializes the project layout and Git repository idempotently.
 2. **Import a Word document.** `.docx` imports directly; Windows can normalize legacy `.doc` files through read-only Microsoft Word automation.
 3. **Associate a template.** Choose the built-in HIT pack or upload a custom template, then review and confirm its parsed requirements.
-4. **Write with a human or Agent.** Edit semantic sections in the workbench or let Codex, Claude, or DeepSeek Harness use the PaperAI tools.
-5. **Review and recover.** Inspect provenance, compare revisions, resolve concurrent edits, or restore an earlier document version.
+4. **Write with a human or Agent.** Type and format on the page in the workbench, or let Codex, Claude, or DeepSeek Harness use the PaperAI tools; right-click a selection to hand it to the Agent.
+5. **Review and recover.** Inspect provenance, compare revisions on the page, resolve concurrent edits, or restore an earlier document version.
 6. **Export deliberately.** Produce a draft at any time or run the template checks before formal delivery.
 
 Original Word files and template uploads are immutable inputs. OfficeCLI renders previews and applies structured changes only to derived Working copies.

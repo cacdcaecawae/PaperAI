@@ -325,9 +325,12 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
   const caption = picked === null
     ? t('versions.select')
     : diff?.result !== null && diff?.result !== undefined
-      ? diff.result.changes.length === 0
-        ? t('versions.diffEmpty')
-        : t('versions.compare', { count: diff.result.changes.length, unchanged: diff.result.unchangedCount })
+      // The root version has no parent: every paragraph reads as added, which says nothing worth marking.
+      ? diff.result.parentCommitId === null
+        ? t('versions.rootDiff', { count: diff.result.changes.length })
+        : diff.result.changes.length === 0
+          ? t('versions.diffEmpty')
+          : t('versions.compare', { count: diff.result.changes.length, unchanged: diff.result.unchangedCount })
       : diff?.error !== null ? t('versions.diffError') : t('versions.diffLoading')
   return (
     <Panel title={t('versions.title')} onClose={onClose} t={t}>

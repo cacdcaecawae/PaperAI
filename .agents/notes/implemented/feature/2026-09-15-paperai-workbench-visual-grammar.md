@@ -1,0 +1,45 @@
+# Agent Note: PaperAI workbench visual grammar: one header, one command row, floating controls
+
+Status: implemented
+
+English | [中文](2026-09-15-paperai-workbench-visual-grammar.zh.md)
+
+## Problem
+
+After the [writing-workflow](2026-09-12-paperai-writing-workflow.md) and [character-formatting](2026-09-10-paperai-character-formatting.md) work landed, the document column carried three rows of chrome above the page: the details title, a row of fact chips with export and focus, and a command ribbon that unfolded a fourth row for paragraph settings. Six native `<select>` controls and a spinner input sat in that ribbon, the one filled button was black, and a status bar closed the page from below. The user read the result as generated rather than designed, and not eye-catching. The approved 2026-09-09 mockup has one header carrying the document facts, a gold filled action, controls floating over the page, and no native form control.
+
+## Decision
+
+**Visual grammar.** Every PaperAI surface follows one set of rules. UI text is 13 and 12 px, titles 15 and 20 px. Radii are 8 for controls, 12 for panels, 16 for floating pills. Separators are the hairline `--dsw-alias-border-l2`. Controls have no border: 28 px tall in the command row, 32 px in the header; hover paints `--dsw-alias-interactive-bg-hover`; pressed and selected states paint `--dsw-alias-state-business-tertiary` with the gold `--dsw-alias-state-business-primary`. Each screen has one filled action, gold in both schemes: `--dsw-alias-button-primary-fill` is `#9a6a1a` in light and `#e2b457` in dark, so ink stays the brand and text color. Every discrete choice is the DSH `Menu`; a native `<select>` never appears. Elevation comes only from the brand tokens `--paperai-page-shadow` and `--paperai-float-shadow`, defined in `ui-paperai-brand/src/client/theme.ts`, the one place literal colors are allowed. Floating pills share one recipe: a translucent base (`color-mix` of `--dsw-alias-bg-base`), `backdrop-filter: blur(12px)`, radius 16, a hairline, and the float shadow. Blue remains an information color for document types.
+
+**Header.** `DetailsViewShell` in `ui-primitives` accepts `subtitle` as a React node and an `actions` node before the close control. The workbench passes the document facts as the subtitle: the template name (or 模板 when none is attached), the format check with a state dot, 版本 N, and a live region reading 已写入文档, 未保存 · N 段 in gold, 正在保存…, or the failure in red. 专注写作 and the filled 导出 are the actions. The fact chip row and the status bar are gone.
+
+**Command row.** One `role="toolbar"` row: undo and redo as icons; font and size as `Menu` triggers whose reading is the current value or a muted 继承 or 混合 word, each list opening with a 继承 row so a stated value can be taken back to the block's; B, I, U, Tx; 段落 as one `Menu` with four submenus (样式, 对齐 with icons, 行距, 缩进 in 0 to 72 pt steps) whose current readings carry the check mark, which `Menu` submenus now render; find as an icon that opens an inline `Input`. Handing selected text to the Agent is not a toolbar control: a right-click on a selection inside mapped blocks opens a `Menu` at the pointer with 交给 Agent, and a right-click anywhere else keeps the browser's own menu. The ribbon's own 保存 button is removed: the pending bar holds the one filled 保存, and Ctrl/Cmd+S and Ctrl/Cmd+Enter still save. Roving focus stays on the row's buttons and the find field; an open menu owns its keys.
+
+**Page.** `.page` takes the hairline, radius 2, and `--paperai-page-shadow`. Zoom is a pill at the page's top right: − and + step through 50 to 200 %, the value opens a `Menu` that also offers 适合页宽, and fit-to-width shows the percentage it landed on. The pagination disclaimer is the pill's tooltip; the in-memory-draft warning is the pending bar's. The change navigator and the pending bar use the floating recipe. Picking the root version, which the Host diffs against nothing, marks no paragraph and says the version holds all N paragraphs instead of counting them as changes.
+
+**Sidebar and Agent column.** 项目体检 is a 36 px sidebar row, and its report uses outline buttons. The ACP session control is a ghost chip with a `StateDot` for the connection, the words in its title. Tool-call rows, reasoning rows, the composer, and the model picker stay DSH-owned; PaperAI reaches them only through tokens.
+
+**Ownership.** `DetailsViewShell.subtitle` as a node, `DetailsViewShell.actions`, and the selection marker inside `Menu` submenus are additive `ui-primitives` changes that later DSH merges must keep, beside `conversation.hero.content`, `LocaleRuntime.override`, `setDraft`, and `setDetailsFocus`. This decision partially supersedes the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) for the toolbar's presentation and the status bar, and the [minimal-workbench decision](2026-09-09-paperai-minimal-workbench-and-outside-edits.md) for the filled action's color and where the document facts live; their other decisions stand.
+
+## Alternatives considered
+
+**Own the whole details header.** A PaperAI header would match the mockup's 48 px line exactly but lose the shared close and tab chrome; two optional shell props keep the chrome and the layout.
+
+**Facts at the right end of the command row.** With the commands the row passes 900 px and wraps inside the 860 px default column.
+
+**A custom anchored popover for paragraph settings.** Positioning, dismissal, and focus return are what `Menu` already owns; submenus with a selection marker read like a native application's format menu.
+
+**Keep the status bar.** It repeated the pending bar and the header, and boxed the page on a fourth side; the approved mockup floats the zoom over the page.
+
+**Keep the ink primary button.** The mockup's rule names gold as the only filled color; ink stays for the brand mark and text.
+
+**交给 Agent as a toolbar button.** A permanent button for an occasional action read as generated chrome to the user; the selection itself is the natural anchor, and a context menu costs nothing while no text is selected.
+
+## Testing
+
+`styles.client.spec.ts` scans the ribbon and diagnostics sheets, forbids `<select` in every workbench component, and requires the shadow tokens. `editor.client.spec.tsx` and `components.client.spec.tsx` drive the font, size, and paragraph menus, quote through the selection's context menu, and save through the pending bar. The ui-primitives atom tests cover the shell; the ACP session spec reads the chip's title. `apps/web/tests/paperai-permissions.e2e.ts` picks zoom, font, size, alignment, indent, spacing, and style through the menus, and the `writing-controls.*` goldens capture the details header, the command row, and the zoom pill.
+
+## Consequences
+
+The document column has one header and one command row, and the page is the largest bright surface. Left indent is chosen from six steps in the browser; Word keeps arbitrary values. Mixed paragraph readings leave every submenu unmarked. Gold is the primary-button color on every DSH surface in light mode. The browser flows hover submenus, so a menu that closed on pointer travel would break them. The ACP settings page keeps its native controls until it is redrawn.

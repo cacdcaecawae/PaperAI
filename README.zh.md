@@ -8,7 +8,7 @@
 
 <p align="center"><strong>面向学术写作、本地优先的 Word 原生 AI 工作台。</strong></p>
 
-<p align="center">使用 Codex、Claude 或 DeepSeek Harness 写作，让每次修改都可恢复，并严格按照指定模板完成交付。</p>
+<p align="center">像在 Word 里一样直接在页面上写。让 Codex、Claude 或 DeepSeek Harness 与你一起写。每次修改都可恢复，并严格按照指定模板完成交付。</p>
 
 <p align="center">
   <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-111827?style=flat-square"></a>
@@ -17,15 +17,33 @@
   <img alt="预发布" src="https://img.shields.io/badge/status-pre--release-EA580C?style=flat-square">
 </p>
 
+<p align="center">
+  <img src="docs/assets/workbench.png" width="960" alt="PaperAI 工作台：开题报告页面上方是一行命令，标题栏里是文档事实，页面旁边是 Agent 对话">
+</p>
+<p align="center"><sub>页面就是工作区：直接在页面上输入，从一行菜单里排版，Agent 在同一份带版本的文档上工作。深色主题：<a href="docs/assets/workbench-dark.png">workbench-dark.png</a>。</sub></p>
+
 PaperAI 把 Working DOCX 作为学术文档的可编辑权威，而不是把 Markdown 或生成的 HTML 当作真源。人工编辑和本地 agent（智能体）使用同一套带版本的文档服务，已确认的学校模板则定义正式交付必须满足的检查要求。
 
 产品建立在固定版本的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 底座上，并集成 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 完成 Word 检查、预览和结构化修改。
+
+## 为什么选择 PaperAI
+
+- **`.docx` 就是真源。** 没有格式转换的往返：浏览器直接渲染 Word 文件，你和 agent 的修改都落成 Word 的 run 和段落，Word 打开的就是保存下来的那份。
+- **人和 agent 共用一份历史。** 每次保存都是一个版本，记录作者、客户端、提供方和模型。任意版本都可以直接在页面上比较，或作为新版本恢复。
+- **模板守住交付。** 关联学校格式，查看解析出的要求，由格式检查决定正式导出能否放行。
+
+## 界面
+
+| 起始页 | 编辑中 | 版本比较 |
+|---|---|---|
+| <img src="docs/assets/start-page.png" alt="项目起始页：标记、带模板与文档数的项目名，以及细线列表中的受管理文档" width="300"> | <img src="docs/assets/editing.png" alt="在段落里输入：标题栏显示未保存的一段草稿，命令行显示光标处的字体和字号，底部浮条提供放弃或保存" width="300"> | <img src="docs/assets/versions.png" alt="页面旁的版本面板：版本时间线，所选版本的那一处改动直接标在页面上" width="300"> |
+| 项目打开即见文档；模板集里的每种格式都从同一个菜单开始。 | 像在 Word 里一样直接在页面上输入；改过的段落停在一条浮条里，保存后成为一个版本。 | 点一版，它的改动就出现在页面上：删除划线，新增标记，逐处跳转。 |
 
 ## PaperAI 提供什么
 
 | 能力 | 含义 |
 |---|---|
-| Word 原生编辑 | 导入 `.docx`、保留原始源文件，并编辑独立且权威的 Working DOCX。 |
+| Word 原生编辑 | 导入 `.docx`、保留原始源文件，直接在渲染出的页面上输入、排版、拆分段落，改动写入独立且权威的 Working DOCX。 |
 | 模板感知交付 | 使用内置的 HIT 硕士毕设模板包，或上传自定义 Word 模板；检查解析出的要求并确认后再使用。 |
 | 多种 agent 路由 | 使用内置 DeepSeek Harness Agent，或通过 ACP（Agent Client Protocol）连接本地 Codex 和 Claude 适配器。 |
 | 人工与 agent 能力一致 | 工作台和经过身份认证的 PaperAI MCP 工具调用同一套文档、模板、版本、恢复和导出服务。 |
@@ -38,8 +56,8 @@ PaperAI 把 Working DOCX 作为学术文档的可编辑权威，而不是把 Mar
 1. **创建或接管工作区。** PaperAI 会幂等初始化项目目录和 Git 仓库。
 2. **导入 Word 文档。** `.docx` 可直接导入；Windows 可通过只读 Microsoft Word 自动化规范化旧版 `.doc` 文件。
 3. **关联模板。** 选择内置 HIT 模板包或上传自定义模板，然后检查并确认解析出的要求。
-4. **由人工或 agent 写作。** 在工作台编辑语义章节，或让 Codex、Claude、DeepSeek Harness 使用 PaperAI 工具。
-5. **审阅与恢复。** 检查修改来源、比较版本、解决并发编辑，或恢复较早的文档版本。
+4. **由人工或 agent 写作。** 在工作台的页面上直接输入和排版，或让 Codex、Claude、DeepSeek Harness 使用 PaperAI 工具；选中文字后右键即可交给 agent。
+5. **审阅与恢复。** 检查修改来源、在页面上比较版本、解决并发编辑，或恢复较早的文档版本。
 6. **明确选择导出方式。** 随时生成草稿，或在正式交付前运行模板检查。
 
 原始 Word 文件和上传的模板是不可变输入。OfficeCLI 只为派生的 Working 副本生成预览并应用结构化修改。

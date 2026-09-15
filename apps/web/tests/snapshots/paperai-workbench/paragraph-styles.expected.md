@@ -1,4 +1,3 @@
-- combobox "段落样式":
-  - option "应用样式" [disabled] [selected]
-  - option "Normal"
-  - option "学院正文"
+- menu:
+  - menuitem "Normal"
+  - menuitem "学院正文"

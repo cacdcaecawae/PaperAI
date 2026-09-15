@@ -14,7 +14,10 @@ export interface DetailsViewShellTab {
 export interface DetailsViewShellProps {
   readonly title: string
   readonly titleHint?: string
-  readonly subtitle?: string
+  /** Caption under the title: a string is clipped with its own tooltip, a node lays itself out. */
+  readonly subtitle?: ReactNode
+  /** Controls seated before the close action. */
+  readonly actions?: ReactNode
   readonly closeLabel: string
   readonly onClose: () => void
   readonly tabs?: readonly DetailsViewShellTab[]
@@ -26,15 +29,18 @@ export interface DetailsViewShellProps {
 
 /** Render the DSH details header, close action, and accessible tab strip. */
 export function DetailsViewShell({
-  title, titleHint, subtitle, closeLabel, onClose, tabs = [], activeTab, onSelectTab, className, children,
+  title, titleHint, subtitle, actions, closeLabel, onClose, tabs = [], activeTab, onSelectTab, className, children,
 }: DetailsViewShellProps): ReactNode {
   return (
     <div className={clsx(css.root, className)} data-dsh-details-shell>
       <header className={css.header}>
         <div className={css.heading}>
           <strong title={titleHint ?? title}>{title}</strong>
-          {subtitle !== undefined && <span title={subtitle}>{subtitle}</span>}
+          {typeof subtitle === 'string'
+            ? <span title={subtitle}>{subtitle}</span>
+            : subtitle == null ? null : <div className={css.subtitle}>{subtitle}</div>}
         </div>
+        {actions != null && <div className={css.actions}>{actions}</div>}
         <button type="button" className={css.close} aria-label={closeLabel} onClick={onClose}>
           <IconCloseOutline16 />
         </button>
