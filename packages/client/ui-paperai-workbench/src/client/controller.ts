@@ -636,15 +636,18 @@ export class PaperAIWorkbenchController {
    * Load one version's paragraph diff into the versions panel.
    * @param sessionId - Session owning the open workbench.
    * @param commitId - version to explain; the same id again closes the diff.
+   * @param baseCommitId - version to measure from instead of the parent; `null` keeps the parent.
    * @returns settled local action result.
    */
-  async showDiff(sessionId: SessionId, commitId: PaperAIDocumentCommitId): Promise<PaperAIActionResult> {
+  async showDiff(
+    sessionId: SessionId, commitId: PaperAIDocumentCommitId, baseCommitId: PaperAIDocumentCommitId | null = null,
+  ): Promise<PaperAIActionResult> {
     this.assertLive()
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.diff?.commitId === commitId && state.diff.error === null) {
+    if (state.diff?.commitId === commitId && state.diff.baseCommitId === baseCommitId && state.diff.error === null) {
       entry.store.update((draft) => { draft.diff = null })
       return OK
     }
@@ -652,16 +655,18 @@ export class PaperAIWorkbenchController {
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'diffing'
-      draft.diff = { commitId, result: null, error: null }
+      draft.diff = { commitId, baseCommitId, result: null, error: null }
       draft.actionError = null
     })
-    const result = await callRemote(() => this.remote.diffVersion({ documentId: document.documentId, commitId }, request.signal))
+    const result = await callRemote(() => this.remote.diffVersion({
+      documentId: document.documentId, commitId, ...(baseCommitId === null ? {} : { baseCommitId }),
+    }, request.signal))
     if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
     entry.store.update((draft) => {
       draft.action = null
       draft.diff = result.ok
-        ? { commitId, result: result.value, error: null }
-        : { commitId, result: null, error: remoteError(result.error) }
+        ? { commitId, baseCommitId, result: result.value, error: null }
+        : { commitId, baseCommitId, result: null, error: remoteError(result.error) }
     })
     return result.ok ? OK : { ok: false, error: remoteError(result.error) }
   }

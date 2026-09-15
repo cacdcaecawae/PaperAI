@@ -1,46 +1,39 @@
+- banner:
+  - strong: 毕业论文_公开合成长文档_方法结果与讨论_Methods_Results_Discussion_Appendix_Review_Draft_2026
+  - button "Template"
+  - button "Versions 1"
+  - status: Written to document
+  - button "Show Agent collaboration" [pressed]:
+    - img
+    - text: Show Agent collaboration
+  - button "Export":
+    - img
+    - text: Export
+    - img
+  - button "Close document":
+    - img
 - toolbar "Document editing toolbar":
-  - group "Save to document":
-    - button "Save" [disabled]
-    - button "Undo draft edit" [disabled]: ↶
-    - button "Redo draft edit" [disabled]: ↷
+  - group "Draft history":
+    - button "Undo draft edit" [disabled]
+    - button "Redo draft edit" [disabled]
   - group "Formatting":
-    - combobox "Font":
-      - option "Inherited (unspecified)" [selected]
-      - option "宋体"
-      - option "黑体"
-      - option "等线"
-      - option "Times New Roman"
-      - option "Arial"
-    - combobox "Font size (points)":
-      - option "9"
-      - option "10 · Inherited" [selected]
-      - option "10.5"
-      - option "11"
-      - option "12"
-      - option "14"
-      - option "15"
-      - option "16"
-      - option "18"
-      - option "22"
-      - option "24"
-      - option "28"
-      - option "36"
+    - button "Font":
+      - text: Inherited
+      - img
+    - button "Font size (points)":
+      - text: "10"
+      - img
     - button "Bold": B
     - button "Italic": I
     - button "Underline": U
     - button "Clear character formatting": Tx
-  - button "Paragraph"
-  - button "Find in document"
-  - button "Ask Agent"
-  - text: Selected text
-- contentinfo "Document status and view":
-  - status: Written to document
-  - text: Preview pagination is approximate; Word controls the final layout Zoom
-  - combobox "Zoom":
-    - option "Fit page width" [selected]
-    - option "50%"
-    - option "75%"
-    - option "100%"
-    - option "125%"
-    - option "150%"
-    - option "200%"
+  - button "Paragraph":
+    - text: Paragraph
+    - img
+  - button "Find in document":
+    - img
+- group "Zoom":
+  - button "Zoom out"
+  - button "Zoom": 100%
+  - button "Zoom in":
+    - img

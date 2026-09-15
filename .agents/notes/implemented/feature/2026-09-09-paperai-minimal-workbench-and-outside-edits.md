@@ -4,7 +4,7 @@ Status: implemented
 
 English | [中文](2026-09-09-paperai-minimal-workbench-and-outside-edits.zh.md)
 
-Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns editor commands, draft conflicts, writing defaults, and panel behavior. Resident-engine lifecycle, version publication, outside-file capture, and theme ownership below remain active.
+Partially superseded: the [writing-workflow decision](2026-09-12-paperai-writing-workflow.md) owns editor commands, draft conflicts, writing defaults, and panel behavior. Resident-engine lifecycle, version publication, outside-file capture, and theme ownership below remain active. Version comparison is now governed by the [visual-grammar decision](2026-09-15-paperai-workbench-visual-grammar.md): the page shows the compared version with every change marked in place.
 
 ## Problem
 
@@ -22,7 +22,7 @@ Comparing a version marks its changes on the current page only where exactly one
 
 Blocks are written into in place. Every mapped block is `contenteditable` (the Host may not pre-declare any block editable; the sanitizer strips the attribute), an `input` event reports the block to the controller, and the workbench keeps a list of drafts rather than one: `updateDraft(nodeId, draft)` adds or replaces a block's draft and `null` drops it, `cancelEdit` drops them all, `commitEdit` sends every draft as one commit with one `replace-text` mutation per block, and the interim preview patch locates all blocks against the original text before rewriting any. A retyped block shows a gold marker and tint like a compared change; one whose block changed outside PaperAI turns the marker red, and the save waits until that draft is discarded. Enter never breaks a paragraph (a new block is the Agent's job), Ctrl/Cmd+Enter saves, Escape returns one block to the Host's rendering, whose runs are kept from a clone taken at render time. One bar at the foot of the page counts the retyped blocks and offers 放弃修改 and 保存; blocks stop being editable while a save is in flight or a version is compared.
 
-The browser follows one visual grammar: the ink-and-gold token layer in `ui-paperai-brand`, which supersedes the no-token-layer half of the [UI overhaul note](2026-09-03-paperai-ui-overhaul.md), 12 to 13 px UI text, hairlines, radii of 8 and 12, one filled action per screen (导出 in the document view, 保存 in the pending bar), and Codex/Claude logos kept where people look for them. The start page names the project with its template, document count, and last edit, lists the tracked documents with type badges, and starts every format from one menu; ACP settings read as grouped cards. The Agent-status chip and its popover are gone from the composer row: detection lives in the Agent settings page, and the workbench no longer fills `conversation.hero.agentPreset.status` or depends on `ui-agent-preset`.
+The browser follows one visual grammar: the ink-and-gold token layer in `ui-paperai-brand`, which supersedes the no-token-layer half of the [UI overhaul note](2026-09-03-paperai-ui-overhaul.md), 12 to 13 px UI text, hairlines, radii of 8 and 12, one filled action per screen (导出 in the document view, 保存 in the pending bar; gold in both schemes, beside document facts the header carries, since the [visual-grammar decision](2026-09-15-paperai-workbench-visual-grammar.md)), and Codex/Claude logos kept where people look for them. The start page names the project with its template, document count, and last edit, lists the tracked documents with type badges, and starts every format from one menu; ACP settings read as grouped cards. The Agent-status chip and its popover are gone from the composer row: detection lives in the Agent settings page, and the workbench no longer fills `conversation.hero.agentPreset.status` or depends on `ui-agent-preset`.
 
 ## Alternatives considered
 
@@ -32,7 +32,7 @@ The browser follows one visual grammar: the ink-and-gold token layer in `ui-pape
 
 **Guess positions for removed paragraphs and repeated text.** The Host diff carries no positions; a guessed mark on the wrong block reads as a wrong edit. Listing beats guessing.
 
-**Show the diff on the compared version's own preview.** Needs a Host method rendering a snapshot; deferred until the history view earns it.
+**Show the diff on the compared version's own preview.** Needs a Host method rendering a snapshot; deferred until the history view earns it. Taken up on 2026-09-15 by the [visual-grammar decision](2026-09-15-paperai-workbench-visual-grammar.md): `diffVersion` returns the snapshot's rendering and the page shows the picked version itself.
 
 **Keep the textarea editor and restyle it.** Any seat beside the paragraph still reads as a form, and one open editor at a time is not how people revise a page. Typing into the rendered block is what Word does; plain-text editing keeps the block's runs intact while the text changes and hands one string per block to the existing `replace-text` mutation.
 

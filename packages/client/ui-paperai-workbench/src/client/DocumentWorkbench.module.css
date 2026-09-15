@@ -1,42 +1,93 @@
-/* Document actions, secondary panels and status share DSH semantic tokens. */
+/* Facts and actions sit in the details header, commands in one row below,
+   and every control over the page floats. Colors are semantic tokens;
+   elevation comes from the brand layer's shadow tokens. */
 
 .root {
   container-name: paperai-workbench;
   container-type: inline-size;
 }
 
-.root :where(button, select) {
+.panel :where(button) {
   min-height: 32px;
 }
 
-.toolbar {
-  display: flex;
-  flex: none;
-  min-height: 44px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
-}
-
-.facts,
-.tools {
+/* Facts under the title: 12px quiet buttons that open their panel, then the save state. */
+.facts {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 4px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
-.facts {
-  flex: 1;
-  flex-wrap: wrap;
+.fact {
+  display: inline-flex;
+  min-width: 0;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 5px;
+  overflow: hidden;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.tools {
+.fact:first-child {
+  margin-left: -5px;
+}
+
+.fact:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.fact[aria-pressed='true'] {
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.fact:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.fact[data-kind='gate'][data-status='failed'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dot {
+  color: var(--dsw-alias-label-quaternary);
+}
+
+.saveStatus {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saveStatus[data-state='unsaved'] {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.saveStatus[data-state='failed'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Header actions: the focus toggle beside export. */
+.actions {
+  display: flex;
   flex: none;
+  align-items: center;
+  gap: 6px;
 }
 
 .chip {
@@ -48,7 +99,7 @@
   gap: 6px;
   border: 0;
   border-radius: 8px;
-  padding: 0 8px;
+  padding: 0 10px;
   overflow: hidden;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
@@ -83,43 +134,23 @@
   color: var(--dsw-alias-state-business-primary);
 }
 
-.chip[data-kind='template'][data-attached='true'] {
-  color: var(--dsw-alias-label-secondary);
-}
-
 .chip > svg {
   flex: none;
 }
 
-.chip[data-kind='gate'][data-status='failed'] {
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.chip[data-kind='gate'][data-status='passed'] {
-  color: var(--dsw-alias-state-success-primary);
-}
-
-/* Export is the one filled action in the column. */
+/* Export and save are the filled actions: gold, and only one is enabled at a time. */
 .chip[data-kind='export'],
 .chip[data-kind='save'] {
-  padding: 0 12px;
+  padding: 0 14px;
   background: var(--dsw-alias-button-primary-fill);
   color: var(--dsw-alias-label-primary-foreground);
-  font-size: 13px;
   font-weight: 500;
-  line-height: 20px;
 }
 
 .chip[data-kind='export']:hover:not(:disabled),
 .chip[data-kind='save']:hover:not(:disabled) {
-  background: var(--dsw-alias-button-primary-fill-hover, var(--dsw-alias-button-primary-fill));
+  background: var(--dsw-alias-button-primary-hover);
   color: var(--dsw-alias-label-primary-foreground);
-}
-
-.tools .chip[data-kind='focus'] {
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 20px;
 }
 
 .notice {
@@ -157,36 +188,6 @@
   color: var(--dsw-alias-state-success-primary);
 }
 
-/* Formatting sits with the other selection actions: quiet chips and a native size control. */
-.format {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-}
-
-.format .chip[aria-pressed='true'] {
-  background: var(--dsw-alias-state-business-tertiary);
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.size {
-  height: 28px;
-  margin-left: 4px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  padding: 0 4px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.size:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
-}
-
 .actionError {
   margin: 0;
   padding: 7px 16px;
@@ -219,6 +220,15 @@
 }
 
 .previewSeat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The page and the pills floating over it; the command row above stays clear of them. */
+.stage {
   position: relative;
   display: flex;
   flex: 1;
@@ -227,51 +237,78 @@
   min-width: 0;
 }
 
-/* The change navigator floats at the foot of the page while a version is
-   compared; it keeps to the left so an open panel never covers it. */
-.changeNav {
+/* Pills floating over the page: a translucent base with blur, r16, a hairline,
+   and the brand's float shadow. The change navigator keeps left so an open
+   panel never covers it; the pending bar centres; zoom sits top right. */
+.floating {
   position: absolute;
-  bottom: 16px;
-  left: 24px;
+  z-index: 1;
   display: flex;
-  height: 32px;
   align-items: center;
   gap: 2px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 16px;
-  padding: 0 4px 0 12px;
-  background: var(--dsw-alias-bg-layer-1);
+  background: color-mix(in srgb, var(--dsw-alias-bg-base) 82%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--paperai-float-shadow);
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 18px;
 }
 
-.changeNav > span {
-  margin-right: 6px;
-}
-
+.zoomPill button,
 .changeNav button {
   display: inline-grid;
-  width: 24px;
   height: 24px;
+  min-width: 24px;
   border: 0;
-  border-radius: 8px;
-  padding: 0;
+  border-radius: 12px;
+  padding: 0 6px;
   place-items: center;
   background: transparent;
   color: inherit;
   cursor: pointer;
+  font: inherit;
 }
 
-.changeNav button:hover {
+.zoomPill button:hover:not(:disabled),
+.changeNav button:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 
+.zoomPill button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.zoomPill button:focus-visible,
 .changeNav button:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
+}
+
+.zoomPill {
+  top: 12px;
+  right: 16px;
+  height: 32px;
+  padding: 0 4px;
+}
+
+.zoomPill > span > button {
+  min-width: 48px;
+}
+
+.changeNav {
+  bottom: 16px;
+  left: 24px;
+  height: 32px;
+  padding: 0 4px 0 12px;
+}
+
+.changeNav > span {
+  margin-right: 6px;
 }
 
 .flipped {
@@ -280,21 +317,13 @@
 
 /* Retyped blocks wait in one bar at the foot of the page: how many, discard, save. */
 .pending {
-  position: absolute;
   bottom: 16px;
   left: 50%;
-  display: flex;
   max-width: calc(100% - 48px);
   min-height: 40px;
-  align-items: center;
   gap: 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 20px;
   padding: 4px 6px 4px 14px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
   transform: translateX(-50%);
 }
 
@@ -304,6 +333,17 @@
 
 .pending [role='alert'] {
   color: var(--dsw-alias-state-error-primary);
+}
+
+.pending > .chip {
+  height: 28px;
+  border-radius: 14px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.pending > .chip[data-kind='save'] {
+  padding: 0 12px;
 }
 
 .previewSeat[hidden] {
@@ -728,48 +768,6 @@
   font-style: normal;
 }
 
-/* Changes the current text no longer carries are listed above the timeline. */
-.unplaced {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.unplaced ul {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.unplaced li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.unplaced del,
-.unplaced ins {
-  border-radius: 4px;
-  padding: 2px 6px;
-  overflow-wrap: anywhere;
-}
-
-.unplaced del {
-  background: var(--dsw-alias-state-error-tertiary, var(--dsw-alias-interactive-bg-hover-danger));
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.unplaced ins {
-  background: var(--dsw-alias-state-success-tertiary, var(--dsw-alias-interactive-bg-hover));
-  color: var(--dsw-alias-state-success-primary);
-  text-decoration: none;
-}
-
 /* Restore is the picked version's action at the foot of the panel. */
 .versionFooter {
   position: sticky;
@@ -810,7 +808,6 @@
 }
 
 @container paperai-workbench (max-width: 520px) {
-  .toolbar,
   .notice,
   .actionError {
     padding-inline: 12px;
@@ -832,34 +829,6 @@
     border-top: 1px solid var(--dsw-alias-border-l2);
   }
 }
-
-.statusBar {
-  display: flex;
-  flex: none;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  min-height: 38px;
-  padding: 4px 16px;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.saveStatus { color: var(--dsw-alias-label-primary); }
-.statusHint { flex: 1; font-size: 12px; }
-.zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.zoom select {
-  max-width: 140px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-base);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-}
-.zoom select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
 
 @media (prefers-reduced-motion: reduce) {
   .chip {

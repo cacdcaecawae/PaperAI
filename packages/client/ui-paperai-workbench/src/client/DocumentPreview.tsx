@@ -1,12 +1,14 @@
 /** Editable Host preview with temporary block drafts, document commands, and local undo history. */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import clsx from 'clsx'
+import { IconChevronDownOutline14, IconPlusOutline16, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaperAIBlockDraft, PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary, PaperAIDocumentSnapshot, PaperAIDocumentTextRun, PaperAIParagraphFormat } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import css from './DocumentWorkbench.module.css'
 import { applyParagraphs, applyRuns, blocksOf, effectiveRunsOf, fontOf, normalize, paragraphsOf, restateCleared, runsOf, sameRuns, textOf } from './preview-html.ts'
 import { formatParagraphs, formatRange, insertParagraphText, readParagraphs, selectedParagraphs, selectionReading } from './editor-dom.ts'
 import { EditorRibbon, type EditorFormat } from './EditorRibbon.tsx'
+import { IconZoomOut } from './editor-icons.tsx'
 import type { WordExcerpt } from './selection-context.ts'
 
 /** Editable document projection and commands owned by the workbench. */
@@ -14,6 +16,7 @@ export interface DocumentPreviewProps {
   readonly active?: boolean
   readonly scrollTop?: number
   readonly zoom?: number | 'fit'
+  readonly onZoom?: (zoom: number | 'fit') => void
   readonly onScroll?: (scrollTop: number) => void
   readonly onQuote?: (excerpt: WordExcerpt) => void
   readonly html: string
@@ -34,15 +37,18 @@ export interface DocumentPreviewProps {
 const DROPPED_ELEMENTS = 'script, iframe, object, embed, link, meta, base, form, input, button, textarea, select, noscript'
 const URL_ATTRIBUTES = new Set(['href', 'src', 'xlink:href', 'action', 'formaction'])
 const COMPLEX = 'img, svg, math, canvas, video, audio, a, table, [data-field], [data-formula], .katex-formula, .equation, .math, .field, sup, sub'
+/** Zoom steps the pill walks through; fit-to-width reports where it landed between them. */
+const ZOOMS = [50, 75, 100, 125, 150, 200]
 const PREVIEW_STYLE = `
 :host { display: block; }
 .paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); zoom: var(--paperai-page-zoom, 1); }
-.paperai-doc .page { outline: 1px solid var(--dsw-alias-border-l2); }
+.paperai-doc .page { border: 1px solid var(--dsw-alias-border-l2); border-radius: 2px; box-shadow: var(--paperai-page-shadow); }
 [data-paperai-change], [data-paperai-changed] { position: relative; }
 [data-paperai-change]::before, [data-paperai-changed]::before { content: '✎'; position: absolute; left: -20px; top: 0; font: 12px sans-serif; color: var(--dsw-alias-state-business-primary); }
 [data-paperai-conflicted]::before { content: '!'; font-weight: bold; color: var(--dsw-alias-state-error-primary); }
 [data-paperai-conflicted] { border-inline-start: 2px dashed var(--dsw-alias-state-error-primary); }
 [data-paperai-change][data-paperai-current] { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+[data-paperai-removed] { opacity: 0.85; }
 [data-paperai-change] del { background: var(--dsw-alias-state-error-tertiary); color: var(--dsw-alias-state-error-primary); text-decoration: line-through; }
 [data-paperai-change] ins { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); text-decoration: underline; }
 [data-paperai-block][contenteditable="true"] { cursor: text; outline: none; min-height: 1em; caret-color: var(--dsw-alias-state-business-primary); }
@@ -132,7 +138,7 @@ function compositionSnapshot(container: HTMLElement): () => void {
 
 /** Render draft operations over the preview; successful Host commits replace the document revision. */
 export function DocumentPreview({ html, revision, nodes, paragraphStyles, title, edits, saving, onDraft, onSave, onCancel, t,
-  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, comparing = false, busy = false,
+  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, comparing = false, busy = false,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
@@ -156,7 +162,11 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const [historyState, setHistoryState] = useState({ undo: false, redo: false })
   const [notice, setNotice] = useState<'editor.protected' | 'editor.conflict' | 'editor.structureProtected' | null>(null)
   const [changes, setChanges] = useState({ count: 0, index: 0 })
+  // Where a right-click on selected text opened the selection menu.
+  const [context, setContext] = useState<{ x: number; y: number } | null>(null)
   const [fonts, setFonts] = useState<readonly string[]>([])
+  const [fitPercent, setFitPercent] = useState(100)
+  const [zoomOpen, setZoomOpen] = useState(false)
   const conflicted = edits.some(edit => edit.conflicted === true)
   const editable = !comparing && !saving && !busy && !conflicted
 
@@ -267,6 +277,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       const natural = pages.offsetWidth
       const factor = zoom === 'fit' ? natural > 0 && available > 0 ? Math.min(1, available / natural) : 1 : zoom / 100
       element.style.setProperty('--paperai-page-zoom', factor.toFixed(3)); element.scrollTop = position * factor
+      if (zoom === 'fit') setFitPercent(Math.round(factor * 100))
     }
     fit()
     if (typeof ResizeObserver === 'undefined') return
@@ -488,6 +499,13 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       }
       if (block !== null && editable) finish([block])
     }
+    // Selected text in mapped blocks gets the selection menu instead of the browser's; anything else keeps the native one.
+    const contextMenu = (event: Event): void => {
+      if (!(event instanceof MouseEvent) || onQuote === undefined) return
+      const range = rangeNow()
+      if (range === null || range.collapsed || range.toString().trim() === '' || ![...mapping.current.keys()].some(block => range.intersectsNode(block))) return
+      event.preventDefault(); capture(range); setContext({ x: event.clientX, y: event.clientY })
+    }
     const clicked = (event: Event): void => {
       if (event.composedPath().some(node => node instanceof HTMLElement && node.dataset.paperaiProtected !== undefined)) setNotice('editor.protected')
       else if (!conflicted) setNotice(null)
@@ -495,7 +513,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     }
     const changed = (): void => { if (!composing.current) capture() }
     const listeners: readonly [string, EventListener][] = [['input', input], ['beforeinput', beforeInput], ['paste', paste], ['keydown', keyDown],
-      ['compositionstart', compositionStart], ['compositionend', compositionEnd], ['click', clicked], ['keyup', changed], ['mouseup', changed]]
+      ['compositionstart', compositionStart], ['compositionend', compositionEnd], ['click', clicked], ['contextmenu', contextMenu], ['keyup', changed], ['mouseup', changed]]
     listeners.forEach(([name, listener]) =>{  shadow.addEventListener(name, listener) }); document.addEventListener('selectionchange', changed)
     return () => { listeners.forEach(([name, listener]) =>{  shadow.removeEventListener(name, listener) }); document.removeEventListener('selectionchange', changed) }
   })
@@ -527,6 +545,10 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     }
     return false
   }
+  const zoomStep = (direction: 1 | -1): number | undefined => {
+    const current = zoom === 'fit' ? fitPercent : zoom
+    return direction > 0 ? ZOOMS.find(value => value > current) : [...ZOOMS].reverse().find(value => value < current)
+  }
   const goToChange = (step: number): void => {
     const marked = [...host.current?.shadowRoot?.querySelectorAll<HTMLElement>('[data-paperai-change]') ?? []]
     if (marked.length === 0) return
@@ -537,29 +559,46 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   return (
     <div className={css.previewSeat} hidden={!active} aria-hidden={!active || undefined}>
       {active && !comparing && <EditorRibbon caret={caret} fonts={fonts} paragraphStyles={paragraphStyles}
-        disabled={!editable || composing.current} dirty={edits.length > 0}
-        undo={historyState.undo} redo={historyState.redo} onSave={onSave} onUndo={() =>{  undo() }} onRedo={() =>{  undo(true) }}
+        disabled={!editable || composing.current}
+        undo={historyState.undo} redo={historyState.redo} onUndo={() =>{  undo() }} onRedo={() =>{  undo(true) }}
         onToggle={toggle} onFormat={format} onParagraph={paragraph} onFind={find}
-        quote={excerpt !== null} onQuote={onQuote === undefined ? undefined : () => {
-          if (excerpt !== null) { onQuote(excerpt); setExcerpt(null) }
-        }}
         onClear={() =>{  format({ 'font-weight': '', 'font-style': '', 'text-decoration': '', 'font-size': '', 'font-family': '', color: '' }) }} t={t} />}
       {active && notice !== null && <div className={css.notice} role="status">{t(notice)}</div>}
-      <div ref={host} className={css.preview} role="document" aria-label={title} onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop) }} />
-      {active && comparing && changes.count > 0 && <div className={css.changeNav} role="group" aria-label={t('versions.changes')}>
-        <span>{t('versions.changeNav', { index: changes.index + 1, count: changes.count })}</span>
-        <button type="button" aria-label={t('versions.prev')} onClick={() =>{  goToChange(-1) }}><IconChevronDownOutline14 className={css.flipped ?? ''} /></button>
-        <button type="button" aria-label={t('versions.next')} onClick={() =>{  goToChange(1) }}><IconChevronDownOutline14 /></button>
-      </div>}
-      {active && edits.length > 0 && <div className={css.pending} role="group" aria-label={t('block.pending', { count: edits.length })} data-paperai-pending>
-        <span>{t('block.pending', { count: edits.length })}</span>
-        {conflicted && <span role="alert">{t('block.conflicted')}</span>}
-        <button className={css.chip} type="button" disabled={saving || busy} onClick={() => {
-          for (const original of originals.current.values()) restoreImage(original.image)
-          history.current = { past: [], future: [] }; updateHistory(); onCancel()
-        }}>{t('block.discard')}</button>
-        <button className={css.chip} type="button" data-kind="save" disabled={saving || busy || conflicted} onClick={onSave}>{saving ? t('block.saving') : t('block.save')}</button>
-      </div>}
+      {active && context !== null && onQuote !== undefined && <Menu portal compact open
+        items={[{ id: 'ask', label: t('selection.ask') }]} anchor={<span hidden />}
+        getAnchorRect={() => ({ left: context.x, right: context.x, top: context.y, bottom: context.y, width: 0, height: 0 } as DOMRect)}
+        onSelect={() => { if (excerpt !== null) { onQuote(excerpt); setExcerpt(null) } setContext(null) }}
+        onClose={() => { setContext(null) }} />}
+      <div className={css.stage}>
+        <div ref={host} className={css.preview} role="document" aria-label={title}
+          onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop) }} />
+        {active && onZoom !== undefined && <div className={clsx(css.floating, css.zoomPill)} role="group" aria-label={t('status.zoom')}>
+          <button type="button" aria-label={t('status.zoomOut')} title={t('status.zoomOut')} disabled={zoomStep(-1) === undefined}
+            onClick={() => { const next = zoomStep(-1); if (next !== undefined) onZoom(next) }}><IconZoomOut size={14} /></button>
+          <Menu portal dense align="end" open={zoomOpen} selectedId={String(zoom)}
+            items={[{ id: 'fit', label: t('status.fit') }, ...ZOOMS.map(value => ({ id: String(value), label: `${value}%` }))]}
+            anchor={<button type="button" aria-haspopup="menu" aria-expanded={zoomOpen} aria-label={t('status.zoom')}
+              title={`${zoom === 'fit' ? t('status.fit') : t('status.zoom')} · ${t('status.pagination')}`}
+              onClick={() => { setZoomOpen(open => !open) }}>{zoom === 'fit' ? fitPercent : zoom}%</button>}
+            onSelect={(id) => { setZoomOpen(false); onZoom(id === 'fit' ? 'fit' : Number(id)) }} onClose={() => { setZoomOpen(false) }} />
+          <button type="button" aria-label={t('status.zoomIn')} title={t('status.zoomIn')} disabled={zoomStep(1) === undefined}
+            onClick={() => { const next = zoomStep(1); if (next !== undefined) onZoom(next) }}><IconPlusOutline16 size={14} /></button>
+        </div>}
+        {active && comparing && changes.count > 0 && <div className={clsx(css.floating, css.changeNav)} role="group" aria-label={t('versions.changes')}>
+          <span>{t('versions.changeNav', { index: changes.index + 1, count: changes.count })}</span>
+          <button type="button" aria-label={t('versions.prev')} onClick={() =>{  goToChange(-1) }}><IconChevronDownOutline14 className={css.flipped ?? ''} /></button>
+          <button type="button" aria-label={t('versions.next')} onClick={() =>{  goToChange(1) }}><IconChevronDownOutline14 /></button>
+        </div>}
+        {active && edits.length > 0 && <div className={clsx(css.floating, css.pending)} role="group" aria-label={t('block.pending', { count: edits.length })} data-paperai-pending>
+          <span title={t('status.memory')}>{t('block.pending', { count: edits.length })}</span>
+          {conflicted && <span role="alert">{t('block.conflicted')}</span>}
+          <button className={css.chip} type="button" disabled={saving || busy} onClick={() => {
+            for (const original of originals.current.values()) restoreImage(original.image)
+            history.current = { past: [], future: [] }; updateHistory(); onCancel()
+          }}>{t('block.discard')}</button>
+          <button className={css.chip} type="button" data-kind="save" disabled={saving || busy || conflicted} onClick={onSave}>{saving ? t('block.saving') : t('block.save')}</button>
+        </div>}
+      </div>
     </div>
   )
 }

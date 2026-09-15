@@ -153,6 +153,22 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.keyboard.insertText(text)
   }
   const pending = () => page.locator('[data-paperai-pending]')
+  /** Pick a zoom level from the pill floating over the page; `fit` is the fit-to-width row. */
+  const zoomTo = async (level: 'fit' | 50 | 75 | 100 | 125 | 150 | 200, labels = { zoom: '缩放', fit: '适合页宽' }): Promise<void> => {
+    await page.getByRole('group', { name: labels.zoom, exact: true }).getByRole('button', { name: labels.zoom, exact: true }).click()
+    await page.getByRole('menuitem', { name: level === 'fit' ? labels.fit : `${level}%`, exact: true }).click()
+  }
+  /** Open the ribbon's font or size menu and pick one row. */
+  const pickFormat = async (menu: string, label: string): Promise<void> => {
+    await page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true }).getByRole('button', { name: menu, exact: true }).click()
+    await page.getByRole('menuitem', { name: label, exact: true }).click()
+  }
+  /** Open one paragraph submenu of the ribbon and pick one row. */
+  const pickParagraph = async (group: string, label: string): Promise<void> => {
+    await page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true }).getByRole('button', { name: '段落', exact: true }).click()
+    await page.getByRole('menuitem', { name: group, exact: true }).hover()
+    await page.getByRole('menuitem', { name: label, exact: true }).click()
+  }
   const agentColumn = () => page.locator('[class*="centerCol"]')
   const expectAgentHidden = async (): Promise<void> => {
     await expect.poll(() => agentColumn().evaluate(element => element.hasAttribute('inert')
@@ -708,7 +724,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     })
     expect(imported.status).toBe('imported')
     const preview = page.getByRole('document', { name: '文档预览' }).filter({ visible: true })
-    await page.getByRole('combobox', { name: '缩放', exact: true }).selectOption('100')
+    await zoomTo(100)
     const original = await preview.elementHandle()
     if (original === null) throw new Error('document preview missing')
     await retype(preview.locator('[data-paperai-block]', { hasText: '浏览器合并后的最终文本' }), '切换文档保留的草稿')
@@ -723,7 +739,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'retained-draft.expected.md'),
       await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
     await pending().getByRole('button', { name: '放弃修改', exact: true }).click()
-    await page.getByRole('combobox', { name: '缩放', exact: true }).selectOption('fit')
+    await zoomTo('fit')
     await original.dispose()
   }, 90_000)
 
@@ -750,9 +766,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       selection.addRange(range)
       element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
     })
-    const selection = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
-      .getByRole('button', { name: '交给 Agent', exact: true })
-    await expect.poll(() => selection.isEnabled(), { timeout: 10_000 }).toBe(true)
+    await block.click({ button: 'right' })
+    const selection = page.getByRole('menuitem', { name: '交给 Agent', exact: true })
+    await selection.waitFor({ timeout: 10_000 })
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection.expected.md'), await selection.ariaSnapshot(), MODE)
     await selection.click()
     const composer = page.locator('textarea:enabled').last()
@@ -908,7 +924,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await selectBlockText(body)
     const toolbar = page.getByRole('toolbar', { name: '文档编辑工具栏', exact: true })
     await toolbar.getByRole('button', { name: '加粗', exact: true }).click()
-    await toolbar.getByRole('combobox', { name: '字号（磅）', exact: true }).selectOption('16pt')
+    await pickFormat('字号（磅）', '16')
     await pending().getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
     // The Host re-renders the preview from the DOCX, so its spans are the run properties Word now stores.
@@ -1000,17 +1016,16 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       first.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
     })
     await toolbar.getByRole('button', { name: '加粗', exact: true }).click()
-    await toolbar.getByRole('combobox', { name: '字体', exact: true }).selectOption('Arial')
-    await toolbar.getByRole('combobox', { name: '字号（磅）', exact: true }).selectOption('14pt')
-    await toolbar.getByRole('button', { name: '段落', exact: true }).click()
-    await toolbar.getByLabel('段落对齐', { exact: true }).selectOption('center')
-    await toolbar.getByLabel('左缩进（磅）', { exact: true }).fill('24')
-    await toolbar.getByLabel('行距', { exact: true }).selectOption('1.5x')
+    await pickFormat('字体', 'Arial')
+    await pickFormat('字号（磅）', '14')
+    await pickParagraph('段落对齐', '居中')
+    await pickParagraph('左缩进（磅）', '24 磅')
+    await pickParagraph('行距', '1.5x')
     expect(await preview.locator('[data-paperai-changed]').count()).toBe(2)
     expect(await page.locator('[data-paperai-toolbar] button[data-kind="export"]').isEnabled()).toBe(false)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-draft.expected.md'),
       await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
-    await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+    await pending().getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
     await page.getByRole('button', { name: '关闭文档', exact: true }).click()
     await sidebarDocument('Paragraph editing.docx').click()
@@ -1108,7 +1123,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(insertionReading.length).toBeGreaterThan(0)
     expect(seedFont).toContain('Times New Roman')
     for (const reading of insertionReading) expect(reading).toEqual({ font: seedFont, bold: true })
-    await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+    await pending().getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
     const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === 'Formatting preservation.docx')!
     const xml = strFromU8(unzipSync(await readFile(row.workingPath!))['word/document.xml']!)
@@ -1171,14 +1186,18 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await expect.poll(() => paragraph.textContent(), { timeout: 20_000 }).toBe('Template body paragraph')
     await selectBlockText(paragraph)
     await toolbar.getByRole('button', { name: '段落', exact: true }).click()
-    const styles = toolbar.getByRole('combobox', { name: '段落样式', exact: true })
-    expect(await styles.locator('option').allTextContents()).toEqual(['应用样式', 'Normal', '学院正文'])
-    expect(await styles.locator('option[value="Heading1"]').count()).toBe(0)
-    expect(await styles.locator('option[value="SchoolBody"]').textContent()).toBe('学院正文')
+    await page.getByRole('menuitem', { name: '段落样式', exact: true }).hover()
+    const styles = page.locator('[role="menu"] [role="menu"]')
+    expect(await styles.getByRole('menuitem').allTextContents()).toEqual(['Normal', '学院正文'])
+    expect(await styles.getByRole('menuitem', { name: 'Heading1', exact: true }).count()).toBe(0)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'paragraph-styles.expected.md'), await styles.ariaSnapshot(), MODE)
-    await styles.selectOption('Normal')
-    expect(await styles.inputValue()).toBe('Normal')
-    await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+    await styles.getByRole('menuitem', { name: 'Normal', exact: true }).click()
+    // The submenu marks the reading the paragraph now carries.
+    await toolbar.getByRole('button', { name: '段落', exact: true }).click()
+    await page.getByRole('menuitem', { name: '段落样式', exact: true }).hover()
+    await expect.poll(() => styles.getByRole('menuitem', { name: 'Normal', exact: true }).locator('svg').count()).toBe(1)
+    await page.keyboard.press('Escape')
+    await pending().getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
     await page.getByRole('button', { name: '关闭文档', exact: true }).click()
     await sidebarDocument('Template styles.docx').click()
@@ -1212,7 +1231,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(officePath).toBe('/body/p[1]')
     await selectBlockText(paragraph)
     await toolbar.getByRole('button', { name: '段落', exact: true }).click()
-    await toolbar.getByLabel('段落对齐', { exact: true }).selectOption('center')
+    await page.getByRole('menuitem', { name: '段落对齐', exact: true }).hover()
+    await page.getByRole('menuitem', { name: '居中', exact: true }).click()
 
     const refreshes = Array.from({ length: 2 }, () => ({
       ready: Promise.withResolvers<undefined>(),
@@ -1242,7 +1262,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       }))
     }, strFromU8(unzipSync(await readFile(row.workingPath!))['word/document.xml']!))
     try {
-      await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+      await pending().getByRole('button', { name: '保存', exact: true }).click()
       await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
       await refreshes[0]!.ready.promise
       expect(await paragraph.textContent()).toBe(original)
@@ -1253,7 +1273,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await page.keyboard.press('End')
       await page.keyboard.insertText('，预览等待期间输入')
       await expect.poll(() => paragraph.textContent()).toBe(secondSave)
-      await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+      await pending().getByRole('button', { name: '保存', exact: true }).click()
       await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
       await refreshes[1]!.ready.promise
       await paragraph.click()
@@ -1281,7 +1301,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
         await preview.ariaSnapshot(),
         await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd),
       ].join('\n')
-      await toolbar.getByRole('button', { name: '保存', exact: true }).click()
+      await pending().getByRole('button', { name: '保存', exact: true }).click()
       await expect.poll(() => pending().count(), { timeout: 30_000 }).toBe(0)
       const saved = await readWord()
       expect(saved).toEqual([{ text: finalText, align: 'center' }, { text: 'Untouched companion', align: null }])
@@ -1345,9 +1365,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await expectAgentHidden()
       const toolbar = page.getByRole('toolbar', { name: locale === 'zh' ? '文档编辑工具栏' : 'Document editing toolbar', exact: true })
       const preview = page.getByRole('document', { name: locale === 'zh' ? '文档预览' : 'Document preview', exact: true }).filter({ visible: true })
-      const status = page.locator('footer').filter({ has: page.getByRole('combobox', { name: locale === 'zh' ? '缩放' : 'Zoom', exact: true }) })
-      const zoom = status.getByRole('combobox')
-      await zoom.selectOption('fit')
+      const labels = locale === 'zh' ? { zoom: '缩放', fit: '适合页宽' } : { zoom: 'Zoom', fit: 'Fit page width' }
+      const status = page.getByRole('group', { name: labels.zoom, exact: true })
+      const header = page.locator('[data-dsh-details-shell] > header').first()
+      await zoomTo('fit', labels)
       const geometry = async (): Promise<{ toolbar: unknown; preview: unknown; status: unknown }> => {
         await expect.poll(async () => {
           const boxes = await Promise.all([toolbar.boundingBox(), preview.boundingBox(), status.boundingBox()])
@@ -1368,16 +1389,16 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
         return boxes
       }
       const fit = await geometry()
-      await zoom.selectOption('100')
+      await zoomTo(100, labels)
       const normal = await preview.locator('.page').first().boundingBox()
-      await zoom.selectOption('125')
+      await zoomTo(125, labels)
       await expect.poll(async () => ((await preview.locator('.page').first().boundingBox())?.width ?? 0) / normal!.width).toBeCloseTo(1.25, 2)
       await geometry()
       expect(await preview.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
       await page.screenshot({ path: join(artifactRoot, `${width}x${height}-${locale}-${scheme}-document-125.png`) })
-      await zoom.selectOption('fit')
+      await zoomTo('fit', labels)
       await compareOrRefreshGolden(join(SNAPSHOT_DIR, `writing-controls.${locale}.expected.md`), [
-        await toolbar.ariaSnapshot(), await status.ariaSnapshot(),
+        await header.ariaSnapshot(), await toolbar.ariaSnapshot(), await status.ariaSnapshot(),
       ].join('\n'), MODE)
       const collaborate = page.getByRole('button', { name: locale === 'zh' ? '显示 Agent 协作' : 'Show Agent collaboration', exact: true })
       await collaborate.click()

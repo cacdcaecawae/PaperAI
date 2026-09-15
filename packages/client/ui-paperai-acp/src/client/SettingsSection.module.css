@@ -57,7 +57,7 @@
 .form summary { cursor: pointer; font-size: 14px; min-height: 36px; line-height: 36px; }
 .form textarea { width: 100%; resize: vertical; }
 .form footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 0; background: var(--dsw-alias-bg-layer-1); }
-.sessionButton { max-width: 100%; min-height: 32px; font-size: 13px; }
+.sessionButton { max-width: 100%; color: var(--dsw-alias-label-secondary); font-size: 13px; }
 .sessionFeedback { min-width: 0; font-size: 13px; color: var(--dsw-alias-label-secondary); }
 @media (max-width: 700px) {
   .row, .history { flex-wrap: wrap; }

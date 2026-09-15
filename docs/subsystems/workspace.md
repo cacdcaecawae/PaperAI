@@ -567,7 +567,8 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
  * immutable snapshots through the document engine.
  * @param request - document and version to explain.
  * @param signal - optional cancellation signal for engine reads.
- * @returns paragraph changes in document order; a root version lists every paragraph as added.
+ * @returns the paragraph alignment and changes in document order plus the snapshot's rendering;
+ * a root version measured from nothing lists every paragraph as added.
  * @throws when the version does not belong to the document.
  */
 @Remote('diffVersion') async diffVersion(request: PaperAIDiffVersionRequest, signal?: AbortSignal): Promise<PaperAIVersionDiff>

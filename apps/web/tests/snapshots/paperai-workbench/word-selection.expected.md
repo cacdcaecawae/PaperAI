@@ -1,1 +1,1 @@
-- button "交给 Agent"
+- menuitem "交给 Agent"

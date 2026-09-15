@@ -1,11 +1,31 @@
-/* Compact project checks and Agent metadata use the existing semantic palette. */
-.trigger { min-height: 32px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); padding: 4px 10px; font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
-.trigger:disabled { opacity: 0.5; cursor: default; }
-.trigger:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
-.doctor { margin: 12px 0; }
-.report, .repair { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
-.report ul { margin: 0; padding-left: 18px; }
-.report li { margin: 8px 0; }
+/* The project check is one more sidebar row; its report keeps to caption
+   sizes and outline buttons, and paints only through semantic tokens. */
+.doctor { margin: 6px 0 4px; }
+.row {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 8px 0 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+}
+.row > svg { flex: none; color: var(--dsw-alias-label-tertiary); }
+.row:hover, .row[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.row:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: -2px; }
+.report, .repair { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 4px 10px 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.report p { margin: 0; }
+.report ul { margin: 0; padding-left: 16px; }
+.report li { margin: 6px 0; }
 .report li > span { display: block; }
 .path { overflow-wrap: anywhere; }
-.repair { padding: 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.repair { width: 100%; box-sizing: border-box; border-top: 1px solid var(--dsw-alias-border-l2); padding-top: 8px; }

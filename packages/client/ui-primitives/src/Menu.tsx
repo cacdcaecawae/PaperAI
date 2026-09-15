@@ -251,19 +251,23 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
         </button>
         {subOpen && entry.submenu !== undefined && (
           <div className={clsx(css.submenu, compact && css.compactList)} role="menu">
-            {entry.submenu.map(sub => (
-              <button
-                key={sub.id}
-                type="button"
-                role="menuitem"
-                className={css.item}
-                disabled={sub.disabled}
-                onClick={() => { onSelect(sub.id); restoreTrigger() }}
-              >
-                {sub.icon !== undefined && <span className={css.itemIcon}>{sub.icon}</span>}
-                <span className={css.itemLabel}>{sub.label}</span>
-              </button>
-            ))}
+            {entry.submenu.map((sub) => {
+              const subSelected = sub.id === selectedId || selectedIds?.includes(sub.id) === true
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  role="menuitem"
+                  className={clsx(css.item, subSelected && css.selected)}
+                  disabled={sub.disabled}
+                  onClick={() => { onSelect(sub.id); restoreTrigger() }}
+                >
+                  {sub.icon !== undefined && <span className={css.itemIcon}>{sub.icon}</span>}
+                  <span className={css.itemLabel}>{sub.label}</span>
+                  {subSelected && <IconCheckOutline16 className={css.check} />}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

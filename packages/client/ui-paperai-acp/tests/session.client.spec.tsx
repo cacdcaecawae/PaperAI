@@ -142,7 +142,7 @@ it('shows model search, favorites, native options, usage and plans while keeping
   state.error = 'Connection lost'
   preferences.error = 'Preferences unavailable'
   view.rerender(<AcpSessionControls {...props} />)
-  expect(screen.getByText(/未连接 · ACP 选项/)).toBeTruthy()
+  expect(screen.getByTitle('未连接 · ACP 选项')).toBeTruthy()
   expect(screen.getByLabelText(/快速模式/)).toHaveProperty('disabled', true)
   expect(screen.getAllByRole('alert')).toHaveLength(3)
   fireEvent.click(screen.getByRole('button', { name: '关闭 ACP 会话选项' }))

@@ -1,6 +1,6 @@
 /** Block-level reading of the Host's preview HTML: the rendered preview, the commit patch, and the version diff. */
 
-import type { PaperAIDocumentTextRun, PaperAIVersionChange, PaperAIDocumentParagraph, PaperAIParagraphFormat } from './types.ts'
+import type { PaperAIDocumentTextRun, PaperAIDocumentParagraph, PaperAIParagraphFormat, PaperAIVersionStep } from './types.ts'
 
 /** Tags whose text maps back to one semantic node. */
 export const BLOCK_TAGS = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH']
@@ -413,40 +413,61 @@ function run(document: Document, kind: 'del' | 'ins', text: string): HTMLElement
   return element
 }
 
-/** A version's changes laid over the current preview, and those the current text no longer carries. */
+/** A version's page with its changes marked in place. */
 export interface MarkedDiff {
   readonly html: string
-  readonly unplaced: readonly PaperAIVersionChange[]
+  /** Marked blocks, struck placeholders for removed paragraphs included. */
+  readonly count: number
 }
 
+/** How far the walk looks ahead for a step's paragraph before leaving the step unmarked. */
+const LOOKAHEAD = 5
+
 /**
- * Show a version's changes on the current preview. A changed or added
- * paragraph is marked in place only when exactly one addressed body block
- * still carries its text; removed paragraphs, and changes whose text is gone
- * or repeated, are returned unplaced for the panel to list rather than guessed
- * at. Every marked block carries `data-paperai-change`.
- * @param html - preview of the current document.
- * @param changes - the version's paragraph changes in reading order.
- * @returns the marked preview and the changes it could not place.
+ * Mark a version's page with the alignment that produced it. The steps and
+ * the page's addressed body blocks share document order, so the walk pairs
+ * them one by one: an equal step consumes the next block, a changed or added
+ * step consumes and marks it, and a removed paragraph, which the page no
+ * longer has, is drawn struck through where it stood. A step whose text is
+ * not within reach leaves the page untouched and the walk continues.
+ * @param html - the version's Host preview.
+ * @param steps - the alignment from the compared version to this one, in document order.
+ * @returns the marked HTML and the number of marked blocks.
  */
-export function markDiffHtml(html: string, changes: readonly PaperAIVersionChange[]): MarkedDiff {
+export function markDiffHtml(html: string, steps: readonly PaperAIVersionStep[]): MarkedDiff {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
-  const blocks = blocksOf(parsed.body)
-  const unplaced: PaperAIVersionChange[] = []
-  for (const change of changes) {
-    const after = change.after
-    const candidates = after === undefined
-      ? []
-      : addressed(blocks, after).filter(candidate => candidate.dataset.paperaiChange === undefined)
-    const block = candidates.length === 1 ? candidates[0] : undefined
-    if (block === undefined) {
-      unplaced.push(change)
+  const blocks = blocksOf(parsed.body).filter(block => block.dataset.path !== undefined)
+  let index = 0
+  let count = 0
+  for (const step of steps) {
+    if (step.kind === 'removed') {
+      const next = blocks[index]
+      const anchor = next ?? blocks.at(-1)
+      const ghost = parsed.createElement('p')
+      ghost.dataset.paperaiChange = ''
+      ghost.dataset.paperaiRemoved = ''
+      ghost.append(run(parsed, 'del', step.before ?? ''))
+      if (anchor === undefined) parsed.body.append(ghost)
+      else {
+        // A ghost never enters a table: it stands before or after the table its neighbour sits in.
+        const seat = anchor.closest('table') ?? anchor
+        if (next === undefined) seat.after(ghost)
+        else seat.before(ghost)
+      }
+      count++
       continue
     }
-    block.replaceChildren(...wordDiff(change.before ?? '', after ?? '').map(([kind, text]) => (
+    const wanted = normalize(step.after ?? '')
+    const at = blocks.slice(index, index + LOOKAHEAD).findIndex(block => normalize(textOf(block)) === wanted)
+    if (at === -1) continue
+    const block = blocks[index + at]
+    index += at + 1
+    if (step.kind === 'equal' || block === undefined) continue
+    block.replaceChildren(...wordDiff(step.before ?? '', step.after ?? '').map(([kind, text]) => (
       kind === 'same' ? parsed.createTextNode(text) : run(parsed, kind, text)
     )))
     block.dataset.paperaiChange = ''
+    count++
   }
-  return { html: parsed.documentElement.outerHTML, unplaced }
+  return { html: parsed.documentElement.outerHTML, count }
 }

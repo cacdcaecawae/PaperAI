@@ -848,7 +848,8 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    * immutable snapshots through the document engine.
    * @param request - document and version to explain.
    * @param signal - optional cancellation signal for engine reads.
-   * @returns paragraph changes in document order; a root version lists every paragraph as added.
+   * @returns the paragraph alignment and changes in document order plus the snapshot's rendering;
+   * a root version measured from nothing lists every paragraph as added.
    * @throws when the version does not belong to the document.
    */
   @Remote('diffVersion')
@@ -865,9 +866,19 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     if (commit.parentId !== undefined && parent === undefined) {
       throw new Error(`paperai-workbench: version '${commit.id}' references missing parent '${commit.parentId}'`)
     }
-    const [before, after] = await Promise.all([
-      parent === undefined ? Promise.resolve([]) : this.ctx.documentEngine.readTextNodes(parent.snapshotPath, signal),
+    const baseId = request.baseCommitId === undefined || request.baseCommitId === null
+      ? undefined
+      : DocumentCommitId(String(request.baseCommitId))
+    const base = baseId === undefined ? parent : this.ctx.paperRepository.getCommit(baseId)
+    if (baseId !== undefined && (base === undefined || String(base.documentId) !== String(documentId))) {
+      throw new Error(
+        `paperai-workbench: base version '${request.baseCommitId}' does not belong to document '${documentId}'`,
+      )
+    }
+    const [before, after, previewHtml] = await Promise.all([
+      base === undefined ? Promise.resolve([]) : this.ctx.documentEngine.readTextNodes(base.snapshotPath, signal),
       this.ctx.documentEngine.readTextNodes(commit.snapshotPath, signal),
+      this.ctx.documentEngine.previewHtml(commit.snapshotPath, signal),
     ])
     const paragraphs = (nodes: readonly { text: string }[]): string[] => nodes.map(node => node.text)
     const diff = diffParagraphs(paragraphs(before), paragraphs(after))
@@ -877,8 +888,11 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       documentId,
       commitId: commit.id,
       parentCommitId: parent?.id ?? null,
+      baseCommitId: base?.id ?? null,
+      steps: diff.steps,
       changes: diff.changes,
       unchangedCount: diff.unchangedCount,
+      previewHtml,
       ...(formattingEditCount === 0 ? {} : { formattingEditCount }),
     }
   }

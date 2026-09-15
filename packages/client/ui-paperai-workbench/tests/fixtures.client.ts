@@ -178,11 +178,20 @@ export const DIFF: PaperAIVersionDiff = {
   documentId: DOCUMENT_ID,
   commitId: COMMIT_1,
   parentCommitId: COMMIT_0,
+  baseCommitId: COMMIT_0,
+  steps: [
+    { kind: 'changed', before: 'Old introduction', after: 'Introduction' },
+    { kind: 'added', after: 'Research background' },
+    { kind: 'equal', before: '', after: '' },
+    { kind: 'equal', before: 'Experiment results', after: 'Experiment results' },
+    { kind: 'equal', before: 'Closing remarks', after: 'Closing remarks' },
+  ],
   changes: [
     { kind: 'changed', before: 'Old introduction', after: 'Introduction' },
     { kind: 'added', after: 'Research background' },
   ],
   unchangedCount: 3,
+  previewHtml: PREVIEW_HTML,
 }
 
 export function successfulRemote(): PaperAIWorkbenchRemote {
