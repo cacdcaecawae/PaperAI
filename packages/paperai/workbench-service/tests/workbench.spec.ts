@@ -334,7 +334,7 @@ async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
       ? { id: WORKSPACE_ID, path: harness.project.rootPath, title: harness.project.name }
       : undefined,
   } as never)
-  ctx.provide('documentEngine', { readTextNodes } as never)
+  ctx.provide('documentEngine', { readTextNodes, previewHtml } as never)
   ctx.provide('paperProjects', {
     create: async () => ({
       project: structuredClone(harness.project), projectCreated: false, contextFile: 'preserved', git: { status: 'ready' },
@@ -1137,6 +1137,7 @@ describe('PaperAiWorkbenchService', () => {
         { kind: 'added', after: '再新增一段' },
       ],
       unchangedCount: 1,
+      previewHtml: '<html><body><p>只读预览</p></body></html>',
     })
     const root = await harness.service.diffVersion({ documentId: DOCUMENT_ID, commitId: first.createdCommitId })
     expect(root).toMatchObject({ parentCommitId: null, unchangedCount: 0 })

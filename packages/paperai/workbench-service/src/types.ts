@@ -458,6 +458,8 @@ export interface PaperAIVersionDiff {
   readonly changes: readonly PaperAIVersionChange[]
   /** Paragraphs that did not change; lets the reader judge the scale of an edit. */
   readonly unchangedCount: number
+  /** The Host's rendering of this version's snapshot, so the page can show the version itself. */
+  readonly previewHtml: string
   /** Recorded text-preserving formatting operations; not an exhaustive formatting diff. */
   readonly formattingEditCount?: number
 }

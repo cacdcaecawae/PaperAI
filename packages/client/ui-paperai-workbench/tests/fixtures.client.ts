@@ -183,6 +183,7 @@ export const DIFF: PaperAIVersionDiff = {
     { kind: 'added', after: 'Research background' },
   ],
   unchangedCount: 3,
+  previewHtml: PREVIEW_HTML,
 }
 
 export function successfulRemote(): PaperAIWorkbenchRemote {

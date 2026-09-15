@@ -1030,6 +1030,7 @@ describe('DocumentWorkbench', () => {
     expect(within(compared).getByText('初始版本收录了全部 2 段，没有更早的版本可比较。')).toBeTruthy()
     expect(within(compared).getAllByRole('button', { pressed: true })).toHaveLength(1)
     expect(rootView.container.querySelector('[role="document"]')!.shadowRoot!.querySelectorAll('[data-paperai-change]')).toHaveLength(0)
+    expect(screen.getByText(/正在查看历史版本：/)).toBeTruthy()
     fireEvent.click(within(compared).getByRole('button', { name: '恢复到此版本' }))
     expect(b.restore).not.toHaveBeenCalled()
     fireEvent.click(within(compared).getByRole('button', { name: '确认恢复并创建新版本' }))
@@ -1042,6 +1043,7 @@ describe('DocumentWorkbench', () => {
     }))
     const view = render(<DocumentWorkbench {...later.props} />)
     expect(within(screen.getByRole('complementary', { name: '版本' })).getByText('2 处变化 · 3 段未变')).toBeTruthy()
+    expect(screen.queryByText(/正在查看历史版本：/)).toBeNull()
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     expect(shadow.querySelectorAll('[data-paperai-change]')).toHaveLength(2)
     expect(shadow.querySelector('h1')!.innerHTML).toBe('<del>Old introduction</del><ins>Introduction</ins>')

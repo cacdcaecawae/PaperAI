@@ -32,7 +32,7 @@ The browser follows one visual grammar: the ink-and-gold token layer in `ui-pape
 
 **Guess positions for removed paragraphs and repeated text.** The Host diff carries no positions; a guessed mark on the wrong block reads as a wrong edit. Listing beats guessing.
 
-**Show the diff on the compared version's own preview.** Needs a Host method rendering a snapshot; deferred until the history view earns it.
+**Show the diff on the compared version's own preview.** Needs a Host method rendering a snapshot; deferred until the history view earns it. Taken up on 2026-09-15 by the [visual-grammar decision](2026-09-15-paperai-workbench-visual-grammar.md): `diffVersion` returns the snapshot's rendering and the page shows the picked version itself.
 
 **Keep the textarea editor and restyle it.** Any seat beside the paragraph still reads as a form, and one open editor at a time is not how people revise a page. Typing into the rendered block is what Word does; plain-text editing keeps the block's runs intact while the text changes and hands one string per block to the existing `replace-text` mutation.
 

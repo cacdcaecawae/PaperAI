@@ -161,14 +161,17 @@ export function DocumentWorkbench({
   const focusActive = useStore(value => value.writing)
   const zoom = useStore(value => value.zoom)
   const [dialogOpen, setDialogOpen] = useState(false)
-  // The picked version's changes marked on the current preview while the versions panel is open; the
-  // root version diffs against nothing, so its "changes" are the whole document and stay unmarked.
+  // The picked version's own page while the versions panel is open, its changes marked; the root
+  // version diffs against nothing, so its page shows unmarked.
   const result = state.panel === 'versions' ? state.diff?.result ?? null : null
-  const changes = result !== null && result.parentCommitId !== null ? result.changes : null
   const compare = useMemo(
-    () => (document === null || changes === null ? null : markDiffHtml(document.previewHtml, changes)),
-    [document, changes],
+    () => (result === null ? null : markDiffHtml(result.previewHtml, result.parentCommitId === null ? [] : result.changes)),
+    [result],
   )
+  // The banner names the version on the page while it is not the current one.
+  const viewing = result !== null && document !== null && result.commitId !== document.headCommitId
+    ? document.versions.find(version => version.commitId === result.commitId)?.summary ?? ''
+    : null
   const ready = state.phase === 'ready' && document !== null
   const panelOpen = ready && state.panel !== null
   useEffect(() => {
@@ -244,6 +247,14 @@ export function DocumentWorkbench({
       )}
       {state.actionError !== null && actionErrorKey(state.actionError) !== 'workbench.workingChanged' && (
         <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError))}</p>
+      )}
+      {ready && compare !== null && viewing !== null && (
+        <div className={css.notice} role="status">
+          <div>
+            <strong>{t('versions.viewing', { summary: viewing })}</strong>
+            <span>{t('versions.viewingHint')}</span>
+          </div>
+        </div>
       )}
       <main className={css.body} data-panel={panelOpen || undefined}>
         {state.phase === 'idle' && <p className={css.centerMessage}>{t('workbench.idle')}</p>}
