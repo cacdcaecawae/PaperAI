@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentCommitId, PaperAIDocumentNodeId,
-  PaperAIDocumentType, PaperAIExportMode, PaperAILibraryState, PaperAIProjectDirectoryState,
+  PaperAIDocumentType, PaperAIExportMode, PaperAILibraryState, PaperAIOutlineDirectoryState, PaperAIProjectDirectoryState,
   PaperAIResourceId, PaperAITemplateStartInput, PaperAIWorkbenchPanel, PaperAIWorkbenchState,
 } from './types.ts'
 
@@ -61,6 +61,8 @@ export interface PaperAIWorkspaceContentInjected {
     diagnostics: HostObservable<import('./diagnostics-controller.ts').DiagnosticsState>
     /** All project projections; the component selects its owner-supplied Workspace id. */
     projects: HostObservable<PaperAIProjectDirectoryState>
+    /** Outlines of every Session's open document; the component selects the current Session's. */
+    outlines: HostObservable<PaperAIOutlineDirectoryState>
   }
   /** Load an unread project or retry its failed read. */
   ensureProject: (workspaceId: WorkspaceId) => Promise<void>
@@ -68,8 +70,6 @@ export interface PaperAIWorkspaceContentInjected {
   refreshProject: (workspaceId: WorkspaceId) => Promise<void>
   /** Connect the Workspace, select its Session, and open one tracked document. */
   openDocument: (workspaceId: WorkspaceId, resourceId: PaperAIResourceId) => Promise<void>
-  /** The stable workbench source of one Session, read for the outline of its open document. */
-  workbenchOf: (sessionId: SessionId) => HostObservable<PaperAIWorkbenchState>
   /** Show the Session's document view and bring one block of its open document into view. */
   reveal: (sessionId: SessionId, nodeId: PaperAIDocumentNodeId) => void
 }

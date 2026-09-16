@@ -1,6 +1,6 @@
 /** Browser state layered over the Host-owned PaperAI workbench protocol. */
 
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId, SnapshotStore, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@paperai/workbench-service/remote'
 import type {
@@ -175,6 +175,27 @@ export interface PaperAIWorkbenchState {
 
 /** One inactive document view, without a recursively retained cache. */
 export type PaperAIRetainedView = Omit<PaperAIWorkbenchState, 'retained'>
+
+/** One heading of an open document, in reading order. */
+export interface PaperAIOutlineEntry {
+  readonly nodeId: PaperAIDocumentNodeId
+  /** Heading text with its whitespace collapsed. */
+  readonly text: string
+  /** 1 for chapters and named parts, 2 and 3 for numbered sections below them. */
+  readonly level: 1 | 2 | 3
+}
+
+/** The headings of one Session's open document, derived by the controller for the sidebar. */
+export interface PaperAIOutlineState {
+  readonly workspaceId: WorkspaceId
+  readonly entries: readonly PaperAIOutlineEntry[]
+}
+
+/** Outlines by Session; a Session without an open document has no entry. */
+export type PaperAIOutlineDirectoryState = Readonly<Record<SessionId, PaperAIOutlineState>>
+
+/** Stable React-free source of every Session's outline. */
+export type PaperAIOutlineDirectoryStore = SnapshotStore<PaperAIOutlineDirectoryState>
 
 /** Stable React-free source for one Session workbench. */
 export type PaperAIWorkbenchStore = SnapshotStore<PaperAIWorkbenchState>

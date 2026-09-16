@@ -78,6 +78,24 @@ describe('markDiffHtml', () => {
     const marked = new DOMParser().parseFromString(result.html, 'text/html')
     expect(marked.querySelector('[data-paperai-change]')?.getAttribute('data-path')).toBe('/body/p[1]')
   })
+
+  it('keeps removed paragraphs past the last block in their own order', () => {
+    const result = markDiffHtml(HTML, [
+      { kind: 'equal', before: 'Introduction', after: 'Introduction' },
+      { kind: 'equal', before: 'Research background', after: 'Research background' },
+      { kind: 'equal', before: 'Research background', after: 'Research background' },
+      { kind: 'equal', before: 'Closing remarks', after: 'Closing remarks' },
+      { kind: 'equal', before: 'Same', after: 'Same' },
+      { kind: 'equal', before: 'Same', after: 'Same' },
+      { kind: 'removed', before: 'Gone first' },
+      { kind: 'removed', before: 'Gone second' },
+    ])
+    expect(result.count).toBe(2)
+    const marked = new DOMParser().parseFromString(result.html, 'text/html')
+    const last = marked.querySelector('[data-path="/body/p[5]"]')
+    expect(last?.nextElementSibling?.innerHTML).toBe('<del>Gone first</del>')
+    expect(last?.nextElementSibling?.nextElementSibling?.innerHTML).toBe('<del>Gone second</del>')
+  })
 })
 
 describe('patchPreviewHtml', () => {

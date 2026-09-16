@@ -1,15 +1,6 @@
 /** The document outline read off the node index: chapter, numbered and named headings with their levels. */
 
-import type { PaperAIDocumentNodeId, PaperAIDocumentNodeSummary } from './types.ts'
-
-/** One heading of the open document, in reading order. */
-export interface PaperAIOutlineEntry {
-  readonly nodeId: PaperAIDocumentNodeId
-  /** Heading text with its whitespace collapsed. */
-  readonly text: string
-  /** 1 for chapters and named parts, 2 and 3 for numbered sections below them. */
-  readonly level: 1 | 2 | 3
-}
+import type { PaperAIDocumentNodeSummary, PaperAIOutlineEntry } from './types.ts'
 
 // ponytail: text heuristics stand in for Word heading styles, which the node
 // index does not carry; move to a Host-emitted heading level when it does.

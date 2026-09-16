@@ -44,6 +44,19 @@ describe('PaperAIWorkbenchController projects', () => {
     expect(remote.open).toHaveBeenCalledTimes(5)
   })
 
+  it('derives the sidebar outline from the open document and drops it when the document closes', async () => {
+    const { controller, store } = await openedController()
+    const outlines = controller.outlineStore()
+    expect(outlines.getSnapshot()[SESSION_ID]).toEqual({
+      workspaceId: WORKSPACE_ID, entries: [{ nodeId: NODE_HEADING, text: 'Introduction', level: 1 }],
+    })
+    const before = outlines.getSnapshot()
+    controller.setScroll(SESSION_ID, 12)
+    expect(outlines.getSnapshot()).toBe(before)
+    store.update((draft) => { draft.document = null })
+    expect(outlines.getSnapshot()[SESSION_ID]).toBeUndefined()
+  })
+
   it('loads a cold project once, mirrors it into the directory, and refreshes on demand', async () => {
     const remote = successfulRemote()
     const overview = vi.spyOn(remote, 'overview')

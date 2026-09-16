@@ -7,11 +7,13 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { resolvePreviewBudget } from '../config.ts'
 import { normalize, patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
 import { commitFormatting } from './format-intent.ts'
+import { outlineOf } from './outline.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
   PaperAIDocumentType, PaperAIExportMode, PaperAIExternalDocumentHead, PaperAIImportDocumentResult, PaperAILibraryAction,
-  PaperAILibraryState, PaperAILibraryStore, PaperAIProjectAction, PaperAIProjectDirectoryState,
+  PaperAILibraryState, PaperAILibraryStore, PaperAIOutlineDirectoryState, PaperAIOutlineDirectoryStore,
+  PaperAIProjectAction, PaperAIProjectDirectoryState,
   PaperAIProjectDirectoryStore, PaperAIProjectOverview, PaperAIProjectState, PaperAIProjectStore,
   PaperAIResourceId, PaperAIRetainedView, PaperAIBlockDraft, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput,
   PaperAIWorkbenchAction,
@@ -118,6 +120,10 @@ export class PaperAIWorkbenchController {
     store: createSnapshotStore(LIBRARY_INITIAL), generation: 0, abort: null,
   }
   private readonly workbenches = new Map<SessionId, RequestEntry<PaperAIWorkbenchStore>>()
+  /** Each Session's outline, derived from its open document as the workbench store changes. */
+  private readonly outlines = createSnapshotStore<PaperAIOutlineDirectoryState>({})
+  private readonly outlineSources = new Map<SessionId, PaperAIDocumentSnapshot | null>()
+  private readonly outlineMirrors = new Map<SessionId, () => void>()
   private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, readonly PaperAIBlockEdit[]>>()
   private readonly positions = new Map<SessionId, Map<PaperAIResourceId, number>>()
   private readonly targets = new Map<SessionId, {
@@ -168,6 +174,14 @@ export class PaperAIWorkbenchController {
   workbenchStore(sessionId: SessionId): PaperAIWorkbenchStore {
     this.assertLive()
     return this.workbenchEntry(sessionId).store
+  }
+
+  /**
+   * Return the outlines of every Session's open document, kept current by the controller.
+   * @returns one stable snapshot store.
+   */
+  outlineStore(): PaperAIOutlineDirectoryStore {
+    return this.outlines
   }
 
   /**
@@ -920,9 +934,12 @@ export class PaperAIWorkbenchController {
     this.library.abort?.abort()
     for (const entry of this.workbenches.values()) entry.abort?.abort()
     for (const dispose of this.projectMirrors.values()) dispose()
+    for (const dispose of this.outlineMirrors.values()) dispose()
     this.projects.clear()
     this.projectMirrors.clear()
     this.workbenches.clear()
+    this.outlineMirrors.clear()
+    this.outlineSources.clear()
     this.targets.clear()
     this.drafts.clear()
     this.positions.clear()
@@ -1049,6 +1066,18 @@ export class PaperAIWorkbenchController {
     if (entry === undefined) {
       entry = { store: createSnapshotStore(WORKBENCH_INITIAL), generation: 0, abort: null }
       this.workbenches.set(sessionId, entry)
+      const created = entry
+      // The outline follows the document by identity: a scroll or a draft leaves it as it is.
+      const publish = (): void => {
+        const document = created.store.getSnapshot().document
+        if (document === this.outlineSources.get(sessionId)) return
+        this.outlineSources.set(sessionId, document)
+        const { [sessionId]: _closed, ...rest } = this.outlines.getSnapshot()
+        this.outlines.set(document === null
+          ? rest
+          : { ...rest, [sessionId]: { workspaceId: document.workspaceId, entries: outlineOf(document.nodes) } })
+      }
+      this.outlineMirrors.set(sessionId, created.store.subscribe(publish))
     }
     return entry
   }

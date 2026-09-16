@@ -439,6 +439,8 @@ export function markDiffHtml(html: string, steps: readonly PaperAIVersionStep[])
   const blocks = blocksOf(parsed.body).filter(block => block.dataset.path !== undefined)
   let index = 0
   let count = 0
+  // Ghosts past the last block follow one another, so a run of removed tail paragraphs keeps its order.
+  let tail: HTMLElement | null = null
   for (const step of steps) {
     if (step.kind === 'removed') {
       const next = blocks[index]
@@ -451,8 +453,7 @@ export function markDiffHtml(html: string, steps: readonly PaperAIVersionStep[])
       else {
         // A ghost never enters a table: it stands before or after the table its neighbour sits in.
         const seat = anchor.closest('table') ?? anchor
-        if (next === undefined) seat.after(ghost)
-        else seat.before(ghost)
+        if (next === undefined) { (tail ?? seat).after(ghost); tail = ghost } else seat.before(ghost)
       }
       count++
       continue

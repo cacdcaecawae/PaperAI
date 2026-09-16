@@ -321,8 +321,10 @@ export function VersionsPanel({ document, state, showDiff, restore, onClose, t }
   const [confirmRestore, setConfirmRestore] = useState(false)
   // `own` measures the picked version from its parent on its own page;
   // `current` measures the head from the picked version on the current page.
-  const [mode, setMode] = useState<'own' | 'current'>('own')
+  // The reading a picked version is shown in follows the comparison itself; the preference only decides the next pick.
+  const [preferred, setPreferred] = useState<'own' | 'current'>('own')
   const diff = state.diff
+  const mode: 'own' | 'current' = diff === null ? preferred : diff.baseCommitId === null ? 'own' : 'current'
   const result = diff?.result ?? null
   const formattingEditCount = result?.formattingEditCount ?? 0
   const pickedId = diff === null ? null : mode === 'current' ? diff.baseCommitId : diff.commitId
@@ -333,8 +335,8 @@ export function VersionsPanel({ document, state, showDiff, restore, onClose, t }
     else if (head !== null) void showDiff(head, commitId)
   }
   const switchMode = (next: 'own' | 'current'): void => {
-    if (next === mode) return
-    setMode(next)
+    if (next === mode || busy) return
+    setPreferred(next)
     if (picked !== null) compare(next, picked.commitId)
   }
   const caption = picked === null
@@ -356,15 +358,15 @@ export function VersionsPanel({ document, state, showDiff, restore, onClose, t }
         : (
           <>
             <div className={css.panelActions} role="group" aria-label={t('versions.title')}>
-              <Pill active={mode === 'own'} onClick={() => { switchMode('own') }}>{t('versions.modeOwn')}</Pill>
-              <Pill active={mode === 'current'} onClick={() => { switchMode('current') }}>{t('versions.modeCurrent')}</Pill>
+              <Pill active={mode === 'own'} disabled={busy} onClick={() => { switchMode('own') }}>{t('versions.modeOwn')}</Pill>
+              <Pill active={mode === 'current'} disabled={busy} onClick={() => { switchMode('current') }}>{t('versions.modeCurrent')}</Pill>
             </div>
             <p className={css.panelNote} aria-live="polite">{caption}</p>
             {formattingEditCount > 0 && (
               <p className={css.panelNote}>{t('versions.formatting', { count: formattingEditCount })}</p>
             )}
             {diff?.error != null && <Button variant="outline" size="sm" onClick={() => {
-              void showDiff(diff.commitId)
+              void showDiff(diff.commitId, diff.baseCommitId)
             }}>{t('versions.retry')}</Button>}
             <ol className={css.versionList}>
               {document.versions.map((version) => {

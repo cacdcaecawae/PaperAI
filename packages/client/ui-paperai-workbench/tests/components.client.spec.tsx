@@ -69,9 +69,8 @@ function libraryActions() {
   }
 }
 
-function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}, workbench = workbenchState()) {
+function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}, outlines: Record<string, unknown> = {}) {
   const store = createSnapshotStore<PaperAIProjectDirectoryState>({ workspaces: { [WORKSPACE_ID]: state } })
-  const workbenchStore = createSnapshotStore(workbench)
   const reveal = vi.fn()
   const ensureProject = vi.fn(async () => {})
   const refreshProject = vi.fn(async () => {})
@@ -79,7 +78,7 @@ function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, 
   const captureExternal = vi.fn(async () => {})
   const props = {
     workspaceId: WORKSPACE_ID, path: 'F:/paper', title: 'Paper', active: true,
-    useSessions: bind(createSnapshotStore({ current: SESSION_ID })), workbenchOf: () => workbenchStore, reveal,
+    useSessions: bind(createSnapshotStore({ current: SESSION_ID })), useOutlines: bind(createSnapshotStore(outlines)), reveal,
     useDiagnostics: bind(createSnapshotStore({ projects: diagnostics })), inspectProject: vi.fn(), captureExternal,
     useProjects: bind(store), ensureProject, refreshProject, openDocument, t,
   } as unknown as PaperAIWorkspaceContentProps
@@ -178,14 +177,10 @@ describe('WorkspaceContent', () => {
   })
 
   it('lists the open document\'s headings as an outline and reveals one on click', () => {
-    const nodes = [
-      { nodeId: 'n-abstract', kind: 'paragraph', label: '摘要', depth: 0, editable: true, text: '摘要' },
-      { nodeId: 'n-1', kind: 'paragraph', label: '1 绪论', depth: 0, editable: true, text: '1 绪论' },
-      { nodeId: 'n-1-1', kind: 'paragraph', label: '1.1 研究背景', depth: 0, editable: true, text: '1.1 研究背景' },
-      { nodeId: 'n-body', kind: 'paragraph', label: '正文', depth: 0, editable: true, text: '本文研究……。' },
-      { nodeId: 'n-2', kind: 'paragraph', label: '第2章 方法', depth: 0, editable: true, text: '第2章 方法' },
-    ] as unknown as NonNullable<PaperAIWorkbenchState['document']>['nodes']
-    const b = workspaceProps(projectState(), {}, workbenchState({ phase: 'ready', document: documentSnapshot(undefined, { nodes }) }))
+    const b = workspaceProps(projectState(), {}, { [SESSION_ID]: { workspaceId: WORKSPACE_ID, entries: [
+      { nodeId: 'n-abstract', text: '摘要', level: 1 }, { nodeId: 'n-1', text: '1 绪论', level: 1 },
+      { nodeId: 'n-1-1', text: '1.1 研究背景', level: 2 }, { nodeId: 'n-2', text: '第2章 方法', level: 1 },
+    ] } })
     render(<WorkspaceContent {...b.props} />)
     const outline = screen.getByRole('navigation', { name: '大纲' })
     expect(within(outline).getAllByRole('button').map(button => button.textContent)).toEqual(['摘要', '1 绪论', '1.1 研究背景', '第2章 方法'])
@@ -1090,6 +1085,32 @@ describe('DocumentWorkbench', () => {
     expect(shadow.querySelectorAll('[data-paperai-change]')).toHaveLength(2)
     expect(shadow.querySelector('h1')!.innerHTML).toBe('<del>Old introduction</del><ins>Introduction</ins>')
     expect(screen.getByText('第 1 / 2 处变化')).toBeTruthy()
+  })
+
+  it('retries a failed comparison with its base, reads the mode off the comparison, and holds the switch while busy', () => {
+    // A failed head-from-version comparison retries with the same base, and the picked version is the one measured from.
+    const failed = workbenchProps(workbenchState({
+      phase: 'ready', panel: 'versions', document: documentSnapshot(),
+      diff: { commitId: COMMIT_1, baseCommitId: COMMIT_0, result: null, error: 'Host offline' },
+    }))
+    render(<DocumentWorkbench {...failed.props} />)
+    const panel = screen.getByRole('complementary', { name: '版本' })
+    expect(within(panel).getByRole('button', { name: /从模板新建/u }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(within(panel).getByRole('button', { name: '重新比较' }))
+    expect(failed.showDiff).toHaveBeenCalledWith(COMMIT_1, COMMIT_0)
+    cleanup()
+    // While a comparison runs, the reading cannot be switched away from what the page is about to show.
+    const busy = workbenchProps(workbenchState({
+      phase: 'ready', panel: 'versions', document: documentSnapshot(), action: 'diffing',
+      diff: { commitId: COMMIT_1, baseCommitId: null, result: null, error: null },
+    }))
+    render(<DocumentWorkbench {...busy.props} />)
+    const running = screen.getByRole('complementary', { name: '版本' })
+    const current = within(running).getByRole('button', { name: '和现在比差多少' })
+    expect(current).toHaveProperty('disabled', true)
+    fireEvent.click(current)
+    expect(busy.showDiff).not.toHaveBeenCalled()
+    expect(within(running).getByRole('button', { name: /Improve the introduction/u }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('exports through the toolbar menu and shows receipts, blocks, and external updates', () => {

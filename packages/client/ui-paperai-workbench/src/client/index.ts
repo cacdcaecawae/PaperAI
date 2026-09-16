@@ -175,7 +175,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
     }
 
     const workspaceInjected: PaperAIWorkspaceContentInjected = {
-      hooks: { projects: controller.projectDirectoryStore(), diagnostics: diagnostics.store },
+      hooks: { projects: controller.projectDirectoryStore(), diagnostics: diagnostics.store, outlines: controller.outlineStore() },
       inspectProject: async (workspaceId, plan) => {
         await diagnostics.inspect(workspaceId, plan)
         if (plan !== undefined) controller.refreshLoaded()
@@ -186,7 +186,6 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
       refreshProject: workspaceId => controller.loadProject(workspaceId),
-      workbenchOf: sessionId => controller.workbenchStore(sessionId),
       reveal: (sessionId, nodeId) => {
         controller.reveal(sessionId, nodeId)
         void settleDetailsSelection(sessionId)
