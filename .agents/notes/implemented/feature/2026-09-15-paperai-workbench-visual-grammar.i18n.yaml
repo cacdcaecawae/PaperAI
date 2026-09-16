@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-15-paperai-workbench-visual-grammar.md
-2026-09-15-paperai-workbench-visual-grammar.md: 52f4f220433cfe5f4373472a949d932f661119f2
-2026-09-15-paperai-workbench-visual-grammar.zh.md: 22abf3d5891bd4c160bea10d5b7a38bc12756c34
+2026-09-15-paperai-workbench-visual-grammar.md: ae7710ac0c1df44164522369892eda8aa77b91d9
+2026-09-15-paperai-workbench-visual-grammar.zh.md: 7b6fb3193e996dbad3002ce3952fe43c17be84b8

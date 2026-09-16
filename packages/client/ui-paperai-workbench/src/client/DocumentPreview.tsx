@@ -19,7 +19,8 @@ export interface DocumentPreviewProps {
   readonly zoom?: number | 'fit'
   readonly onZoom?: (zoom: number | 'fit') => void
   readonly onScroll?: (scrollTop: number) => void
-  readonly onQuote?: (excerpt: WordExcerpt) => void
+  /** Hand the selection to the Agent, with one of the canned requests when the menu named it. */
+  readonly onQuote?: (excerpt: WordExcerpt, request?: string) => void
   readonly html: string
   readonly revision: PaperAIDocumentSnapshot['revision']
   readonly nodes: readonly PaperAIDocumentNodeSummary[]
@@ -72,6 +73,13 @@ function sanitize(html: string): { readonly styles: string; readonly body: Node[
   for (const style of parsed.querySelectorAll('style')) style.remove()
   return { styles, body: [...parsed.body.childNodes].map(node => document.importNode(node, true)) }
 }
+
+/** The canned selection actions: menu id, its label, and the request that follows the quoted text into the composer. */
+const SELECTION_REQUESTS = [
+  ['polish', 'selection.polish', 'selection.polishRequest'],
+  ['expand', 'selection.expand', 'selection.expandRequest'],
+  ['citations', 'selection.citations', 'selection.citationsRequest'],
+] as const
 
 /** Addressed body blocks consume equal-text nodes in reading order; page bands never enter this mapping. */
 function mapBlocks(blocks: readonly HTMLElement[], nodes: readonly PaperAIDocumentNodeSummary[]): Map<HTMLElement, PaperAIDocumentNodeId> {
@@ -591,9 +599,14 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         onClear={() =>{  format({ 'font-weight': '', 'font-style': '', 'text-decoration': '', 'font-size': '', 'font-family': '', color: '' }) }} t={t} />}
       {active && notice !== null && <div className={css.notice} role="status">{t(notice)}</div>}
       {active && context !== null && onQuote !== undefined && <Menu portal compact open
-        items={[{ id: 'ask', label: t('selection.ask') }]} anchor={<span hidden />}
+        items={[{ id: 'ask', label: t('selection.ask') }, { type: 'separator', id: 'canned' },
+          ...SELECTION_REQUESTS.map(([id, label]) => ({ id, label: t(label) }))]} anchor={<span hidden />}
         getAnchorRect={() => ({ left: context.x, right: context.x, top: context.y, bottom: context.y, width: 0, height: 0 } as DOMRect)}
-        onSelect={() => { if (excerpt !== null) { onQuote(excerpt); setExcerpt(null) } setContext(null) }}
+        onSelect={(id) => {
+          const request = SELECTION_REQUESTS.find(([action]) => action === id)?.[2]
+          if (excerpt !== null) { onQuote(excerpt, request === undefined ? undefined : t(request)); setExcerpt(null) }
+          setContext(null)
+        }}
         onClose={() => { setContext(null) }} />}
       <div className={css.stage}>
         <div ref={host} className={css.preview} role="document" aria-label={title}

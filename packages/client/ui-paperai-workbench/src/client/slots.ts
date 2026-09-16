@@ -120,8 +120,12 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   showConversation: () => void
   /** Append a repair request to the existing composer draft and reveal the Session conversation. */
   prepareAgentFix: (text: string) => void
-  /** Add a frozen Word excerpt to the Session's composer. */
-  quoteSelection: (document: import('./types.ts').PaperAIDocumentSnapshot, excerpt: import('./selection-context.ts').WordExcerpt) => void
+  /** Add a frozen Word excerpt to the Session's composer, followed by a canned request when one is named. */
+  quoteSelection: (
+    document: import('./types.ts').PaperAIDocumentSnapshot,
+    excerpt: import('./selection-context.ts').WordExcerpt,
+    request?: string,
+  ) => void
   /** Remember the active document's scroll offset. */
   setScroll: (scrollTop: number) => void
   hooks: PaperAILibraryInjected['hooks'] & {

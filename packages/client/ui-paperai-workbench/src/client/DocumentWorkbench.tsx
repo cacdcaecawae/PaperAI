@@ -281,7 +281,7 @@ export function DocumentWorkbench({
                 scrollTop={view.scrollTop}
                 reveal={view === state ? state.reveal : null}
                 onScroll={setScroll}
-                onQuote={(excerpt) => { if (view.document !== null) quoteSelection(view.document, excerpt) }}
+                onQuote={(excerpt, request) => { if (view.document !== null) quoteSelection(view.document, excerpt, request) }}
                 title={t('preview.title')}
                 edits={view.edits}
                 comparing={view === state && compare !== null}

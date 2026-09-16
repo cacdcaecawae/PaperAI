@@ -283,15 +283,17 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
             showConversation()
           },
           setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
-          quoteSelection: (document, excerpt) => {
+          quoteSelection: (document, excerpt, request) => {
             const input = sessionInput()
             if (input === undefined) return
             const state = input.state.getSnapshot()
             const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
               start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
             })
-            if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
-            if (accepted) showConversation()
+            if (!accepted) { input.notify('error', ctx.locale.bind(NS)('selection.busy')); return }
+            // The canned request reads after the excerpt it is about; the person still sends the message.
+            if (request !== undefined) input.setDraft(`${input.state.getSnapshot().draft}\n\n${request}`)
+            showConversation()
           },
           showPanel: (panel) => { controller.showPanel(sessionId, panel) },
           updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
