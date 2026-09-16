@@ -156,6 +156,8 @@ export interface PaperAIWorkbenchState {
   retained: readonly PaperAIRetainedView[]
   /** Last scroll offset of this document preview. */
   scrollTop: number
+  /** Block an outline click asked the page to bring into view; the tick grows so the same heading can be asked again. */
+  reveal: { readonly nodeId: PaperAIDocumentNodeId; readonly tick: number } | null
   phase: PaperAIWorkbenchPhase
   document: PaperAIDocumentSnapshot | null
   /** Blocks retyped in the page and not yet saved, each with the text it started from. */

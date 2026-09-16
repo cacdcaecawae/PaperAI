@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { AcpSessionDetails } from '@paperai/agent-acp/diagnostic-types'
 import { AcpSessionController } from '../src/client/session-controller.ts'
@@ -118,7 +118,7 @@ it('shows model search, favorites, native options, usage and plans while keeping
   useAcpPreferences: (fn: (value: unknown) => unknown) => fn(preferences) } as unknown as AcpSessionProps
   const view = render(<AcpSessionControls {...props} />)
   fireEvent.click(screen.getByRole('button', { name: 'Codex ACP 会话选项' }))
-  expect(screen.getByLabelText(/权限模式/)).toHaveProperty('disabled', true)
+  expect(screen.getByRole('button', { name: /权限模式/ })).toHaveProperty('disabled', true)
   fireEvent.change(screen.getByLabelText('搜索 ACP 模型'), { target: { value: 'beta' } })
   expect(screen.queryByRole('button', { name: /Alpha/ })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: /^Beta/ }))
@@ -130,7 +130,9 @@ it('shows model search, favorites, native options, usage and plans while keeping
   expect(select).toHaveBeenCalledWith('model', 'custom-model')
   fireEvent.click(screen.getByLabelText(/快速模式/))
   expect(select).toHaveBeenCalledWith('fast', true)
-  fireEvent.change(screen.getByLabelText('推理强度'), { target: { value: 'high' } })
+  // The dialog's focus trap admits the portaled menu once its MutationObserver has run, so each click gets its own tick.
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '推理强度' })))
+  await act(async () => fireEvent.click(screen.getByRole('menuitem', { name: 'High' })))
   expect(select).toHaveBeenCalledWith('effort', 'high')
   expect(screen.getByText(/累计费用 0.01 USD/)).toBeTruthy()
   expect(screen.getByText('先检查论文')).toBeTruthy()

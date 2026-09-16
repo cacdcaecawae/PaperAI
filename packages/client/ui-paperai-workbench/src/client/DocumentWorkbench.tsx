@@ -279,6 +279,7 @@ export function DocumentWorkbench({
                 paragraphStyles={view.document.paragraphStyles}
                 active={view === state}
                 scrollTop={view.scrollTop}
+                reveal={view === state ? state.reveal : null}
                 onScroll={setScroll}
                 onQuote={(excerpt) => { if (view.document !== null) quoteSelection(view.document, excerpt) }}
                 title={t('preview.title')}

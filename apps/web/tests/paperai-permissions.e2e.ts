@@ -377,7 +377,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await codex.getByText('正在使用', { exact: true }).waitFor()
     await claude.getByText('未使用', { exact: true }).waitFor()
     expect(await directory.getByRole('article').count()).toBe(2)
-    expect(await directory.getByRole('combobox', { name: '默认 Agent' }).locator('option').allTextContents()).toEqual(['Codex', 'Claude'])
+    const defaultAgent = directory.getByRole('button', { name: '默认 Agent', exact: true })
+    await defaultAgent.click()
+    expect(await page.getByRole('menuitem').allTextContents()).toEqual(['Codex', 'Claude'])
+    await page.keyboard.press('Escape')
     expect(await codex.locator('svg[aria-hidden="true"]').count()).toBe(1)
     expect(await claude.locator('svg[aria-hidden="true"]').count()).toBe(1)
     const detectAll = directory.getByRole('button', { name: '一键检测', exact: true })
@@ -392,7 +395,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await codex.getByText('正在使用', { exact: true }).ariaSnapshot(),
       await claude.getByText('检测通过', { exact: true }).ariaSnapshot(),
       await claude.getByText('未使用', { exact: true }).ariaSnapshot(),
-      await directory.getByRole('combobox', { name: '默认 Agent' }).ariaSnapshot(),
+      await defaultAgent.ariaSnapshot(),
     ].join('\n'), MODE)
     await page.keyboard.press('Escape')
     await settings.waitFor({ state: 'hidden' })
@@ -1456,7 +1459,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     }))
     await editor.getByRole('button', { name: '保存配置', exact: true }).click()
     await editor.waitFor({ state: 'hidden' })
-    await settings.getByRole('combobox', { name: '默认 Agent' }).selectOption('claude')
+    await settings.getByRole('button', { name: '默认 Agent', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Claude', exact: true }).click()
     await expect.poll(() => scaffold.ctx.settings.describe().find(entry => entry.ns === 'agent-presets')?.value)
       .toMatchObject({ default: 'claude' })
     await page.keyboard.press('Escape')

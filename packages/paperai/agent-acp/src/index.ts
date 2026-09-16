@@ -51,7 +51,7 @@ import type PaperMcpService from '@paperai/mcp'
 import type { PaperMcpDescriptorLease } from '@paperai/mcp'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-tools'
-import { ACP_TOOL, presentAcpCall, presentAcpResult } from './tool-presentation.ts'
+import { ACP_TOOL, PAPERAI_TOOL, presentAcpCall, presentAcpResult } from './tool-presentation.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -177,10 +177,9 @@ export class PaperAiAcpAgents extends Service {
     )
     this.syncRoutes()
     ctx.inject(['tools'], (scope) => {
-      scope.effect(
-        () => scope.tools.registerPresenter(ACP_TOOL, { presentCall: presentAcpCall, presentResult: presentAcpResult }),
-        'paperai-acp: external tool presentation',
-      )
+      const presenter = { presentCall: presentAcpCall, presentResult: presentAcpResult }
+      scope.effect(() => scope.tools.registerPresenter(ACP_TOOL, presenter), 'paperai-acp: external tool presentation')
+      scope.effect(() => scope.tools.registerPresenter(PAPERAI_TOOL, presenter), 'paperai-acp: PaperAI tool presentation')
     })
     ctx.inject(['agentPresets'], (presetCtx) => {
       const registrations = new Map<string, { key: string; dispose: () => void }>()

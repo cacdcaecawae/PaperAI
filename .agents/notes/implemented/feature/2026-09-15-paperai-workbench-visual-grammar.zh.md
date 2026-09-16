@@ -18,7 +18,7 @@ Status: implemented
 
 **纸面。** `.page` 用细线、2 圆角和 `--paperai-page-shadow`。缩放是纸面右上角的一个胶囊：− 与 + 在 50 到 200 % 间步进，点数值打开一个同时提供「适合页宽」的 `Menu`，适合页宽时显示实际落到的百分比。分页声明是这个胶囊的提示；内存草稿的提醒是待保存条的提示。变化导航和待保存条使用同一浮层配方。点一个版本时显示的是这一版自己的页面：`diffVersion` 返回 Host 对该快照的渲染，以及包含相等步骤的完整段落对齐；浏览器按文档顺序沿页面走这条对齐，把修改和新增的段落就地标出，被删除的段落用删除线画在它原来的位置，不再另列。不是当前版本时顶部有一条横幅点名版本。面板提供两种读法：「这一版改了什么」把版本和它的父版本比（初始版本无从比较，显示自己的页面且不标记，面板说它收录了全部 N 段）；「和现在比差多少」让 `diffVersion` 以所选版本为基准计量当前版本，显示当前页面及自那一版以来的全部变化。
 
-**侧栏与 Agent 栏。** 「项目体检」是一行 36 px 的侧栏行，报告里用 outline 按钮。ACP 会话控件是一个 ghost 芯片，用 `StateDot` 表示连接状态，文字进入 title。Tool call 行、思考行、输入框和模型选择仍归 DSH，PaperAI 只通过 token 影响它们。
+**侧栏与 Agent 栏。** 「项目体检」是一行 36 px 的侧栏行，报告里用 outline 按钮。文档列表下方的「大纲」以 28 px 的行列出所选 Session 打开文档的标题，每级向内缩进 12 px。标题按文字从节点索引中识别（第 N 章、最多三级的编号小节，以及摘要、参考文献等固定部分），点击后通过工作台状态里的 `reveal` 请求让纸面把该块滚到顶边之下，随后的一次滚动会清掉这个请求。纸面右下角的页码胶囊显示视口中线所在的「第 current / total 页」。ACP 会话控件是一个 ghost 芯片，用 `StateDot` 表示连接状态，文字进入 title；ACP 设置页和会话对话框的离散设置改用同一个基于 `Menu` 的 `Choice`，PaperAI 的任何表面都不再有原生 `<select>`。PaperAI 自己的 MCP 工具有独立的 Tool call 行：Host 把这些调用写成 `paperai_document_tool`（其他 provider 调用仍是 `paperai_acp_tool`），`ui-paperai-acp` 在 `tool.call.toolview` 里接管这个 key，行内显示状态点、动作名称（读取文档、提交修改、检查格式……）、折叠时的失败原因一行，展开后才显示输入与输出。思考行、输入框和模型选择仍归 DSH。
 
 **归属。** 节点形式的 `DetailsViewShell.subtitle`、`DetailsViewShell.actions`，以及 `Menu` 子菜单内的选中标记，是对 `ui-primitives` 的加法改动，后续合并 DSH 时必须保留，与 `conversation.hero.content`、`LocaleRuntime.override`、`setDraft`、`setDetailsFocus` 并列。本决策部分取代[写作工作流决策](2026-09-12-paperai-writing-workflow.zh.md)中工具栏呈现与状态栏的部分，以及[极简工作台决策](2026-09-09-paperai-minimal-workbench-and-outside-edits.zh.md)中实心动作颜色与文档事实位置的部分；它们的其他决策继续有效。
 
@@ -38,8 +38,8 @@ Status: implemented
 
 ## Testing
 
-`styles.client.spec.ts` 扫描工具栏与诊断样式表，禁止所有工作台组件出现 `<select`，并要求使用投影 token。`editor.client.spec.tsx` 与 `components.client.spec.tsx` 通过字体、字号与段落菜单操作，经选区右键菜单引用文字，并经待保存条保存。ui-primitives 的原子测试覆盖 shell；ACP 会话测试读取芯片的 title。`apps/web/tests/paperai-permissions.e2e.ts` 经菜单选择缩放、字体、字号、对齐、缩进、行距与样式，`writing-controls.*` golden 捕获详情标题栏、命令行与缩放胶囊。
+`styles.client.spec.ts` 扫描工具栏与诊断样式表，禁止所有工作台组件出现 `<select`，并要求使用投影 token。`editor.client.spec.tsx` 与 `components.client.spec.tsx` 通过字体、字号与段落菜单操作，经选区右键菜单引用文字，并经待保存条保存。ui-primitives 的原子测试覆盖 shell；ACP 会话测试读取芯片的 title。`apps/web/tests/paperai-permissions.e2e.ts` 经菜单选择缩放、字体、字号、对齐、缩进、行距与样式，`writing-controls.*` golden 捕获详情标题栏、命令行与缩放胶囊。`outline.client.spec.ts` 固定标题识别规则；`components.client.spec.tsx` 渲染大纲并触发 reveal；`editor.client.spec.tsx` 统计页数并滚动到被指名的块；ACP 的 `tool-row.client.spec.tsx` 以 Host 的名称为 key 并读取一次失败调用；`tool-presentation.spec.ts` 区分两个 transcript 名称；`apps/web/tests/paperai-acp-tool-failure.e2e.ts` 捕获折叠与展开的 PaperAI 行。
 
 ## Consequences
 
-文档列只有一行标题与一行命令，纸面是最大的亮面。浏览器里左缩进从六个档位中选择，Word 仍保留任意值。混合的段落读数让所有子菜单都不带标记。浅色模式下金色成为所有 DSH 表面的主按钮颜色。浏览器流程依赖悬停打开子菜单，若菜单在指针移动时关闭，这些流程会失败。ACP 设置页在重绘之前仍保留原生控件。
+文档列只有一行标题与一行命令，纸面是最大的亮面。浏览器里左缩进从六个档位中选择，Word 仍保留任意值。混合的段落读数让所有子菜单都不带标记。浅色模式下金色成为所有 DSH 表面的主按钮颜色。浏览器流程依赖悬停打开子菜单，若菜单在指针移动时关闭，这些流程会失败。在节点索引带上 Word 标题级别之前，标题按文字识别，因此不足 60 字、末尾无标点的编号列表项也会被当作标题。此前写入的 transcript 里 PaperAI 工具仍是 `paperai_acp_tool`，继续用通用卡片渲染。

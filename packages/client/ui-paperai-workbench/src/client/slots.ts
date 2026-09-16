@@ -68,6 +68,10 @@ export interface PaperAIWorkspaceContentInjected {
   refreshProject: (workspaceId: WorkspaceId) => Promise<void>
   /** Connect the Workspace, select its Session, and open one tracked document. */
   openDocument: (workspaceId: WorkspaceId, resourceId: PaperAIResourceId) => Promise<void>
+  /** The stable workbench source of one Session, read for the outline of its open document. */
+  workbenchOf: (sessionId: SessionId) => HostObservable<PaperAIWorkbenchState>
+  /** Show the Session's document view and bring one block of its open document into view. */
+  reveal: (sessionId: SessionId, nodeId: PaperAIDocumentNodeId) => void
 }
 
 /** Full props assembled for the sidebar document list entry. */

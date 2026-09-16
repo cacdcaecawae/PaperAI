@@ -443,6 +443,35 @@ describe('Document editing commands', () => {
     controller.dispose()
   })
 
+  it('counts the rendered pages in a pill and hides it when the preview has no pages', () => {
+    const paged = setup('<div class="page"><p data-path="/body/p[1]">Hello world</p></div><div class="page"><p data-path="/body/p[2]">Second page</p></div>',
+      ['Hello world', 'Second page'])
+    expect(screen.getByLabelText(/第 \d \/ 2 页/).textContent).toMatch(/\/ 2$/)
+    expect(paged.paragraphs()).toHaveLength(2)
+    cleanup()
+    setup()
+    expect(screen.queryByLabelText(/页$/)).toBeNull()
+  })
+
+  it('brings the revealed block under the top edge of the page', () => {
+    const body = '<p data-path="/body/p[1]">Hello world</p><p data-path="/body/p[2]">Second block</p>'
+    const nodes = ['Hello world', 'Second block'].map((text, index) => ({
+      nodeId: `node-${index}` as PaperAIDocumentNodeId, text, label: text, kind: 'paragraph' as const, depth: 0, editable: true,
+    }))
+    const shared = {
+      html: body, revision: REVISION_1, nodes, title: 'Document', edits: [], saving: false, t, paragraphStyles: [],
+      onDraft: vi.fn(), onSave: vi.fn(), onCancel: vi.fn(),
+    }
+    const view = render(<DocumentPreview {...shared} reveal={null} />)
+    const host = view.container.querySelector<HTMLElement>('[role="document"]')!
+    const second = host.shadowRoot!.querySelectorAll<HTMLElement>('[data-path]')[1]!
+    second.getBoundingClientRect = () => ({ top: 300 } as DOMRect)
+    view.rerender(<DocumentPreview {...shared} reveal={{ nodeId: 'node-1' as PaperAIDocumentNodeId, tick: 1 }} />)
+    expect(host.scrollTop).toBe(284)
+    view.rerender(<DocumentPreview {...shared} reveal={{ nodeId: 'node-1' as PaperAIDocumentNodeId, tick: 2 }} />)
+    expect(host.scrollTop).toBe(568)
+  })
+
   it('keeps the ribbon visible and displays inherited caret font and size', () => {
     const editor = setup()
     expect(screen.getByRole('toolbar', { name: zh['editor.ribbon'] })).toBeTruthy()

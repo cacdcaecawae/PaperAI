@@ -300,6 +300,15 @@
   min-width: 48px;
 }
 
+/* The page counter answers the zoom pill at the opposite corner. */
+.pageCounter {
+  right: 16px;
+  bottom: 16px;
+  height: 28px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
 .changeNav {
   bottom: 16px;
   left: 24px;

@@ -6,11 +6,13 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@paperai/agent-acp/diagnostic-types'
 import { AcpSettingsController } from './controller.ts'
 import { AcpSettingsSection, type AcpSettingsInjected } from './SettingsSection.tsx'
 import { AcpSessionController } from './session-controller.ts'
 import { AcpSessionControls, type AcpSessionInjected } from './SessionControls.tsx'
+import { AcpToolRow, PAPERAI_TOOL } from './AcpToolRow.tsx'
 import { zh, en, type AcpKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -128,6 +130,11 @@ export function apply(ctx: ClientContext): void {
       AcpSessionControls,
     ),
   )
+  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+    name: 'tool.call.toolview',
+    key: PAPERAI_TOOL,
+    locale: 'paperai.acp',
+  }, AcpToolRow))
   ctx.effect(
     () =>
       ctx.remote.$on('paperai/acp-changed', (id) => {

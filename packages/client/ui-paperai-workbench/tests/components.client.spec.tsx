@@ -53,7 +53,7 @@ function libraryState(overrides: Partial<PaperAILibraryState> = {}): PaperAILibr
 
 function workbenchState(overrides: Partial<PaperAIWorkbenchState> = {}): PaperAIWorkbenchState {
   return {
-    retained: [], scrollTop: 0,
+    retained: [], scrollTop: 0, reveal: null,
     phase: 'idle', document: null, edits: [], action: null, panel: null, diff: null, typeSuggestion: null,
     exportReceipt: null, externalUpdate: null, error: null, actionError: null, ...overrides,
   }
@@ -69,18 +69,21 @@ function libraryActions() {
   }
 }
 
-function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}) {
+function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}, workbench = workbenchState()) {
   const store = createSnapshotStore<PaperAIProjectDirectoryState>({ workspaces: { [WORKSPACE_ID]: state } })
+  const workbenchStore = createSnapshotStore(workbench)
+  const reveal = vi.fn()
   const ensureProject = vi.fn(async () => {})
   const refreshProject = vi.fn(async () => {})
   const openDocument = vi.fn(async () => {})
   const captureExternal = vi.fn(async () => {})
   const props = {
     workspaceId: WORKSPACE_ID, path: 'F:/paper', title: 'Paper', active: true,
+    useSessions: bind(createSnapshotStore({ current: SESSION_ID })), workbenchOf: () => workbenchStore, reveal,
     useDiagnostics: bind(createSnapshotStore({ projects: diagnostics })), inspectProject: vi.fn(), captureExternal,
     useProjects: bind(store), ensureProject, refreshProject, openDocument, t,
   } as unknown as PaperAIWorkspaceContentProps
-  return { props, store, ensureProject, refreshProject, openDocument, captureExternal }
+  return { props, store, ensureProject, refreshProject, openDocument, captureExternal, reveal }
 }
 
 function startProps(state: PaperAIProjectState | null, library = libraryState()) {
@@ -172,6 +175,23 @@ describe('WorkspaceContent', () => {
     expect(b.openDocument).toHaveBeenCalledWith(WORKSPACE_ID, RESOURCE_ID)
     expect(screen.queryByText('模板')).toBeNull()
     expect(screen.queryByText('新建文档')).toBeNull()
+  })
+
+  it('lists the open document\'s headings as an outline and reveals one on click', () => {
+    const nodes = [
+      { nodeId: 'n-abstract', kind: 'paragraph', label: '摘要', depth: 0, editable: true, text: '摘要' },
+      { nodeId: 'n-1', kind: 'paragraph', label: '1 绪论', depth: 0, editable: true, text: '1 绪论' },
+      { nodeId: 'n-1-1', kind: 'paragraph', label: '1.1 研究背景', depth: 0, editable: true, text: '1.1 研究背景' },
+      { nodeId: 'n-body', kind: 'paragraph', label: '正文', depth: 0, editable: true, text: '本文研究……。' },
+      { nodeId: 'n-2', kind: 'paragraph', label: '第2章 方法', depth: 0, editable: true, text: '第2章 方法' },
+    ] as unknown as NonNullable<PaperAIWorkbenchState['document']>['nodes']
+    const b = workspaceProps(projectState(), {}, workbenchState({ phase: 'ready', document: documentSnapshot(undefined, { nodes }) }))
+    render(<WorkspaceContent {...b.props} />)
+    const outline = screen.getByRole('navigation', { name: '大纲' })
+    expect(within(outline).getAllByRole('button').map(button => button.textContent)).toEqual(['摘要', '1 绪论', '1.1 研究背景', '第2章 方法'])
+    expect(within(outline).getByRole('button', { name: '1.1 研究背景' }).getAttribute('data-level')).toBe('2')
+    fireEvent.click(within(outline).getByRole('button', { name: '1 绪论' }))
+    expect(b.reveal).toHaveBeenCalledWith(SESSION_ID, 'n-1')
   })
 
   it('offers to record an outside working edit from the project doctor', async () => {

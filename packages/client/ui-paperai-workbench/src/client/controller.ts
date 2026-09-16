@@ -29,6 +29,7 @@ const LIBRARY_INITIAL: PaperAILibraryState = Object.freeze({
 const WORKBENCH_INITIAL: PaperAIWorkbenchState = Object.freeze({
   retained: [],
   scrollTop: 0,
+  reveal: null,
   phase: 'idle',
   document: null,
   edits: [],
@@ -416,7 +417,19 @@ export class PaperAIWorkbenchController {
    */
   setScroll(sessionId: SessionId, scrollTop: number): void {
     if (this.disposed) return
-    this.workbenchEntry(sessionId).store.update((state) => { state.scrollTop = scrollTop })
+    this.workbenchEntry(sessionId).store.update((state) => { state.scrollTop = scrollTop; state.reveal = null })
+  }
+
+  /**
+   * Ask the open page to bring one block into view; the scroll that follows clears the request.
+   * @param sessionId - owning Session.
+   * @param nodeId - block named by the sidebar outline.
+   */
+  reveal(sessionId: SessionId, nodeId: PaperAIDocumentNodeId): void {
+    this.assertLive()
+    this.workbenchEntry(sessionId).store.update((state) => {
+      if (state.document !== null) state.reveal = { nodeId, tick: (state.reveal?.tick ?? 0) + 1 }
+    })
   }
 
   private retain(sessionId: SessionId, state: PaperAIWorkbenchState, opening: PaperAIResourceId): PaperAIRetainedView[] {
@@ -1171,6 +1184,7 @@ export class PaperAIWorkbenchController {
       phase: 'ready',
       retained: previous.retained,
       scrollTop: sameDocument ? previous.scrollTop : 0,
+      reveal: null,
       document: result.document,
       edits: [],
       action: null,

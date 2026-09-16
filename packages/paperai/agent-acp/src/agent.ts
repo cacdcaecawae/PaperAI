@@ -56,7 +56,7 @@ import type { AcpSessionDetails, AcpSessionState } from './diagnostic-types.ts'
 import { diagnosticCapabilities } from './diagnostics.ts'
 import { isAcpPermissionOption } from './catalog.ts'
 import { environmentSecrets, redactAcpText } from './redaction.ts'
-import { ACP_TOOL, type AcpToolDisplay } from './tool-presentation.ts'
+import { presentationName, type AcpToolDisplay } from './tool-presentation.ts'
 import { projectAcpContent } from './content.ts'
 import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import {
@@ -432,7 +432,7 @@ class AcpTurnProjection {
       turn: this.turn,
       step: this.step,
       callId: tool.callId,
-      name: ACP_TOOL,
+      name: presentationName(tool.display),
       arguments: argumentsText(tool.display),
     })
     tool.progressPending = false

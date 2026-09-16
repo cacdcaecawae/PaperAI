@@ -15,6 +15,7 @@ import type { WordExcerpt } from './selection-context.ts'
 export interface DocumentPreviewProps {
   readonly active?: boolean
   readonly scrollTop?: number
+  readonly reveal?: { readonly nodeId: PaperAIDocumentNodeId; readonly tick: number } | null
   readonly zoom?: number | 'fit'
   readonly onZoom?: (zoom: number | 'fit') => void
   readonly onScroll?: (scrollTop: number) => void
@@ -138,7 +139,7 @@ function compositionSnapshot(container: HTMLElement): () => void {
 
 /** Render draft operations over the preview; successful Host commits replace the document revision. */
 export function DocumentPreview({ html, revision, nodes, paragraphStyles, title, edits, saving, onDraft, onSave, onCancel, t,
-  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, comparing = false, busy = false,
+  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, comparing = false, busy = false, reveal = null,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
@@ -166,6 +167,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const [context, setContext] = useState<{ x: number; y: number } | null>(null)
   const [fonts, setFonts] = useState<readonly string[]>([])
   const [fitPercent, setFitPercent] = useState(100)
+  const [pages, setPages] = useState({ current: 1, total: 0 })
   const [zoomOpen, setZoomOpen] = useState(false)
   const conflicted = edits.some(edit => edit.conflicted === true)
   const editable = !comparing && !saving && !busy && !conflicted
@@ -202,6 +204,18 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     current?.removeAllRanges(); current?.addRange(range); capture(range)
   }
   const updateHistory = (): void =>{  setHistoryState({ undo: history.current.past.length > 0, redo: history.current.future.length > 0 }) }
+  // The page under the middle of the viewport is the one being read; the count follows the rendered pages.
+  const measurePages = (): void => {
+    const element = host.current
+    const list = [...element?.shadowRoot?.querySelectorAll<HTMLElement>('.paperai-doc .page') ?? []]
+    if (element === null || list.length === 0) { setPages(previous => previous.total === 0 ? previous : { current: 1, total: 0 }); return }
+    const middle = element.getBoundingClientRect().top + element.clientHeight / 2
+    let current = 0
+    list.forEach((page, index) => { if (page.getBoundingClientRect().top <= middle) current = index })
+    setPages(previous => (previous.current === current + 1 && previous.total === list.length
+      ? previous
+      : { current: current + 1, total: list.length }))
+  }
 
   useLayoutEffect(() => {
     const element = host.current
@@ -229,6 +243,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     setFonts([...new Set([...mapping.current.keys()].flatMap(block => [block, ...block.querySelectorAll<HTMLElement>('span')])
       .map(block => fontOf(getComputedStyle(block))).filter(Boolean).concat(['宋体', '黑体', '等线', 'Times New Roman', 'Arial']))])
     setChanges({ count: container.querySelectorAll('[data-paperai-change]').length, index: 0 })
+    measurePages()
   }, [html, revision])
 
   useLayoutEffect(() => {
@@ -263,6 +278,16 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     if (conflicted) { setCaret(null); setNotice('editor.conflict') }
   }, [edits, editable, html, nodes])
   useLayoutEffect(() => { if (active && host.current !== null) host.current.scrollTop = scrollTop }, [active, html])
+  // An outline click names a block: the page brings it under the top edge, and the scroll that follows records the offset.
+  useLayoutEffect(() => {
+    const element = host.current
+    if (!active || reveal === null || element === null) return
+    const wanted = normalize(nodes.find(node => node.nodeId === reveal.nodeId)?.text ?? '')
+    const block = [...mapping.current].find(([, id]) => id === reveal.nodeId)?.[0]
+      ?? (wanted === '' ? undefined : [...element.shadowRoot?.querySelectorAll<HTMLElement>('[data-path]') ?? []]
+        .find(candidate => normalize(textOf(candidate)) === wanted))
+    if (block !== undefined) element.scrollTop += block.getBoundingClientRect().top - element.getBoundingClientRect().top - 16
+  }, [reveal])
   useLayoutEffect(() => {
     const element = host.current
     if (element === null) return
@@ -278,6 +303,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       const factor = zoom === 'fit' ? natural > 0 && available > 0 ? Math.min(1, available / natural) : 1 : zoom / 100
       element.style.setProperty('--paperai-page-zoom', factor.toFixed(3)); element.scrollTop = position * factor
       if (zoom === 'fit') setFitPercent(Math.round(factor * 100))
+      measurePages()
     }
     fit()
     if (typeof ResizeObserver === 'undefined') return
@@ -571,7 +597,10 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         onClose={() => { setContext(null) }} />}
       <div className={css.stage}>
         <div ref={host} className={css.preview} role="document" aria-label={title}
-          onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop) }} />
+          onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop); measurePages() }} />
+        {active && pages.total > 0 && <div className={clsx(css.floating, css.pageCounter)} aria-label={t('status.page', pages)} title={t('status.pagination')}>
+          {pages.current} / {pages.total}
+        </div>}
         {active && onZoom !== undefined && <div className={clsx(css.floating, css.zoomPill)} role="group" aria-label={t('status.zoom')}>
           <button type="button" aria-label={t('status.zoomOut')} title={t('status.zoomOut')} disabled={zoomStep(-1) === undefined}
             onClick={() => { const next = zoomStep(-1); if (next !== undefined) onZoom(next) }}><IconZoomOut size={14} /></button>

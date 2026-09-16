@@ -186,6 +186,11 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
       refreshProject: workspaceId => controller.loadProject(workspaceId),
+      workbenchOf: sessionId => controller.workbenchStore(sessionId),
+      reveal: (sessionId, nodeId) => {
+        controller.reveal(sessionId, nodeId)
+        void settleDetailsSelection(sessionId)
+      },
       openDocument: async (workspaceId, resourceId) => {
         try {
           const sessionId = await documentSession(workspaceId)
