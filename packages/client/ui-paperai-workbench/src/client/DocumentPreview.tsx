@@ -173,6 +173,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const [changes, setChanges] = useState({ count: 0, index: 0 })
   // Where a right-click on selected text opened the selection menu.
   const [context, setContext] = useState<{ x: number; y: number } | null>(null)
+  /** Where the selection bar hangs, relative to the stage: centred under the selection's last line, or above it when there is no room. */
+  const [bar, setBar] = useState<{ x: number; y: number; above: number } | null>(null)
+  const barRef = useRef<HTMLDivElement>(null)
   const [fonts, setFonts] = useState<readonly string[]>([])
   const [fitPercent, setFitPercent] = useState(100)
   const [pages, setPages] = useState({ current: 1, total: 0 })
@@ -286,6 +289,15 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     if (conflicted) { setCaret(null); setNotice('editor.conflict') }
   }, [edits, editable, html, nodes])
   useLayoutEffect(() => { if (active && host.current !== null) host.current.scrollTop = scrollTop }, [active, html])
+  // The bar stays inside the stage: clamped sideways, and flipped above the selection when the room below runs out.
+  useLayoutEffect(() => {
+    const element = barRef.current
+    const stage = host.current?.parentElement
+    if (element === null || bar === null || stage === null || stage === undefined) return
+    const half = element.offsetWidth / 2
+    element.style.left = `${Math.min(Math.max(bar.x, half + 8), Math.max(half + 8, stage.clientWidth - half - 8))}px`
+    element.style.top = `${bar.y + 8 + element.offsetHeight <= stage.clientHeight ? bar.y + 8 : bar.above - 8 - element.offsetHeight}px`
+  }, [bar])
   // An outline click names a block: the page brings it under the top edge, and the scroll that follows records the offset.
   useLayoutEffect(() => {
     const element = host.current
@@ -538,16 +550,29 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       if (!(event instanceof MouseEvent) || onQuote === undefined) return
       const range = rangeNow()
       if (range === null || range.collapsed || range.toString().trim() === '' || ![...mapping.current.keys()].some(block => range.intersectsNode(block))) return
-      event.preventDefault(); capture(range); setContext({ x: event.clientX, y: event.clientY })
+      event.preventDefault(); capture(range); setContext({ x: event.clientX, y: event.clientY }); setBar(null)
     }
     const clicked = (event: Event): void => {
       if (event.composedPath().some(node => node instanceof HTMLElement && node.dataset.paperaiProtected !== undefined)) setNotice('editor.protected')
       else if (!conflicted) setNotice(null)
       capture()
     }
-    const changed = (): void => { if (!composing.current) capture() }
+    // A selection still changing hides the bar; one that settles (key or mouse released) over mapped text shows it under its last line.
+    const changed = (): void => { if (!composing.current) capture(); setBar(null) }
+    const settled = (): void => {
+      if (composing.current) return
+      capture()
+      const range = rangeNow()
+      const stage = host.current?.parentElement
+      if (range === null || range.collapsed || range.toString().trim() === '' || stage === null || stage === undefined
+        || ![...mapping.current.keys()].some(block => range.intersectsNode(block))) { setBar(null); return }
+      // jsdom's Range has no rect; the bar then sits at the stage origin, which the tests never look at.
+      const rect = (range as Partial<Range>).getBoundingClientRect?.() ?? { left: 0, width: 0, top: 0, bottom: 0 }
+      const base = stage.getBoundingClientRect()
+      setBar({ x: rect.left + rect.width / 2 - base.left, y: rect.bottom - base.top, above: rect.top - base.top })
+    }
     const listeners: readonly [string, EventListener][] = [['input', input], ['beforeinput', beforeInput], ['paste', paste], ['keydown', keyDown],
-      ['compositionstart', compositionStart], ['compositionend', compositionEnd], ['click', clicked], ['contextmenu', contextMenu], ['keyup', changed], ['mouseup', changed]]
+      ['compositionstart', compositionStart], ['compositionend', compositionEnd], ['click', clicked], ['contextmenu', contextMenu], ['keyup', settled], ['mouseup', settled]]
     listeners.forEach(([name, listener]) =>{  shadow.addEventListener(name, listener) }); document.addEventListener('selectionchange', changed)
     return () => { listeners.forEach(([name, listener]) =>{  shadow.removeEventListener(name, listener) }); document.removeEventListener('selectionchange', changed) }
   })
@@ -590,6 +615,15 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     marked.forEach((block, position) => block.toggleAttribute('data-paperai-current', position === index))
     marked[index]?.scrollIntoView({ block: 'center' }); setChanges({ count: marked.length, index })
   }
+  /** Hand the captured selection to the Agent with an optional canned request, and put the selection surfaces away. */
+  const act = (request?: string): void => {
+    if (excerpt !== null && onQuote !== undefined) onQuote(excerpt, request)
+    setExcerpt(null); setBar(null); setContext(null)
+  }
+  const requestFor = (id: string): string | undefined => {
+    const key = SELECTION_REQUESTS.find(([action]) => action === id)?.[2]
+    return key === undefined ? undefined : t(key)
+  }
   return (
     <div className={css.previewSeat} hidden={!active} aria-hidden={!active || undefined}>
       {active && !comparing && <EditorRibbon caret={caret} fonts={fonts} paragraphStyles={paragraphStyles}
@@ -602,15 +636,20 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         items={[{ id: 'ask', label: t('selection.ask') }, { type: 'separator', id: 'canned' },
           ...SELECTION_REQUESTS.map(([id, label]) => ({ id, label: t(label) }))]} anchor={<span hidden />}
         getAnchorRect={() => ({ left: context.x, right: context.x, top: context.y, bottom: context.y, width: 0, height: 0 } as DOMRect)}
-        onSelect={(id) => {
-          const request = SELECTION_REQUESTS.find(([action]) => action === id)?.[2]
-          if (excerpt !== null) { onQuote(excerpt, request === undefined ? undefined : t(request)); setExcerpt(null) }
-          setContext(null)
-        }}
+        onSelect={(id) => { act(requestFor(id)) }}
         onClose={() => { setContext(null) }} />}
       <div className={css.stage}>
         <div ref={host} className={css.preview} role="document" aria-label={title}
-          onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop); measurePages() }} />
+          onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop); measurePages(); setBar(null) }} />
+        {active && bar !== null && excerpt !== null && onQuote !== undefined && (
+          <div ref={barRef} className={clsx(css.floating, css.selectionBar)} role="toolbar" aria-label={t('selection.title')}
+            style={{ left: bar.x, top: bar.y + 8 }} onMouseDown={(event) => { event.preventDefault() }}>
+            <button type="button" onClick={() => { act() }}>{t('selection.ask')}</button>
+            {SELECTION_REQUESTS.map(([id, label, request]) => (
+              <button key={id} type="button" onClick={() => { act(t(request)) }}>{t(label)}</button>
+            ))}
+          </div>
+        )}
         {active && pages.total > 0 && <div className={clsx(css.floating, css.pageCounter)} aria-label={t('status.page', pages)} title={t('status.pagination')}>
           {pages.current} / {pages.total}
         </div>}

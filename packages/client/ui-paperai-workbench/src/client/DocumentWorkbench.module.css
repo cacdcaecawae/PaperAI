@@ -309,6 +309,34 @@
   white-space: nowrap;
 }
 
+/* The selection bar hangs under the selected words with the four Agent actions; the preview positions it. */
+.selectionBar {
+  padding: 2px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.selectionBar > button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.selectionBar > button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.selectionBar > button:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
 .changeNav {
   bottom: 16px;
   left: 24px;

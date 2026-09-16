@@ -618,8 +618,12 @@ describe('DocumentWorkbench', () => {
       },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
-    // A right-click on the selection opens the selection menu in place of the browser's.
+    // Releasing the key over a selection floats the bar with the four actions under it.
+    const bar = screen.getByRole('toolbar', { name: '选中的文字' })
+    expect(within(bar).getAllByRole('button').map(button => button.textContent)).toEqual(['交给 Agent', '润色', '扩写', '检查引用'])
+    // A right-click on the selection opens the selection menu in place of the browser's, and puts the bar away.
     expect(fireEvent.contextMenu(paragraph, { clientX: 300, clientY: 200 })).toBe(false)
+    expect(screen.queryByRole('toolbar', { name: '选中的文字' })).toBeNull()
     const ask = screen.getByRole('menuitem', { name: '交给 Agent' })
     expect([...host.parentElement!.children]).toEqual(siblings)
     fireEvent.click(ask)
@@ -636,6 +640,11 @@ describe('DocumentWorkbench', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '润色' }))
     expect(b.quoteSelection).toHaveBeenLastCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' }, t('selection.polishRequest'))
     expect(screen.queryByRole('menuitem', { name: '润色' })).toBeNull()
+    // The bar runs the same actions and goes away with them.
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+    fireEvent.click(within(screen.getByRole('toolbar', { name: '选中的文字' })).getByRole('button', { name: '扩写' }))
+    expect(b.quoteSelection).toHaveBeenLastCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' }, t('selection.expandRequest'))
+    expect(screen.queryByRole('toolbar', { name: '选中的文字' })).toBeNull()
     host.scrollTop = 320
     fireEvent.scroll(host)
     expect(b.setScroll).toHaveBeenCalledWith(320)

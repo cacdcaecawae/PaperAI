@@ -144,8 +144,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       const selection = window.getSelection()!
       selection.removeAllRanges()
       selection.addRange(range)
-      element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
     })
+    // selectionchange is delivered asynchronously; the key release that settles the selection lands after it, as it does for a person.
+    await page.waitForTimeout(100)
+    await block.evaluate((element) => { element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true })) })
   }
   /** Replace one paragraph's selected text through the browser's native input event. */
   const retype = async (block: Locator, text: string): Promise<void> => {
@@ -767,8 +769,14 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       const selection = window.getSelection()!
       selection.removeAllRanges()
       selection.addRange(range)
-      element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
     })
+    // selectionchange is delivered asynchronously; the key release that settles the selection lands after it, as it does for a person.
+    await page.waitForTimeout(100)
+    await block.evaluate((element) => { element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true })) })
+    // Releasing the key floats the selection bar; the right-click below opens the same list as a menu.
+    const selectionBar = page.getByRole('toolbar', { name: '选中的文字', exact: true })
+    await selectionBar.waitFor({ timeout: 10_000 })
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'word-selection-bar.expected.md'), await selectionBar.ariaSnapshot(), MODE)
     await block.click({ button: 'right' })
     const selection = page.getByRole('menuitem', { name: '交给 Agent', exact: true })
     await selection.waitFor({ timeout: 10_000 })
@@ -1532,6 +1540,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'restore-confirmation.expected.md',
       'table-figure.expected.md',
       'word-selection.expected.md',
+      'word-selection-bar.expected.md',
       'word-selection-message.expected.md',
       'word-selection-session-title.expected.md',
       'writing-controls.en.expected.md',
