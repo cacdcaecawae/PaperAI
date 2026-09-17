@@ -1,5 +1,5 @@
 - menu:
-  - menuitem "Codex 暂无描述。":
-    - text: Codex 暂无描述。
+  - menuitem "Codex 本地 Codex ACP 通道。":
+    - text: Codex 本地 Codex ACP 通道。
     - img
-  - menuitem "Claude 暂无描述。"
+  - menuitem "Claude 本地 Claude ACP 通道。"

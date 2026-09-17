@@ -81,6 +81,8 @@ export interface AcpConfig {
 export interface AcpTemplate {
   readonly id: AcpProviderDefinition['id']
   readonly name: string
+  /** Picker copy beside the channel name. */
+  readonly description: string
   readonly command: string
   readonly args: readonly string[]
   readonly cli: string
@@ -95,8 +97,8 @@ export interface AcpTemplate {
 
 /** ACP command templates; discovery never installs them. DSH remains its native preset. */
 export const ACP_TEMPLATES: readonly AcpTemplate[] = [
-  { id: 'codex', name: 'Codex', command: 'codex-acp', args: [], cli: 'codex', packageName: '@agentclientprotocol/codex-acp', cliPackage: '@openai/codex', bundled: true, apiKeyEnv: 'OPENAI_API_KEY', baseURLEnv: 'OPENAI_BASE_URL', url: 'https://github.com/zed-industries/codex-acp', login: 'codex login' },
-  { id: 'claude', name: 'Claude', command: 'claude-agent-acp', args: [], cli: 'claude', packageName: '@agentclientprotocol/claude-agent-acp', cliPackage: '@anthropic-ai/claude-code', bundled: true, apiKeyEnv: 'ANTHROPIC_API_KEY', baseURLEnv: 'ANTHROPIC_BASE_URL', url: 'https://github.com/zed-industries/claude-agent-acp', login: 'claude auth login' },
+  { id: 'codex', name: 'Codex', description: '本地 Codex ACP 通道。', command: 'codex-acp', args: [], cli: 'codex', packageName: '@agentclientprotocol/codex-acp', cliPackage: '@openai/codex', bundled: true, apiKeyEnv: 'OPENAI_API_KEY', baseURLEnv: 'OPENAI_BASE_URL', url: 'https://github.com/zed-industries/codex-acp', login: 'codex login' },
+  { id: 'claude', name: 'Claude', description: '本地 Claude ACP 通道。', command: 'claude-agent-acp', args: [], cli: 'claude', packageName: '@agentclientprotocol/claude-agent-acp', cliPackage: '@anthropic-ai/claude-code', bundled: true, apiKeyEnv: 'ANTHROPIC_API_KEY', baseURLEnv: 'ANTHROPIC_BASE_URL', url: 'https://github.com/zed-industries/claude-agent-acp', login: 'claude auth login' },
 ]
 
 // An absent SSH block selects local execution; it must not default to an empty object.
