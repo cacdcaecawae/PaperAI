@@ -4,14 +4,16 @@ import { describe, expect, it } from 'vitest'
 
 const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 const workbench = read('../src/client/DocumentWorkbench.module.css')
+const ribbon = read('../src/client/EditorRibbon.module.css')
+const diagnostics = read('../src/client/Diagnostics.module.css')
 const sidebar = read('../src/client/WorkspaceContent.module.css')
 const start = read('../src/client/StartPage.module.css')
 const library = read('../src/client/TemplateLibrary.module.css')
 const preview = read('../src/client/DocumentPreview.tsx')
 const components = [
-  read('../src/client/DocumentWorkbench.tsx'), read('../src/client/panels.tsx'),
-  read('../src/client/StartPage.tsx'), read('../src/client/TemplateLibrary.tsx'),
-  read('../src/client/WorkspaceContent.tsx'),
+  read('../src/client/DocumentWorkbench.tsx'), read('../src/client/panels.tsx'), read('../src/client/EditorRibbon.tsx'),
+  read('../src/client/StartPage.tsx'), read('../src/client/TemplateLibrary.tsx'), read('../src/client/ProjectDoctor.tsx'),
+  read('../src/client/WorkspaceContent.tsx'), preview,
 ].join('\n')
 
 describe('PaperAI DSH-native styling', () => {
@@ -28,18 +30,22 @@ describe('PaperAI DSH-native styling', () => {
     expect(sidebar).toContain('font-size: 14px')
     expect(sidebar).toContain('min-height: 34px')
     expect(sidebar).toContain('var(--dsw-alias-interactive-bg-hover)')
+    expect(diagnostics).toContain('min-height: 36px')
+    expect(diagnostics).toContain('border-radius: 8px')
     expect(start).toContain('font-size: 20px')
     expect(start).toContain('min-height: 48px')
   })
 
-  it('paints only through theme tokens, with no drop shadows, literal colors, or product accent overrides', () => {
-    for (const sheet of [workbench, sidebar, start, library]) {
-      // Focus rings (0 0 0 2px) are fine; offset or blurred drop shadows are not DSH vocabulary.
+  it('paints only through theme tokens: no literal colors, and elevation only through the brand shadow tokens', () => {
+    for (const sheet of [workbench, ribbon, diagnostics, sidebar, start, library]) {
+      // Focus rings (0 0 0 2px) are fine; a literal offset or blurred shadow is not, the page and its pills take --paperai-*-shadow.
       expect(sheet).not.toMatch(/box-shadow:\s*(?:0|-?\d+px)\s+-?\d+px\s+\d+px/u)
       expect(sheet).not.toMatch(/#[0-9a-f]{3,8}\b/iu)
       expect(sheet).not.toMatch(/\brgb\(/u)
     }
     expect(workbench).toContain('var(--dsw-alias-border-l2)')
+    expect(workbench).toContain('var(--paperai-float-shadow)')
+    expect(preview).toContain('var(--paperai-page-shadow)')
     expect(library).toContain('var(--dsw-alias-border-l2)')
   })
 
@@ -52,12 +58,14 @@ describe('PaperAI DSH-native styling', () => {
     expect(preview).toContain("getData('text/plain')")
   })
 
-  it('composes from DSH primitives and never reaches for a primary button or card vocabulary', () => {
+  it('composes from DSH primitives: menus for every choice, never a native select, primary button, or card vocabulary', () => {
+    expect(components).not.toContain('<select')
     expect(components).not.toContain('variant="primary"')
     expect(components).not.toMatch(/className=\{css\.card\b/u)
     expect(components).toContain('variant="toolbar"')
     expect(components).toContain('variant="outline"')
     expect(components).toContain('DetailsViewShell')
     expect(components).toContain('<Modal')
+    expect(components).toContain('<Menu')
   })
 })

@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from 'react'
 import clsx from 'clsx'
-import { Button, IconBrowseOutline16, IconRefreshOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconBrowseOutline16, IconListPenOutline16, IconRefreshOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaperAIDocumentRow, PaperAIProjectState } from './types.ts'
 import type { PaperAIWorkspaceContentProps } from './slots.ts'
 import { DOCUMENT_TYPE_KEYS } from './locales.ts'
@@ -45,10 +45,15 @@ function DocumentRow({ row, selected, duplicate, open, t }: {
 
 /** Render the document list for one project. */
 export function WorkspaceContent({
-  workspaceId, useProjects, useDiagnostics, inspectProject, captureExternal, ensureProject, refreshProject, openDocument, t,
+  workspaceId, active, useProjects, useDiagnostics, useSessions, useOutlines, reveal, inspectProject, captureExternal, ensureProject,
+  refreshProject, openDocument, t,
 }: PaperAIWorkspaceContentProps): ReactNode {
   const state = useProjects(directory => directory.workspaces[workspaceId] ?? PROJECT_EMPTY)
   const diagnostics = useDiagnostics(value => value.projects[workspaceId])
+  // The outline follows the selected Session's open document, and only under the project that owns it.
+  const current = useSessions(sessions => sessions.current)
+  const outline = useOutlines(outlines => (current === undefined ? undefined : outlines[current]))
+  const entries = active && outline !== undefined && outline.workspaceId === workspaceId ? outline.entries : []
 
   useEffect(() => {
     void ensureProject(workspaceId)
@@ -94,6 +99,29 @@ export function WorkspaceContent({
             </div>
           ))}
         </div>
+      )}
+      {entries.length > 0 && current !== undefined && (
+        <>
+          <div className={css.heading}>
+            <span className={css.headingIcon} aria-hidden="true"><IconListPenOutline16 /></span>
+            <h3>{t('outline.title')}</h3>
+            <span className={css.count}>{entries.length}</span>
+          </div>
+          <nav className={css.outline} aria-label={t('outline.title')}>
+            {entries.map(entry => (
+              <button
+                key={entry.nodeId}
+                type="button"
+                className={css.outlineRow}
+                data-level={entry.level}
+                title={entry.text}
+                onClick={() => { reveal(current, entry.nodeId) }}
+              >
+                {entry.text}
+              </button>
+            ))}
+          </nav>
+        </>
       )}
       <ProjectDoctor
         key={workspaceId}

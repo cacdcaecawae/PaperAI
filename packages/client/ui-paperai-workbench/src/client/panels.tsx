@@ -8,7 +8,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   PaperAIDocumentSnapshot, PaperAIDocumentType, PaperAIDocumentVersion, PaperAIGateFinding,
-  PaperAIProjectOverview, PaperAIVersionChange, PaperAIWorkbenchState,
+  PaperAIProjectOverview, PaperAIWorkbenchState,
 } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import { DOCUMENT_TYPE_KEYS, DOCUMENT_TYPE_ORDER, USAGE_KEYS, type PaperAIWorkbenchKey } from './locales.ts'
@@ -305,13 +305,13 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
 
 /**
  * Versions panel: the history as a timeline in the panel column. Picking a
- * version shows its text changes on the document; unplaced changes remain in
- * the panel, alongside recorded formatting operations and version restoration.
+ * version shows its page with its changes marked; a second reading shows the
+ * current page with everything that changed since the picked version. The
+ * panel also lists recorded formatting operations and offers restoration.
  */
-export function VersionsPanel({ document, state, unplaced, showDiff, restore, onClose, t }: {
+export function VersionsPanel({ document, state, showDiff, restore, onClose, t }: {
   document: PaperAIDocumentSnapshot
   state: PaperAIWorkbenchState
-  unplaced: readonly PaperAIVersionChange[]
   showDiff: PaperAIDocumentWorkbenchProps['showDiff']
   restore: PaperAIDocumentWorkbenchProps['restore']
   onClose: () => void
@@ -319,15 +319,37 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
 }): ReactNode {
   const busy = state.action !== null
   const [confirmRestore, setConfirmRestore] = useState(false)
+  // `own` measures the picked version from its parent on its own page;
+  // `current` measures the head from the picked version on the current page.
+  // The reading a picked version is shown in follows the comparison itself; the preference only decides the next pick.
+  const [preferred, setPreferred] = useState<'own' | 'current'>('own')
   const diff = state.diff
-  const formattingEditCount = diff?.result?.formattingEditCount ?? 0
-  const picked = diff === null ? null : document.versions.find(version => version.commitId === diff.commitId) ?? null
+  const mode: 'own' | 'current' = diff === null ? preferred : diff.baseCommitId === null ? 'own' : 'current'
+  const result = diff?.result ?? null
+  const formattingEditCount = result?.formattingEditCount ?? 0
+  const pickedId = diff === null ? null : mode === 'current' ? diff.baseCommitId : diff.commitId
+  const picked = pickedId === null ? null : document.versions.find(version => version.commitId === pickedId) ?? null
+  const compare = (reading: 'own' | 'current', commitId: PaperAIDocumentVersion['commitId']): void => {
+    const head = document.headCommitId
+    if (reading === 'own') void showDiff(commitId)
+    else if (head !== null) void showDiff(head, commitId)
+  }
+  const switchMode = (next: 'own' | 'current'): void => {
+    if (next === mode || busy) return
+    setPreferred(next)
+    if (picked !== null) compare(next, picked.commitId)
+  }
   const caption = picked === null
     ? t('versions.select')
-    : diff?.result !== null && diff?.result !== undefined
-      ? diff.result.changes.length === 0
-        ? t('versions.diffEmpty')
-        : t('versions.compare', { count: diff.result.changes.length, unchanged: diff.result.unchangedCount })
+    : result !== null
+      ? result.baseCommitId === result.commitId
+        ? t('versions.sameVersion')
+        // Measured from nothing, the root version reads as all additions, which says nothing worth marking.
+        : result.baseCommitId === null
+          ? t('versions.rootDiff', { count: result.changes.length })
+          : result.changes.length === 0
+            ? t('versions.diffEmpty')
+            : t(mode === 'current' ? 'versions.compareCurrent' : 'versions.compare', { count: result.changes.length, unchanged: result.unchangedCount })
       : diff?.error !== null ? t('versions.diffError') : t('versions.diffLoading')
   return (
     <Panel title={t('versions.title')} onClose={onClose} t={t}>
@@ -335,30 +357,21 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
         ? <p className={css.panelNote}>{t('versions.empty')}</p>
         : (
           <>
+            <div className={css.panelActions} role="group" aria-label={t('versions.title')}>
+              <Pill active={mode === 'own'} disabled={busy} onClick={() => { switchMode('own') }}>{t('versions.modeOwn')}</Pill>
+              <Pill active={mode === 'current'} disabled={busy} onClick={() => { switchMode('current') }}>{t('versions.modeCurrent')}</Pill>
+            </div>
             <p className={css.panelNote} aria-live="polite">{caption}</p>
             {formattingEditCount > 0 && (
               <p className={css.panelNote}>{t('versions.formatting', { count: formattingEditCount })}</p>
             )}
             {diff?.error != null && <Button variant="outline" size="sm" onClick={() => {
-              void showDiff(diff.commitId)
+              void showDiff(diff.commitId, diff.baseCommitId)
             }}>{t('versions.retry')}</Button>}
-            {unplaced.length > 0 && (
-              <div className={css.unplaced}>
-                <span className={css.panelCaption}>{t('versions.unplaced', { count: unplaced.length })}</span>
-                <ul>
-                  {unplaced.map((change, index) => (
-                    <li key={`${change.kind}:${index}`}>
-                      {change.before !== undefined && <del>{change.before === '' ? ' ' : change.before}</del>}
-                      {change.after !== undefined && <ins>{change.after === '' ? ' ' : change.after}</ins>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
             <ol className={css.versionList}>
               {document.versions.map((version) => {
                 const current = version.commitId === document.headCommitId
-                const open = diff?.commitId === version.commitId
+                const open = picked?.commitId === version.commitId
                 return (
                   <li key={version.commitId} className={clsx(css.version, current && css.versionCurrent)}>
                     <button
@@ -367,7 +380,7 @@ export function VersionsPanel({ document, state, unplaced, showDiff, restore, on
                       aria-pressed={open}
                       disabled={busy && !open}
                       title={version.summary}
-                      onClick={() => { setConfirmRestore(false); void showDiff(version.commitId) }}
+                      onClick={() => { setConfirmRestore(false); compare(mode, version.commitId) }}
                     >
                       <span className={css.versionMain}>
                         <strong>{version.summary}</strong>

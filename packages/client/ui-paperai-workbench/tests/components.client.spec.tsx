@@ -18,10 +18,7 @@ import type {
 import type {
   PaperAILibraryState, PaperAIProjectDirectoryState, PaperAIProjectState, PaperAIWorkbenchState,
 } from '../src/client/types.ts'
-import {
-  COMMIT_0, CUSTOM_PACK_ID, DIFF, documentSnapshot, HIT_PACK_ID, LIBRARY, NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE,
-  OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, UNDECIDED_OVERVIEW, WORKSPACE_ID, successfulRemote,
-} from './fixtures.client.ts'
+import { COMMIT_0, COMMIT_1, CUSTOM_PACK_ID, DIFF, HIT_PACK_ID, LIBRARY, NODE_HEADING, NODE_PARAGRAPH, NODE_TABLE, OVERVIEW, RESOURCE_ID, REVISION_2, SESSION_ID, UNDECIDED_OVERVIEW, WORKSPACE_ID, documentSnapshot, successfulRemote } from './fixtures.client.ts'
 
 afterEach(() => { cleanup(); localStorage.clear() })
 
@@ -56,7 +53,7 @@ function libraryState(overrides: Partial<PaperAILibraryState> = {}): PaperAILibr
 
 function workbenchState(overrides: Partial<PaperAIWorkbenchState> = {}): PaperAIWorkbenchState {
   return {
-    retained: [], scrollTop: 0,
+    retained: [], scrollTop: 0, reveal: null,
     phase: 'idle', document: null, edits: [], action: null, panel: null, diff: null, typeSuggestion: null,
     exportReceipt: null, externalUpdate: null, error: null, actionError: null, ...overrides,
   }
@@ -72,18 +69,20 @@ function libraryActions() {
   }
 }
 
-function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}) {
+function workspaceProps(state: PaperAIProjectState, diagnostics: Record<string, unknown> = {}, outlines: Record<string, unknown> = {}) {
   const store = createSnapshotStore<PaperAIProjectDirectoryState>({ workspaces: { [WORKSPACE_ID]: state } })
+  const reveal = vi.fn()
   const ensureProject = vi.fn(async () => {})
   const refreshProject = vi.fn(async () => {})
   const openDocument = vi.fn(async () => {})
   const captureExternal = vi.fn(async () => {})
   const props = {
     workspaceId: WORKSPACE_ID, path: 'F:/paper', title: 'Paper', active: true,
+    useSessions: bind(createSnapshotStore({ current: SESSION_ID })), useOutlines: bind(createSnapshotStore(outlines)), reveal,
     useDiagnostics: bind(createSnapshotStore({ projects: diagnostics })), inspectProject: vi.fn(), captureExternal,
     useProjects: bind(store), ensureProject, refreshProject, openDocument, t,
   } as unknown as PaperAIWorkspaceContentProps
-  return { props, store, ensureProject, refreshProject, openDocument, captureExternal }
+  return { props, store, ensureProject, refreshProject, openDocument, captureExternal, reveal }
 }
 
 function startProps(state: PaperAIProjectState | null, library = libraryState()) {
@@ -156,6 +155,12 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
   return { props, store, projects, ...callbacks, ...actions }
 }
 
+/** Open the size menu and pick one row; the inherited row takes the size back to the block. */
+function pickSize(label: string): void {
+  fireEvent.click(screen.getByRole('button', { name: '字号（磅）' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: label }))
+}
+
 describe('WorkspaceContent', () => {
   it('lists only tracked documents with their types and opens one on click', async () => {
     const b = workspaceProps(projectState({ selected: RESOURCE_ID }))
@@ -169,6 +174,19 @@ describe('WorkspaceContent', () => {
     expect(b.openDocument).toHaveBeenCalledWith(WORKSPACE_ID, RESOURCE_ID)
     expect(screen.queryByText('模板')).toBeNull()
     expect(screen.queryByText('新建文档')).toBeNull()
+  })
+
+  it('lists the open document\'s headings as an outline and reveals one on click', () => {
+    const b = workspaceProps(projectState(), {}, { [SESSION_ID]: { workspaceId: WORKSPACE_ID, entries: [
+      { nodeId: 'n-abstract', text: '摘要', level: 1 }, { nodeId: 'n-1', text: '1 绪论', level: 1 },
+      { nodeId: 'n-1-1', text: '1.1 研究背景', level: 2 }, { nodeId: 'n-2', text: '第2章 方法', level: 1 },
+    ] } })
+    render(<WorkspaceContent {...b.props} />)
+    const outline = screen.getByRole('navigation', { name: '大纲' })
+    expect(within(outline).getAllByRole('button').map(button => button.textContent)).toEqual(['摘要', '1 绪论', '1.1 研究背景', '第2章 方法'])
+    expect(within(outline).getByRole('button', { name: '1.1 研究背景' }).getAttribute('data-level')).toBe('2')
+    fireEvent.click(within(outline).getByRole('button', { name: '1 绪论' }))
+    expect(b.reveal).toHaveBeenCalledWith(SESSION_ID, 'n-1')
   })
 
   it('offers to record an outside working edit from the project doctor', async () => {
@@ -574,15 +592,13 @@ describe('DocumentWorkbench', () => {
     for (const id of ['download', 'script']) expect(shadow.querySelector(`#${id}`)?.hasAttribute('href')).toBe(false)
   })
 
-  it('quotes an exact shadow-tree selection and preserves its scroll without starting a block edit', () => {
+  it('quotes an exact shadow-tree selection from its context menu and preserves its scroll without starting a block edit', () => {
     const snapshot = documentSnapshot()
     const b = workbenchProps(workbenchState({ phase: 'ready', document: snapshot, scrollTop: 120 }))
     const view = render(<DocumentWorkbench {...b.props} />)
     const host = view.container.querySelector<HTMLElement>('[role="document"]')!
     const shadow = host.shadowRoot!
-    const ask = screen.getByRole<HTMLButtonElement>('button', { name: '交给 Agent' })
-    expect(ask.disabled).toBe(true)
-    expect(ask.closest('[role="toolbar"]')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: '交给 Agent' })).toBeNull()
     const siblings = [...host.parentElement!.children]
     const paragraph = [...shadow.querySelectorAll('p')].find(p => p.textContent === 'Research background')!
     const range = document.createRange()
@@ -597,17 +613,33 @@ describe('DocumentWorkbench', () => {
       },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
-    expect(ask.disabled).toBe(false)
+    // Releasing the key over a selection floats the bar with the four actions under it.
+    const bar = screen.getByRole('toolbar', { name: '选中的文字' })
+    expect(within(bar).getAllByRole('button').map(button => button.textContent)).toEqual(['交给 Agent', '润色', '扩写', '检查引用'])
+    // A right-click on the selection opens the selection menu in place of the browser's, and puts the bar away.
+    expect(fireEvent.contextMenu(paragraph, { clientX: 300, clientY: 200 })).toBe(false)
+    expect(screen.queryByRole('toolbar', { name: '选中的文字' })).toBeNull()
+    const ask = screen.getByRole('menuitem', { name: '交给 Agent' })
     expect([...host.parentElement!.children]).toEqual(siblings)
-    expect(fireEvent.mouseDown(ask)).toBe(false)
     fireEvent.click(ask)
-    expect(b.quoteSelection).toHaveBeenCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' })
+    expect(b.quoteSelection).toHaveBeenCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' }, undefined)
     expect(b.updateDraft).not.toHaveBeenCalled()
     expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
-    expect(ask.disabled).toBe(true)
+    expect(screen.queryByRole('menuitem', { name: '交给 Agent' })).toBeNull()
     expect(b.quoteSelection).toHaveBeenCalledOnce()
     expect(screen.queryByRole('region', { name: '选中的文字' })).toBeNull()
     expect(host.scrollTop).toBe(120)
+    // The canned actions ride the same menu: the excerpt goes first, the fixed request follows it.
+    expect(fireEvent.contextMenu(paragraph, { clientX: 300, clientY: 200 })).toBe(false)
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['交给 Agent', '润色', '扩写', '检查引用'])
+    fireEvent.click(screen.getByRole('menuitem', { name: '润色' }))
+    expect(b.quoteSelection).toHaveBeenLastCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' }, t('selection.polishRequest'))
+    expect(screen.queryByRole('menuitem', { name: '润色' })).toBeNull()
+    // The bar runs the same actions and goes away with them.
+    fireEvent.keyUp(paragraph, { key: 'Shift' })
+    fireEvent.click(within(screen.getByRole('toolbar', { name: '选中的文字' })).getByRole('button', { name: '扩写' }))
+    expect(b.quoteSelection).toHaveBeenLastCalledWith(snapshot, { nodeIds: [NODE_PARAGRAPH], text: 'search bac' }, t('selection.expandRequest'))
+    expect(screen.queryByRole('toolbar', { name: '选中的文字' })).toBeNull()
     host.scrollTop = 320
     fireEvent.scroll(host)
     expect(b.setScroll).toHaveBeenCalledWith(320)
@@ -695,13 +727,13 @@ describe('DocumentWorkbench', () => {
     })
     expect(screen.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('true')
 
-    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '16pt' } })
+    pickSize('16')
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true, size: '16pt' }, { text: ' background' }],
       formatting: expect.objectContaining({ after: expect.arrayContaining([expect.objectContaining({ text: 'Research', size: '16pt' })]) as unknown }) as unknown,
     })
-    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '' } })
+    pickSize('继承')
     expect(b.updateDraft).toHaveBeenLastCalledWith(NODE_PARAGRAPH, {
       text: 'Research background',
       runs: [{ text: 'Research', bold: true }, { text: ' background' }],
@@ -850,12 +882,12 @@ describe('DocumentWorkbench', () => {
       },
     }) })
     fireEvent.keyUp(paragraph, { key: 'Shift' })
-    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '16pt' } })
+    pickSize('16')
     fireEvent.click(screen.getByRole('button', { name: '加粗' }))
     expect(paragraph.textContent).toBe('Research background')
     expect(paragraph.innerHTML).toContain('font-size: 16pt')
 
-    fireEvent.change(screen.getByRole('combobox', { name: '字号（磅）' }), { target: { value: '' } })
+    pickSize('继承')
     expect(paragraph.innerHTML).not.toContain('font-size')
     expect(paragraph.innerHTML).toContain('font-weight: bold')
   })
@@ -863,7 +895,7 @@ describe('DocumentWorkbench', () => {
   it('opens the template, gate, and versions panels from the toolbar and drafts an agent fix', () => {
     const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot() }))
     render(<DocumentWorkbench {...b.props} />)
-    fireEvent.click(screen.getByRole('button', { name: '模板' }))
+    fireEvent.click(screen.getByRole('button', { name: 'HIT 开题报告' }))
     expect(b.showPanel).toHaveBeenCalledWith('template')
     fireEvent.click(screen.getByRole('button', { name: '格式问题 1' }))
     expect(b.showPanel).toHaveBeenCalledWith('gate')
@@ -1015,27 +1047,70 @@ describe('DocumentWorkbench', () => {
     expect(within(panel).getByText('点一版，在文档上查看它的改动。')).toBeTruthy()
     fireEvent.click(within(panel).getByRole('button', { name: /Improve the introduction/u }))
     expect(timeline.showDiff).toHaveBeenCalledWith(documentSnapshot().headCommitId)
+    // The second reading measures the current head from the picked version.
+    fireEvent.click(within(panel).getByRole('button', { name: '和现在比差多少' }))
+    fireEvent.click(within(panel).getByRole('button', { name: /从模板新建/u }))
+    expect(timeline.showDiff).toHaveBeenLastCalledWith(documentSnapshot().headCommitId, COMMIT_0)
     cleanup()
     expect(timeline.setDetailsFocus).toHaveBeenLastCalledWith(false)
 
+    // The root version diffs against nothing: the panel says so and the page stays unmarked.
     const b = workbenchProps(workbenchState({
       phase: 'ready', panel: 'versions', document: documentSnapshot(),
-      diff: { commitId: COMMIT_0, result: { ...DIFF, commitId: COMMIT_0, parentCommitId: null }, error: null },
+      diff: {
+        commitId: COMMIT_0, baseCommitId: null, error: null,
+        result: { ...DIFF, commitId: COMMIT_0, parentCommitId: null, baseCommitId: null },
+      },
     }))
-    const view = render(<DocumentWorkbench {...b.props} />)
+    const rootView = render(<DocumentWorkbench {...b.props} />)
     const compared = screen.getByRole('complementary', { name: '版本' })
-    expect(within(compared).getByText('2 处变化 · 3 段未变')).toBeTruthy()
+    expect(within(compared).getByText('初始版本收录了全部 2 段，没有更早的版本可比较。')).toBeTruthy()
     expect(within(compared).getAllByRole('button', { pressed: true })).toHaveLength(1)
+    expect(rootView.container.querySelector('[role="document"]')!.shadowRoot!.querySelectorAll('[data-paperai-change]')).toHaveLength(0)
+    expect(screen.getByText(/正在查看历史版本：/)).toBeTruthy()
     fireEvent.click(within(compared).getByRole('button', { name: '恢复到此版本' }))
     expect(b.restore).not.toHaveBeenCalled()
     fireEvent.click(within(compared).getByRole('button', { name: '确认恢复并创建新版本' }))
     expect(b.restore).toHaveBeenCalledWith(COMMIT_0)
+    cleanup()
 
-    // The document shows the changes in place and offers to walk them.
+    // A later version shows its changes in place and offers to walk them.
+    const later = workbenchProps(workbenchState({
+      phase: 'ready', panel: 'versions', document: documentSnapshot(), diff: { commitId: COMMIT_1, baseCommitId: null, result: DIFF, error: null },
+    }))
+    const view = render(<DocumentWorkbench {...later.props} />)
+    expect(within(screen.getByRole('complementary', { name: '版本' })).getByText('2 处变化 · 3 段未变')).toBeTruthy()
+    expect(screen.queryByText(/正在查看历史版本：/)).toBeNull()
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     expect(shadow.querySelectorAll('[data-paperai-change]')).toHaveLength(2)
     expect(shadow.querySelector('h1')!.innerHTML).toBe('<del>Old introduction</del><ins>Introduction</ins>')
     expect(screen.getByText('第 1 / 2 处变化')).toBeTruthy()
+  })
+
+  it('retries a failed comparison with its base, reads the mode off the comparison, and holds the switch while busy', () => {
+    // A failed head-from-version comparison retries with the same base, and the picked version is the one measured from.
+    const failed = workbenchProps(workbenchState({
+      phase: 'ready', panel: 'versions', document: documentSnapshot(),
+      diff: { commitId: COMMIT_1, baseCommitId: COMMIT_0, result: null, error: 'Host offline' },
+    }))
+    render(<DocumentWorkbench {...failed.props} />)
+    const panel = screen.getByRole('complementary', { name: '版本' })
+    expect(within(panel).getByRole('button', { name: /从模板新建/u }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(within(panel).getByRole('button', { name: '重新比较' }))
+    expect(failed.showDiff).toHaveBeenCalledWith(COMMIT_1, COMMIT_0)
+    cleanup()
+    // While a comparison runs, the reading cannot be switched away from what the page is about to show.
+    const busy = workbenchProps(workbenchState({
+      phase: 'ready', panel: 'versions', document: documentSnapshot(), action: 'diffing',
+      diff: { commitId: COMMIT_1, baseCommitId: null, result: null, error: null },
+    }))
+    render(<DocumentWorkbench {...busy.props} />)
+    const running = screen.getByRole('complementary', { name: '版本' })
+    const current = within(running).getByRole('button', { name: '和现在比差多少' })
+    expect(current).toHaveProperty('disabled', true)
+    fireEvent.click(current)
+    expect(busy.showDiff).not.toHaveBeenCalled()
+    expect(within(running).getByRole('button', { name: /Improve the introduction/u }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('exports through the toolbar menu and shows receipts, blocks, and external updates', () => {

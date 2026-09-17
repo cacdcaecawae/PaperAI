@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { presentAcpCall, presentAcpResult, type AcpToolDisplay } from '../src/tool-presentation.ts'
+import { ACP_TOOL, PAPERAI_TOOL, presentAcpCall, presentAcpResult, presentationName, type AcpToolDisplay } from '../src/tool-presentation.ts'
 import { environmentSecrets, redactAcpText } from '../src/redaction.ts'
 
 const call: AcpToolDisplay = { name: 'research', title: 'Research paper', kind: 'search', status: 'in_progress',
@@ -25,4 +25,13 @@ it('redacts overlapping known credentials and authorization fragments while pres
   expect(redactAcpText('key-one-long key-one Authorization: Bearer unknown https://user:pass@api.test?token=other&x=1',
     ['key-one', 'key-one-long', '', 'key-one']))
     .toBe('[redacted] [redacted] Authorization: [redacted] https://[redacted]@api.test?token=[redacted]&x=1')
+})
+
+it('gives the PaperAI MCP tools their own transcript name and leaves every other provider tool on the shared one', () => {
+  expect(presentationName({ name: 'mcp__paperai__paperai_commit_document', title: 'paperai: paperai_commit_document' })).toBe(PAPERAI_TOOL)
+  expect(presentationName({ name: 'read', title: 'mcp.paperai.paperai_read_document' })).toBe(PAPERAI_TOOL)
+  expect(presentationName({ name: 'paperai_check_gate', title: 'Check' })).toBe(PAPERAI_TOOL)
+  expect(presentationName({ name: 'paperai.edit', title: 'Edit introduction' })).toBe(ACP_TOOL)
+  expect(presentationName({ name: 'terminal', title: 'Streaming output' })).toBe(ACP_TOOL)
+  expect(presentationName({ name: 'mcp__notpaperai_read_document', title: '' })).toBe(ACP_TOOL)
 })

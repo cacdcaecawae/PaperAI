@@ -441,6 +441,18 @@ export interface PaperAIDocumentTypeSuggestion {
 export interface PaperAIDiffVersionRequest {
   readonly documentId: PaperAIDocumentId
   readonly commitId: PaperAIDocumentCommitId
+  /**
+   * Measure the version from this one instead of its parent. The current head as
+   * `commitId` with an older base gives the distance between then and now.
+   */
+  readonly baseCommitId?: PaperAIDocumentCommitId | null
+}
+
+/** One step of the paragraph alignment between two versions; `equal` carries the shared text on both sides. */
+export interface PaperAIVersionStep {
+  readonly kind: 'equal' | 'added' | 'removed' | 'changed'
+  readonly before?: string
+  readonly after?: string
 }
 
 /** One paragraph-level change between two versions. */
@@ -455,9 +467,15 @@ export interface PaperAIVersionDiff {
   readonly documentId: PaperAIDocumentId
   readonly commitId: PaperAIDocumentCommitId
   readonly parentCommitId: PaperAIDocumentCommitId | null
+  /** The version the changes are measured from: the requested base, else the parent, else none for a root version. */
+  readonly baseCommitId: PaperAIDocumentCommitId | null
+  /** The whole alignment in document order, equal paragraphs included; the browser walks it along the version's page. */
+  readonly steps: readonly PaperAIVersionStep[]
   readonly changes: readonly PaperAIVersionChange[]
   /** Paragraphs that did not change; lets the reader judge the scale of an edit. */
   readonly unchangedCount: number
+  /** The Host's rendering of this version's snapshot, so the page can show the version itself. */
+  readonly previewHtml: string
   /** Recorded text-preserving formatting operations; not an exhaustive formatting diff. */
   readonly formattingEditCount?: number
 }

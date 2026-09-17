@@ -2,7 +2,7 @@
 import { useState, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { DocumentPreview } from '../src/client/DocumentPreview.tsx'
 import { zh } from '../src/client/locales.ts'
 import type { PaperAIBlockDraft, PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentSnapshot } from '../src/client/types.ts'
@@ -21,6 +21,13 @@ const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   for (const [name, value] of Object.entries(params ?? {})) text = text.replace(`{${name}}`, String(value))
   return text
 }) as PaperAIDocumentWorkbenchProps['t']
+
+/** Open one ribbon menu and pick a row by its label; a group name opens that paragraph submenu first. */
+function pick(menu: string, label: string, group?: string): void {
+  fireEvent.click(screen.getByRole('button', { name: menu }))
+  if (group !== undefined) act(() => { screen.getByRole('menuitem', { name: group }).focus() })
+  fireEvent.click(screen.getByRole('menuitem', { name: label }))
+}
 
 function setup(body = '<p data-path="/body/p[1]" style="font-size:12pt;font-family:Arial">Hello world</p>', texts = ['Hello world'], comparing = false,
   paragraphStyles: PaperAIDocumentSnapshot['paragraphStyles'] = [{ id: 'Normal', name: '正文' }, { id: 'SectionTitle', name: '章节标题' }]) {
@@ -251,15 +258,14 @@ describe('Document editing commands', () => {
     act(() => { first!.focus() })
     fireEvent.keyUp(first!, { key: 'Shift' })
     fireEvent.click(screen.getByRole('button', { name: zh['block.bold'] }))
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.size'] }), { target: { value: '18pt' } })
+    pick(zh['editor.size'], '18')
     expect(store.getSnapshot().edits.find(edit => edit.nodeId === NODE_PARAGRAPH)?.runs)
       .toEqual([{ text: 'Changed paragraph', bold: true, size: '18pt' }])
     expect(runsOf(second!)).toEqual([{ text: 'Changed paragraph', bold: true, size: '18pt' }])
     expect(first!.contains(range.startContainer)).toBe(true)
     expect(second!.contains(range.endContainer)).toBe(true)
     expect(range.toString()).toBe('Changed headingChanged paragraph')
-    fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.align'] }), { target: { value: 'center' } })
+    pick(zh['editor.paragraph'], zh['editor.center'], zh['editor.align'])
     const formatted = store.getSnapshot().edits
     expect(formatted.map(edit => edit.paragraphs?.[0]?.format)).toEqual([{ align: 'center' }, { align: 'center' }])
     expect(formatted.map(edit => edit.paragraphs?.[0]?.runs?.[0]?.size)).toEqual(['18pt', '18pt'])
@@ -316,10 +322,10 @@ describe('Document editing commands', () => {
     const editor = setup()
     const block = editor.paragraphs()[0]!
     editor.select(block, 0, block, block.childNodes.length)
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.font'] }), { target: { value: 'Times New Roman' } })
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.size'] }), { target: { value: '18pt' } })
+    pick(zh['editor.font'], 'Times New Roman')
+    pick(zh['editor.size'], '18')
     expect(runsOf(block)).toEqual([{ text: 'Hello world', font: 'Times New Roman', size: '18pt' }])
-    expect(screen.getByRole('combobox', { name: zh['editor.font'] }).getAttribute('title')).toContain(zh['editor.explicit'])
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).getAttribute('title')).toContain(zh['editor.explicit'])
     const undo = screen.getByRole('button', { name: zh['editor.undo'] })
     expect(fireEvent.mouseDown(undo)).toBe(false)
     fireEvent.click(undo)
@@ -333,34 +339,36 @@ describe('Document editing commands', () => {
     expect(runsOf(block)[0]).toMatchObject({ bold: true, italic: true, underline: true })
     fireEvent.keyDown(block, { key: 's', ctrlKey: true })
     fireEvent.keyDown(block, { key: 'Enter', metaKey: true })
-    fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: zh['block.save'] }))
+    fireEvent.click(screen.getByRole('button', { name: zh['block.save'] }))
     expect(editor.onSave).toHaveBeenCalledTimes(3)
     fireEvent.keyDown(block, { key: 'Escape' })
     expect(runsOf(block)).toEqual([{ text: 'Hello world' }])
     expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', null)
   })
 
-  it('submits paragraph style, spacing and indentation while native controls retain their arrow keys', () => {
+  it('submits paragraph style, spacing and indentation from the paragraph menu; the find field keeps its arrow keys', () => {
     const editor = setup()
     const block = editor.paragraphs()[0]!
     editor.select(block.firstChild!, 3)
-    fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
-    const styles = screen.getByRole('combobox', { name: zh['editor.style'] })
-    expect(within(styles).getAllByRole('option').map(option => option.textContent)).toEqual([zh['editor.applyStyle'], '正文', '章节标题'])
-    fireEvent.change(styles, { target: { value: 'SectionTitle' } })
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.spacing'] }), { target: { value: '2x' } })
-    const indent = screen.getByRole('spinbutton', { name: zh['editor.indent'] })
-    fireEvent.change(indent, { target: { value: '24' } })
+    pick(zh['editor.paragraph'], '章节标题', zh['editor.style'])
+    pick(zh['editor.paragraph'], '2x', zh['editor.spacing'])
+    pick(zh['editor.paragraph'], '24 磅', zh['editor.indent'])
     expect(readParagraphs(block)[0]?.format).toEqual({ style: 'SectionTitle', lineSpacing: '2x', indent: '24pt' })
     expect(block.style.marginLeft).toBe('24pt')
     expect(block.style.lineHeight).toBe('2')
-    expect(fireEvent.keyDown(indent, { key: 'ArrowLeft' })).toBe(true)
-    const calls = editor.onDraft.mock.calls.length
-    fireEvent.change(indent, { target: { value: '' } })
-    expect(editor.onDraft).toHaveBeenCalledTimes(calls)
-    act(() => { indent.focus() })
-    fireEvent.keyDown(indent, { key: 'Tab', shiftKey: true })
-    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: zh['editor.align'] }))
+    // The menu marks the current reading inside its submenu.
+    fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
+    act(() => { screen.getByRole('menuitem', { name: zh['editor.style'] }).focus() })
+    expect(screen.getByRole('menuitem', { name: '章节标题' }).className).toContain('selected')
+    expect(screen.getByRole('menuitem', { name: '正文' }).className).not.toContain('selected')
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: zh['editor.find'] }))
+    const find = screen.getByRole('textbox', { name: zh['editor.findPlaceholder'] })
+    expect(fireEvent.keyDown(find, { key: 'ArrowLeft' })).toBe(true)
+    act(() => { find.focus() })
+    fireEvent.keyDown(find, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: zh['editor.find'] }))
   })
 
   it.each([undefined, 'ImportedStyle'])('disables an empty style catalog while retaining the current reading %s', (style) => {
@@ -369,12 +377,16 @@ describe('Document editing commands', () => {
     if (style !== undefined) block.dataset.paperaiFormat = JSON.stringify({ style })
     editor.select(block.firstChild!, 2)
     fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
-    const styles = screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.style'] })
-    expect(styles.disabled).toBe(true)
-    expect(styles.value).toBe(style ?? '')
-    expect(styles.selectedOptions[0]?.textContent).toBe(style ?? zh['editor.applyStyle'])
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.align'] }).disabled).toBe(false)
-    expect(within(styles).queryByRole('option', { name: 'Heading1' })).toBeNull()
+    const styles = screen.getByRole<HTMLButtonElement>('menuitem', { name: zh['editor.style'] })
+    expect(styles.disabled).toBe(style === undefined)
+    if (style !== undefined) {
+      act(() => { styles.focus() })
+      const current = screen.getByRole<HTMLButtonElement>('menuitem', { name: style })
+      expect(current.disabled).toBe(true)
+      expect(current.className).toContain('selected')
+    }
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: zh['editor.align'] }).disabled).toBe(false)
+    expect(screen.queryByRole('menuitem', { name: 'Heading1' })).toBeNull()
   })
 
   it('navigates version changes in both directions and keeps comparison text read-only', () => {
@@ -431,23 +443,52 @@ describe('Document editing commands', () => {
     controller.dispose()
   })
 
+  it('counts the rendered pages in a pill and hides it when the preview has no pages', () => {
+    const paged = setup('<div class="page"><p data-path="/body/p[1]">Hello world</p></div><div class="page"><p data-path="/body/p[2]">Second page</p></div>',
+      ['Hello world', 'Second page'])
+    expect(screen.getByLabelText(/第 \d \/ 2 页/).textContent).toMatch(/\/ 2$/)
+    expect(paged.paragraphs()).toHaveLength(2)
+    cleanup()
+    setup()
+    expect(screen.queryByLabelText(/页$/)).toBeNull()
+  })
+
+  it('brings the revealed block under the top edge of the page', () => {
+    const body = '<p data-path="/body/p[1]">Hello world</p><p data-path="/body/p[2]">Second block</p>'
+    const nodes = ['Hello world', 'Second block'].map((text, index) => ({
+      nodeId: `node-${index}` as PaperAIDocumentNodeId, text, label: text, kind: 'paragraph' as const, depth: 0, editable: true,
+    }))
+    const shared = {
+      html: body, revision: REVISION_1, nodes, title: 'Document', edits: [], saving: false, t, paragraphStyles: [],
+      onDraft: vi.fn(), onSave: vi.fn(), onCancel: vi.fn(),
+    }
+    const view = render(<DocumentPreview {...shared} reveal={null} />)
+    const host = view.container.querySelector<HTMLElement>('[role="document"]')!
+    const second = host.shadowRoot!.querySelectorAll<HTMLElement>('[data-path]')[1]!
+    second.getBoundingClientRect = () => ({ top: 300 } as DOMRect)
+    view.rerender(<DocumentPreview {...shared} reveal={{ nodeId: 'node-1' as PaperAIDocumentNodeId, tick: 1 }} />)
+    expect(host.scrollTop).toBe(284)
+    view.rerender(<DocumentPreview {...shared} reveal={{ nodeId: 'node-1' as PaperAIDocumentNodeId, tick: 2 }} />)
+    expect(host.scrollTop).toBe(568)
+  })
+
   it('keeps the ribbon visible and displays inherited caret font and size', () => {
     const editor = setup()
     expect(screen.getByRole('toolbar', { name: zh['editor.ribbon'] })).toBeTruthy()
     expect(screen.getByRole('button', { name: zh['block.bold'] }).hasAttribute('disabled')).toBe(true)
     const block = editor.paragraphs()[0]!
     editor.select(block.firstChild!, 2)
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.size'] }).value).toBe('12pt')
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.font'] }).value).toBe('Arial')
-    expect(screen.getByText(zh['editor.insertion'])).toBeTruthy()
+    expect(screen.getByRole('button', { name: zh['editor.size'] }).textContent).toBe('12')
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe('Arial')
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).title).toContain(zh['editor.insertion'])
     expect(editor.onDraft).not.toHaveBeenCalled()
     const bold = screen.getByRole('button', { name: zh['block.bold'] })
     act(() => { bold.focus() })
     expect(fireEvent.keyDown(bold, { key: 'Home' })).toBe(false)
-    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: zh['editor.font'] }))
-    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
-    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: zh['editor.size'] }))
-    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: zh['editor.font'] }))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: zh['editor.size'] }))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
     expect(document.activeElement).toBe(bold)
     expect(screen.getByRole('toolbar').querySelectorAll('[tabindex="0"]').length).toBe(1)
   })
@@ -500,9 +541,8 @@ describe('Document editing commands', () => {
     const editor = setup('<p data-path="/body/p[1]"><span style="font-family:Arial;font-weight:bold">Hello world</span></p>')
     const block = editor.paragraphs()[0]!
     editor.select(block.querySelector('span')!.firstChild!, 5)
-    fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
-    fireEvent.change(screen.getByLabelText(zh['editor.align']), { target: { value: 'center' } })
-    fireEvent.change(screen.getByLabelText(zh['editor.spacing']), { target: { value: '1.5x' } })
+    pick(zh['editor.paragraph'], zh['editor.center'], zh['editor.align'])
+    pick(zh['editor.paragraph'], '1.5x', zh['editor.spacing'])
     fireEvent.keyDown(block, { key: 'Enter' })
     fireEvent.paste(block, { clipboardData: { getData: () => '新增\n下一段' } })
     const paragraphs = readParagraphs(block)
@@ -514,11 +554,11 @@ describe('Document editing commands', () => {
   it('keeps a cleared font cleared on both sides of Enter without storing the browser font', () => {
     const editor = setup('<p data-path="/body/p[1]" style="font-family:-apple-system,sans-serif"><span style="font-family:Arial">Hello world</span></p>')
     const block = editor.paragraphs()[0]!
-    expect(within(screen.getByRole('combobox', { name: zh['editor.font'] })).getByRole('option', { name: '—' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe('—')
     editor.select(block, 0, block, block.childNodes.length)
     fireEvent.click(screen.getByRole('button', { name: zh['editor.clear'] }))
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: zh['editor.font'] }).value).toBe('')
-    expect(within(screen.getByRole('combobox', { name: zh['editor.font'] })).getByRole('option', { name: zh['editor.fontUnspecified'] })).toBeTruthy()
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe(zh['editor.inherited'])
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).hasAttribute('data-muted')).toBe(true)
     const text = document.createTreeWalker(block, NodeFilter.SHOW_TEXT).nextNode()!
     editor.select(text, 5)
     fireEvent.keyDown(block, { key: 'Enter' })
@@ -595,8 +635,7 @@ describe('Document editing commands', () => {
     const editor = setup()
     const block = editor.paragraphs()[0]!
     editor.select(block.firstChild!, 0, block.firstChild!, 5)
-    fireEvent.click(screen.getByRole('button', { name: zh['editor.paragraph'] }))
-    fireEvent.change(screen.getByRole('combobox', { name: zh['editor.align'] }), { target: { value: 'center' } })
+    pick(zh['editor.paragraph'], zh['editor.center'], zh['editor.align'])
     expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', expect.objectContaining({ paragraphs: [expect.objectContaining({ format: { align: 'center' } })] }))
     expect(block.style.textAlign).toBe('center')
   })

@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentCommitId, PaperAIDocumentNodeId,
-  PaperAIDocumentType, PaperAIExportMode, PaperAILibraryState, PaperAIProjectDirectoryState,
+  PaperAIDocumentType, PaperAIExportMode, PaperAILibraryState, PaperAIOutlineDirectoryState, PaperAIProjectDirectoryState,
   PaperAIResourceId, PaperAITemplateStartInput, PaperAIWorkbenchPanel, PaperAIWorkbenchState,
 } from './types.ts'
 
@@ -61,6 +61,8 @@ export interface PaperAIWorkspaceContentInjected {
     diagnostics: HostObservable<import('./diagnostics-controller.ts').DiagnosticsState>
     /** All project projections; the component selects its owner-supplied Workspace id. */
     projects: HostObservable<PaperAIProjectDirectoryState>
+    /** Outlines of every Session's open document; the component selects the current Session's. */
+    outlines: HostObservable<PaperAIOutlineDirectoryState>
   }
   /** Load an unread project or retry its failed read. */
   ensureProject: (workspaceId: WorkspaceId) => Promise<void>
@@ -68,6 +70,8 @@ export interface PaperAIWorkspaceContentInjected {
   refreshProject: (workspaceId: WorkspaceId) => Promise<void>
   /** Connect the Workspace, select its Session, and open one tracked document. */
   openDocument: (workspaceId: WorkspaceId, resourceId: PaperAIResourceId) => Promise<void>
+  /** Show the Session's document view and bring one block of its open document into view. */
+  reveal: (sessionId: SessionId, nodeId: PaperAIDocumentNodeId) => void
 }
 
 /** Full props assembled for the sidebar document list entry. */
@@ -116,8 +120,12 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   showConversation: () => void
   /** Append a repair request to the existing composer draft and reveal the Session conversation. */
   prepareAgentFix: (text: string) => void
-  /** Add a frozen Word excerpt to the Session's composer. */
-  quoteSelection: (document: import('./types.ts').PaperAIDocumentSnapshot, excerpt: import('./selection-context.ts').WordExcerpt) => void
+  /** Add a frozen Word excerpt to the Session's composer, followed by a canned request when one is named. */
+  quoteSelection: (
+    document: import('./types.ts').PaperAIDocumentSnapshot,
+    excerpt: import('./selection-context.ts').WordExcerpt,
+    request?: string,
+  ) => void
   /** Remember the active document's scroll offset. */
   setScroll: (scrollTop: number) => void
   hooks: PaperAILibraryInjected['hooks'] & {
@@ -146,8 +154,8 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   detachTemplate: () => Promise<PaperAIActionResult>
   /** Record the project's template set, or the choice of none. */
   setProjectTemplate: (workspaceId: WorkspaceId, packId: string | null) => Promise<PaperAIActionResult>
-  /** Show or hide one version's diff. */
-  showDiff: (commitId: PaperAIDocumentCommitId) => Promise<PaperAIActionResult>
+  /** Show or hide one version's diff, measured from its parent or from `baseCommitId`. */
+  showDiff: (commitId: PaperAIDocumentCommitId, baseCommitId?: PaperAIDocumentCommitId | null) => Promise<PaperAIActionResult>
   /** Restore one version through a new version. */
   restore: (commitId: PaperAIDocumentCommitId) => Promise<PaperAIActionResult>
   /** Export an immutable draft or gate-checked formal delivery. */

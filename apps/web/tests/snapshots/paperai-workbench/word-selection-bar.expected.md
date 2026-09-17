@@ -1,0 +1,5 @@
+- toolbar "选中的文字":
+  - button "交给 Agent"
+  - button "润色"
+  - button "扩写"
+  - button "检查引用"

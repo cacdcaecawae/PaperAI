@@ -1,4 +1,4 @@
 - text: 失败
-- 'button "Tool call paperai: paperai_commit_document"':
+- button "提交修改 Read the current revision before retrying.":
   - img
-  - text: "Tool call paperai: paperai_commit_document"
+  - text: 提交修改 Read the current revision before retrying.

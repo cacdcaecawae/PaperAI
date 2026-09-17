@@ -334,7 +334,7 @@ async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
       ? { id: WORKSPACE_ID, path: harness.project.rootPath, title: harness.project.name }
       : undefined,
   } as never)
-  ctx.provide('documentEngine', { readTextNodes } as never)
+  ctx.provide('documentEngine', { readTextNodes, previewHtml } as never)
   ctx.provide('paperProjects', {
     create: async () => ({
       project: structuredClone(harness.project), projectCreated: false, contextFile: 'preserved', git: { status: 'ready' },
@@ -1131,18 +1131,37 @@ describe('PaperAiWorkbenchService', () => {
       documentId: DOCUMENT_ID,
       commitId: 'commit-2',
       parentCommitId: 'commit-1',
+      baseCommitId: 'commit-1',
+      steps: [
+        { kind: 'equal', before: '标题', after: '标题' },
+        { kind: 'changed', before: '第一版', after: '第二版' },
+        { kind: 'changed', before: '删掉的段落', after: '新增的段落' },
+        { kind: 'added', after: '再新增一段' },
+      ],
       changes: [
         { kind: 'changed', before: '第一版', after: '第二版' },
         { kind: 'changed', before: '删掉的段落', after: '新增的段落' },
         { kind: 'added', after: '再新增一段' },
       ],
       unchangedCount: 1,
+      previewHtml: '<html><body><p>只读预览</p></body></html>',
     })
     const root = await harness.service.diffVersion({ documentId: DOCUMENT_ID, commitId: first.createdCommitId })
-    expect(root).toMatchObject({ parentCommitId: null, unchangedCount: 0 })
+    expect(root).toMatchObject({ parentCommitId: null, baseCommitId: null, unchangedCount: 0 })
     expect(root.changes).toEqual([
       { kind: 'added', after: '标题' }, { kind: 'added', after: '第一版' }, { kind: 'added', after: '删掉的段落' },
     ])
+    // Measured from a later version, the first one reads as the way back: its paragraphs return, the later additions go.
+    const reversed = await harness.service.diffVersion({
+      documentId: DOCUMENT_ID, commitId: first.createdCommitId, baseCommitId: second.createdCommitId,
+    })
+    expect(reversed).toMatchObject({ commitId: 'commit-1', baseCommitId: 'commit-2', unchangedCount: 1, changes: [
+      { kind: 'changed', before: '第二版', after: '第一版' },
+      { kind: 'changed', before: '新增的段落', after: '删掉的段落' },
+      { kind: 'removed', before: '再新增一段' },
+    ] })
+    await expect(harness.service.diffVersion({ documentId: DOCUMENT_ID, commitId: first.createdCommitId, baseCommitId: 'commit-9' as PaperAIDocumentCommitId }))
+      .rejects.toThrow('does not belong')
     const edited = harness.history[0]!
     harness.history[0] = { ...edited, operations: [
       { type: 'replace-text', nodeId: NODE_ID, before: '第二版', after: '第二版' },

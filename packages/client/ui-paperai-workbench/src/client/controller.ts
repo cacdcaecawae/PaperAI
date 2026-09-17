@@ -7,11 +7,13 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { resolvePreviewBudget } from '../config.ts'
 import { normalize, patchPreviewHtml, type PreviewTextPatch } from './preview-html.ts'
 import { commitFormatting } from './format-intent.ts'
+import { outlineOf } from './outline.ts'
 import type {
   PaperAIActionResult, PaperAIAddFormatInput, PaperAIDocumentChangedEvent, PaperAIDocumentCommitId,
   PaperAIDocumentCommitResult, PaperAIDocumentNodeId, PaperAIDocumentOpenResult, PaperAIDocumentSnapshot,
   PaperAIDocumentType, PaperAIExportMode, PaperAIExternalDocumentHead, PaperAIImportDocumentResult, PaperAILibraryAction,
-  PaperAILibraryState, PaperAILibraryStore, PaperAIProjectAction, PaperAIProjectDirectoryState,
+  PaperAILibraryState, PaperAILibraryStore, PaperAIOutlineDirectoryState, PaperAIOutlineDirectoryStore,
+  PaperAIProjectAction, PaperAIProjectDirectoryState,
   PaperAIProjectDirectoryStore, PaperAIProjectOverview, PaperAIProjectState, PaperAIProjectStore,
   PaperAIResourceId, PaperAIRetainedView, PaperAIBlockDraft, PaperAIBlockEdit, PaperAITemplateLibrary, PaperAITemplateStartInput,
   PaperAIWorkbenchAction,
@@ -29,6 +31,7 @@ const LIBRARY_INITIAL: PaperAILibraryState = Object.freeze({
 const WORKBENCH_INITIAL: PaperAIWorkbenchState = Object.freeze({
   retained: [],
   scrollTop: 0,
+  reveal: null,
   phase: 'idle',
   document: null,
   edits: [],
@@ -117,6 +120,10 @@ export class PaperAIWorkbenchController {
     store: createSnapshotStore(LIBRARY_INITIAL), generation: 0, abort: null,
   }
   private readonly workbenches = new Map<SessionId, RequestEntry<PaperAIWorkbenchStore>>()
+  /** Each Session's outline, derived from its open document as the workbench store changes. */
+  private readonly outlines = createSnapshotStore<PaperAIOutlineDirectoryState>({})
+  private readonly outlineSources = new Map<SessionId, PaperAIDocumentSnapshot | null>()
+  private readonly outlineMirrors = new Map<SessionId, () => void>()
   private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, readonly PaperAIBlockEdit[]>>()
   private readonly positions = new Map<SessionId, Map<PaperAIResourceId, number>>()
   private readonly targets = new Map<SessionId, {
@@ -167,6 +174,14 @@ export class PaperAIWorkbenchController {
   workbenchStore(sessionId: SessionId): PaperAIWorkbenchStore {
     this.assertLive()
     return this.workbenchEntry(sessionId).store
+  }
+
+  /**
+   * Return the outlines of every Session's open document, kept current by the controller.
+   * @returns one stable snapshot store.
+   */
+  outlineStore(): PaperAIOutlineDirectoryStore {
+    return this.outlines
   }
 
   /**
@@ -416,7 +431,19 @@ export class PaperAIWorkbenchController {
    */
   setScroll(sessionId: SessionId, scrollTop: number): void {
     if (this.disposed) return
-    this.workbenchEntry(sessionId).store.update((state) => { state.scrollTop = scrollTop })
+    this.workbenchEntry(sessionId).store.update((state) => { state.scrollTop = scrollTop; state.reveal = null })
+  }
+
+  /**
+   * Ask the open page to bring one block into view; the scroll that follows clears the request.
+   * @param sessionId - owning Session.
+   * @param nodeId - block named by the sidebar outline.
+   */
+  reveal(sessionId: SessionId, nodeId: PaperAIDocumentNodeId): void {
+    this.assertLive()
+    this.workbenchEntry(sessionId).store.update((state) => {
+      if (state.document !== null) state.reveal = { nodeId, tick: (state.reveal?.tick ?? 0) + 1 }
+    })
   }
 
   private retain(sessionId: SessionId, state: PaperAIWorkbenchState, opening: PaperAIResourceId): PaperAIRetainedView[] {
@@ -636,15 +663,18 @@ export class PaperAIWorkbenchController {
    * Load one version's paragraph diff into the versions panel.
    * @param sessionId - Session owning the open workbench.
    * @param commitId - version to explain; the same id again closes the diff.
+   * @param baseCommitId - version to measure from instead of the parent; `null` keeps the parent.
    * @returns settled local action result.
    */
-  async showDiff(sessionId: SessionId, commitId: PaperAIDocumentCommitId): Promise<PaperAIActionResult> {
+  async showDiff(
+    sessionId: SessionId, commitId: PaperAIDocumentCommitId, baseCommitId: PaperAIDocumentCommitId | null = null,
+  ): Promise<PaperAIActionResult> {
     this.assertLive()
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
-    if (state.diff?.commitId === commitId && state.diff.error === null) {
+    if (state.diff?.commitId === commitId && state.diff.baseCommitId === baseCommitId && state.diff.error === null) {
       entry.store.update((draft) => { draft.diff = null })
       return OK
     }
@@ -652,16 +682,18 @@ export class PaperAIWorkbenchController {
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'diffing'
-      draft.diff = { commitId, result: null, error: null }
+      draft.diff = { commitId, baseCommitId, result: null, error: null }
       draft.actionError = null
     })
-    const result = await callRemote(() => this.remote.diffVersion({ documentId: document.documentId, commitId }, request.signal))
+    const result = await callRemote(() => this.remote.diffVersion({
+      documentId: document.documentId, commitId, ...(baseCommitId === null ? {} : { baseCommitId }),
+    }, request.signal))
     if (!this.isCurrent(entry, request)) return { ok: false, error: 'request superseded' }
     entry.store.update((draft) => {
       draft.action = null
       draft.diff = result.ok
-        ? { commitId, result: result.value, error: null }
-        : { commitId, result: null, error: remoteError(result.error) }
+        ? { commitId, baseCommitId, result: result.value, error: null }
+        : { commitId, baseCommitId, result: null, error: remoteError(result.error) }
     })
     return result.ok ? OK : { ok: false, error: remoteError(result.error) }
   }
@@ -902,9 +934,12 @@ export class PaperAIWorkbenchController {
     this.library.abort?.abort()
     for (const entry of this.workbenches.values()) entry.abort?.abort()
     for (const dispose of this.projectMirrors.values()) dispose()
+    for (const dispose of this.outlineMirrors.values()) dispose()
     this.projects.clear()
     this.projectMirrors.clear()
     this.workbenches.clear()
+    this.outlineMirrors.clear()
+    this.outlineSources.clear()
     this.targets.clear()
     this.drafts.clear()
     this.positions.clear()
@@ -1031,6 +1066,18 @@ export class PaperAIWorkbenchController {
     if (entry === undefined) {
       entry = { store: createSnapshotStore(WORKBENCH_INITIAL), generation: 0, abort: null }
       this.workbenches.set(sessionId, entry)
+      const created = entry
+      // The outline follows the document by identity: a scroll or a draft leaves it as it is.
+      const publish = (): void => {
+        const document = created.store.getSnapshot().document
+        if (document === this.outlineSources.get(sessionId)) return
+        this.outlineSources.set(sessionId, document)
+        const { [sessionId]: _closed, ...rest } = this.outlines.getSnapshot()
+        this.outlines.set(document === null
+          ? rest
+          : { ...rest, [sessionId]: { workspaceId: document.workspaceId, entries: outlineOf(document.nodes) } })
+      }
+      this.outlineMirrors.set(sessionId, created.store.subscribe(publish))
     }
     return entry
   }
@@ -1166,6 +1213,7 @@ export class PaperAIWorkbenchController {
       phase: 'ready',
       retained: previous.retained,
       scrollTop: sameDocument ? previous.scrollTop : 0,
+      reveal: null,
       document: result.document,
       edits: [],
       action: null,

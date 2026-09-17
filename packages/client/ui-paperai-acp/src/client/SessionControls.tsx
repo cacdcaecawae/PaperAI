@@ -1,6 +1,7 @@
 /** Provider-owned options and connection feedback in the existing conversation header. */
 import { useEffect, useState } from 'react'
-import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Modal, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Choice } from './Choice.tsx'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AcpSessionControlState } from './session-controller.ts'
@@ -52,11 +53,14 @@ export function AcpSessionControls({
   const favorites = preferences.favorites[details.provider] ?? []
   const locked = state.loading || state.busy || !details.connected
   const status = t(state.busy ? 'applying' : state.loading ? 'sessionLoading' : details.connected ? 'connected' : 'disconnected')
+  // The dot carries the connection state; the words stay in the title and the dialog.
+  const dot = state.busy || state.loading ? 'ongoing' : details.connected ? 'done' : 'error'
   return <>
-    <Button variant="toolbar" className={css.sessionButton}
-      aria-label={t('sessionTitle', { name: details.name })} aria-haspopup="dialog" aria-expanded={open}
+    <Button variant="ghost" size="sm" className={css.sessionButton} icon={<StateDot state={dot} size={8} />}
+      aria-label={t('sessionTitle', { name: details.name })} title={`${status} · ${t('sessionOptions')}`}
+      aria-haspopup="dialog" aria-expanded={open}
       onClick={() => { setOpen(true); void load() }}>
-      {status} · {t('sessionOptions')}
+      {t('sessionOptions')}
     </Button>
     <Modal open={open} onClose={() => { setOpen(false) }}
       title={t('sessionDialog', { name: details.name })} closeLabel={t('sessionClose')} className={css.modal ?? ''}>
@@ -111,20 +115,22 @@ export function AcpSessionControls({
             </form>
           </section>
         ) : (
-          <label key={option.id} className={typeof option.value === 'boolean' ? css.check : undefined}>
-            <span>{option.name}</span>
-            {typeof option.value === 'boolean' ? (
+          typeof option.value === 'boolean' ? (
+            <label key={option.id} className={css.check}>
+              <span>{option.name}</span>
               <input type="checkbox" disabled={locked || !option.editable} checked={option.value}
                 onChange={(event) => { void select(option.id, event.target.checked) }} />
-            ) : (
-              <select disabled={locked || !option.editable} value={option.value}
-                onChange={(event) => { void select(option.id, event.target.value) }}>
-                {!option.choices.some(choice => choice.value === option.value) && <option>{option.value}</option>}
-                {option.choices.map(choice => <option key={choice.value} value={choice.value}>{choice.name}</option>)}
-              </select>
-            )}
-            <small>{option.editable ? option.description : t('permissionOwned')}</small>
-          </label>
+              <small>{option.editable ? option.description : t('permissionOwned')}</small>
+            </label>
+          ) : (
+            <div key={option.id} className={css.field}>
+              <span>{option.name}</span>
+              <Choice label={option.name} value={option.value} disabled={locked || !option.editable}
+                options={option.choices.map(choice => ({ id: choice.value, name: choice.name }))}
+                onChange={(value) => { void select(option.id, value) }} />
+              <small>{option.editable ? option.description : t('permissionOwned')}</small>
+            </div>
+          )
         ))}
         {details.state.usage !== null && <p>{t('context', { used: details.state.usage.used, size: details.state.usage.size })}
           {details.state.usage.cost !== null && t('cost', { amount: details.state.usage.cost.amount, currency: details.state.usage.cost.currency })}

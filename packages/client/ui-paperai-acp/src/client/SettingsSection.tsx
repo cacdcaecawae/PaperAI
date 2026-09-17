@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Choice } from './Choice.tsx'
 import type { HostObservable, InjectFace, PropsRenderSlots, PropsRuntime, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from './brand-slot.ts'
@@ -475,27 +476,19 @@ export function AcpSettingsSection({
       <div className={css.group}>
         <div className={css.groupLabel}>{t('newSessionDefaults')}</div>
         <div className={css.card}>
-          <label className={css.row}>
+          <div className={css.row}>
             <span className={css.fact}>
               <span>{t('defaultAgent')}</span>
               <span>{t('defaultHint')}</span>
             </span>
-            <select
+            <Choice
+              label={t('defaultAgent')}
               value={state.defaultProvider}
               disabled={!state.writable}
-              onChange={(event) => {
-                void setDefault(event.target.value)
-              }}
-            >
-              {state.entries
-                .filter(entry => entry.enabled)
-                .map(entry => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.name}
-                  </option>
-                ))}
-            </select>
-          </label>
+              options={state.entries.filter(entry => entry.enabled).map(entry => ({ id: entry.id, name: entry.name }))}
+              onChange={(id) => { void setDefault(id) }}
+            />
+          </div>
         </div>
       </div>
       <Modal
@@ -574,19 +567,17 @@ export function AcpSettingsSection({
           >
             <p>{routing.providerId}{t('routingImpact')}</p>
             <fieldset disabled={state.busy.includes(routing.id)}>
-              <label>{t('apiType')}<select
-                value={routing.apiType}
-                onChange={(event) => {
-                  setRouting({ ...routing, apiType: event.target.value })
-                }}
-              >
-                {state.management[routing.id]?.providers
-                  ?.find(provider => provider.id === routing.providerId)
-                  ?.supported.map(api => (
-                    <option key={api}>{api}</option>
-                  ))}
-              </select>
-              </label>
+              <div className={css.field}>
+                <span>{t('apiType')}</span>
+                <Choice
+                  label={t('apiType')}
+                  value={routing.apiType}
+                  options={(state.management[routing.id]?.providers
+                    ?.find(provider => provider.id === routing.providerId)
+                    ?.supported ?? []).map(api => ({ id: api, name: api }))}
+                  onChange={(api) => { setRouting({ ...routing, apiType: api }) }}
+                />
+              </div>
               <label>{t('apiUrl')}<Input
                 required
                 type="url"

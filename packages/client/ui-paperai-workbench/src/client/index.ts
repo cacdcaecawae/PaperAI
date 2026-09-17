@@ -175,7 +175,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
     }
 
     const workspaceInjected: PaperAIWorkspaceContentInjected = {
-      hooks: { projects: controller.projectDirectoryStore(), diagnostics: diagnostics.store },
+      hooks: { projects: controller.projectDirectoryStore(), diagnostics: diagnostics.store, outlines: controller.outlineStore() },
       inspectProject: async (workspaceId, plan) => {
         await diagnostics.inspect(workspaceId, plan)
         if (plan !== undefined) controller.refreshLoaded()
@@ -186,6 +186,10 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
       },
       ensureProject: workspaceId => controller.ensureProject(workspaceId),
       refreshProject: workspaceId => controller.loadProject(workspaceId),
+      reveal: (sessionId, nodeId) => {
+        controller.reveal(sessionId, nodeId)
+        void settleDetailsSelection(sessionId)
+      },
       openDocument: async (workspaceId, resourceId) => {
         try {
           const sessionId = await documentSession(workspaceId)
@@ -278,15 +282,17 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
             showConversation()
           },
           setScroll: (scrollTop) => { controller.setScroll(sessionId, scrollTop) },
-          quoteSelection: (document, excerpt) => {
+          quoteSelection: (document, excerpt, request) => {
             const input = sessionInput()
             if (input === undefined) return
             const state = input.state.getSnapshot()
             const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
               start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
             })
-            if (!accepted) input.notify('error', ctx.locale.bind(NS)('selection.busy'))
-            if (accepted) showConversation()
+            if (!accepted) { input.notify('error', ctx.locale.bind(NS)('selection.busy')); return }
+            // The canned request reads after the excerpt it is about; the person still sends the message.
+            if (request !== undefined) input.setDraft(`${input.state.getSnapshot().draft}\n\n${request}`)
+            showConversation()
           },
           showPanel: (panel) => { controller.showPanel(sessionId, panel) },
           updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
@@ -297,7 +303,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
           applyTemplate: documentType => controller.applyTemplate(sessionId, documentType),
           detachTemplate: () => controller.detachTemplate(sessionId),
           setProjectTemplate: (workspaceId, packId) => controller.setProjectTemplate(workspaceId, packId),
-          showDiff: commitId => controller.showDiff(sessionId, commitId),
+          showDiff: (commitId, baseCommitId) => controller.showDiff(sessionId, commitId, baseCommitId),
           restore: commitId => controller.restore(sessionId, commitId),
           exportDocument: mode => controller.exportDocument(sessionId, mode),
           reloadExternal: () => controller.reloadExternal(sessionId),

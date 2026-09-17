@@ -39,6 +39,9 @@
       "path": "../ui-conversation"
     },
     {
+      "path": "../ui-tool"
+    },
+    {
       "path": "../ui-paperai-workbench"
     },
     {

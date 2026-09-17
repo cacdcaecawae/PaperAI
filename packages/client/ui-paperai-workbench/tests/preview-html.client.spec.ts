@@ -42,26 +42,59 @@ describe('wordDiff', () => {
 })
 
 describe('markDiffHtml', () => {
-  it('marks a change only where exactly one addressed body block carries its text, and lists the rest', () => {
+  it('walks the alignment along the page in order, marks changes in place, and draws removed paragraphs where they stood', () => {
     const result = markDiffHtml(HTML, [
-      { kind: 'removed', before: 'A dropped paragraph' },
       { kind: 'changed', before: 'Old introduction', after: 'Introduction' },
+      { kind: 'equal', before: 'Research background', after: 'Research background' },
+      { kind: 'equal', before: 'Research background', after: 'Research background' },
+      { kind: 'removed', before: 'A dropped paragraph' },
       { kind: 'added', after: 'Closing remarks' },
       { kind: 'changed', before: 'Different', after: 'Same' },
-      { kind: 'changed', before: 'Once here', after: 'Overwritten later' },
+      { kind: 'equal', before: 'Same', after: 'Same' },
     ])
-    expect(result.unplaced).toEqual([
-      { kind: 'removed', before: 'A dropped paragraph' },
-      { kind: 'changed', before: 'Different', after: 'Same' },
-      { kind: 'changed', before: 'Once here', after: 'Overwritten later' },
-    ])
+    expect(result.count).toBe(4)
     const marked = new DOMParser().parseFromString(result.html, 'text/html')
     const changes = [...marked.querySelectorAll('[data-paperai-change]')]
-    expect(changes.map(block => block.getAttribute('data-path'))).toEqual(['/body/p[1]', '/body/p[3]'])
+    expect(changes.map(block => block.getAttribute('data-path'))).toEqual(['/body/p[1]', null, '/body/p[3]', '/body/p[4]'])
     expect(changes[0]?.innerHTML).toBe('<del>Old introduction</del><ins>Introduction</ins>')
-    expect(changes[1]?.innerHTML).toBe('<ins>Closing remarks</ins>')
+    // The dropped paragraph stands where it was: before the paragraph that followed it.
+    expect(changes[1]?.innerHTML).toBe('<del>A dropped paragraph</del>')
+    expect(changes[1]?.hasAttribute('data-paperai-removed')).toBe(true)
+    expect(changes[1]?.nextElementSibling).toBe(changes[2])
+    expect(changes[2]?.innerHTML).toBe('<ins>Closing remarks</ins>')
+    // Repeated text is settled by order: the first "Same" is the changed one, the second stays.
+    expect(changes[3]?.innerHTML).toBe('<del>Different</del><ins>Same</ins>')
+    expect(marked.querySelector('[data-path="/body/p[5]"]')?.innerHTML).toBe('Same')
     // The header with the same text is not a body block and stays as it was.
     expect(marked.querySelector('.doc-header p')?.innerHTML).toBe('Closing remarks')
+  })
+
+  it('leaves a step whose paragraph is out of reach unmarked and keeps walking', () => {
+    const result = markDiffHtml(HTML, [
+      { kind: 'changed', before: 'Nowhere', after: 'Not on this page' },
+      { kind: 'changed', before: 'Old introduction', after: 'Introduction' },
+    ])
+    expect(result.count).toBe(1)
+    const marked = new DOMParser().parseFromString(result.html, 'text/html')
+    expect(marked.querySelector('[data-paperai-change]')?.getAttribute('data-path')).toBe('/body/p[1]')
+  })
+
+  it('keeps removed paragraphs past the last block in their own order', () => {
+    const result = markDiffHtml(HTML, [
+      { kind: 'equal', before: 'Introduction', after: 'Introduction' },
+      { kind: 'equal', before: 'Research background', after: 'Research background' },
+      { kind: 'equal', before: 'Research background', after: 'Research background' },
+      { kind: 'equal', before: 'Closing remarks', after: 'Closing remarks' },
+      { kind: 'equal', before: 'Same', after: 'Same' },
+      { kind: 'equal', before: 'Same', after: 'Same' },
+      { kind: 'removed', before: 'Gone first' },
+      { kind: 'removed', before: 'Gone second' },
+    ])
+    expect(result.count).toBe(2)
+    const marked = new DOMParser().parseFromString(result.html, 'text/html')
+    const last = marked.querySelector('[data-path="/body/p[5]"]')
+    expect(last?.nextElementSibling?.innerHTML).toBe('<del>Gone first</del>')
+    expect(last?.nextElementSibling?.nextElementSibling?.innerHTML).toBe('<del>Gone second</del>')
   })
 })
 

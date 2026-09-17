@@ -1,6 +1,9 @@
 - text: 失败
-- 'button "Tool call paperai: paperai_commit_document" [expanded]':
+- button "提交修改 Read the current revision before retrying." [expanded]:
   - img
-  - text: "Tool call paperai: paperai_commit_document"
-- text: "IN { \"documentId\": \"public-synthetic-document\", \"expectedRevision\": 1 } OUT {\"content\":[{\"type\":\"text\",\"text\":\"{\\\"error\\\":\\\"revision_conflict\\\",\\\"detail\\\":\\\"Read the current revision before retrying.\\\"}\"}],\"isError\":true}"
-- button "Inspect"
+  - text: 提交修改 Read the current revision before retrying.
+- heading "输入" [level=4]
+- text: "{ \"documentId\": \"public-synthetic-document\", \"expectedRevision\": 1 }"
+- heading "输出" [level=4]
+- text: "{\"error\":\"revision_conflict\",\"detail\":\"Read the current revision before retrying.\"}"
+- button "查看详情"

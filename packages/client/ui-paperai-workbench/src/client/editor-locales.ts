@@ -2,6 +2,7 @@
 export const editorZh = {
   'editor.ribbon': '文档编辑工具栏',
   'editor.save': '保存到文档',
+  'editor.history': '草稿历史',
   'editor.undo': '撤销草稿修改',
   'editor.redo': '重做草稿修改',
   'editor.font': '字体',
@@ -23,6 +24,7 @@ export const editorZh = {
   'editor.right': '右对齐',
   'editor.justify': '两端对齐',
   'editor.indent': '左缩进（磅）',
+  'editor.indentValue': '{value} 磅',
   'editor.spacing': '行距',
   'editor.find': '查找文档',
   'editor.findPlaceholder': '查找正文',
@@ -39,6 +41,7 @@ export const editorZh = {
 export const editorEn: Record<keyof typeof editorZh, string> = {
   'editor.ribbon': 'Document editing toolbar',
   'editor.save': 'Save to document',
+  'editor.history': 'Draft history',
   'editor.undo': 'Undo draft edit',
   'editor.redo': 'Redo draft edit',
   'editor.font': 'Font',
@@ -60,6 +63,7 @@ export const editorEn: Record<keyof typeof editorZh, string> = {
   'editor.right': 'Align right',
   'editor.justify': 'Justify',
   'editor.indent': 'Left indent (points)',
+  'editor.indentValue': '{value} pt',
   'editor.spacing': 'Line spacing',
   'editor.find': 'Find in document',
   'editor.findPlaceholder': 'Find document text',

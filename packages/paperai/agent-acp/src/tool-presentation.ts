@@ -6,6 +6,21 @@ import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools/presen
 /** Driver-owned presentation name; this registration never exposes an executable tool. */
 export const ACP_TOOL = 'paperai_acp_tool'
 
+/** Presentation name for PaperAI's own MCP tools, so the browser can give them a row of their own. */
+export const PAPERAI_TOOL = 'paperai_document_tool'
+
+/**
+ * Pick the transcript tool name for one provider call: PaperAI's own MCP tools
+ * (`mcp__paperai__paperai_read_document`, `mcp.paperai.paperai_commit_document`)
+ * take {@link PAPERAI_TOOL}; every other provider tool stays on {@link ACP_TOOL}.
+ * @param display - durable display fields of the call.
+ * @returns the DSH tool name written with the call.
+ */
+export function presentationName(display: { readonly name: string; readonly title: string }): string {
+  const own = /(?:^|[^a-z])paperai_[a-z]+(?:_[a-z]+)*$/u
+  return own.test(display.name) || own.test(display.title) ? PAPERAI_TOOL : ACP_TOOL
+}
+
 /** Validated durable display fields retained with each complete tool argument update. */
 export const AcpToolDisplaySchema = z.object({
   name: z.string(),

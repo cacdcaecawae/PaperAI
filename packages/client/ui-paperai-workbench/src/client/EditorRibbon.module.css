@@ -1,44 +1,60 @@
+/* One row of document commands: 28px quiet controls on the base surface,
+   hairline dividers between groups, a menu for every choice. Pressed and
+   selected states take the gold accent; disabled controls fade. */
 .ribbon {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
-  padding: 8px 12px;
-  color: var(--dsw-alias-text-primary);
+  gap: 2px;
+  min-height: 40px;
+  padding: 4px 12px;
+  color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-base);
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   flex-shrink: 0;
   font-size: 13px;
+  line-height: 20px;
 }
-.group { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.group + .group { border-inline-start: 1px solid var(--dsw-alias-border-l2); padding-inline-start: 10px; }
-.ribbon button, .ribbon select, .ribbon input {
-  min-height: 32px;
-  min-width: 32px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 5px;
-  background: var(--dsw-alias-bg-base);
-  color: inherit;
+.group { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.group + .group::before { content: ''; width: 1px; height: 16px; margin: 0 6px 0 4px; background: var(--dsw-alias-border-l2); }
+.tool, .select {
+  display: inline-flex;
+  height: 28px;
+  min-width: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
   font: inherit;
-  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
 }
-.ribbon button { cursor: pointer; }
-.ribbon button:hover, .ribbon button[aria-pressed="true"], .ribbon button[aria-pressed="mixed"] { background: var(--dsw-alias-state-business-tertiary); }
-.ribbon button[aria-pressed="mixed"] { border-style: dashed; }
-.ribbon button:focus-visible, .ribbon select:focus-visible, .ribbon input:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
-.ribbon :disabled { opacity: 0.45; cursor: default; }
-.font { max-width: 160px; }
-.size { max-width: 120px; }
-.scope { font-size: 12px; color: var(--dsw-alias-text-secondary); }
-.more { position: relative; }
-.more summary { cursor: pointer; padding: 6px 8px; min-height: 32px; }
-.paragraph { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; width: 100%; }
-.paragraph label { display: flex; align-items: center; gap: 6px; }
-.paragraph input { width: 76px; }
-.find { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
-.find input { min-width: 0; max-width: 220px; }
-@media (max-width: 700px) {
-  .ribbon { gap: 6px; padding: 6px 8px; }
-  .font { max-width: 115px; }
-  .group + .group { padding-inline-start: 6px; }
+.tool:hover:not(:disabled), .select:hover:not(:disabled), .select[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tool[aria-pressed='true'], .tool[aria-pressed='mixed'], .tool[aria-expanded='true'] {
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+}
+.tool[aria-pressed='mixed'] { outline: 1px dashed var(--dsw-alias-state-business-primary); outline-offset: -1px; }
+.tool:disabled, .select:disabled { cursor: default; opacity: 0.4; }
+.tool:focus-visible, .select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.select { padding: 0 4px 0 8px; color: var(--dsw-alias-label-primary); }
+.select > span { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.select[data-muted] > span { color: var(--dsw-alias-label-tertiary); }
+.select > svg { flex: none; color: var(--dsw-alias-label-tertiary); }
+.find { display: flex; align-items: center; gap: 4px; }
+.findInput { height: 28px; }
+.findInput input { font-size: 13px; }
+.noMatch { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+@container paperai-workbench (max-width: 640px) {
+  .ribbon { padding: 4px 8px; }
+  .select > span { max-width: 88px; }
 }

@@ -1,0 +1,91 @@
+/* PaperAI's own document tools: DisclosureRow chrome with a state dot in the
+   leading slot, the action in words, and the input and output only once opened.
+   Colors and radii come from the alias tokens; nothing here is literal. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  gap: 0;
+}
+
+.title {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.summary,
+.failure {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.failure {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.body {
+  display: grid;
+  gap: 8px;
+  padding: 4px 0 8px 24px;
+}
+
+.body section {
+  display: grid;
+  gap: 4px;
+}
+
+.body h4 {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.body pre {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.body > button {
+  justify-self: start;
+}
+
+/* Read by assistive technology only; the state dot carries the same word visually. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

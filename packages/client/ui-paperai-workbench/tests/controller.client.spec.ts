@@ -44,6 +44,19 @@ describe('PaperAIWorkbenchController projects', () => {
     expect(remote.open).toHaveBeenCalledTimes(5)
   })
 
+  it('derives the sidebar outline from the open document and drops it when the document closes', async () => {
+    const { controller, store } = await openedController()
+    const outlines = controller.outlineStore()
+    expect(outlines.getSnapshot()[SESSION_ID]).toEqual({
+      workspaceId: WORKSPACE_ID, entries: [{ nodeId: NODE_HEADING, text: 'Introduction', level: 1 }],
+    })
+    const before = outlines.getSnapshot()
+    controller.setScroll(SESSION_ID, 12)
+    expect(outlines.getSnapshot()).toBe(before)
+    store.update((draft) => { draft.document = null })
+    expect(outlines.getSnapshot()[SESSION_ID]).toBeUndefined()
+  })
+
   it('loads a cold project once, mirrors it into the directory, and refreshes on demand', async () => {
     const remote = successfulRemote()
     const overview = vi.spyOn(remote, 'overview')
@@ -398,15 +411,24 @@ describe('PaperAIWorkbenchController documents', () => {
     controller.showPanel(SESSION_ID, 'versions')
     await expect(controller.showDiff(SESSION_ID, COMMIT_1)).resolves.toEqual({ ok: true })
     expect(diffVersion).toHaveBeenCalledWith({ documentId: DOCUMENT_ID, commitId: COMMIT_1 }, expect.any(AbortSignal))
-    expect(store.getSnapshot().diff).toEqual({ commitId: COMMIT_1, result: { ...DIFF, commitId: COMMIT_1 }, error: null })
+    expect(store.getSnapshot().diff)
+      .toEqual({ commitId: COMMIT_1, baseCommitId: null, result: { ...DIFF, commitId: COMMIT_1 }, error: null })
     await expect(controller.showDiff(SESSION_ID, COMMIT_1)).resolves.toEqual({ ok: true })
     expect(store.getSnapshot().diff).toBeNull()
     diffVersion.mockResolvedValueOnce(REMOTE_FAILURE)
     await expect(controller.showDiff(SESSION_ID, COMMIT_0)).resolves.toEqual({ ok: false, error: 'internal: Host capability unavailable' })
-    expect(store.getSnapshot().diff).toEqual({ commitId: COMMIT_0, result: null, error: 'internal: Host capability unavailable' })
+    expect(store.getSnapshot().diff).toEqual({ commitId: COMMIT_0, baseCommitId: null, result: null, error: 'internal: Host capability unavailable' })
     diffVersion.mockResolvedValueOnce({ ok: true, value: { ...DIFF, commitId: COMMIT_0 } })
     await expect(controller.showDiff(SESSION_ID, COMMIT_0)).resolves.toEqual({ ok: true })
     expect(store.getSnapshot().diff?.result?.commitId).toBe(COMMIT_0)
+    // Measured from another version, the request names the base and the same pick with the same base closes the diff.
+    diffVersion.mockResolvedValueOnce({ ok: true, value: { ...DIFF, commitId: COMMIT_1, baseCommitId: COMMIT_0 } })
+    await expect(controller.showDiff(SESSION_ID, COMMIT_1, COMMIT_0)).resolves.toEqual({ ok: true })
+    expect(diffVersion)
+      .toHaveBeenLastCalledWith({ documentId: DOCUMENT_ID, commitId: COMMIT_1, baseCommitId: COMMIT_0 }, expect.any(AbortSignal))
+    expect(store.getSnapshot().diff).toMatchObject({ commitId: COMMIT_1, baseCommitId: COMMIT_0 })
+    await expect(controller.showDiff(SESSION_ID, COMMIT_1, COMMIT_0)).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().diff).toBeNull()
     controller.showPanel(SESSION_ID, 'versions')
     expect(store.getSnapshot()).toMatchObject({ panel: null, diff: null })
   })
