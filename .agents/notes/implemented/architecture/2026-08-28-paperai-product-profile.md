@@ -22,7 +22,7 @@ The fork keeps upstream packages under `@deepseek-ai/dsh-*`. New product-owned p
 
 PaperAI exposes only Codex and Claude, defaults to Codex, and disables the user preset root under the [ACP channel decision](2026-09-08-paperai-acp-channels.md). Both use the shared top-level ACP implementation and receive document tools through session-owned MCP descriptors. Model options come from the running provider; manual model IDs require provider acceptance.
 
-The native DSH loop and product-owned dsh composition remain available to explicit deployment configuration. Other DSH profiles retain their shipped and user presets. Platform, domain-service, and client-composition ownership remain unchanged.
+The native DSH loop and the product-owned `dsh` composition are offered in the PaperAI roster beside the two channels since the [native-engine-in-roster decision](../feature/2026-09-17-paperai-native-engine-in-roster.md). Other DSH profiles retain their shipped and user presets. Platform, domain-service, and client-composition ownership remain unchanged.
 
 PaperAI MCP tools are the model-facing document capability surface for all Agents. Host commands and MCP handlers call the same domain services, and actor/model provenance is resolved from the active DSH session when each document command runs.
 

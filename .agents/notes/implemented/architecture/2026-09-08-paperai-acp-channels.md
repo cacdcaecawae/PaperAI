@@ -10,7 +10,7 @@ A channel overview must distinguish installation, a past successful handshake, a
 
 ## Decision
 
-PaperAI exposes Codex and Claude through one ACP implementation and a settings directory. Other channel identities are rejected. DSH's native loop and other profiles retain their own composition. Provider definitions contribute exact factory routes to the preset registry; copying a contributed route as an ordinary file preset is rejected because an empty composition cannot reproduce the external loop.
+PaperAI exposes Codex and Claude through one ACP implementation and a settings directory. Other channel identities are rejected. The native DSH loop sits beside them in the roster per the [native-engine-in-roster decision](../feature/2026-09-17-paperai-native-engine-in-roster.md); other profiles retain their own composition. Provider definitions contribute exact factory routes to the preset registry; copying a contributed route as an ordinary file preset is rejected because an empty composition cannot reproduce the external loop.
 
 This partially supersedes the initial PaperAI roster in the [product-profile decision](2026-08-28-paperai-product-profile.md). The [Agentero adoption decision](2026-09-05-paperai-agentero-adoption.md) still owns document navigation and draft retention; this note owns the expanded ACP directory and lifecycle. The [model-option decision](../feature/2026-09-02-acp-model-effort-switch-selection.md) retains its transaction and log-reconstruction rationale.
 

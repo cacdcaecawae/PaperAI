@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-PaperAI 通过统一的 ACP 实现和设置目录开放 Codex 与 Claude，拒绝其他渠道身份。DSH 原生循环与其他 profile 保留各自组合。Provider 定义向预设注册表贡献精确工厂路由；不能将这种路由复制成普通文件预设，因为空组合无法重现外部循环。
+PaperAI 通过统一的 ACP 实现和设置目录开放 Codex 与 Claude，拒绝其他渠道身份。按[原生引擎入名册决策](../feature/2026-09-17-paperai-native-engine-in-roster.zh.md)，DSH 原生循环在名册中与两者并列；其他 profile 保留各自组合。Provider 定义向预设注册表贡献精确工厂路由；不能将这种路由复制成普通文件预设，因为空组合无法重现外部循环。
 
 本决策部分取代[产品 profile 决策](2026-08-28-paperai-product-profile.zh.md)中的初始 PaperAI 渠道名单。[Agentero 采纳决策](2026-09-05-paperai-agentero-adoption.zh.md)继续拥有文档导航与草稿保留规则，本记录拥有扩展后的 ACP 目录和生命周期。[模型选项决策](../feature/2026-09-02-acp-model-effort-switch-selection.zh.md)继续保留事务与日志重建依据。
 

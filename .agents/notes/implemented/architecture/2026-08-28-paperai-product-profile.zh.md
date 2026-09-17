@@ -22,7 +22,7 @@ fork 中的上游包继续使用 `@deepseek-ai/dsh-*`，新增的产品自有包
 
 PaperAI 按 [ACP 渠道决策](2026-09-08-paperai-acp-channels.zh.md)只开放 Codex 与 Claude，默认 Codex，并关闭用户 preset 根目录。两者共用顶层 ACP Agent 实现，通过会话专属 MCP 描述符获得论文工具。模型选项来自运行中的提供方，手工模型 ID 必须获得提供方接受。
 
-原生 DSH Loop 与产品自有 dsh 组装保留给显式部署配置；其他 DSH profile 继续提供随附与用户 preset。平台、领域服务和客户端组装的所有权不变。
+自[原生引擎入名册决策](../feature/2026-09-17-paperai-native-engine-in-roster.zh.md)起，原生 DSH Loop 与产品自有 `dsh` 组装在 PaperAI 名册中与两个通道并列提供；其他 DSH profile 继续提供随附与用户 preset。平台、领域服务和客户端组装的所有权不变。
 
 PaperAI MCP 工具是所有 Agent 可见的文档能力面。Host 命令与 MCP handler 调用相同的领域服务；每次执行文档命令时，都从当前 DSH 会话解析 actor/model 来源信息。
 

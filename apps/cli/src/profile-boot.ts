@@ -56,10 +56,9 @@ const PAPERAI_PRESET_ROOT = join(
 export function profilePresetRoots(name: string): Array<{
   path: string
   trust: 'system'
-  ids?: string[]
 }> {
   if (name !== 'paperai') return [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }]
-  return [{ path: PAPERAI_PRESET_ROOT, trust: 'system', ids: ['codex', 'claude'] }]
+  return [{ path: PAPERAI_PRESET_ROOT, trust: 'system' }]
 }
 
 const NAME = 'dsh'

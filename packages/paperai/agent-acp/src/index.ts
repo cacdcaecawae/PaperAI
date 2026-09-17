@@ -202,6 +202,7 @@ export class PaperAiAcpAgents extends Service {
         }
         for (const provider of providers) {
           if (registrations.has(provider.id)) continue
+          const template = ACP_TEMPLATES.find(entry => entry.id === provider.id)
           const dispose = presetCtx.effect(
             () =>
               presetCtx.agentPresets.register({
@@ -211,6 +212,7 @@ export class PaperAiAcpAgents extends Service {
                 path: composition,
                 factoryRoute: provider.id,
                 ...(provider.enabled ? {} : { broken: '此 ACP 渠道尚未启用，请在 ACP 设置中配置并启用。' }),
+                ...(template === undefined ? {} : { description: template.description }),
               }),
             `paperAiAcpAgents.preset(${provider.id})`,
           )
