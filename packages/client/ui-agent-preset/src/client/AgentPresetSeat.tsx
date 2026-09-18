@@ -15,7 +15,7 @@
 import { useEffect, useState } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { IconAgentPresetOutline16, IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconAgentPresetOutline16, IconChevronDownOutline14, Menu, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: pulls the ui-conversation SlotMap merge (the hero seat).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from './brand-slot.ts'
@@ -132,7 +132,7 @@ export function AgentPresetSeat({
     : label
 
   return (
-    <span>
+    <span className={css.row}>
       <Menu
         open={open}
         onClose={() => { setOpen(false) }}
@@ -170,7 +170,7 @@ export function AgentPresetSeat({
             className={css.seat}
             aria-haspopup="menu"
             aria-expanded={open}
-            title={state.error ?? t('seatHint')}
+            title={state.error ?? (state.busy ? t('connecting') : t('seatHint'))}
             aria-busy={state.busy || undefined}
             onClick={() => { setOpen(value => !value) }}
           >
@@ -188,14 +188,19 @@ export function AgentPresetSeat({
               ),
             })}
             {shownLabel}
-            {state.busy && <span role="status">{t('connecting')}</span>}
+            {state.busy && <StateDot state="ongoing" size={8} className={css.dot} />}
+            {state.busy && <span role="status" className={css.srOnly}>{t('connecting')}</span>}
             <IconChevronDownOutline14 className={css.chevron} />
           </button>
         )}
       />
-      {state.busy && <button type="button" onClick={cancel}>{t('cancelConnection')}</button>}
+      {state.busy && (
+        <Button size="sm" className={css.cancel} onClick={cancel} aria-label={t('cancelConnection')} title={t('cancelConnection')}>
+          {t('cancel')}
+        </Button>
+      )}
       {renderSlot('conversation.hero.agentPreset.status', { presetId: state.current, connecting: state.busy })}
-      {state.error !== null && <span role="alert">{state.error}</span>}
+      {state.error !== null && <span role="alert" className={css.error}>{state.error}</span>}
     </span>
   )
 }

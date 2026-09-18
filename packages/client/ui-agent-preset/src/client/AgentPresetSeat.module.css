@@ -131,3 +131,43 @@
   color: var(--dsw-alias-label-caption);
   white-space: normal;
 }
+
+/* The chip and its in-flight companions share one row: a state dot inside the
+   chip says a switch is connecting, the cancel control beside it is a ghost
+   button of the chip's height, and a refused switch reads in the caption size. */
+.row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dot {
+  flex: none;
+  margin-left: 2px;
+}
+
+.cancel {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+}
+
+.error {
+  max-width: 240px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-state-danger-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Spoken status for the dot: present for assistive technology, not drawn. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
