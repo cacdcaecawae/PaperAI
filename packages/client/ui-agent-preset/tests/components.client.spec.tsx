@@ -302,7 +302,7 @@ describe('the new-session chip', () => {
   it('offers a cancel control beside the chip while a switch is in flight', () => {
     const actions = renderSeat({ busy: true })
 
-    expect(screen.getByRole('status').textContent).toBe(en.connecting)
+    expect(screen.getByRole('status').textContent).toBe(en.connectingChip)
     fireEvent.click(screen.getByRole('button', { name: en.cancelConnection }))
 
     expect(actions.cancel).toHaveBeenCalledTimes(1)

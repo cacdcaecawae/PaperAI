@@ -85,7 +85,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .introIcon,
-  .introChar {
+  .introChar,
+  .spinner {
     animation: none;
     opacity: 1;
   }
@@ -132,9 +133,10 @@
   white-space: normal;
 }
 
-/* The chip and its in-flight companions share one row: a state dot inside the
-   chip says a switch is connecting, the cancel control beside it is a ghost
-   button of the chip's height, and a refused switch reads in the caption size. */
+/* The chip and its in-flight companions share one row: while a switch connects
+   the brand mark gives way to a spinning loading icon in the accent color and a
+   caption-size word follows the name; the cancel control beside the chip is a
+   ghost button of its height, and a refused switch reads in the caption size. */
 .row {
   display: inline-flex;
   align-items: center;
@@ -142,14 +144,26 @@
   min-width: 0;
 }
 
-.dot {
+.spinner {
+  color: var(--dsw-alias-state-business-primary);
+  animation: seat-spin 0.8s linear infinite;
+}
+
+@keyframes seat-spin {
+  to { transform: rotate(360deg); }
+}
+
+.connecting {
   flex: none;
-  margin-left: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-caption);
 }
 
 .cancel {
   flex: none;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-primary);
 }
 
 .error {
@@ -160,14 +174,4 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Spoken status for the dot: present for assistive technology, not drawn. */
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }

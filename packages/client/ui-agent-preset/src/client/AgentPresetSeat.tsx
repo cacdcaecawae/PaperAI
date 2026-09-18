@@ -15,7 +15,7 @@
 import { useEffect, useState } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, IconAgentPresetOutline16, IconChevronDownOutline14, Menu, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconAgentPresetOutline16, IconChevronDownOutline14, IconLoadingOutline16, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: pulls the ui-conversation SlotMap merge (the hero seat).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from './brand-slot.ts'
@@ -174,22 +174,23 @@ export function AgentPresetSeat({
             aria-busy={state.busy || undefined}
             onClick={() => { setOpen(value => !value) }}
           >
-            {renderSlot('conversation.hero.agentPreset.mark', {
-              presetId: state.current,
-              size: 16,
-              className: introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon,
-            }, {
-              entryKey: state.current,
-              fallback: (
-                <IconAgentPresetOutline16
-                  size={16}
-                  className={introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon}
-                />
-              ),
-            })}
+            {state.busy
+              ? <IconLoadingOutline16 size={16} className={`${css.seatIcon} ${css.spinner}`} />
+              : renderSlot('conversation.hero.agentPreset.mark', {
+                presetId: state.current,
+                size: 16,
+                className: introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon,
+              }, {
+                entryKey: state.current,
+                fallback: (
+                  <IconAgentPresetOutline16
+                    size={16}
+                    className={introducing ? `${css.seatIcon} ${css.introIcon}` : css.seatIcon}
+                  />
+                ),
+              })}
             {shownLabel}
-            {state.busy && <StateDot state="ongoing" size={8} className={css.dot} />}
-            {state.busy && <span role="status" className={css.srOnly}>{t('connecting')}</span>}
+            {state.busy && <span role="status" className={css.connecting}>{t('connectingChip')}</span>}
             <IconChevronDownOutline14 className={css.chevron} />
           </button>
         )}
