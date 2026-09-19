@@ -22,6 +22,96 @@
       welcomeNotice: false
       deepSeekCredential: false
 
+# The native writing engine runs on the model the person already pays for.
+# pi-ai ships only the Qwen Token Plan endpoints for Alibaba, which reject a
+# regular 阿里云百炼 (DashScope) key, so the profile declares the Bailian
+# compatible-mode route itself: the Models page lists it as 阿里云百炼, the
+# key is entered there under DASHSCOPE_API_KEY, and the models below are the
+# ones that endpoint serves (checked against its /models listing). Compat
+# switches are what DashScope's OpenAI-compatible surface needs: Qwen-style
+# enable_thinking, no developer role, no store, max_tokens as the cap; the two
+# DeepSeek V4 models keep their own reasoning replay rule.
+- id: llm-pi-ai
+  config:
+    providers:
+      bailian:
+        displayName: 阿里云百炼
+        apiKeyEnv: DASHSCOPE_API_KEY
+        api: openai-completions
+        baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+        compat:
+          thinkingFormat: qwen
+          supportsDeveloperRole: false
+          supportsStore: false
+          maxTokensField: max_tokens
+        models:
+          - id: qwen3.7-plus
+            name: Qwen3.7 Plus
+            contextWindow: 1000000
+            maxTokens: 65536
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: qwen3.7-max
+            name: Qwen3.7 Max
+            contextWindow: 1000000
+            maxTokens: 131072
+            reasoningEfforts: { off: null, high: high }
+          - id: qwen3.6-plus
+            name: Qwen3.6 Plus
+            contextWindow: 1000000
+            maxTokens: 65536
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: qwen3.6-flash
+            name: Qwen3.6 Flash
+            contextWindow: 1000000
+            maxTokens: 65536
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: deepseek-v4-pro
+            name: DeepSeek V4 Pro
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts: { off: null, high: high }
+            compat:
+              thinkingFormat: deepseek
+              requiresReasoningContentOnAssistantMessages: true
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts: { off: null, high: high }
+            compat:
+              thinkingFormat: deepseek
+              requiresReasoningContentOnAssistantMessages: true
+          - id: deepseek-v3.2
+            name: DeepSeek V3.2
+            contextWindow: 131072
+            maxTokens: 65536
+            reasoningEfforts: { off: null, high: high }
+          - id: glm-5.2
+            name: GLM-5.2
+            contextWindow: 1000000
+            maxTokens: 131072
+            reasoningEfforts: { off: null, high: high }
+          - id: kimi-k2.6
+            name: Kimi K2.6
+            contextWindow: 262144
+            maxTokens: 262144
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: kimi-k2.7-code
+            name: Kimi K2.7 Code
+            contextWindow: 262144
+            maxTokens: 262144
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: MiniMax-M2.5
+            name: MiniMax-M2.5
+            contextWindow: 196608
+            maxTokens: 32768
+            reasoningEfforts: { off: null, high: high }
+
 - id: storage-domain
   config:
     backend: json
