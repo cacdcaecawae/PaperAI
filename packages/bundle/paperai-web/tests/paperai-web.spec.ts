@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { Config as PiAiConfig } from '@deepseek-ai/dsh-llm-pi-ai'
+import { assertServiceable, resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
 
 describe('PaperAI web profile bundle', () => {
   it('mounts the PaperAI client plugins and document layout without replacing the Agent loop', () => {
@@ -99,5 +100,27 @@ describe('PaperAI Bailian route', () => {
       expect(model.contextWindow).toBeGreaterThan(0)
       expect(model.maxTokens).toBeGreaterThan(0)
     }
+  })
+
+  it('resolves into a serviceable route, not just a schema-valid one', () => {
+    // Parsing the row proves only that the fields typecheck. The Host registers
+    // assertServiceable as this namespace's settings `validate` hook, and that
+    // is what refuses an endpoint, protocol, compat switch, or model the
+    // adapter cannot actually serve — so a row that parses but cannot run must
+    // fail here rather than at boot.
+    const config = new PiAiConfig(row?.config)
+    expect(() => { assertServiceable(config) }).not.toThrow()
+
+    const bailian = resolveProfiles(config.providers).get('bailian')
+    expect(bailian).toMatchObject({ provider: 'bailian', displayName: '阿里云百炼', apiKeyEnv: 'DASHSCOPE_API_KEY' })
+    // The materialized pi-ai provider carries the endpoint every model requests
+    // against; without it pi-ai would fall back to its own id-based detection.
+    expect((bailian?.piProvider as { baseUrl?: string } | undefined)?.baseUrl)
+      .toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
+    // All eleven models materialized with their declared output caps.
+    expect([...(bailian?.configuredMaxTokens.keys() ?? [])]).toEqual(
+      (row?.config as { providers?: { bailian?: { models?: Array<{ id: string }> } } })
+        ?.providers?.bailian?.models?.map(model => model.id),
+    )
   })
 })
