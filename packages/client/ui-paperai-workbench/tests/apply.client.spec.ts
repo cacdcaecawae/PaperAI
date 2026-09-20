@@ -211,7 +211,8 @@ describe('PaperAI workbench browser plugin', () => {
     expect(details.hooks.workbench.getSnapshot().panel).toBe('versions')
     details.quoteSelection(document, excerpt)
     expect(b.input.insertReference).toHaveBeenCalledWith(expect.objectContaining({
-      source: 'paperai-selection', clipboardText: expect.stringContaining('"text":"Introduction"') as unknown,
+      source: 'paperai-selection',
+      clipboardText: expect.stringContaining('"text":"Introduction","includesUnsavedEdits":false') as unknown,
     }), { start: 13, end: 13, draftRev: 4 })
     expect(b.revealConversation).toHaveBeenCalledOnce()
     expect(details.hooks.workbench.getSnapshot().panel).toBeNull()
@@ -224,6 +225,14 @@ describe('PaperAI workbench browser plugin', () => {
     expect(select({ text: 'ordinary prompt' } as never)).toBeNull()
     const quoted = '[Word selection]\nquoted payload'
     expect(select({ text: quoted } as never)).toBe(quoted)
+    // A draft standing in the page puts the quoted words ahead of the revision the citation stamps.
+    const workspace = injected(b.slots, 'sidebar.workspaces.content') as PaperAIWorkspaceContentInjected
+    await workspace.openDocument(WORKSPACE_ID, RESOURCE_ID)
+    details.updateDraft(NODE_HEADING, { text: 'Retyped heading' })
+    details.quoteSelection(document, excerpt)
+    expect(b.input.insertReference).toHaveBeenLastCalledWith(expect.objectContaining({
+      clipboardText: expect.stringContaining('"includesUnsavedEdits":true') as unknown,
+    }), expect.anything())
     await b.ctx.fiber.dispose()
   })
 

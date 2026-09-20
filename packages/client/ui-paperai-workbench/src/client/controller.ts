@@ -87,8 +87,10 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
 function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
   return edits.map((edit) => {
     const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
-    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable
-      || node.text !== edit.baseText || (edit.baseRevision !== undefined && edit.baseRevision !== document.revision) }
+    // ponytail: the block's own text is the whole client-side check, so an external change that only reformats
+    // this same block slips past it; the Host still refuses a stale commit on baseText. Upgrade: carry
+    // lastCommitId on PaperAIDocumentNodeSummary and compare it per node.
+    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText }
   })
 }
 
@@ -503,8 +505,11 @@ export class PaperAIWorkbenchController {
           ...(draft.runs === undefined ? {} : { runs: draft.runs }),
           ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
           ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
+          // A retyped block is still a draft whose save failed, so the verdict travels with it.
+          ...(previous?.saveFailed === true ? { saveFailed: true } : {}),
         }]
-      state.actionError = null
+      // A failed save keeps its reason while a draft still carries it; every other failure is stale once the writer types on.
+      if (!state.edits.some(edit => edit.saveFailed === true)) state.actionError = null
     })
   }
 
@@ -533,11 +538,11 @@ export class PaperAIWorkbenchController {
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
     if (state.edits.length === 0) return { ok: false, error: 'no block has changes' }
-    if (state.edits.some(edit => edit.conflicted === true)) {
-      return { ok: false, error: 'block changed externally; local draft retained' }
-    }
     const document = state.document
-    const edits = state.edits
+    // A conflicted draft cannot commit, but it must not hold the clean ones back: they commit and it stays.
+    const edits = state.edits.filter(edit => edit.conflicted !== true)
+    const retained = state.edits.filter(edit => edit.conflicted === true)
+    if (edits.length === 0) return { ok: false, error: 'block changed externally; local draft retained' }
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'committing'
@@ -567,7 +572,13 @@ export class PaperAIWorkbenchController {
         ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs }),
       }
     })
-    return this.settleCommit(entry, request, document, result, patches)
+    const settled = this.settleCommit(entry, request, document, result, patches)
+    // The commit republishes the document with an empty edit list, so the conflicts go back on top.
+    if (result.ok && settled.ok && retained.length > 0) {
+      const committed = result.value.document
+      entry.store.update((draft) => { draft.edits = restoreEdits(committed, retained) })
+    }
+    return settled
   }
 
   /**
@@ -1196,6 +1207,8 @@ export class PaperAIWorkbenchController {
   /** Settle a failed action on either store kind: clear the action, keep the reason for the view. */
   private fail(store: PaperAIProjectStore | PaperAIWorkbenchStore, error: string): PaperAIActionResult {
     store.update((state: PaperAIProjectState | PaperAIWorkbenchState) => {
+      // A save is the one action the writer types over, so its verdict is kept on the drafts that are still only in the page.
+      if (state.action === 'committing') state.edits = state.edits.map(edit => ({ ...edit, saveFailed: true }))
       state.action = null
       state.actionError = error
     })

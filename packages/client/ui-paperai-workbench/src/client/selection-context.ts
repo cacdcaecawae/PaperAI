@@ -13,12 +13,15 @@ export interface WordExcerpt {
  * Capture document provenance and text at the user gesture, before asynchronous submission.
  * @param document - preview revision the user selected from.
  * @param excerpt - exact text and intersecting block identities.
+ * @param unsaved - whether block drafts stand in the page, leaving the quoted text ahead of the stamped revision.
  * @returns removable inline reference whose model and persistence forms contain the same frozen context.
  */
-export function wordSelectionReference(document: PaperAIDocumentSnapshot, excerpt: WordExcerpt): ReferenceInsert {
+export function wordSelectionReference(document: PaperAIDocumentSnapshot, excerpt: WordExcerpt, unsaved: boolean): ReferenceInsert {
   const context = `${document.title}\n[Word selection]\n${JSON.stringify({
     document: document.documentId, path: document.path, version: document.headCommitId,
     revision: document.revision, blocks: excerpt.nodeIds, text: excerpt.text,
+    // The Agent reads the file with its own tool; without this the revision stamp claims words the file does not hold.
+    includesUnsavedEdits: unsaved,
   })}\n[/Word selection]\n`
   return {
     source: 'paperai-selection', ref: context, clipboardText: context,

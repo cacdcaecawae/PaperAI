@@ -554,7 +554,8 @@ describe('Document editing commands', () => {
   it('keeps a cleared font cleared on both sides of Enter without storing the browser font', () => {
     const editor = setup('<p data-path="/body/p[1]" style="font-family:-apple-system,sans-serif"><span style="font-family:Arial">Hello world</span></p>')
     const block = editor.paragraphs()[0]!
-    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe('—')
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe(zh['editor.font'])
+    expect(screen.getByRole('button', { name: zh['editor.size'] }).textContent).toBe(zh['editor.size'])
     editor.select(block, 0, block, block.childNodes.length)
     fireEvent.click(screen.getByRole('button', { name: zh['editor.clear'] }))
     expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe(zh['editor.inherited'])

@@ -42,7 +42,7 @@ function Facts({ document, state, panel, showPanel, t }: {
     : document.gate.status === 'failed' ? 'toolbar.gateFailed' : 'toolbar.gateNotRun'
   const saveKey: PaperAIWorkbenchKey = state.action === 'committing'
     ? 'block.saving'
-    : state.actionError !== null ? 'status.failed' : state.edits.length > 0 ? 'status.unsaved' : 'status.saved'
+    : state.edits.length > 0 ? 'status.unsaved' : 'status.saved'
   const fact = (id: PaperAIWorkbenchPanel, label: ReactNode, extra: Record<string, string | undefined> = {}): ReactNode => (
     <button type="button" className={css.fact} data-kind={id} aria-pressed={panel === id} onClick={() => { showPanel(id) }} {...extra}>
       {label}
@@ -76,7 +76,7 @@ function Facts({ document, state, panel, showPanel, t }: {
         role="status"
         aria-live="polite"
         className={css.saveStatus}
-        data-state={saveKey === 'status.unsaved' ? 'unsaved' : saveKey === 'status.failed' ? 'failed' : undefined}
+        data-state={saveKey === 'status.unsaved' ? 'unsaved' : undefined}
       >
         {t(saveKey, { count: state.edits.length })}
       </span>
@@ -181,6 +181,17 @@ export function DocumentWorkbench({
   useEffect(() => {
     if (dialogOpen) void loadLibrary()
   }, [dialogOpen, loadLibrary])
+  const unsaved = state.edits.length > 0 || state.retained.some(view => view.edits.length > 0)
+  // Drafts live only in this store, so a reload discards them. The listener stays off while nothing is at
+  // stake: a permanently bound beforeunload also costs the page its back/forward cache.
+  // ponytail: counts the views this mounted workbench holds. Drafts the controller keeps for an evicted
+  // document, or after the details view closes, are invisible here; arm from the controller if that loses text.
+  useEffect(() => {
+    if (!unsaved) return
+    const confirmUnload = (event: BeforeUnloadEvent): void => { event.preventDefault() }
+    window.addEventListener('beforeunload', confirmUnload)
+    return () => { window.removeEventListener('beforeunload', confirmUnload) }
+  }, [unsaved])
   const toggleFocus = (): void => {
     if (focusActive || panelOpen) showConversation()
     else actions.setWriting(true)

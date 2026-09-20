@@ -123,11 +123,14 @@ export function TemplatePanel({
   const [typeOpen, setTypeOpen] = useState(false)
   useEffect(() => { setChosen(initial) }, [initial])
   // Ask once what the document looks like, so the type chooser starts on the likely answer.
+  // The controller refuses the guess while a block is dirty and a keystroke clears that refusal,
+  // so asking with drafts open re-failed the panel on every character typed.
   useEffect(() => {
-    if (document.template === null && state.typeSuggestion === null && state.action === null && state.actionError === null) {
+    if (document.template === null && state.typeSuggestion === null && state.action === null
+      && state.actionError === null && state.edits.length === 0) {
       void suggestType()
     }
-  }, [document.template, state.typeSuggestion, state.action, state.actionError, suggestType])
+  }, [document.template, state.typeSuggestion, state.action, state.actionError, state.edits.length, suggestType])
   const [requirementsOpen, setRequirementsOpen] = useState(false)
   const template = document.template
   // The Host's guess, while it is still the chooser's value: the caption says where the default came from.
@@ -267,7 +270,8 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
   onClose: () => void
   t: Translate
 }): ReactNode {
-  const busy = state.action !== null || state.edits.length > 0
+  const dirty = state.edits.length > 0
+  const busy = state.action !== null || dirty
   const failing = document.gate.findings.filter(finding => !finding.passed).length
   const statusKey: PaperAIWorkbenchKey = document.gate.status === 'passed'
     ? 'gate.passed'
@@ -285,7 +289,9 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
             <span>{t(statusKey)}</span>
           </div>
           <div className={css.panelActions}>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => { void validate() }}>
+            {/* The check reads the saved version, so say that the open draft is why it is off. */}
+            <Button variant="outline" size="sm" disabled={busy} title={dirty ? t('gate.saveFirst') : undefined}
+              onClick={() => { void validate() }}>
               {state.action === 'validating' ? t('gate.validating') : t('gate.validate')}
             </Button>
             {failing > 0 && (

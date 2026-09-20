@@ -706,6 +706,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'block-conflict.expected.md'),
       await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
     await pending().getByRole('button', { name: '放弃修改', exact: true }).click()
+    await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
     await expect.poll(() => pending().count()).toBe(0)
     await preview.getByText('Initial browser paragraph — 外部会话写入的最新文本').waitFor({ timeout: 10_000 })
     expect(await page.locator('body').innerText()).not.toContain('local draft dropped')
@@ -744,6 +745,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'retained-draft.expected.md'),
       await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
     await pending().getByRole('button', { name: '放弃修改', exact: true }).click()
+    await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
     await zoomTo('fit')
     await original.dispose()
   }, 90_000)
@@ -874,6 +876,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'import-draft.expected.md'),
         await captureStableAria(page, '[data-paperai-pending]', scaffold.workspaceCwd), MODE)
       await pending().getByRole('button', { name: '放弃修改', exact: true }).click()
+      await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
     } finally {
       release.resolve(undefined)
       await page.unrouteAll({ behavior: 'wait' })

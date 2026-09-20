@@ -286,7 +286,10 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
             const input = sessionInput()
             if (input === undefined) return
             const state = input.state.getSnapshot()
-            const accepted = input.insertReference(wordSelectionReference(document, excerpt), {
+            // The Agent re-reads the saved file, so the citation must admit the page is ahead of the stamped revision.
+            // ponytail: one flag for the whole document; intersect excerpt node ids with the drafts if over-warning gets noisy.
+            const unsaved = controller.workbenchStore(sessionId).getSnapshot().edits.length > 0
+            const accepted = input.insertReference(wordSelectionReference(document, excerpt, unsaved), {
               start: state.draft.length, end: state.draft.length, draftRev: state.draftRev,
             })
             if (!accepted) { input.notify('error', ctx.locale.bind(NS)('selection.busy')); return }

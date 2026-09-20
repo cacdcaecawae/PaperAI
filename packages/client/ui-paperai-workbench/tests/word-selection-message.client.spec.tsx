@@ -18,7 +18,7 @@ function show(matched: string) {
 
 describe('logged Word quotations', () => {
   it('shows exact quotations and surrounding requests while folding source identifiers', () => {
-    const reference = wordSelectionReference(documentSnapshot(), { nodeIds: [NODE_PARAGRAPH], text: 'A <quote>\n中文' })
+    const reference = wordSelectionReference(documentSnapshot(), { nodeIds: [NODE_PARAGRAPH], text: 'A <quote>\n中文' }, true)
     const { container } = show(`Please revise\n${reference.ref}\nKeep its meaning.`)
     expect(container.querySelector('blockquote')?.textContent).toBe('A <quote>\n中文')
     expect(container.querySelector('strong')?.textContent).toBe('硕士学位论文开题报告.docx')
@@ -29,6 +29,7 @@ describe('logged Word quotations', () => {
     expect(disclosure.open).toBe(false)
     expect(disclosure.textContent).toContain(NODE_PARAGRAPH)
     expect(disclosure.textContent).toContain(documentSnapshot().documentId)
+    expect(disclosure.textContent).toContain('含未保存的修改')
     expect(container.querySelector('quote')).toBeNull()
   })
 
@@ -45,9 +46,13 @@ describe('logged Word quotations', () => {
 
   it('renders multiple selections including an uncommitted document', () => {
     const document = documentSnapshot()
-    const first = wordSelectionReference({ ...document, headCommitId: null }, { nodeIds: [], text: 'first' })
-    const second = wordSelectionReference(document, { nodeIds: [NODE_PARAGRAPH], text: 'second' })
-    const { container } = show(first.ref + second.ref)
-    expect([...container.querySelectorAll('blockquote')].map(block => block.textContent)).toEqual(['first', 'second'])
+    const first = wordSelectionReference({ ...document, headCommitId: null }, { nodeIds: [], text: 'first' }, false)
+    const second = wordSelectionReference(document, { nodeIds: [NODE_PARAGRAPH], text: 'second' }, false)
+    // A citation logged before the unsaved flag existed carries six keys and must still render.
+    const payload = '{"document":"d","path":"p.docx","version":"v","revision":"r","blocks":[],"text":"legacy"}'
+    const legacy = `[Word selection]\n${payload}\n[/Word selection]`
+    const { container } = show(first.ref + second.ref + legacy)
+    expect([...container.querySelectorAll('blockquote')].map(block => block.textContent)).toEqual(['first', 'second', 'legacy'])
+    expect(container.textContent).not.toContain('含未保存的修改')
   })
 })

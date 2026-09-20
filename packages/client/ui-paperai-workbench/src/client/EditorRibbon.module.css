@@ -1,6 +1,6 @@
 /* One row of document commands: 28px quiet controls on the base surface,
    hairline dividers between groups, a menu for every choice. Pressed and
-   selected states take the gold accent; disabled controls fade. */
+   selected states take the gold accent; disabled controls quiet to tertiary. */
 .ribbon {
   display: flex;
   flex-wrap: wrap;
@@ -44,7 +44,11 @@
   color: var(--dsw-alias-state-business-primary);
 }
 .tool[aria-pressed='mixed'] { outline: 1px dashed var(--dsw-alias-state-business-primary); outline-offset: -1px; }
-.tool:disabled, .select:disabled { cursor: default; opacity: 0.4; }
+/* Editability drops on every save, format read, and template apply, so disabled is read
+   many times an hour: a quieter token stays legible where the old 0.4 fade left the
+   label at 2.5:1 on the base surface. Kept after the pressed rule, of equal specificity,
+   so a disabled pressed control quiets with it. */
+.tool:disabled, .select:disabled { cursor: default; color: var(--dsw-alias-label-tertiary); }
 .tool:focus-visible, .select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
 .select { padding: 0 4px 0 8px; color: var(--dsw-alias-label-primary); }
 .select > span { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
