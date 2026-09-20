@@ -18,7 +18,7 @@ PaperAI 是 DeepSeek Harness 的源码，产品层在同一棵树里生长，而
 
 第二个是浅克隆。`.git/shallow` 里恰好只有 `b150a551b8`，它记录的父提交并不在对象库中：`git rev-list --max-parents=0 upstream/master` 会报告两个根，而 `git merge-base --is-ancestor` 对真实祖先也答 false。引用任何数字之前，先跑 `git fetch upstream --unshallow`。
 
-**度量区间用 `dsh-v0.1.1-rc.2..upstream/master`，绝不要按日期。** 上游每天落 49 到 326 个提交，因此为了贴合导入日期而挑的提交早已在锚点之后上千个提交，算出的差异会大出六倍。按 2026-09-19 的实测，把头部钉在 `ddefc45fb`（0.1.6-alpha.2）后，GitHub 对 `b150a551b8...ddefc45fb` 的比较报告 4912 个提交。同一区间在本地浅克隆状态下无法直接计数：`git rev-list --count b150a551b8..upstream/master` 给出 18027，而 `--ancestry-path` 给出 4659，因为后者会丢掉所有只经合并第二父到达头部的提交。引用比较结果，并在引用时钉住两端。同日，`git merge-tree --write-tree --merge-base=b150a551b8 origin/main upstream/master` 报告 292 个冲突路径，其中没有一个落在 `packages/paperai/*`、`packages/client/ui-paperai-*` 或 `packages/bundle/paperai-web` 下。
+**度量区间用 `dsh-v0.1.1-rc.2..upstream/master`，绝不要按日期。** 上游每天落 49 到 326 个提交，因此为了贴合导入日期而挑的提交早已在锚点之后上千个提交，算出的差异会大出六倍。按 2026-09-19 的实测，把头部钉在 `ddefc45fb`（0.1.6-alpha.2）后，GitHub 对 `b150a551b8...ddefc45fb` 的比较报告 4912 个提交。同一区间在本地浅克隆状态下无法直接计数：`git rev-list --count b150a551b8..ddefc45fb` 给出 18027，加上 `--ancestry-path` 后给出 4659。该选项只保留区间内属于 `b150a551b8` 后代的提交；它不按合并父提交的顺序过滤，也不能替代完整区间统计。引用比较结果，并在引用时钉住两端。同日，`git merge-tree --write-tree --merge-base=b150a551b8 origin/main upstream/master` 报告 292 个冲突路径，其中没有一个落在 `packages/paperai/*`、`packages/client/ui-paperai-*` 或 `packages/bundle/paperai-web` 下。
 
 **冲突数严重低估了工作量，因为产品最吃重的几个接入点在上游已经没有文件可供冲突。** 上游此后整体删除了 `packages/host/apiproxy`、`packages/client/runtime`、`packages/api/remotes/src/agent-lookup.ts`、`IApiClient` 类型，以及文档工作台所依附的布局 details 栏。我们这一侧是更小的一侧，也是被重放的一侧：58 个提交、875 个文件，对上游的 12,150 个文件。PaperAI 在共享 DSH 包内的改动触及 29 个包，13 个在 `packages/client` 下、16 个在其外，因此任何只列举 UI 包的清单，从构造上就是不完整的。
 
