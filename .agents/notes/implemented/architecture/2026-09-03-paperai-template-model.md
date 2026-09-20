@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-09-03-paperai-template-model.zh.md)
 
+Partially superseded: template prompting is governed by the [writing-workflow decision](../feature/2026-09-12-paperai-writing-workflow.md) — templates open on request, and the start page no longer asks an undecided project. The template model below remains active.
+
 ## Problem
 
 PaperAI ships an institution's Word templates (the HIT master's set holds a proposal form, a midterm-report form, and a thesis formatting sample) and lets users add their own. The first client treated each template file as a peer catalog entry and asked the user to pick one per document, in the sidebar under the project and again in a Templates tab, so templates appeared as a level of the project hierarchy rather than as configuration, and every document start repeated a choice the institution had already made. Every import asked for a document role whether or not a template would ever apply. The user's verdict was that the arrangement was unreadable: a template belongs in settings, a project picks one, and the document's kind should do the rest.
