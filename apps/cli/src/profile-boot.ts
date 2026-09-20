@@ -47,8 +47,9 @@ const PAPERAI_PRESET_ROOT = join(
 /**
  * Preset roots supplied by this app for one profile.
  *
- * PaperAI exposes Codex and Claude from its product-owned root. Other
- * profiles retain the complete shipped DSH root. Deployment configuration
+ * PaperAI exposes its whole product-owned root: the native `dsh` engine
+ * beside the Codex and Claude channels. Other profiles retain the complete
+ * shipped DSH root. Deployment configuration
  * controls whether the registry also admits user-authored presets.
  * @param name - the profile name.
  * @returns roots in discovery precedence order.
@@ -56,10 +57,9 @@ const PAPERAI_PRESET_ROOT = join(
 export function profilePresetRoots(name: string): Array<{
   path: string
   trust: 'system'
-  ids?: string[]
 }> {
   if (name !== 'paperai') return [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }]
-  return [{ path: PAPERAI_PRESET_ROOT, trust: 'system', ids: ['codex', 'claude'] }]
+  return [{ path: PAPERAI_PRESET_ROOT, trust: 'system' }]
 }
 
 const NAME = 'dsh'

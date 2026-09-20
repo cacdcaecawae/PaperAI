@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-PaperAI 通过精确的 preset contribution 开放 Codex 和 Claude。原生 DSH 工厂仍可供其他 profile 使用。ACP 模型、思考级别与开关使用现有模型选择器；通用协商选项与模型收藏使用 ACP 会话控件。修改在 RPC 前校验公布的值，先应用模型再应用依赖选项，遭拒时恢复此前选择。观测者收到结算后的选择；恢复失败会标记运行时需要重建。实际选项写入 paperai/acp/config，request header 携带实际模型和思考级别。手工模型 ID 必须获得提供方接受。
+PaperAI 通过精确的 preset contribution 开放 Codex 和 Claude，与档案同时列出的产品自有原生 `dsh` 引擎并列。ACP 模型、思考级别与开关使用现有模型选择器；通用协商选项与模型收藏使用 ACP 会话控件。修改在 RPC 前校验公布的值，先应用模型再应用依赖选项，遭拒时恢复此前选择。观测者收到结算后的选择；恢复失败会标记运行时需要重建。实际选项写入 paperai/acp/config，request header 携带实际模型和思考级别。手工模型 ID 必须获得提供方接受。
 
 `diagnosticStatus()` 发现适配器安装情况并读取历史模型元数据，不创建进程。`probe()` 在空临时目录中独立初始化，不携带提示词或 PaperAI MCP descriptor，拒绝文件回调，并采用原生只读模式。同一启动配置的并发探测共享工作。`Config.probeTimeoutMs` 默认 `15000`，`failureCooldownMs` 默认 `120000`，两者都必须为正整数。显式强制重试可跳过失败冷却。真实会话启动也记录元数据，旧探测不能覆盖新观察。缓存模型名称不能授权当前选择，成功初始化也不保证后续提示词能够通过认证。卸载会中止探测并等待进程树清理。
 
