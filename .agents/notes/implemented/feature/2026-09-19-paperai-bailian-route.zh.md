@@ -14,7 +14,7 @@ PaperAI 档案自己声明这条路由。`packages/bundle/paperai-web/cordis.pat
 
 **每个数字都取自阿里云自己的模型页面，而非 pi-ai 的目录。** pi-ai 在 `qwen-token-plan-cn` 路由上描述了同样的 id，但那是另一个端点，其容量并不通用；照搬的结果是五个错误的输出上限和两个错误的上下文长度。`enable_thinking` 是这个端点唯一的思考开关，因此没有任何模型携带自己的 `thinkingFormat`，也没有任何模型设置 `requiresReasoningContentOnAssistantMessages`；百炼用于回放思考内容的机制是 `preserve_thinking`，而其 DeepSeek 页面根本没有记载这个参数。
 
-**`maxTokens` 是请求上限，不是容量标签。** 适配器会把配置值作为这条路由的 `max_tokens` 默认值发出，而百炼在思考模式下拒绝超过 32,768 的 `max_tokens`，该约束覆盖阿里云直供的 Qwen、GLM 与 Kimi 部署，而它们默认开启思考。因此这些行填的是 `min(文档输出长度, 32768)`，而不是模型的标称输出长度：四个 Qwen 行与 GLM-5.2 填 32,768，两个 Kimi 行填 16,384（其文档输出长度本就更低）。DeepSeek 与 MiniMax 不受该约束，填各自的真实上限：V4 两个为 393,216，V3.2 为 65,536。`kimi-k2.7-code` 与 `MiniMax-M2.5` 运行在仅思考模式，只提供 `high`；其余模型提供 `off` 与 `high`。
+**`maxTokens` 是请求上限，不是容量标签。** 适配器会把配置值作为这条路由的 `max_tokens` 默认值发出，而百炼在思考模式下拒绝超过 32,768 的 `max_tokens`，该约束覆盖阿里云直供的 Qwen、GLM 与 Kimi 部署，而它们默认开启思考。因此这些行填的是 `min(文档输出长度, 32768)`，而不是模型的标称输出长度：四个 Qwen 行与 GLM-5.2 填 32,768，两个 Kimi 行填 16,384（其文档输出长度本就更低）。DeepSeek 与 MiniMax 不受该约束，填各自的真实上限：V4 两个为 393,216，V3.2 为 65,536。`kimi-k2.7-code` 与 `MiniMax-M2.5` 运行在仅思考模式，只提供 `high`；其余模型提供 `off` 与 `high`。声明的等级清单决定的是菜单，不是线上请求：pi-ai 的 qwen 格式按请求是否携带等级来写 `enable_thinking`，因此一次不指定等级的调用——也就是输入框自身的默认路径——会要求这两个模型停止思考。为此路由设置 `reasoning: high` 作为未指定等级时的默认值，这也与百炼为九个混合模型中七个设定的默认一致；显式的 `off` 仍然能到达允许关闭的模型。
 
 行配置是设置命名空间的基础层，所以这条路由会以"阿里云百炼"这个已声明 provider 出现在模型页目录里，key 在那里以 `DASHSCOPE_API_KEY` 录入，用户 `settings.yaml` 里自己的路由与之合并共存。无论是否存了 key，路由都会注册，这与 DSH 的每条路由一致；没有 key 的一轮以 `MISSING_CREDENTIAL` 失败。
 

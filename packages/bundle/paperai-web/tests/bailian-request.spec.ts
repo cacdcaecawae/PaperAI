@@ -76,12 +76,17 @@ function declaredModels(): Array<{ id: string; maxTokens: number; offers: string
   }))
 }
 
-async function streamOnce(ctx: Context, model: string, effort: string): Promise<void> {
+/**
+ * Stream one turn. `effort` omitted reproduces the composer's own default
+ * call: ModelSelect sends no reasoningEffort while the model menu sits on the
+ * provider default, which is the path a declared level list never reaches.
+ */
+async function streamOnce(ctx: Context, model: string, effort?: string): Promise<void> {
   const assembler = new BlockAssembler()
   for await (const chunk of ctx.llm.stream({
     provider: 'bailian',
     model,
-    reasoningEffort: ReasoningEffortId(effort),
+    ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
     messages: [],
   })) assembler.push(chunk)
 }
@@ -134,6 +139,28 @@ describe('the Bailian route on the wire', () => {
     await streamOnce(ctx, 'deepseek-v4-pro', 'off')
     expect(server.requests[1]).toMatchObject({ enable_thinking: false })
     expect(server.requests[1]).not.toHaveProperty('thinking')
+  }, 30_000)
+
+  it('keeps thinking on for the thinking-only models when the caller names no level', async () => {
+    const server = await captureServer()
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, { providers: { bailian: shippedRoute(server.url) } })
+
+    // Declaring no `off` level keeps it out of the menu; it does not decide
+    // what a request with no level sends. pi-ai's qwen format writes
+    // enable_thinking from the effort's presence, so an absent effort asks a
+    // thinking-only model to stop thinking, which Bailian cannot do.
+    for (const model of ['kimi-k2.7-code', 'MiniMax-M2.5']) await streamOnce(ctx, model)
+
+    expect(server.requests.map(request => request.enable_thinking)).toEqual([true, true])
+
+    // The same route default carries the mixed models, and an explicit off
+    // still reaches the ones that allow it.
+    await streamOnce(ctx, 'kimi-k2.6')
+    expect(server.requests[2]).toMatchObject({ enable_thinking: true })
+    await streamOnce(ctx, 'kimi-k2.6', 'off')
+    expect(server.requests[3]).toMatchObject({ enable_thinking: false })
   }, 30_000)
 
   it('offers no off level on the two models Bailian cannot stop thinking', () => {
