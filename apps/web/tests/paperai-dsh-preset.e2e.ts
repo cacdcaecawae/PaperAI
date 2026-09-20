@@ -1,6 +1,7 @@
 // PaperAI assembled roster: the product profile offers exactly its three
-// engines, and the built-in `dsh` engine composes the writing persona, the
-// native paperai_* document tools, and the complete standard capability set.
+// engines, the built-in `dsh` engine composes the writing persona, the
+// native paperai_* document tools, and the complete standard capability set,
+// and a native session stays clear of the ACP session control.
 // Proven on the real bundle composition (base + web + PaperAI overlay), not on
 // a package-level stub: a preset row that fails to resolve, or a document
 // service the tool package waits for, surfaces here as a mount failure.
@@ -30,7 +31,7 @@ const DOCUMENT_TOOLS = [
   'paperai_revert_document',
 ]
 
-describe('web e2e: PaperAI with an explicitly enabled native DSH preset', { concurrent: false }, () => {
+describe('web e2e: PaperAI with the native DSH preset in its roster', { concurrent: false }, () => {
   let scaffold: WebScaffold
   let handle: AgentHandle
 
@@ -53,7 +54,7 @@ describe('web e2e: PaperAI with an explicitly enabled native DSH preset', { conc
     await scaffold?.close()
   })
 
-  it('allows a deployment to re-enable the native engine alongside the two product channels', async () => {
+  it('offers the native engine alongside the two product channels', async () => {
     const listed = await scaffold.ctx.agentPresets.list()
     expect(listed.map(preset => preset.id).sort()).toEqual(['claude', 'codex', 'dsh'])
     expect(listed.every(preset => preset.trust === 'system')).toBe(true)
@@ -75,5 +76,9 @@ describe('web e2e: PaperAI with an explicitly enabled native DSH preset', { conc
     expect(tools).not.toContain('str_replace_editor')
     // Document tools belong to the preset layer: the host's global layer stays empty.
     expect(scaffold.ctx.tools.schemas().map(schema => schema.name)).toEqual([])
+  })
+
+  it('answers no ACP session details for a native session, so the ACP header control stays out', async () => {
+    expect(scaffold.ctx.paperaiWorkbench.acpSession({ sessionId: SessionId('paperai-dsh-preset') })).toBeNull()
   })
 })
