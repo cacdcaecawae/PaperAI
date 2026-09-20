@@ -22,6 +22,107 @@
       welcomeNotice: false
       deepSeekCredential: false
 
+# The native writing engine runs on the model the person already pays for.
+# pi-ai ships only the Qwen Token Plan endpoints for Alibaba, which reject a
+# regular 阿里云百炼 (DashScope) key, so the profile declares the Bailian
+# compatible-mode route itself: the Models page lists it as 阿里云百炼, the
+# key is entered there under DASHSCOPE_API_KEY, and the models below are the
+# ones that endpoint serves (checked against its /models listing).
+#
+# Every switch and every number below comes from Alibaba's own model pages,
+# never from pi-ai's qwen-token-plan catalog: that is a different endpoint
+# whose capacities do not transfer. `enable_thinking` is this endpoint's only
+# thinking switch (thinkingFormat: qwen) — no model here takes the
+# anthropic-style thinking:{type} object — so no model carries a per-model
+# thinkingFormat.
+#
+# maxTokens is a REQUEST CAP here, not a capacity label: the adapter sends it
+# as this route's max_tokens default. Bailian rejects max_tokens above 32768
+# while thinking is on, for its own Qwen, GLM and Kimi deployments, and
+# thinking is on by default for most of them — so those rows carry
+# min(documented output, 32768) rather than the model's headline output
+# length. DeepSeek and MiniMax are outside that gate and carry their real
+# caps. bailian-request.spec.ts asserts what each model actually sends.
+- id: llm-pi-ai
+  config:
+    providers:
+      bailian:
+        displayName: 阿里云百炼
+        apiKeyEnv: DASHSCOPE_API_KEY
+        api: openai-completions
+        baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+        # Route default for a request that names no level. pi-ai's qwen format
+        # writes enable_thinking from the effort's presence, so without this a
+        # default call asks 仅思考模式 models to stop thinking, which Bailian
+        # refuses. Bailian itself defaults thinking on for seven of the nine
+        # mixed models here; an explicit off still reaches models that allow it.
+        reasoning: high
+        compat:
+          thinkingFormat: qwen
+          supportsDeveloperRole: false
+          supportsStore: false
+          maxTokensField: max_tokens
+        models:
+          - id: qwen3.7-plus
+            name: Qwen3.7 Plus
+            contextWindow: 1000000
+            maxTokens: 32768  # output 131072, gated to 32768 while thinking is on
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: qwen3.7-max
+            name: Qwen3.7 Max
+            contextWindow: 1000000
+            maxTokens: 32768  # output 131072, gated to 32768 while thinking is on
+            reasoningEfforts: { off: null, high: high }
+          - id: qwen3.6-plus
+            name: Qwen3.6 Plus
+            contextWindow: 1000000
+            maxTokens: 32768  # output 65536, gated to 32768 while thinking is on
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: qwen3.6-flash
+            name: Qwen3.6 Flash
+            contextWindow: 1000000
+            maxTokens: 32768  # output 65536, gated to 32768 while thinking is on
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: deepseek-v4-pro
+            name: DeepSeek V4 Pro
+            contextWindow: 1000000
+            maxTokens: 393216  # max_tokens and thinking_budget share this ceiling
+            reasoningEfforts: { off: null, high: high }
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1000000
+            maxTokens: 393216  # max_tokens and thinking_budget share this ceiling
+            reasoningEfforts: { off: null, high: high }
+          - id: deepseek-v3.2
+            name: DeepSeek V3.2
+            contextWindow: 131072
+            maxTokens: 65536  # retires from 阿里云百炼 on 2026-10-10
+            reasoningEfforts: { off: null, high: high }
+          - id: glm-5.2
+            name: GLM-5.2
+            contextWindow: 1048576
+            maxTokens: 32768  # output 131072, gated to 32768 while thinking is on
+            reasoningEfforts: { off: null, high: high }
+          - id: kimi-k2.6
+            name: Kimi K2.6
+            contextWindow: 262144
+            maxTokens: 16384  # documented output cap, well under the gate
+            input: [text, image]
+            reasoningEfforts: { off: null, high: high }
+          - id: kimi-k2.7-code
+            name: Kimi K2.7 Code
+            contextWindow: 262144
+            maxTokens: 16384  # 仅思考模式: thinking cannot be turned off
+            input: [text, image]
+            reasoningEfforts: { high: high }
+          - id: MiniMax-M2.5
+            name: MiniMax-M2.5
+            contextWindow: 204800
+            maxTokens: 32768  # 仅思考模式: thinking cannot be turned off
+            reasoningEfforts: { high: high }
 - id: storage-domain
   config:
     backend: json
