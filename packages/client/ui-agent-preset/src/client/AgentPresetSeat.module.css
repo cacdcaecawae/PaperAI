@@ -83,14 +83,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .introIcon,
-  .introChar {
-    animation: none;
-    opacity: 1;
-  }
-}
-
 .chevron {
   flex: none;
   color: var(--dsw-alias-label-caption);
@@ -130,4 +122,59 @@
   line-height: 16px;
   color: var(--dsw-alias-label-caption);
   white-space: normal;
+}
+
+/* The chip and its in-flight companions share one row: while a switch connects
+   the brand mark gives way to a spinning loading icon in the accent color and a
+   caption-size word follows the name; the cancel control beside the chip is a
+   ghost button of its height, and a refused switch reads in the caption size. */
+.row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.spinner {
+  color: var(--dsw-alias-state-business-primary);
+  animation: seat-spin 0.8s linear infinite;
+}
+
+@keyframes seat-spin {
+  to { transform: rotate(360deg); }
+}
+
+.connecting {
+  flex: none;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-caption);
+}
+
+.cancel {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+}
+
+.error {
+  max-width: 240px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-state-danger-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Reduced motion, last so it wins: these three rules carry `animation`
+   declarations of equal specificity, and the earlier of two equal rules
+   loses. Placed above `.spinner` this block was inert. */
+@media (prefers-reduced-motion: reduce) {
+  .introIcon,
+  .introChar,
+  .spinner {
+    animation: none;
+    opacity: 1;
+  }
 }

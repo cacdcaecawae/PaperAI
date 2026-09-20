@@ -67,6 +67,7 @@ function renderSeat(
   const actions = {
     load: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => Promise.resolve()),
+    cancel: vi.fn(),
     introduced: vi.fn(),
   }
   const renderSlot = vi.fn((
@@ -296,6 +297,15 @@ describe('the new-session chip', () => {
     const selector = screen.getByRole('button', { name: new RegExp(en.presetStandardName) })
     expect(selector).toHaveProperty('disabled', false)
     expect(selector.getAttribute('aria-busy')).toBe('true')
+  })
+
+  it('offers a cancel control beside the chip while a switch is in flight', () => {
+    const actions = renderSeat({ busy: true })
+
+    expect(screen.getByRole('status').textContent).toBe(en.connectingChip)
+    fireEvent.click(screen.getByRole('button', { name: en.cancelConnection }))
+
+    expect(actions.cancel).toHaveBeenCalledTimes(1)
   })
 
   it('shows a refused switch on the trigger', () => {
