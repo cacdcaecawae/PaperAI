@@ -10,7 +10,7 @@ PaperAI 的 Codex 与 Claude 引擎经固定版本的 ACP 适配器运行，两�
 
 ## Decision
 
-**一条可叠加的驱动方缝。**`@deepseek-ai/dsh-agent` 为 `AgentDriverModel` 增加可选的 `reasoning`（驱动方拥有的等级列表以及驱动方默认应用的等级），为 `AgentModelController` 增加可选的 `currentReasoningEffort`、`switches`（带驱动方自己名称与说明的布尔开关）以及 `selectModel(model, { reasoningEffort?, switches? })` 的第二个参数。什么都不通告的驱动保持原契约；DSH Agent Loop 仍走 `ctx.llm`，不暴露其中任何一项。
+**一处增量的 driver 接缝，由 PaperAI 添加。** `AgentDriverModel` 与 `AgentModelController` 位于 `@deepseek-ai/dsh-agent`，但在[基线](../process/2026-08-28-paperai-dsh-baseline.zh.md)与上游中都不存在，因此后续的 DSH 更新是重新应用这处接缝，而不是保留它。PaperAI AgentDriverModel` 增加可选的 `reasoning`（驱动方拥有的等级列表以及驱动方默认应用的等级），为 `AgentModelController` 增加可选的 `currentReasoningEffort`、`switches`（带驱动方自己名称与说明的布尔开关）以及 `selectModel(model, { reasoningEffort?, switches? })` 的第二个参数。什么都不通告的驱动保持原契约；DSH Agent Loop 仍走 `ctx.llm`，不暴露其中任何一项。
 
 **Host 只转发，驱动方负责校验。**`session.models` 把驱动方的等级投影进既有的精确模型 `reasoning` 元数据，把开关列为 `SessionModels.switches`；上报的 `current` 选择携带已应用的等级与每个开关的值。`session.selectModel` 在推理强度之外接受可选的 `switches`，一并交给驱动方，并回显驱动方得到的选择结果。Host 不再拒绝驱动会话的推理强度：驱动方拒绝它未通告的等级或开关，表现为菜单已本地化的同一种 `model-unavailable` 失败。
 
