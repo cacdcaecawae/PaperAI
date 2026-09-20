@@ -55,7 +55,7 @@
         # writes enable_thinking from the effort's presence, so without this a
         # default call asks 仅思考模式 models to stop thinking, which Bailian
         # refuses. Bailian itself defaults thinking on for seven of the nine
-        # mixed models here; an explicit off still reaches the two that allow it.
+        # mixed models here; an explicit off still reaches models that allow it.
         reasoning: high
         compat:
           thinkingFormat: qwen

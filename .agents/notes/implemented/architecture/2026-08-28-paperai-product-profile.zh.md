@@ -20,9 +20,9 @@ fork 中的上游包继续使用 `@deepseek-ai/dsh-*`，新增的产品自有包
 
 ### 运行时与 Agent 组合
 
-PaperAI 按 [ACP 渠道决策](2026-09-08-paperai-acp-channels.zh.md)只开放 Codex 与 Claude，默认 Codex，并关闭用户 preset 根目录。两者共用顶层 ACP Agent 实现，通过会话专属 MCP 描述符获得论文工具。模型选项来自运行中的提供方，手工模型 ID 必须获得提供方接受。
+PaperAI 在 Codex 与 Claude 两个 ACP 通道之外同时开放原生 `dsh` 引擎，默认 Codex，并关闭用户 preset 根目录；两个通道来自 [ACP 渠道决策](2026-09-08-paperai-acp-channels.zh.md)，名册来自[原生引擎入名册决策](../feature/2026-09-17-paperai-native-engine-in-roster.zh.md)。两者共用顶层 ACP Agent 实现，通过会话专属 MCP 描述符获得论文工具。模型选项来自运行中的提供方，手工模型 ID 必须获得提供方接受。
 
-自[原生引擎入名册决策](../feature/2026-09-17-paperai-native-engine-in-roster.zh.md)起，原生 DSH Loop 与产品自有 `dsh` 组装在 PaperAI 名册中与两个通道并列提供；其他 DSH profile 继续提供随附与用户 preset。平台、领域服务和客户端组装的所有权不变。
+其他 DSH profile 继续提供随附与用户 preset。平台、领域服务和客户端组装的所有权不变。
 
 PaperAI MCP 工具是所有 Agent 可见的文档能力面。Host 命令与 MCP handler 调用相同的领域服务；每次执行文档命令时，都从当前 DSH 会话解析 actor/model 来源信息。
 
@@ -37,7 +37,7 @@ DSH 客户端继续作为页面壳。PaperAI 只扩展四个窄上游 seam，并
 | `ui-conversation` | 与既有工具详情并列的通用详情视图宿主 | 预览、编辑、历史和模板门禁视图 |
 | `ui-agent-preset` | keyed 品牌呈现 slot | DSH、Codex、Claude 官方标记，不再硬编码通用图标 |
 
-PaperAI 提供 `ui-brand`、`ui-document-tree`、`ui-document-workbench`、`ui-toolviews`，以及由功能属主注册的 Settings contribution。组件使用 DSH CSS Modules 和语义 token；不引入另一套组件系统、主题、页面壳、Modal 框架或全局 store。客户端产品文案使用中文；需要翻译的可见字符串遵守既有 locale 服务。
+PaperAI 提供 `ui-paperai-brand`、`ui-paperai-workbench`、`ui-paperai-acp`，以及由功能属主注册的 Settings contribution。组件使用 DSH CSS Modules 和语义 token；不引入另一套组件系统、主题、页面壳、Modal 框架或全局 store。客户端产品文案使用中文；需要翻译的可见字符串遵守既有 locale 服务。
 
 ### 文档领域
 
@@ -74,12 +74,12 @@ PaperAI 领域服务独立于 DSH 平台，并通过 Cordis Service Definition �
 
 **把 Markdown 或可编辑 HTML 持久化为第二份权威文档。** 通过另一种全文模型往返 Word 版式会产生同步和保真冲突。单一 Working DOCX 配合生成预览和章节缓冲区，可以维持一个真源。
 
-**把 `standard` 复制进 PaperAI 组合包。** 副本会逐渐偏离其声称提供的 DSH Agent，也会要求每项上游 preset 修正重复应用两次。按 id 从共享系统根目录选择 `standard`，可以让原生 Agent 继续只有一份组装真源，同时允许 PaperAI 收敛自己的 roster。
+**把 `standard` 复制进 PaperAI 组合包。** 副本会逐渐偏离其声称提供的 DSH Agent，也会要求每项上游 preset 修正重复应用两次。按 id 从共享系统根目录选择 `standard`，曾让原生 Agent 继续只有一份组装真源，同时允许 PaperAI 收敛自己的 roster；此后名册已迁往产品自有根目录，其 `dsh` preset 自行组装标准行。
 
 ## 测试
 
 - PaperAI 配置可从源码和构建产物启动，并完整保留原生 DSH 会话、权限、Settings、凭据、模型和响应式 UI 行为。
-- 全新的 PaperAI harness home 只列出既有 `standard` DSH Agent、本地 Codex 与本地 Claude，三者以并列顶级 Agent 显示，各自具有标记和真实提供方/模型选择，并均能运行会话。其他 profile 保留完整的随附 DSH roster。
+- 全新的 PaperAI harness home 只列出产品自有的 `DSH 标准` 引擎、本地 Codex 与本地 Claude，三者以并列顶级 Agent 显示，各自具有标记和真实提供方/模型选择，并均能运行会话。其他 profile 保留完整的随附 DSH roster。
 - 用户可以选择目录、初始化或恢复 PaperAI 项目、导入 DOC/DOCX、查看 OfficeCLI HTML 预览、编辑选中章节并创建可恢复文档提交。
 - 文档工作台提供预览、编辑、历史和模板门禁，且不再受原先 300–520 px 工具详情栏宽度限制。
 - HIT 模板内置可用，自定义模板可以上传和确认，源文件保持不变，派生文档遵守角色兼容性。

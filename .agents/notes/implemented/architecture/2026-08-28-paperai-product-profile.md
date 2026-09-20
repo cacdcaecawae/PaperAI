@@ -20,9 +20,9 @@ The fork keeps upstream packages under `@deepseek-ai/dsh-*`. New product-owned p
 
 ### Runtime and Agent composition
 
-PaperAI exposes only Codex and Claude, defaults to Codex, and disables the user preset root under the [ACP channel decision](2026-09-08-paperai-acp-channels.md). Both use the shared top-level ACP implementation and receive document tools through session-owned MCP descriptors. Model options come from the running provider; manual model IDs require provider acceptance.
+PaperAI exposes the native `dsh` engine beside the Codex and Claude ACP channels, defaults to Codex, and disables the user preset root; the two channels come from the [ACP channel decision](2026-09-08-paperai-acp-channels.md) and the roster from the [native-engine-in-roster decision](../feature/2026-09-17-paperai-native-engine-in-roster.md). Both use the shared top-level ACP implementation and receive document tools through session-owned MCP descriptors. Model options come from the running provider; manual model IDs require provider acceptance.
 
-The native DSH loop and the product-owned `dsh` composition are offered in the PaperAI roster beside the two channels since the [native-engine-in-roster decision](../feature/2026-09-17-paperai-native-engine-in-roster.md). Other DSH profiles retain their shipped and user presets. Platform, domain-service, and client-composition ownership remain unchanged.
+Other DSH profiles retain their shipped and user presets. Platform, domain-service, and client-composition ownership remain unchanged.
 
 PaperAI MCP tools are the model-facing document capability surface for all Agents. Host commands and MCP handlers call the same domain services, and actor/model provenance is resolved from the active DSH session when each document command runs.
 
@@ -37,7 +37,7 @@ The DSH client stays the page shell. PaperAI extends four narrow upstream seams 
 | `ui-conversation` | A generic details-view host alongside the existing Tool details view | Preview, Edit, History, and Template Gate views |
 | `ui-agent-preset` | A keyed brand presentation slot | Official DSH, Codex, and Claude marks without hardcoded generic icons |
 
-PaperAI supplies `ui-brand`, `ui-document-tree`, `ui-document-workbench`, `ui-toolviews`, and feature-owned settings contributions. Components use DSH CSS Modules and semantic tokens; they do not introduce another component system, theme, page shell, modal framework, or global store. Product copy is Chinese in the client and follows the existing locale service where a user-visible string needs translation.
+PaperAI supplies `ui-paperai-brand`, `ui-paperai-workbench`, `ui-paperai-acp`, and feature-owned settings contributions. Components use DSH CSS Modules and semantic tokens; they do not introduce another component system, theme, page shell, modal framework, or global store. Product copy is Chinese in the client and follows the existing locale service where a user-visible string needs translation.
 
 ### Document domain
 
@@ -74,12 +74,12 @@ The implementation proceeds as runnable vertical slices: product profile and bra
 
 **Persist Markdown or editable HTML as a second authoritative document.** Round-tripping Word layout through another full-document model introduces synchronization and fidelity conflicts. A single Working DOCX plus generated preview and section buffers keeps one source of truth.
 
-**Copy `standard` into the PaperAI bundle.** A duplicate would drift from the DSH Agent it claims to provide and would require every upstream preset correction to be applied twice. Selecting `standard` by id from the shared system root keeps one composition as the source of the native Agent while allowing PaperAI to curate its roster.
+**Copy `standard` into the PaperAI bundle.** A duplicate would drift from the DSH Agent it claims to provide and would require every upstream preset correction to be applied twice. Selecting `standard` by id from the shared system root kept one composition as the source of the native Agent while allowing PaperAI to curate its roster; the roster has since moved to a product-owned root whose `dsh` preset composes the standard rows itself.
 
 ## Testing
 
 - The PaperAI profile boots from source and from a built artifact with the original DSH session, permission, settings, credential, model, and responsive UI behavior intact.
-- A fresh PaperAI harness home lists exactly the existing `standard` DSH Agent, local Codex, and local Claude as peer top-level Agent choices with their own marks; each shows real provider/model choices and can run a session. Other profiles retain the complete shipped DSH roster.
+- A fresh PaperAI harness home lists exactly the product-owned `DSH 标准` engine, local Codex, and local Claude as peer top-level Agent choices with their own marks; each shows real provider/model choices and can run a session. Other profiles retain the complete shipped DSH roster.
 - A user can choose a directory, initialize or resume a PaperAI project, import DOC/DOCX, inspect an OfficeCLI HTML preview, edit a selected section, and create a recoverable document commit.
 - The document workbench exposes Preview, Edit, History, and Template Gate without shrinking to the former 300–520 px Tool-details width.
 - HIT templates are bundled, custom templates can be uploaded and confirmed, source files remain unchanged, and derived documents obey role compatibility.

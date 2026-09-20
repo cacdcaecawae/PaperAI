@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-PaperAI 档案发现整个产品自有 preset 根目录。`profilePresetRoots('paperai')` 返回不带 id 过滤的根目录，选择器按文件顺序列出三个引擎：`DSH 标准`、`Codex`、`Claude`。Codex 仍是部署默认值；用户 preset 根目录仍关闭。
+PaperAI 档案发现整个产品自有 preset 根目录。`profilePresetRoots('paperai')` 返回不带 id 过滤的根目录，选择器按各自声明的 `order` 列出三个引擎：`DSH 标准`、`Codex`、`Claude`。Codex 仍是部署默认值；用户 preset 根目录仍关闭。
 
 每一项的文案都是一句短话，说明的是通道而非人设：原生引擎为"自定义模型，直连 API。"，两个通道为"本地 Codex ACP 通道。"与"本地 Claude ACP 通道。"。原生引擎的文案写在其 `preset.yml` 里；通道的文案作为 `description` 放在 `@paperai/agent-acp` 的 `ACP_TEMPLATES` 上，`PaperAiAcpAgents` 注册贡献 preset 时一并传入。贡献会遮住同 id 的文件 preset，因此两个通道的 `preset.yml` 也写同一句话，供未组装 ACP 插件的组合使用。
 

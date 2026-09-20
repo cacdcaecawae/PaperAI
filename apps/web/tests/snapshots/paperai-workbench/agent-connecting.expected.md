@@ -1,4 +1,5 @@
 - button "Claude":
+  - img
   - text: Claude
-  - status: 连接中，可继续输入
+  - status: 连接中…
   - img

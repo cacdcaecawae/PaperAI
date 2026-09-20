@@ -10,7 +10,7 @@ Since the [ACP channels decision](../architecture/2026-09-08-paperai-acp-channel
 
 ## Decision
 
-The PaperAI profile discovers its whole product-owned preset root. `profilePresetRoots('paperai')` returns the root without an id filter, so the picker lists three engines in file order: `DSH 标准`, `Codex`, and `Claude`. Codex stays the deployment default; the user preset root stays off.
+The PaperAI profile discovers its whole product-owned preset root. `profilePresetRoots('paperai')` returns the root without an id filter, so the picker lists three engines in their declared `order`: `DSH 标准`, `Codex`, and `Claude`. Codex stays the deployment default; the user preset root stays off.
 
 Each entry's copy is one short line naming the transport, not the persona: `自定义模型，直连 API。` for the native engine, `本地 Codex ACP 通道。` and `本地 Claude ACP 通道。` for the channels. The native engine's copy lives in its `preset.yml`. The channels' copy lives as `description` on `ACP_TEMPLATES` in `@paperai/agent-acp`, and `PaperAiAcpAgents` passes it when it registers the contributed preset. A contribution shadows the file preset of the same id, so the two channel `preset.yml` files carry the same line for a composition without the ACP plugin.
 
