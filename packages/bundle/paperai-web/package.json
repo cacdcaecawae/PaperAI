@@ -84,10 +84,11 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
     "js-yaml": "^4.2.0"
   }
 }

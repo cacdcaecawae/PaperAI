@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-19-paperai-bailian-route.md
-2026-09-19-paperai-bailian-route.md: e5bd020f963b4bc89d72b49b485a647985efccef
-2026-09-19-paperai-bailian-route.zh.md: c7f68ab2e42898238523bee35ae6145fa3c7b88d
+2026-09-19-paperai-bailian-route.md: f8b7fd09bfac68664382e2edc692b528cebcaf63
+2026-09-19-paperai-bailian-route.zh.md: a30bdcea44cc92f84204f227c61027e10d6c78ab

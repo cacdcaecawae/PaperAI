@@ -94,12 +94,33 @@ describe('PaperAI Bailian route', () => {
       'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v3.2',
       'glm-5.2', 'kimi-k2.6', 'kimi-k2.7-code', 'MiniMax-M2.5',
     ])
-    // Every model reasons through Qwen-style enable_thinking, with off offered.
+    // No model carries a thinkingFormat of its own: enable_thinking is the
+    // endpoint's only switch, so the route-level qwen format serves all of them.
     for (const model of bailian?.models ?? []) {
-      expect(model.reasoningEfforts).toEqual({ off: null, high: 'high' })
-      expect(model.contextWindow).toBeGreaterThan(0)
-      expect(model.maxTokens).toBeGreaterThan(0)
+      expect(model.compat?.thinkingFormat).toBeUndefined()
     }
+    // Capacities are per-model facts read off Alibaba's own pages, not one
+    // shared shape: a loop that asserts the same numbers for every model is
+    // exactly how a capacity copied from another endpoint survives review.
+    const declared = Object.fromEntries((bailian?.models ?? []).map(model =>
+      [model.id, { contextWindow: model.contextWindow, maxTokens: model.maxTokens, efforts: model.reasoningEfforts }]))
+    const off = { off: null, high: 'high' }
+    const thinkingOnly = { high: 'high' }
+    expect(declared).toEqual({
+      'qwen3.7-plus': { contextWindow: 1000000, maxTokens: 32768, efforts: off },
+      'qwen3.7-max': { contextWindow: 1000000, maxTokens: 32768, efforts: off },
+      'qwen3.6-plus': { contextWindow: 1000000, maxTokens: 32768, efforts: off },
+      'qwen3.6-flash': { contextWindow: 1000000, maxTokens: 32768, efforts: off },
+      'deepseek-v4-pro': { contextWindow: 1000000, maxTokens: 393216, efforts: off },
+      'deepseek-v4-flash': { contextWindow: 1000000, maxTokens: 393216, efforts: off },
+      'deepseek-v3.2': { contextWindow: 131072, maxTokens: 65536, efforts: off },
+      'glm-5.2': { contextWindow: 1048576, maxTokens: 32768, efforts: off },
+      'kimi-k2.6': { contextWindow: 262144, maxTokens: 16384, efforts: off },
+      // Bailian runs these two in 仅思考模式; an off level would promise a
+      // state the endpoint cannot reach.
+      'kimi-k2.7-code': { contextWindow: 262144, maxTokens: 16384, efforts: thinkingOnly },
+      'MiniMax-M2.5': { contextWindow: 204800, maxTokens: 32768, efforts: thinkingOnly },
+    })
   })
 
   it('resolves into a serviceable route, not just a schema-valid one', () => {
