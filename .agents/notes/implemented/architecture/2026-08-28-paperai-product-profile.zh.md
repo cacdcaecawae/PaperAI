@@ -37,7 +37,7 @@ DSH 客户端继续作为页面壳。PaperAI 只扩展四个窄上游 seam，并
 | `ui-conversation` | 与既有工具详情并列的通用详情视图宿主 | 预览、编辑、历史和模板门禁视图 |
 | `ui-agent-preset` | keyed 品牌呈现 slot | DSH、Codex、Claude 官方标记，不再硬编码通用图标 |
 
-PaperAI 提供 `ui-brand`、`ui-document-tree`、`ui-document-workbench`、`ui-toolviews`，以及由功能属主注册的 Settings contribution。组件使用 DSH CSS Modules 和语义 token；不引入另一套组件系统、主题、页面壳、Modal 框架或全局 store。客户端产品文案使用中文；需要翻译的可见字符串遵守既有 locale 服务。
+PaperAI 提供 `ui-paperai-brand`、`ui-paperai-workbench`、`ui-paperai-acp`，以及由功能属主注册的 Settings contribution。组件使用 DSH CSS Modules 和语义 token；不引入另一套组件系统、主题、页面壳、Modal 框架或全局 store。客户端产品文案使用中文；需要翻译的可见字符串遵守既有 locale 服务。
 
 ### 文档领域
 

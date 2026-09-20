@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-28-paperai-product-profile.md
-2026-08-28-paperai-product-profile.md: 729b630846807925514742483d43421248e958f3
-2026-08-28-paperai-product-profile.zh.md: 27628be1789d246c0648ece9c11b4c4709da0c47
+2026-08-28-paperai-product-profile.md: 2b3905e1d6e5168bb3e374e80b56b5389d8c962e
+2026-08-28-paperai-product-profile.zh.md: 7b080f1206124e21afe10012a085a5cc45215ad9

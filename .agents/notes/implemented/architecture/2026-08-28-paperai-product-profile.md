@@ -37,7 +37,7 @@ The DSH client stays the page shell. PaperAI extends four narrow upstream seams 
 | `ui-conversation` | A generic details-view host alongside the existing Tool details view | Preview, Edit, History, and Template Gate views |
 | `ui-agent-preset` | A keyed brand presentation slot | Official DSH, Codex, and Claude marks without hardcoded generic icons |
 
-PaperAI supplies `ui-brand`, `ui-document-tree`, `ui-document-workbench`, `ui-toolviews`, and feature-owned settings contributions. Components use DSH CSS Modules and semantic tokens; they do not introduce another component system, theme, page shell, modal framework, or global store. Product copy is Chinese in the client and follows the existing locale service where a user-visible string needs translation.
+PaperAI supplies `ui-paperai-brand`, `ui-paperai-workbench`, `ui-paperai-acp`, and feature-owned settings contributions. Components use DSH CSS Modules and semantic tokens; they do not introduce another component system, theme, page shell, modal framework, or global store. Product copy is Chinese in the client and follows the existing locale service where a user-visible string needs translation.
 
 ### Document domain
 
