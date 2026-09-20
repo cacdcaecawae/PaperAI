@@ -89,6 +89,6 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
-    "js-yaml": "^4.2.0"
+    "js-yaml": "^4.3.2"
   }
 }
