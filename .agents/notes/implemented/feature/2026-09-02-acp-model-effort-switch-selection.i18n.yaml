@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-acp-model-effort-switch-selection.md
 2026-09-02-acp-model-effort-switch-selection.md: c498440256177ed423af35574679d9ca580089b8
-2026-09-02-acp-model-effort-switch-selection.zh.md: f59461de4110e6f7a4d78fb28712d5c7b1320897
+2026-09-02-acp-model-effort-switch-selection.zh.md: 9a0bb48a0aa72edc8a8b9667ecb3e64d1e167799
