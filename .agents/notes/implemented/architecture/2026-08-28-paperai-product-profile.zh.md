@@ -92,4 +92,4 @@ PaperAI 领域服务独立于 DSH 平台，并通过 Cordis Service Definition �
 
 ## 后果
 
-fork 在四个 UI 包中维护少量上游补丁；每项扩展都必须保持可加性并有测试，使后续 DSH 更新可以通过 merge 而非手工重抄。顶级 ACP 投影必须保持 DSH 会话事件配对、取消、权限请求、恢复和进程清理。OfficeCLI 与旧版 DOC 转换存在 Windows/原生依赖故障模式，需要明确的降级状态。文档提交跨越文件系统和 SQLite，需要可恢复的事务顺序。DSH 固定在 release candidate，公开约定仍可能变化。首版针对用户的 HIT 工作流；其他学校在获得同等保真承诺前，需要新增模板包和更大的视觉回归语料。
+fork 手工修改了 29 个共享 DSH 包，其中 13 个在 `packages/client` 下、16 个在其外；每一处扩展都必须保持增量且有测试覆盖，使后续 DSH 更新能够被重新应用，而不是重新发现。这些更新据以度量的分叉点记录在 [DSH 基线笔记](../process/2026-08-28-paperai-dsh-baseline.zh.md) 中。顶级 ACP 投影必须保持 DSH 会话事件配对、取消、权限请求、恢复和进程清理。OfficeCLI 与旧版 DOC 转换存在 Windows/原生依赖故障模式，需要明确的降级状态。文档提交跨越文件系统和 SQLite，需要可恢复的事务顺序。DSH 固定在 release candidate，公开约定仍可能变化。首版针对用户的 HIT 工作流；其他学校在获得同等保真承诺前，需要新增模板包和更大的视觉回归语料。
