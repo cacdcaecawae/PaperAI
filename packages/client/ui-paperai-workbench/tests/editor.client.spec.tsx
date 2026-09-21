@@ -734,3 +734,184 @@ describe('Document editing commands', () => {
     expect(screen.getByRole('status').textContent).toBe(zh['editor.structureProtected'])
   })
 })
+
+/**
+ * One conflicted paragraph, rendered the way the workbench renders it after an external reload: the page
+ * holds the document's new text, the store holds the writer's draft, and the edit is marked conflicted.
+ * @param body - the reloaded page.
+ * @param texts - what each node reads in the document now.
+ * @param draft - the writer's unsaved text for the conflicted node.
+ * @param conflictedIndex - which node is in conflict.
+ * @returns the shadow root, the spies, and the band's buttons.
+ */
+function conflicted(body: string, texts: readonly string[], draft: string, conflictedIndex = 0,
+  kind: 'paragraph' | 'table-cell' = 'paragraph') {
+  const onDraft = vi.fn()
+  const onResolveConflict = vi.fn()
+  const nodes = texts.map((text, index) => ({
+    nodeId: `node-${index}` as PaperAIDocumentNodeId, text, label: text, kind, depth: 0, editable: true,
+  }))
+  const subject = nodes[conflictedIndex]!.nodeId
+  function Harness() {
+    const [edits, setEdits] = useState<PaperAIBlockEdit[]>([
+      { nodeId: subject, baseText: 'stale base', draft, conflicted: true },
+    ])
+    return <DocumentPreview html={body} revision={REVISION_1} nodes={nodes} title="Document" edits={edits} saving={false} t={t}
+      onSave={vi.fn()} paragraphStyles={[]} onCancel={() => { setEdits([]) }}
+      // The controller's own shape: the rebase clears the flag and leaves the draft alone.
+      onResolveConflict={(nodeId) => {
+        onResolveConflict(nodeId)
+        setEdits(current => current.map(edit => (edit.nodeId === nodeId
+          ? { ...edit, baseText: nodes.find(node => node.nodeId === nodeId)?.text ?? '', conflicted: false }
+          : edit)))
+      }}
+      onDraft={(nodeId, next) => {
+        onDraft(nodeId, next)
+        setEdits(current => [...current.filter(edit => edit.nodeId !== nodeId), ...(next === null ? [] : [{
+          ...current.find(edit => edit.nodeId === nodeId),
+          nodeId, baseText: current.find(edit => edit.nodeId === nodeId)?.baseText ?? '', draft: next.text,
+          ...(next.runs === undefined ? {} : { runs: next.runs }),
+        }])])
+      }} />
+  }
+  const view = render(<Harness />)
+  const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+  let current: Range | null = null
+  Object.defineProperty(shadow, 'getSelection', { value: () => ({
+    get rangeCount() { return current === null ? 0 : 1 },
+    getRangeAt: () => current,
+    removeAllRanges: () => { current = null },
+    addRange: (range: Range) => { current = range },
+  }) })
+  return {
+    shadow, onDraft, onResolveConflict,
+    getRange: () => current,
+    band: () => shadow.querySelector<HTMLElement>('[data-paperai-conflict]'),
+    act: (resolve: string) => shadow.querySelector<HTMLElement>(`[data-paperai-resolve="${resolve}"]`),
+    blocks: () => [...shadow.querySelectorAll<HTMLElement>('[data-paperai-block]')],
+  }
+}
+
+describe('Conflict resolution in the page', () => {
+  const PAGE = '<p data-path="/body/p[1]">文档改写后的这一段</p>'
+
+  it('quotes the document above the paragraph and marks what each side contributed', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段'], '文档保留原样的这一段')
+    const band = editor.band()!
+    // The band stands immediately before the paragraph it contests, inside the page.
+    expect(band.nextElementSibling).toBe(editor.blocks()[0])
+    expect(band.getAttribute('contenteditable')).toBe('false')
+    expect(band.dataset.paperaiConflictForm).toBe('document')
+    expect(band.querySelector('.paperai-conflict-who')!.textContent).toBe(zh['editor.conflictTheirs'])
+    // Both marks present, and the legend names them in words so neither depends on hue.
+    expect(band.querySelectorAll('del').length).toBeGreaterThan(0)
+    expect(band.querySelectorAll('ins').length).toBeGreaterThan(0)
+    expect(band.querySelector('.paperai-conflict-legend')!.textContent).toBe(zh['editor.conflictLegend'])
+    // The two halves of one object: solid beside the document's text, dashed beside the draft.
+    expect(editor.blocks()[0]!.dataset.paperaiConflictSeat).toBe('mine')
+    // The paragraph shows the writer's draft and is frozen until they choose.
+    expect(editor.blocks()[0]!.textContent).toBe('文档保留原样的这一段')
+    expect(editor.blocks()[0]!.getAttribute('contenteditable')).toBe('false')
+  })
+
+  it('thaws the paragraph on 用我的 so the merge is typed in the page', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段'], '文档保留原样的这一段')
+    expect(editor.blocks()[0]!.getAttribute('contenteditable')).toBe('false')
+    fireEvent.click(editor.act('mine')!)
+    expect(editor.onResolveConflict).toHaveBeenCalledWith('node-0')
+    const block = editor.blocks()[0]!
+    // The whole point: the same caret, IME and ribbon that write every other paragraph now write this one.
+    expect(block.getAttribute('contenteditable')).toBe('true')
+    // And the band goes, because there is no longer a decision waiting.
+    expect(editor.band()).toBeNull()
+    expect(block.dataset.paperaiConflictSeat).toBeUndefined()
+    // The repaint wraps the draft in a run, so reach the text itself rather than the block's first child.
+    const text = document.createTreeWalker(block, NodeFilter.SHOW_TEXT).nextNode()!
+    text.nodeValue = `${text.nodeValue!}续写`
+    fireEvent.input(block)
+    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', expect.objectContaining({ text: '文档保留原样的这一段续写' }))
+  })
+
+  it('takes the document on 用文档的 and keeps the draft one undo away', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段'], '文档保留原样的这一段')
+    fireEvent.click(editor.act('theirs')!)
+    expect(editor.onResolveConflict).not.toHaveBeenCalled()
+    // The edit drops itself: the block now reads exactly what the document delivered.
+    expect(editor.blocks()[0]!.textContent).toBe('文档改写后的这一段')
+    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', null)
+    expect(editor.band()).toBeNull()
+    // A press that destroys a draft must be recoverable, which is why it routes through history.
+    fireEvent.click(screen.getByRole('button', { name: zh['editor.undo'] }))
+    expect(editor.blocks()[0]!.textContent).toBe('文档保留原样的这一段')
+    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', expect.objectContaining({ text: '文档保留原样的这一段' }))
+  })
+
+  it('clears the gutter rule on a paragraph whose band had to stand before its table', () => {
+    // A band never enters a table, so for a cell it seats before the whole table — which means its next
+    // sibling is the table, not the paragraph, and finding the seat that way would strand this rule.
+    const editor = conflicted('<table><tr><td><p data-path="/body/tbl[1]/tr[1]/td[1]/p[1]">文档改写后的这一段</p></td></tr></table>',
+      ['文档改写后的这一段'], '文档保留原样的这一段', 0, 'table-cell')
+    const band = editor.band()!
+    expect(band.nextElementSibling?.tagName).toBe('TABLE')
+    expect(editor.blocks()[0]!.dataset.paperaiConflictSeat).toBe('mine')
+    fireEvent.click(editor.act('mine')!)
+    expect(editor.band()).toBeNull()
+    expect(editor.blocks()[0]!.dataset.paperaiConflictSeat).toBeUndefined()
+  })
+
+  it('drops the marking when the document rewrote the paragraph outright', () => {
+    // Almost nothing survives, so per-character Han runs would stipple rather than mark.
+    const editor = conflicted('<p data-path="/body/p[1]">近年来大模型在文本生成方面进展显著</p>',
+      ['近年来大模型在文本生成方面进展显著'], '本课题旨在构建面向学位论文的写作工作台')
+    const band = editor.band()!
+    expect(band.querySelectorAll('del, ins').length).toBe(0)
+    expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('近年来大模型在文本生成方面进展显著')
+    expect(band.querySelector('.paperai-conflict-legend')!.textContent).toBe(zh['editor.conflictRewritten'])
+  })
+})
+
+describe('Conflict on a paragraph the browser cannot merge', () => {
+  // A citation superscript is exactly what an Agent adds and what COMPLEX excludes from `mapping`.
+  const PAGE = '<p data-path="/body/p[1]">文档改写后的这一段<sup>[1]</sup></p>'
+
+  it('quotes the draft for saving by hand instead of promising a merge it cannot deliver', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段[1]'], '文档保留原样的这一段')
+    const band = editor.band()!
+    expect(band.dataset.paperaiConflictForm).toBe('draft')
+    expect(band.querySelector('.paperai-conflict-who')!.textContent).toBe(zh['editor.conflictMine'])
+    expect(band.querySelector('.paperai-conflict-legend')!.textContent).toBe(zh['editor.conflictUnmergeable'])
+    // The draft verbatim, unmarked: there is nothing to choose between, only something to rescue.
+    expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('文档保留原样的这一段')
+    expect(band.querySelectorAll('del, ins').length).toBe(0)
+    // No 用我的, because no keystroke can land in that paragraph.
+    expect(editor.act('mine')).toBeNull()
+    expect(editor.act('copy')).not.toBeNull()
+    expect(editor.act('drop')).not.toBeNull()
+    // Its seat wears the solid rule: the paragraph is showing the document, the band the draft.
+    expect(band.nextElementSibling).toBe(editor.shadow.querySelector('[data-paperai-node="node-0"]'))
+    expect(editor.shadow.querySelector<HTMLElement>('[data-paperai-node="node-0"]')!.dataset.paperaiConflictSeat).toBe('theirs')
+  })
+
+  it('selects the quoted draft on 复制草稿 so a refused clipboard still leaves Ctrl+C working', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段[1]'], '文档保留原样的这一段')
+    fireEvent.click(editor.act('copy')!)
+    expect(editor.getRange()!.toString()).toBe('文档保留原样的这一段')
+    expect(editor.onDraft).not.toHaveBeenCalled()
+  })
+
+  it('asks twice before discarding a draft that exists nowhere else', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段[1]'], '文档保留原样的这一段')
+    const drop = editor.act('drop')!
+    fireEvent.click(drop)
+    expect(editor.onDraft).not.toHaveBeenCalled()
+    expect(drop.textContent).toBe(zh['editor.conflictDropConfirm'])
+    // A click anywhere else puts the question back, so a stray second click cannot complete it.
+    fireEvent.click(editor.shadow.querySelector('.paperai-doc')!)
+    expect(drop.textContent).toBe(zh['editor.conflictDrop'])
+    fireEvent.click(drop)
+    expect(editor.onDraft).not.toHaveBeenCalled()
+    fireEvent.click(drop)
+    expect(editor.onDraft).toHaveBeenCalledWith('node-0', null)
+    expect(editor.band()).toBeNull()
+  })
+})

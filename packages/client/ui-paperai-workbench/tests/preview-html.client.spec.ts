@@ -6,7 +6,8 @@ import { DocumentPreview, type DocumentPreviewProps } from '../src/client/Docume
 import { zh } from '../src/client/locales.ts'
 import { NODE_HEADING, NODE_PARAGRAPH, REVISION_2 } from './fixtures.client.ts'
 import {
-  applyRuns, blocksOf, effectiveRunsOf, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns, textOf, wordDiff,
+  applyRuns, blocksOf, conflictBand, effectiveRunsOf, fontOf, markDiffHtml, patchPreviewHtml, restateCleared, runsOf, sameRuns,
+  textOf, wordDiff, type ConflictBandSide,
 } from '../src/client/preview-html.ts'
 
 afterEach(cleanup)
@@ -38,6 +39,14 @@ describe('wordDiff', () => {
     ])
     expect(wordDiff('', 'new')).toEqual([['ins', 'new']])
     expect(wordDiff('gone', '')).toEqual([['del', 'gone']])
+  })
+
+  it('gives up on a pair past the default cap and marks the same pair once a caller raises it', () => {
+    // 501 Han characters a side, because TOKEN counts each one: 251_001 cells, just past the default.
+    const before = `${'本'.repeat(500)}甲`
+    const after = `${'本'.repeat(500)}乙`
+    expect(wordDiff(before, after)).toEqual([['del', before], ['ins', after]])
+    expect(wordDiff(before, after, 1_000_000)).toEqual([['same', '本'.repeat(500)], ['del', '甲'], ['ins', '乙']])
   })
 })
 
@@ -348,4 +357,74 @@ describe('clearing a run', () => {
     expect(restateCleared([], [{ text: 'last', bold: true }], element)).toEqual([])
     expect(restateCleared([{ text: 'new' }], [], element)).toEqual([{ text: 'new' }])
   })
+})
+
+/** One band's input. The copy is marker text, so an assertion names the string the band picked rather than matching prose. */
+function side(form: ConflictBandSide['form'], mine: string, theirs: string): ConflictBandSide {
+  return {
+    nodeId: NODE_PARAGRAPH,
+    form,
+    theirs,
+    mine,
+    copy: {
+      who: 'who', legend: 'legend', rewritten: 'rewritten', empty: 'empty',
+      actions: form === 'draft'
+        ? [{ resolve: 'copy', label: 'copy' }, { resolve: 'drop', label: 'drop' }]
+        : [{ resolve: 'mine', label: 'mine' }, { resolve: 'theirs', label: 'theirs' }],
+    },
+  }
+}
+
+describe('conflictBand', () => {
+  it('quotes the document marked against the draft, and carries nothing that would let the band reach the thesis', () => {
+    const band = conflictBand(document, side('document',
+      '本课题旨在构建一个面向中文学位论文的写作工作台。', '本课题旨在构建一个面向中文学位论文的批改工作台。'))
+    expect(band.dataset.paperaiConflict).toBe(NODE_PARAGRAPH)
+    expect(band.dataset.paperaiConflictForm).toBe('document')
+    expect(band.getAttribute('contenteditable')).toBe('false')
+    // The three absences are the band's whole claim to being inert: no data-path, so the node mapping
+    // and the report never see it; no data-paperai-change, so the change navigator never steps onto it.
+    expect(band.hasAttribute('data-path')).toBe(false)
+    expect(band.hasAttribute('data-paperai-change')).toBe(false)
+    expect(band.querySelectorAll('[data-path], [data-paperai-change]')).toHaveLength(0)
+    expect(band.querySelector('.paperai-conflict-who')?.textContent).toBe('who')
+    expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('legend')
+    const text = band.querySelector('.paperai-conflict-text')!
+    expect([...text.children].map(mark => [mark.tagName, mark.textContent]))
+      .toEqual([['DEL', '写作'], ['INS', '批改']])
+    expect(text.textContent).toBe('本课题旨在构建一个面向中文学位论文的写作批改工作台。')
+    expect([...band.querySelectorAll<HTMLButtonElement>('.paperai-conflict-act')]
+      .map(button => [button.type, button.dataset.paperaiResolve, button.textContent]))
+      .toEqual([['button', 'mine', 'mine'], ['button', 'theirs', 'theirs']])
+  })
+
+  it('drops the marking and says so when the document kept too little of the draft to mark', () => {
+    const theirs = '近年来大模型在文本生成方面取得显著进展，为教育领域带来新机遇。'
+    const band = conflictBand(document, side('document', '本课题旨在构建一个面向中文学位论文的写作工作台。', theirs))
+    const text = band.querySelector('.paperai-conflict-text')!
+    expect(text.querySelectorAll('del, ins')).toHaveLength(0)
+    expect(text.textContent).toBe(theirs)
+    expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('rewritten')
+  })
+
+  it('quotes an unreachable draft verbatim and offers copying and discarding in place of a merge', () => {
+    const mine = '本课题旨在构建一个面向中文学位论文的写作工作台。'
+    const band = conflictBand(document, side('draft', mine, '近年来大模型在文本生成方面取得显著进展。'))
+    expect(band.dataset.paperaiConflictForm).toBe('draft')
+    const text = band.querySelector('.paperai-conflict-text')!
+    expect(text.querySelectorAll('del, ins')).toHaveLength(0)
+    expect(text.textContent).toBe(mine)
+    expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('legend')
+    expect([...band.querySelectorAll<HTMLElement>('.paperai-conflict-act')].map(button => button.dataset.paperaiResolve))
+      .toEqual(['copy', 'drop'])
+  })
+
+  it.each([['document', '草稿还在这里', ''], ['draft', '', '文档现在的写法']] as const)(
+    'stands a placeholder in for the side a %s band would otherwise quote as a blank line', (form, mine, theirs) => {
+      const band = conflictBand(document, side(form, mine, theirs))
+      const text = band.querySelector('.paperai-conflict-text')!
+      expect(text.textContent).toBe('empty')
+      expect(text.classList.contains('paperai-conflict-empty')).toBe(true)
+      expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('')
+    })
 })

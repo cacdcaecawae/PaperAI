@@ -494,13 +494,15 @@ export class PaperAIWorkbenchController {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
       const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
-      if (state.phase !== 'ready' || state.action !== null || state.document === null || node === undefined || !node.editable) return
+      if (state.phase !== 'ready' || state.action !== null || state.document === null) return
       const others = state.edits.filter(edit => edit.nodeId !== nodeId)
       const previous = state.edits.find(edit => edit.nodeId === nodeId)
-      if (draft !== null && previous?.conflicted === true) return
-      state.edits = draft === null
-        ? others
-        : [...others, {
+      // A draft can always be abandoned. Writing one needs a block that still takes writes, but the
+      // block a draft was typed into may since have become a formula or left the document, and
+      // refusing the drop there would trap that text in the store with no gesture left to clear it.
+      if (draft !== null) {
+        if (node === undefined || !node.editable || previous?.conflicted === true) return
+        state.edits = [...others, {
           nodeId, baseText: previous?.baseText ?? node.text,
           baseRevision: previous?.baseRevision ?? state.document.revision,
           draft: draft.text,
@@ -510,8 +512,29 @@ export class PaperAIWorkbenchController {
           // A retyped block is still a draft whose save failed, so the verdict travels with it.
           ...(previous?.saveFailed === true ? { saveFailed: true } : {}),
         }]
+      }
+      else state.edits = others
       // A failed save keeps its reason while a draft still carries it; every other failure is stale once the writer types on.
       if (!state.edits.some(edit => edit.saveFailed === true)) state.actionError = null
+    })
+  }
+
+  /**
+   * Start from the local draft on one conflicted block: rebase it onto the text the document now has
+   * and unfreeze the block, so the merge is typed in the page with the editor the writer already has.
+   * The commit service refuses a mutation whose `baseText` is stale, so the rebase is the substance of
+   * this, not bookkeeping. The draft is not touched: it is already what the block shows.
+   * @param sessionId - Session owning the edits.
+   * @param nodeId - the conflicted block whose draft the writer chose to keep.
+   */
+  resolveConflict(sessionId: SessionId, nodeId: PaperAIDocumentNodeId): void {
+    this.assertLive()
+    this.workbenchEntry(sessionId).store.update((state) => {
+      const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
+      if (state.phase !== 'ready' || state.action !== null || node === undefined || !node.editable) return
+      state.edits = state.edits.map(edit => (edit.nodeId === nodeId && edit.conflicted === true
+        ? { ...edit, baseText: node.text, conflicted: false }
+        : edit))
     })
   }
 

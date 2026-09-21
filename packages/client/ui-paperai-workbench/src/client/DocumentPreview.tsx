@@ -5,7 +5,7 @@ import { IconChevronDownOutline14, IconPlusOutline16, Menu } from '@deepseek-ai/
 import type { PaperAIBlockDraft, PaperAIBlockEdit, PaperAIDocumentNodeId, PaperAIDocumentNodeSummary, PaperAIDocumentSnapshot, PaperAIDocumentTextRun, PaperAIParagraphFormat } from './types.ts'
 import type { PaperAIDocumentWorkbenchProps } from './slots.ts'
 import css from './DocumentWorkbench.module.css'
-import { applyParagraphs, applyRuns, blocksOf, effectiveRunsOf, fontOf, normalize, paragraphsOf, restateCleared, runsOf, sameRuns, textOf } from './preview-html.ts'
+import { applyParagraphs, applyRuns, blocksOf, conflictBand, effectiveRunsOf, fontOf, normalize, paragraphsOf, restateCleared, runsOf, sameRuns, textOf, type ConflictBandSide } from './preview-html.ts'
 import { formatParagraphs, formatRange, insertParagraphText, readParagraphs, selectedParagraphs, selectionReading } from './editor-dom.ts'
 import { EditorRibbon, type EditorFormat } from './EditorRibbon.tsx'
 import { IconZoomOut } from './editor-icons.tsx'
@@ -31,9 +31,31 @@ export interface DocumentPreviewProps {
   readonly saving: boolean
   readonly busy?: boolean
   readonly onDraft: (nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null) => void
+  /** Keep the local draft on one conflicted block: rebase it onto the document's text and unfreeze it. */
+  readonly onResolveConflict?: (nodeId: PaperAIDocumentNodeId) => void
   readonly onSave: () => void
   readonly onCancel: () => void
   readonly t: PaperAIDocumentWorkbenchProps['t']
+}
+
+/**
+ * Copy printed on one conflict band.
+ * @param form - `document` quotes the document and offers both sides; `draft` quotes a draft no keystroke can reach.
+ * @param t - the workbench translator.
+ * @returns the resolved strings and the buttons this form can carry.
+ */
+function bandCopy(form: ConflictBandSide['form'], t: PaperAIDocumentWorkbenchProps['t']): ConflictBandSide['copy'] {
+  return {
+    who: t(form === 'draft' ? 'editor.conflictMine' : 'editor.conflictTheirs'),
+    legend: t(form === 'draft' ? 'editor.conflictUnmergeable' : 'editor.conflictLegend'),
+    rewritten: t('editor.conflictRewritten'),
+    empty: t('editor.conflictEmpty'),
+    // No 用我的 on a draft band: no caret can enter that paragraph, so the button would promise a
+    // merge the browser cannot deliver — which is the promise the frozen-block copy makes today.
+    actions: form === 'draft'
+      ? [{ resolve: 'copy', label: t('editor.conflictCopy') }, { resolve: 'drop', label: t('editor.conflictDrop') }]
+      : [{ resolve: 'mine', label: t('editor.conflictKeep') }, { resolve: 'theirs', label: t('editor.conflictTake') }],
+  }
 }
 
 const DROPPED_ELEMENTS = 'script, iframe, object, embed, link, meta, base, form, input, button, textarea, select, noscript'
@@ -46,15 +68,110 @@ const PREVIEW_STYLE = `
 .paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); zoom: var(--paperai-page-zoom, 1); }
 .paperai-doc .page { border: 1px solid var(--dsw-alias-border-l2); border-radius: 2px; box-shadow: var(--paperai-page-shadow); }
 [data-paperai-change], [data-paperai-changed] { position: relative; }
-[data-paperai-change]::before, [data-paperai-changed]::before { content: '✎'; position: absolute; left: -20px; top: 0; font: 12px sans-serif; color: var(--dsw-alias-state-business-primary); }
+/* Marks drawn on the sheet take the page's own gold, not the app's: --dsw-alias-state-business-primary
+   resolves to champagne #e2b457 in dark, which is 1.9:1 on white paper. */
+[data-paperai-change]::before, [data-paperai-changed]::before { content: '✎'; position: absolute; left: -20px; top: 0; font: 12px sans-serif; color: var(--paperai-page-accent); }
 [data-paperai-conflicted]::before { content: '!'; font-weight: bold; color: var(--dsw-alias-state-error-primary); }
 [data-paperai-conflicted] { border-inline-start: 2px dashed var(--dsw-alias-state-error-primary); }
-[data-paperai-change][data-paperai-current] { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+[data-paperai-change][data-paperai-current] { outline: 2px solid var(--paperai-page-accent); outline-offset: 2px; }
 [data-paperai-removed] { opacity: 0.85; }
-[data-paperai-change] del { background: var(--dsw-alias-state-error-tertiary); color: var(--dsw-alias-state-error-primary); text-decoration: line-through; }
-[data-paperai-change] ins { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); text-decoration: underline; }
-[data-paperai-block][contenteditable="true"] { cursor: text; outline: none; min-height: 1em; caret-color: var(--dsw-alias-state-business-primary); }
+/* A version comparison keeps its own red-removed/green-added reading; what goes is the tint behind it.
+   --dsw-alias-state-error-tertiary is defined in neither scheme, so that one was already doing nothing,
+   and --dsw-alias-state-success-tertiary resolves to green-900 in dark: a near-black block on white
+   paper. A background is also what turns dense Chinese into confetti and what breaks CJK line-breaking,
+   so the strike and the underline carry the shape instead. */
+[data-paperai-change] del { color: var(--dsw-alias-state-error-primary); text-decoration: line-through; text-decoration-thickness: 0.06em; }
+[data-paperai-change] ins { color: var(--dsw-alias-state-success-primary); text-decoration: underline; text-decoration-skip-ink: none; text-decoration-thickness: 0.06em; text-underline-offset: 0.2em; }
+[data-paperai-block][contenteditable="true"] { cursor: text; outline: none; min-height: 1em; caret-color: var(--paperai-page-accent); }
 [data-paperai-paragraph] { display: block; min-height: 1em; }
+
+/* ── A conflict, shown in the page ──────────────────────────────────────────────────────────────
+   A tint block hung from a gold rule, seated in the paper at the page's own measure. No shadow, no
+   blur, no hairline and no position: those are the four things that would make it read as something
+   lying on the sheet rather than as a state the paragraph is in. No hover on the box either — in a
+   typing surface the mouse parks anywhere, and three boxes lighting up while the writer types is a
+   flicker that buys nothing. Texture is authorship, and it is one word in both forms: a solid rule
+   stands beside the document's text, a dashed rule beside your draft.
+   The grid row is what lets real height animate, so the thesis is pushed rather than jumped, and
+   overflow-anchor keeps the browser from anchoring scroll on the band instead of on the paragraph
+   the writer is reading. */
+[data-paperai-conflict] {
+  display: grid; grid-template-rows: 0fr; opacity: 0;
+  margin: 1.1em 0 0.3em; border-inline-start: 2px solid var(--paperai-page-accent); border-radius: 2px;
+  background: color-mix(in srgb, var(--paperai-page-accent) 10%, transparent);
+  overflow-anchor: none; text-align: start; text-indent: 0;
+  transition: grid-template-rows 160ms ease, margin-block 160ms ease, opacity 160ms ease;
+}
+[data-paperai-conflict][data-paperai-open] { grid-template-rows: 1fr; opacity: 1; }
+[data-paperai-conflict][data-paperai-conflict-form="draft"] { border-inline-start-style: dashed; }
+.paperai-conflict-body { min-height: 0; overflow: hidden; padding-inline: 0.85em; }
+/* The band and its paragraph are two stanzas of one object, so the paragraph wears the opposite
+   texture, and the red ! it would otherwise carry goes: a band standing above explains the conflict
+   better than a glyph, and two marks in one gutter is noise. */
+[data-paperai-conflict-seat="mine"] { border-inline-start: 2px dashed var(--paperai-page-accent); }
+[data-paperai-conflict-seat="theirs"] { border-inline-start: 2px solid var(--paperai-page-accent); }
+[data-paperai-conflict-seat]::before { content: none; }
+
+/* Chrome register: 13px type and 28px targets on screen at every zoom, because these are the same
+   kind of thing as the zoom pill and the page counter, and a 28px button at a 50% fit is 14px of
+   screen the writer misses. Sized through --paperai-page-relief (= 1 / --paperai-page-zoom, written
+   by the same fit() that writes the zoom) rather than a reciprocal zoom, which would nest a second
+   coordinate context inside the editing host that three getBoundingClientRect callers read. */
+.paperai-conflict-head, .paperai-conflict-acts {
+  display: flex; align-items: center; gap: calc(8px * var(--paperai-page-relief, 1));
+  font-family: var(--dsw-font-family); user-select: none;
+}
+.paperai-conflict-head {
+  min-height: calc(24px * var(--paperai-page-relief, 1)); padding-top: calc(6px * var(--paperai-page-relief, 1));
+  font-size: calc(13px * var(--paperai-page-relief, 1)); line-height: calc(20px * var(--paperai-page-relief, 1));
+}
+/* The one line a glance has to resolve: whose words these are. */
+.paperai-conflict-who { flex: none; font-weight: 500; color: var(--paperai-page-accent); }
+/* Names both marks in words, so neither depends on hue. --dsw-static-* is the register the page
+   already uses and does not flip, which is what a white-in-both-schemes sheet needs. */
+.paperai-conflict-legend {
+  min-width: 0; overflow: hidden; color: var(--dsw-static-neutral-550);
+  font-size: calc(12px * var(--paperai-page-relief, 1)); text-overflow: ellipsis; white-space: nowrap;
+}
+/* Prose register: the document's own face, size and leading, inherited, because this quotation is
+   read straight down against the paragraph below it and two texts at two scales cannot be compared
+   by eye. Context is demoted so the marked words come forward. */
+.paperai-conflict-text { margin: 0.35em 0 0; color: var(--dsw-static-neutral-600); user-select: text; }
+.paperai-conflict-empty { color: var(--dsw-static-neutral-550); font-style: italic; }
+/* Deliberately not the comparison's red-and-green above: neither side here is deleted, and one of them
+   is the writer's own sentence. In the document now and not in your draft comes forward to full ink and
+   takes a gold underline — skip-ink off, because it shreds under 一 丁 冖, and the offset clears 宋体's
+   low horizontal strokes. In your draft and dropped by the document takes the one red the page spends. */
+.paperai-conflict-text ins { color: var(--dsw-static-neutral-1000); text-decoration: underline; text-decoration-color: var(--paperai-page-accent); text-decoration-skip-ink: none; text-decoration-thickness: 0.06em; text-underline-offset: 0.2em; }
+.paperai-conflict-text del { color: var(--paperai-page-loss); text-decoration: line-through; text-decoration-thickness: 0.06em; }
+
+.paperai-conflict-acts { justify-content: flex-end; gap: calc(2px * var(--paperai-page-relief, 1)); padding: calc(4px * var(--paperai-page-relief, 1)) 0 calc(6px * var(--paperai-page-relief, 1)); }
+/* The grammar's control: no border, radius 8, 28px. Its fills mix from the page accent rather than
+   --dsw-alias-interactive-bg-hover, which is white at 7% in dark and so has no value over a sheet. */
+.paperai-conflict-act {
+  height: calc(28px * var(--paperai-page-relief, 1)); border: 0; border-radius: calc(8px * var(--paperai-page-relief, 1));
+  padding: 0 calc(10px * var(--paperai-page-relief, 1)); background: transparent; color: var(--dsw-static-neutral-600);
+  cursor: pointer; font-weight: 500; font-size: calc(13px * var(--paperai-page-relief, 1));
+  line-height: calc(20px * var(--paperai-page-relief, 1)); font-family: var(--dsw-font-family);
+}
+.paperai-conflict-act:hover { background: color-mix(in srgb, var(--paperai-page-accent) 14%, transparent); color: var(--dsw-static-neutral-1000); }
+.paperai-conflict-act:active { background: color-mix(in srgb, var(--paperai-page-accent) 22%, transparent); }
+/* Inset, because .paperai-conflict-body clips and an outset ring would be cut. */
+.paperai-conflict-act:focus-visible { outline: 2px solid var(--paperai-page-accent); outline-offset: -2px; }
+/* 用我的 destroys nothing, so it carries the grammar's SELECTED fill, not the primary fill: the
+   screen's one filled action stays 导出 in the header, and three bands add no gold button to the page. */
+.paperai-conflict-act[data-paperai-resolve="mine"] { background: var(--dsw-alias-state-business-tertiary); color: var(--paperai-page-accent); }
+/* Second press of 放弃这段草稿, the only other place the page spends red. */
+.paperai-conflict-act[data-paperai-armed] { background: color-mix(in srgb, var(--paperai-page-loss) 10%, transparent); color: var(--paperai-page-loss); }
+
+/* The Host paginated this page before the band existed, so a page carrying one has to grow rather
+   than clip its last lines. Defensive: the .page rule ships with the Host's preview HTML, from
+   office-cli and not from this repo, so this is a no-op unless that CSS fixes a height. */
+.page:has([data-paperai-conflict]) { height: auto; overflow: visible; }
+/* The exit still has to fire transitionend, which is what removes the node. */
+@media (prefers-reduced-motion: reduce) { [data-paperai-conflict] { transition-duration: 1ms; } }
+/* Browser furniture: manufactured into the projection, never into the .docx. */
+@media print { [data-paperai-conflict] { display: none; } [data-paperai-conflict-seat] { border-inline-start: 0; } }
 `
 
 function sanitize(html: string): { readonly styles: string; readonly body: Node[] } {
@@ -92,6 +209,10 @@ function mapBlocks(blocks: readonly HTMLElement[], nodes: readonly PaperAIDocume
       && (candidate.kind === 'table-cell') === cell && normalize(candidate.text) === normalize(textOf(block)))
     if (node === undefined) continue
     used.add(node.nodeId)
+    // Every identified block names its node, mapped or not. That is what gives a conflict on an
+    // unmergeable paragraph a seat to stand above: it is identified, so its draft exists, but it is
+    // not in `mapping`, so nothing else in the component can find it.
+    block.dataset.paperaiNode = node.nodeId
     if (node.editable && block.querySelector(COMPLEX) === null) mapping.set(block, node.nodeId)
     else block.dataset.paperaiProtected = ''
   }
@@ -166,7 +287,7 @@ function compositionSnapshot(container: HTMLElement): () => void {
 
 /** Render draft operations over the preview; successful Host commits replace the document revision. */
 export function DocumentPreview({ html, revision, nodes, paragraphStyles, title, edits, saving, onDraft, onSave, onCancel, t,
-  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, comparing = false, busy = false, reveal = null,
+  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, onResolveConflict, comparing = false, busy = false, reveal = null,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
@@ -183,6 +304,8 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const blockedComposition = useRef<(() => void) | null>(null)
   const target = useRef<{ range: Range; blocks: HTMLElement[] } | null>(null)
   const findCursor = useRef<{ query: string; block: HTMLElement; offset: number } | null>(null)
+  /** The half-pressed 放弃这段草稿, if one is waiting for its second press. */
+  const armed = useRef<HTMLElement | null>(null)
   const callbacks = useRef({ onDraft, onSave })
   callbacks.current = { onDraft, onSave }
   const [caret, setCaret] = useState<EditorFormat | null>(null)
@@ -204,8 +327,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   // Not while the retry runs, and not over a conflict that already explains itself.
   const saveFailed = !saving && !conflicted && edits.some(edit => edit.saveFailed === true)
   const editable = !comparing && !saving && !busy
-  // ponytail: a conflicted block freezes instead of offering a merge, because no resolution UI exists yet.
-  // Its draft stays readable for copying while every other block keeps taking writes.
+  // A conflicted block is frozen, and the band seated above it is the gesture that thaws it: 用我的
+  // clears the flag through `resolveConflict`, this set stops naming the block, and the same caret,
+  // IME and ribbon that write every other paragraph write the merge.
   const conflicts = new Set(edits.filter(edit => edit.conflicted === true).map(edit => edit.nodeId))
   const writable = (block: HTMLElement): boolean => {
     const nodeId = mapping.current.get(block)
@@ -329,6 +453,51 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       block.toggleAttribute('data-paperai-conflicted', edit?.conflicted === true)
       latest.current.set(block, imageOf(block))
     }
+    // ── The other side of each conflict, seated above the paragraph it contests ──────────────────
+    // Keyed by node id, so this is idempotent: a conflicted draft cannot change (`updateDraft` refuses
+    // one), and the document's text changes only with `html`, whose effect rebuilds the shadow root.
+    // So no word diff runs on an unrelated keystroke.
+    const seated = new Map([...container?.querySelectorAll<HTMLElement>('[data-paperai-conflict]') ?? []]
+      .map(band => [band.dataset.paperaiConflict, band] as const))
+    for (const [nodeId, band] of seated) {
+      if (!comparing && nodeId !== undefined && conflicts.has(nodeId as PaperAIDocumentNodeId)) continue
+      seated.delete(nodeId)
+      // By node id, not by the band's next sibling: a band whose paragraph sits in a table cell stands
+      // before the whole table, so the sibling is the table and the paragraph would keep its rule.
+      for (const seat of container?.querySelectorAll<HTMLElement>('[data-paperai-conflict-seat]') ?? []) {
+        if (seat.dataset.paperaiNode === nodeId) delete seat.dataset.paperaiConflictSeat
+      }
+      // Removed outright rather than collapsed: every exit follows a press on this band's own button,
+      // so it is direct feedback, not a block vanishing unbidden above a live caret.
+      band.remove()
+    }
+    for (const edit of comparing ? [] : edits) {
+      if (edit.conflicted !== true || seated.has(edit.nodeId)) continue
+      const mapped = [...mapping.current].find(([, id]) => id === edit.nodeId)?.[0]
+      // Matched in JS rather than through an attribute selector: a node id is an opaque Host string,
+      // and CSS.escape is absent outside a browser, so a selector would make this path environment-bound.
+      const seat = mapped ?? [...container?.querySelectorAll<HTMLElement>('[data-paperai-node]') ?? []]
+        .find(candidate => candidate.dataset.paperaiNode === edit.nodeId)
+      if (seat === null || seat === undefined) continue
+      // A paragraph out of `mapping` takes no keystrokes, so its band quotes the draft for saving by
+      // hand instead of offering a merge; the paragraph itself is already showing the document.
+      const form = mapped === undefined ? 'draft' : 'document'
+      const band = conflictBand(document, {
+        nodeId: edit.nodeId,
+        form,
+        theirs: nodes.find(node => node.nodeId === edit.nodeId)?.text ?? edit.baseText,
+        mine: edit.draft,
+        copy: bandCopy(form, t),
+      })
+      seat.dataset.paperaiConflictSeat = form === 'draft' ? 'theirs' : 'mine'
+      // A band never enters a table: it stands before the table its seat sits in, as a removed
+      // paragraph's placeholder already does on a compared page.
+      ;(seat.closest('table') ?? seat).before(band)
+      // Next frame, so the row and the opacity have an initial style to transition from and the
+      // thesis is pushed down rather than jumped.
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { band.dataset.paperaiOpen = '' })
+      else band.dataset.paperaiOpen = ''
+    }
     // The caret reading survives the conflict; only a selection inside a frozen block clears it, in capture.
     if (conflicted) setNotice('editor.conflict')
     // `editable` carries the flag already, but not while saving, busy, or conflicted: the drafts still
@@ -370,6 +539,8 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       const natural = pages.offsetWidth
       const factor = zoom === 'fit' ? natural > 0 && available > 0 ? Math.min(1, available / natural) : 1 : zoom / 100
       element.style.setProperty('--paperai-page-zoom', factor.toFixed(3)); element.scrollTop = position * factor
+      // What a control inside the page divides by to stay its own size on screen while the paper scales.
+      element.style.setProperty('--paperai-page-relief', (1 / factor).toFixed(3))
       if (zoom === 'fit') setFitPercent(Math.round(factor * 100))
       measurePages()
     }
@@ -424,6 +595,64 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     }
     report(blocks)
     capture()
+  }
+  /** Put the half-pressed 放弃这段草稿 back, so the next click elsewhere cannot complete a discard. */
+  const disarm = (): void => {
+    const button = armed.current
+    armed.current = null
+    if (button === null) return
+    delete button.dataset.paperaiArmed
+    button.textContent = t('editor.conflictDrop')
+  }
+  /**
+   * One press on a conflict band. Both fills route through `finish` rather than through a store
+   * repaint: the repaint refuses any block holding the focus, which would silently desync the store
+   * from the page, and it never enters `history`, which would make 用文档的 an unrecoverable press.
+   * @param button - the button pressed, inside the band naming its block.
+   */
+  const resolve = (button: HTMLElement): void => {
+    const band = button.closest<HTMLElement>('[data-paperai-conflict]')
+    const nodeId = band?.dataset.paperaiConflict as PaperAIDocumentNodeId | undefined
+    if (band === null || band === undefined || nodeId === undefined) return
+    const kind = button.dataset.paperaiResolve
+    if (kind !== 'drop') disarm()
+    // The draft on an unmergeable paragraph exists nowhere but this band, so 复制 both writes the
+    // clipboard and selects the quotation: where the clipboard is refused, Ctrl+C still works.
+    if (kind === 'copy') {
+      const quoted = band.querySelector<HTMLElement>('.paperai-conflict-text')
+      if (quoted === null) return
+      const range = document.createRange(); range.selectNodeContents(quoted)
+      const current = selection(); current?.removeAllRanges(); current?.addRange(range)
+      void navigator.clipboard?.writeText(quoted.textContent ?? '').catch(() => undefined)
+      return
+    }
+    // Saving, comparing or busy: the snapshot a commit takes before its await must not move under it.
+    if (!editable) { setNotice('editor.conflict'); return }
+    if (kind === 'drop') {
+      // This destroys text that exists nowhere else, so it asks twice.
+      if (armed.current === button) { disarm(); callbacks.current.onDraft(nodeId, null); return }
+      disarm()
+      armed.current = button
+      button.dataset.paperaiArmed = ''
+      button.textContent = t('editor.conflictDropConfirm')
+      return
+    }
+    const block = [...mapping.current].find(([, id]) => id === nodeId)?.[0]
+    if (block === undefined) return
+    if (kind === 'mine') {
+      // Unfreeze first: `updateDraft` refuses to write a draft onto a block still marked conflicted,
+      // so the report `finish` publishes would be dropped in the same tick.
+      onResolveConflict?.(nodeId)
+      finish([block])
+      block.focus({ preventScroll: true })
+      return
+    }
+    const original = originals.current.get(block)
+    if (original === undefined) return
+    // The document's text as this reload delivered it. `report` then finds the block unchanged and
+    // publishes `draft: null`, so the edit drops itself and takes its conflict with it.
+    restoreImage(original.image)
+    finish([block])
   }
   const undo = (redo = false): void => {
     if (!editable || composing.current) return
@@ -605,6 +834,10 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       event.preventDefault(); capture(range); setContext({ x: event.clientX, y: event.clientY }); setBar(null)
     }
     const clicked = (event: Event): void => {
+      const button = event.composedPath().find((node): node is HTMLElement =>
+        node instanceof HTMLElement && node.dataset.paperaiResolve !== undefined)
+      if (button !== undefined) { resolve(button); return }
+      disarm()
       if (event.composedPath().some(node => node instanceof HTMLElement && node.dataset.paperaiProtected !== undefined)) setNotice('editor.protected')
       else if (!conflicted) setNotice(null)
       capture()

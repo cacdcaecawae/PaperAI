@@ -132,6 +132,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
     retryOpen: vi.fn(async () => {}),
     showPanel: vi.fn(),
     updateDraft: vi.fn(),
+    resolveConflict: vi.fn(),
     cancelEdit: vi.fn(),
     commitEdit: vi.fn(async () => ok),
     validate: vi.fn(async () => ok),
@@ -453,7 +454,13 @@ describe('DocumentWorkbench', () => {
     const discard = screen.getByRole<HTMLButtonElement>('button', { name: '放弃修改' })
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     expect(discard.disabled).toBe(true)
-    expect(shadow.querySelector('[contenteditable]')).toBeNull()
+    // Nothing takes a keystroke while the refresh runs. The conflict band is present and is itself
+    // contenteditable="false", so the invariant is the absence of a writable node, not of the attribute.
+    expect(shadow.querySelector('[contenteditable="true"]')).toBeNull()
+    // Its buttons are inert for the same reason: a resolve must not move the snapshot a commit holds.
+    const keep = shadow.querySelector<HTMLElement>('[data-paperai-resolve="mine"]')!
+    fireEvent.click(keep)
+    expect(b.resolveConflict).not.toHaveBeenCalled()
     fireEvent.click(discard)
     expect(b.cancelEdit).not.toHaveBeenCalled()
     act(() => { b.store.update((state) => { state.action = null }) })
@@ -1059,6 +1066,17 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...editing.props} />)
     expect(screen.getByRole('alert').textContent).toBe('请先保存或放弃页面上的修改。')
+  })
+
+  it.each([
+    ["internal: NODE_TEXT_CONFLICT: node 'node-paragraph' text changed since the mutation was prepared"],
+    ["internal: paperai-workbench: document 'doc-1' changed; reload before applying this action"],
+  ])('points a conflict failure at the refresh that can resolve it, not at a retry that cannot: %s', (error) => {
+    // Both of these mean the document moved under the save. Until the bands existed neither had a
+    // gesture behind it, so both landed on the generic retry and 保存 could be pressed forever.
+    const failed = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(), actionError: error }))
+    render(<DocumentWorkbench {...failed.props} />)
+    expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toContain(zh['workbench.reloadFirst'])
   })
 
   it('keeps the save failure beside the pending pill while the writer types on', () => {
