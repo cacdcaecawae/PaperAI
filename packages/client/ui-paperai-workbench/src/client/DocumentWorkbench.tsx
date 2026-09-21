@@ -181,17 +181,7 @@ export function DocumentWorkbench({
   useEffect(() => {
     if (dialogOpen) void loadLibrary()
   }, [dialogOpen, loadLibrary])
-  const unsaved = state.edits.length > 0 || state.retained.some(view => view.edits.length > 0)
-  // Drafts live only in this store, so a reload discards them. The listener stays off while nothing is at
-  // stake: a permanently bound beforeunload also costs the page its back/forward cache.
-  // ponytail: counts the views this mounted workbench holds. Drafts the controller keeps for an evicted
-  // document, or after the details view closes, are invisible here; arm from the controller if that loses text.
-  useEffect(() => {
-    if (!unsaved) return
-    const confirmUnload = (event: BeforeUnloadEvent): void => { event.preventDefault() }
-    window.addEventListener('beforeunload', confirmUnload)
-    return () => { window.removeEventListener('beforeunload', confirmUnload) }
-  }, [unsaved])
+  // The unload guard is the controller's: it owns the drafts of documents this view no longer shows.
   const toggleFocus = (): void => {
     if (focusActive || panelOpen) showConversation()
     else actions.setWriting(true)

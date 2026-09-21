@@ -189,6 +189,14 @@ describe('WorkspaceContent', () => {
     expect(b.reveal).toHaveBeenCalledWith(SESSION_ID, 'n-1')
   })
 
+  it('tells the writer to apply Word heading styles when the open document states none', () => {
+    const b = workspaceProps(projectState(), {}, { [SESSION_ID]: { workspaceId: WORKSPACE_ID, entries: [] } })
+    render(<WorkspaceContent {...b.props} />)
+    // An open document with no heading is a reading the writer needs, so the outline says so rather than vanishing.
+    expect(screen.getByText(zh['outline.empty'])).toBeDefined()
+    expect(screen.queryByRole('navigation', { name: zh['outline.title'] })).toBeNull()
+  })
+
   it('offers to record an outside working edit from the project doctor', async () => {
     const report = {
       checkedAt: '2026-09-09T00:00:00.000Z', documents: 1, repairs: [],

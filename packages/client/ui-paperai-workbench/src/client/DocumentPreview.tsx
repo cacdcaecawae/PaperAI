@@ -125,6 +125,25 @@ function restoreImage(image: BlockImage): void {
   else image.block.dataset.paperaiFormat = image.format
 }
 
+/**
+ * The draft as this block can still honour it: its text and paragraph structure, carrying the character
+ * formatting the block reads now instead of the formatting the draft captured against an older rendering.
+ * ponytail: the whole draft takes the block's first run, because matching drafted text to the new run
+ * boundaries needs a diff; upgrade when a run-level merge exists.
+ * @param edit - restored draft whose captured rendering is stale.
+ * @param base - the block's first run as it now reads, or undefined when the block states none.
+ * @returns the draft with every captured run restated from the block's own reading.
+ */
+function restated(edit: PaperAIBlockEdit, base: PaperAIDocumentTextRun | undefined): PaperAIBlockEdit {
+  return {
+    ...edit,
+    ...(edit.runs === undefined ? {} : { runs: [{ ...base, text: edit.draft }] }),
+    ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs.map(paragraph => ({
+      ...paragraph, runs: [{ ...base, text: paragraph.text }],
+    })) }),
+  }
+}
+
 /** Restore rejected, non-cancelable composition without replacing mapped node identities. */
 function compositionSnapshot(container: HTMLElement): () => void {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_ALL)
@@ -288,13 +307,21 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       // ids; name the version's own nodes once the diff carries its node index.
       const edit = comparing ? undefined : drafts.get(nodeId)
       const original = originals.current.get(block)
+      // A draft captured its runs against the rendering it was typed into. When the block reads differently now,
+      // an outside version reformatted it while the draft waited: repainting the capture would put the old
+      // formatting back on screen, and the next keystroke would read it as an intended change and commit it over
+      // theirs. The text is the writer's; the formatting the block reads now is not theirs to restate.
+      const painted = edit === undefined || edit.formatting === undefined || original === undefined
+        || sameRuns(edit.formatting.before, original.effective)
+        ? edit
+        : restated(edit, original.runs[0])
       if (!block.contains(focusNode ?? null) && !publishing.current) {
-        if (edit?.paragraphs !== undefined && JSON.stringify(readParagraphs(block)) !== JSON.stringify(edit.paragraphs)) {
-          applyParagraphs(block, edit.paragraphs)
+        if (painted?.paragraphs !== undefined && JSON.stringify(readParagraphs(block)) !== JSON.stringify(painted.paragraphs)) {
+          applyParagraphs(block, painted.paragraphs)
         }
-        else if (edit?.runs !== undefined && !sameRuns(runsOf(block), edit.runs)) applyRuns(block, edit.runs)
-        else if (edit !== undefined && edit.paragraphs === undefined && textOf(block) !== edit.draft) {
-          applyRuns(block, [{ text: edit.draft }])
+        else if (painted?.runs !== undefined && !sameRuns(runsOf(block), painted.runs)) applyRuns(block, painted.runs)
+        else if (painted !== undefined && painted.paragraphs === undefined && textOf(block) !== painted.draft) {
+          applyRuns(block, [{ text: painted.draft }])
         }
         else if (edit === undefined && original !== undefined && block.hasAttribute('data-paperai-changed')) restoreImage(original.image)
       }

@@ -87,9 +87,9 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
 function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
   return edits.map((edit) => {
     const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
-    // ponytail: the block's own text is the whole client-side check, so an external change that only reformats
-    // this same block slips past it; the Host still refuses a stale commit on baseText. Upgrade: carry
-    // lastCommitId on PaperAIDocumentNodeSummary and compare it per node.
+    // Text alone decides this, so one external commit elsewhere no longer conflicts every unrelated draft. An
+    // outside reformat of this same block needs no conflict either: the preview repaints such a draft from the
+    // block's new rendering (DocumentPreview `painted`), so it commits its text and restates no formatting.
     return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText }
   })
 }
@@ -132,6 +132,8 @@ export class PaperAIWorkbenchController {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
   }>()
+  /** The one page-wide unload guard; preventDefault is the whole of the modern contract. */
+  private readonly confirmUnload = (event: BeforeUnloadEvent): void => { event.preventDefault() }
   private disposed = false
 
   /**
@@ -937,6 +939,45 @@ export class PaperAIWorkbenchController {
     }
   }
 
+  /**
+   * Whether any block in this browser is retyped and unsaved: what the mounted
+   * views hold, plus the drafts kept for documents the preview budget has
+   * evicted. A document a view still holds is read from that view alone — its
+   * `drafts` entry is only rewritten on the next eviction, so it outlives the
+   * save that emptied it — while an entry for any other document is unsaved by
+   * construction, because `retain` deletes it when the view leaves clean.
+   */
+  private hasUnsavedDraft(): boolean {
+    for (const [sessionId, entry] of this.workbenches) {
+      const state = entry.store.getSnapshot()
+      const mounted = new Set<PaperAIResourceId>()
+      for (const view of [state, ...state.retained]) {
+        if (view.document === null) continue
+        mounted.add(view.document.resourceId)
+        if (view.edits.length > 0) return true
+      }
+      for (const resourceId of this.drafts.get(sessionId)?.keys() ?? []) {
+        if (!mounted.has(resourceId)) return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Bind the unload guard while a draft is unsaved and remove it otherwise.
+   * The controller owns it rather than the view because drafts outlive every
+   * mounted workbench: an evicted document and a closed details column both
+   * leave no view to arm one, and one controller per browser is what makes
+   * this exactly one listener however many views are mounted — re-adding the
+   * same callback is a no-op, so the DOM keeps it at one.
+   * A permanently bound beforeunload would cost the page its back/forward cache.
+   */
+  private syncUnloadGuard(): void {
+    // The effect this replaces was DOM-only by construction; a store subscription is not. The plugin's
+    if (this.hasUnsavedDraft()) window.addEventListener('beforeunload', this.confirmUnload)
+    else window.removeEventListener('beforeunload', this.confirmUnload)
+  }
+
   /** Abort active reads, release stores, and reject stale callbacks. */
   dispose(): void {
     if (this.disposed) return
@@ -954,6 +995,8 @@ export class PaperAIWorkbenchController {
     this.targets.clear()
     this.drafts.clear()
     this.positions.clear()
+    // Last: nothing is left to lose, so the guard goes with the controller.
+    this.syncUnloadGuard()
   }
 
   /**
@@ -1080,13 +1123,15 @@ export class PaperAIWorkbenchController {
       const created = entry
       // The outline follows the document by identity: a scroll or a draft leaves it as it is.
       const publish = (): void => {
+        // Every change to a Session's edits passes here, and one guard covers the page, so it re-reads every Session.
+        this.syncUnloadGuard()
         const document = created.store.getSnapshot().document
         if (document === this.outlineSources.get(sessionId)) return
         this.outlineSources.set(sessionId, document)
         const { [sessionId]: _closed, ...rest } = this.outlines.getSnapshot()
         this.outlines.set(document === null
           ? rest
-          : { ...rest, [sessionId]: { workspaceId: document.workspaceId, entries: outlineOf(document.nodes) } })
+          : { ...rest, [sessionId]: { workspaceId: document.workspaceId, entries: outlineOf(document.nodes, document.previewHtml) } })
       }
       this.outlineMirrors.set(sessionId, created.store.subscribe(publish))
     }
