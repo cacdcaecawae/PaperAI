@@ -478,7 +478,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       // and CSS.escape is absent outside a browser, so a selector would make this path environment-bound.
       const seat = mapped ?? [...container?.querySelectorAll<HTMLElement>('[data-paperai-node]') ?? []]
         .find(candidate => candidate.dataset.paperaiNode === edit.nodeId)
-      if (seat === null || seat === undefined) continue
+      if (seat === undefined) continue
       // A paragraph out of `mapping` takes no keystrokes, so its band quotes the draft for saving by
       // hand instead of offering a merge; the paragraph itself is already showing the document.
       const form = mapped === undefined ? 'draft' : 'document'
@@ -613,7 +613,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const resolve = (button: HTMLElement): void => {
     const band = button.closest<HTMLElement>('[data-paperai-conflict]')
     const nodeId = band?.dataset.paperaiConflict as PaperAIDocumentNodeId | undefined
-    if (band === null || band === undefined || nodeId === undefined) return
+    if (band === null || nodeId === undefined) return
     const kind = button.dataset.paperaiResolve
     if (kind !== 'drop') disarm()
     // The draft on an unmergeable paragraph exists nowhere but this band, so 复制 both writes the
@@ -623,7 +623,11 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       if (quoted === null) return
       const range = document.createRange(); range.selectNodeContents(quoted)
       const current = selection(); current?.removeAllRanges(); current?.addRange(range)
-      void navigator.clipboard?.writeText(quoted.textContent ?? '').catch(() => undefined)
+      // lib.dom promises a clipboard that an insecure context does not have, where the bare call
+      // throws and would take the selection down with it. The selection is the guarantee; this is
+      // the convenience on top of it.
+      const clipboard = navigator.clipboard as Clipboard | undefined
+      if (clipboard !== undefined) void clipboard.writeText(quoted.textContent).catch(() => undefined)
       return
     }
     // Saving, comparing or busy: the snapshot a commit takes before its await must not move under it.
