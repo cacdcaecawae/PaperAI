@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, mkdtemp, mkdir, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PaperCommitError } from '../src/errors.ts'
 import {
   createCandidateFile,
@@ -15,9 +15,15 @@ import {
   storeSnapshot,
 } from '../src/files.ts'
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...fs, writeFile: vi.fn(fs.writeFile), open: vi.fn(fs.open), link: vi.fn(fs.link), rename: vi.fn(fs.rename) }
+})
+
 const roots: string[] = []
 
 afterEach(async () => {
+  vi.clearAllMocks()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -34,6 +40,33 @@ async function fileFixture() {
 }
 
 describe('commit-service file operations', () => {
+  it('flushes complete bytes before publishing snapshots and replacing Working DOCX', async () => {
+    const fixture = await fileFixture()
+    const bytes = Buffer.from('durable')
+    await storeSnapshot(fixture.paths, bytes, sha256Bytes(bytes))
+    await replaceRegularFile(fixture.workingPath, bytes, 0o600)
+    const calls = vi.mocked(writeFile).mock.calls
+    expect(calls[1]?.[2]).toMatchObject({ flag: 'wx', flush: true })
+    expect(calls[2]?.[2]).toMatchObject({ flag: 'wx', flush: true })
+    expect(vi.mocked(writeFile).mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(link).mock.invocationCallOrder[0]!)
+    expect(vi.mocked(writeFile).mock.invocationCallOrder[2]).toBeLessThan(vi.mocked(rename).mock.invocationCallOrder[0]!)
+    if (process.platform !== 'win32') expect(open).toHaveBeenCalledWith(fixture.root, 'r')
+    expect(await readFile(fixture.workingPath)).toEqual(bytes)
+  })
+
+  it.each(['snapshot', 'working'] as const)('leaves published files untouched when the %s write cannot flush', async (target) => {
+    const fixture = await fileFixture()
+    const bytes = Buffer.from('durable')
+    vi.mocked(writeFile).mockRejectedValueOnce(new Error('flush failed'))
+    const pending = target === 'snapshot'
+      ? storeSnapshot(fixture.paths, bytes, sha256Bytes(bytes))
+      : replaceRegularFile(fixture.workingPath, bytes, 0o600)
+    await expect(pending).rejects.toThrow('flush failed')
+    expect(link).not.toHaveBeenCalled()
+    expect(rename).not.toHaveBeenCalled()
+    expect(await readFile(fixture.workingPath, 'utf8')).toBe('alpha')
+  })
+
   it('resolves only absolute Working DOCX paths inside the project', async () => {
     const fixture = await fileFixture()
     expect(fixture.paths.workingPath).toBe(fixture.workingPath)
@@ -87,16 +120,27 @@ describe('commit-service file operations', () => {
       .rejects.toThrow('invalid document snapshot SHA-256')
   })
 
-  it('rejects a corrupt existing object during publication and direct reads', async () => {
+  it('rejects corrupt snapshot reads and repairs publication from verified bytes', async () => {
     const fixture = await fileFixture()
     const bytes = Buffer.from('snapshot')
     const digest = sha256Bytes(bytes)
     const snapshot = await storeSnapshot(fixture.paths, bytes, digest)
     await writeFile(snapshot, 'corrupt', 'utf8')
-    await expect(storeSnapshot(fixture.paths, bytes, digest))
-      .rejects.toThrow('does not match content address')
     await expect(readSnapshot(fixture.paths, snapshot, digest))
       .rejects.toThrow('does not match recorded SHA-256')
+    expect(await storeSnapshot(fixture.paths, bytes, digest)).toBe(snapshot)
+    expect((await readSnapshot(fixture.paths, snapshot, digest)).bytes).toEqual(bytes)
+  })
+
+  it('does not repair a snapshot symlink or replace its target', async () => {
+    const fixture = await fileFixture()
+    const bytes = Buffer.from('snapshot')
+    const digest = sha256Bytes(bytes)
+    const snapshot = await storeSnapshot(fixture.paths, bytes, digest)
+    await rm(snapshot)
+    await symlink(fixture.workingPath, snapshot, 'file')
+    await expect(storeSnapshot(fixture.paths, bytes, digest)).rejects.toThrow('non-symlink regular file')
+    expect(await readFile(fixture.workingPath, 'utf8')).toBe('alpha')
   })
 
   it('atomically replaces regular files and refuses a directory target', async () => {

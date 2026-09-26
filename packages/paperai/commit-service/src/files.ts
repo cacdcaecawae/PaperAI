@@ -5,6 +5,7 @@ import {
   link,
   lstat,
   mkdir,
+  open,
   readFile,
   rename,
   rm,
@@ -23,6 +24,17 @@ import { PaperCommitError } from './errors.ts'
 
 const PRIVATE_FILE_MODE = 0o600
 const PRIVATE_DIRECTORY_MODE = 0o700
+
+async function syncDirectory(path: string): Promise<void> {
+  // Node cannot open Windows directories for fsync; file data is still flushed before publication.
+  if (process.platform === 'win32') return
+  const handle = await open(path, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
 
 /** Immutable bytes and metadata captured from one regular file. */
 export interface FileImage {
@@ -164,16 +176,31 @@ export async function storeSnapshot(
     throw new PaperCommitError('SNAPSHOT_CORRUPT', 'candidate bytes do not match their proposed content address')
   }
   const destination = snapshotPath(paths, digest)
-  await mkdir(dirname(destination), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  const created = await mkdir(dirname(destination), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  if (created !== undefined) {
+    for (let directory = dirname(destination); isContained(paths.projectRoot, directory); directory = dirname(directory)) {
+      await syncDirectory(directory)
+      if (directory === paths.projectRoot) break
+    }
+  }
   const temporary = `${destination}.${randomBytes(8).toString('hex')}.tmp`
-  await writeFile(temporary, bytes, { flag: 'wx', mode: PRIVATE_FILE_MODE })
   try {
+    await writeFile(temporary, bytes, { flag: 'wx', mode: PRIVATE_FILE_MODE, flush: true })
     try {
       await link(temporary, destination)
     } catch (cause) {
       /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
       if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause
+      try {
+        await verifySnapshot(destination, digest)
+      } catch (error) {
+        if (!(error instanceof PaperCommitError) || error.code !== 'SNAPSHOT_CORRUPT') throw error
+        const existing = await lstat(destination)
+        if (!existing.isFile() || existing.isSymbolicLink()) throw error
+        await rename(temporary, destination)
+      }
     }
+    await syncDirectory(dirname(destination))
   } finally {
     await rm(temporary, { force: true })
   }
@@ -236,8 +263,9 @@ export async function replaceRegularFile(
   }
   const temporary = `${filePath}.${randomBytes(8).toString('hex')}.paperai.tmp`
   try {
-    await writeFile(temporary, bytes, { flag: 'wx', mode })
+    await writeFile(temporary, bytes, { flag: 'wx', mode, flush: true })
     await rename(temporary, filePath)
+    await syncDirectory(dirname(filePath))
   } finally {
     await rm(temporary, { force: true })
   }

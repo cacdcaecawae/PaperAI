@@ -210,12 +210,18 @@ export class PaperCommitService extends Service {
     super(ctx, 'paperCommits')
   }
 
-  /** Recover every durable publication before the service accepts document work. */
+  /** Recover retained publications; an unresolved journal blocks only its document's FIFO. */
   protected async [Service.init](): Promise<void> {
     const publications = this.dependencies.paperRepository.listCommitPublications()
       .map(publication => structuredClone(publication))
       .sort((left, right) => left.documentId.localeCompare(right.documentId))
-    for (const publication of publications) await this.recoverPublication(publication)
+    for (const publication of publications) {
+      try {
+        await this.recoverPublication(publication)
+      } catch (error) {
+        this.ctx.logger.warn(`document '${publication.documentId}' publication recovery remains pending: ${String(error)}`)
+      }
+    }
   }
 
   /**

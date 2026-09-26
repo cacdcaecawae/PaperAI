@@ -1532,7 +1532,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Remove a Working import after its root-commit attempt has settled without a commit. Cleanup is non-cancellable, deletes only service-published copies, and removes the document record last so a failed attempt can be retried with the same identity.',
         parameters: [{ name: 'documentId', description: 'identity returned by a successful {@link importDocument} call.' }],
         returns: 'after the record, semantic nodes, immutable copy, and Working copy are absent.',
-        throws: ['PaperDocumentError when the record is not a Working import or has acquired a head commit.'],
+        throws: ['PaperDocumentError when the record is not a Working import, has a head, or retains a publication journal.'],
       },
       {
         signature: 'listDocuments(projectId: ProjectId, role?: DocumentRole): DocumentRecord[]',
