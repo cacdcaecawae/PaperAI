@@ -93,6 +93,7 @@ async function ensureDirectory(path: string, journal: FilesystemJournal): Promis
   } catch (error) {
     if (isErrno(error, 'ENOENT')) {
       const parent = dirname(path)
+      if (parent === path) throw error
       await ensureDirectory(parent, journal)
       await ensureDirectory(path, journal)
       return
