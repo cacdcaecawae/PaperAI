@@ -59,6 +59,8 @@ interface CreatePaperProjectResult {
 
 文件系统、Workspace 或 Repository 的致命失败只会删除本次创建且内容未变的文件和空目录。Repository 发布失败时，本次新注册的 Workspace 也会删除。服务从不递归删除已有内容；回滚本身失败时，会同时报告初始错误和清理错误。
 
+文件系统根目录不可用时，包括已断开的 Windows 驱动器或网络共享，初始化会返回原始文件系统错误。串行队列仍可处理后续项目操作。
+
 项目发布后，服务通过可选的 `ctx.subprocess` 以精确 argv、无 Shell 的方式执行 Git。目录处于已有仓库中时直接复用，否则在项目根目录执行 `git init --initial-branch <名称>`。Subprocess Provider 或 Git 缺失、超时、输出超限或初始化非零退出时，返回 `git.status: 'degraded'`，但保留已经可用的项目。
 
 ## 配置

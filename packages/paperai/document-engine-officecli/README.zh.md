@@ -20,6 +20,8 @@
 
 转换器在 Windows 上默认使用 `powershell.exe`。`legacyDocPowerShellCommand` 可指定其他可执行文件名称或绝对路径，也可设为 `false` 或空字符串以禁用 `.doc` 规范化。`legacyDocTimeoutMs` 默认 120000，`legacyDocOutputMaxBytes` 默认每个流 1048576，`legacyDocTerminateGraceMs` 默认 5000；三个限制都必须是正安全整数。
 
+转换器在打开源文件前，将本次 Word 实例绑定到 Windows 作业对象。即使 COM 调用挂起，关闭或终止 PowerShell 也会释放该实例；其他 Word 实例不受影响。需要打开密码的文档会直接失败，不显示交互提示；文档关闭失败后仍会尝试退出 Word。
+
 `cleanupTimeoutMs` 默认为 5000，且必须是正安全整数。每次独立尽力 `close` 命令受该值约束。`residentIdleMs` 默认为 2000，且必须是正安全整数：最后一次操作之后常驻文档保持多久空闲再关闭。文档常驻期间，其他程序可以读取并就地写入该文件，但不能重命名、替换或删除它，因此这个窗口保持很短，引擎在自己替换或删除文件前也会先释放。
 
 取消、超时、输出截断、非零转换失败以及缺失或无效的 DOCX 输出会抛出带稳定 `code` 的 `LegacyDocConversionError`。每次未成功的转换尝试都会删除生成的目标；已存在的目标会在进程启动前被拒绝且不会被覆盖。若清理失败，错误会同时保留主要转换失败和清理失败。
