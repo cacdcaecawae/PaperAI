@@ -353,12 +353,12 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 
 ```ts cordis-catalog
 /**
- * Lazily initialize the selected Workspace's project and describe it: the
- * template set it writes against and its tracked documents.
+ * Describe a Workspace without initializing a project or changing its files.
+ * An uninitialized Workspace has no template decision or tracked documents.
  * @param request - Workspace whose project should be described.
- * @param signal - optional cancellation signal for project initialization.
+ * @param signal - optional cancellation signal for the read.
  * @returns the project name, template decision, and document rows.
- * @throws when the Workspace or its PaperAI project cannot be resolved.
+ * @throws when the Workspace directory is unavailable or its registered project has a different root.
  */
 @Remote('overview') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>
 

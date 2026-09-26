@@ -4,7 +4,7 @@
 
 基于 DSH 插件和 slot 的 PaperAI 浏览器工作台。左侧显示项目和受管理的 Word 文档；文档默认进入写作模式，可明确切换到右侧 Agent 协作。写作模式和缩放按 Session 记忆。产品通过 `ctx.layout.configure` 安装 `PAPERAI_LAYOUT_CONFIG`：`detailsPosition: start`、`centerMin: 360`、`detailsMin: 480`、`detailsDefault: 860`、`detailsMax: 1280`，允许当前空白 Session 显示文档，两栏无法并排时聚焦文档。进入协作、让 Agent 修复检查问题或引用选区，都会关闭文档面板并显示对话，空间足够时文档仍在旁边。
 
-本插件贡献文档列表和项目体检、项目起始页、模板设置页和 `paperai` 文档视图。Workspace 导航、对话、权限控制和模型选择仍由 DSH 提供。注册通过 `slots.inject()` 跟随 slot 声明者的生命周期。颜色和共享控件来自 DSH。
+本插件贡献文档列表和项目体检、项目起始页、模板设置页和 `paperai` 文档视图。Workspace 导航、对话、权限控制和模型选择仍由 DSH 提供。注册通过 `slots.inject()` 跟随 slot 声明者的生命周期。颜色和共享控件来自 DSH。工作区导航与已挂载视图只读取概览；只有明确选择模板或通过 [Host 服务](../../paperai/workbench-service/README.zh.md)创建文档时才初始化项目。
 
 起始页创建或打开项目目录，以模板、文档数和最近编辑时间标识项目，列出已追踪文档及其类型，并通过一个菜单从项目模板格式新建或自由导入 Word。同名文档显示文件名和文档 id 简写，提示中保留完整工作路径和标题。模板选择由用户主动打开；对话框与设置页共用模板库存储，替换前说明影响，移除格式或模板集前确认。[Host 服务](../../paperai/workbench-service/README.zh.md)拥有导入限制、模板语义和文档操作。
 

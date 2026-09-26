@@ -2172,6 +2172,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
         try {
+          if (workspace !== undefined && !(await stat(workspace.path)).isDirectory()) {
+            throw new Error(`workspace root "${workspace.path}" is not a directory`)
+          }
           await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {

@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
-PaperAI 工作台的 Host Remote，作为产品层接入固定版本的 DeepSeek Harness 客户端。它会把所选 DSH 工作区幂等初始化为 PaperAI 项目，描述该项目（选用的模板与被追踪的文档），投影只读 OfficeCLI HTML 及每个语义节点的当前纯文本，并让每次保存、模板变更或回退都经过 `ctx.paperCommits`。
+PaperAI 工作台的 Host Remote，作为产品层接入固定版本的 DeepSeek Harness 客户端。它描述已有项目，投影只读 OfficeCLI HTML 及每个语义节点的当前纯文本，并让每次保存、模板变更或回退都经过 `ctx.paperCommits`。
+
+`overview()` 和 `open()` 从不初始化或修复项目。未初始化工作区的概览采用工作区标题、未选择的模板和空文档列表；打开文档要求项目已经存在。只有 `setProjectTemplate()`、`importDocument()` 和 `createFromTemplate()` 可以初始化项目，且创建文件前要求工作区目录已经存在。已登记项目直接复用，不重写上下文文件。目录不存在时拒绝操作，不重新创建。[初始化决策](../../../.agents/notes/implemented/architecture/2026-09-26-paperai-explicit-project-initialization.zh.md) 记录了这一归属规则。
 
 `agentDiagnostics()` 读取可选 ACP provider 的缓存观察，未组装 provider 时返回空名单。`probeAgent()` 请求显式且有时限的初始化，未组装 provider 时失败。`inspectProject()` 只读已登记项目，不创建上下文文件或初始化项目。`recoverWorking()` 验证方案中的文档属于该 Workspace，再交由提交服务处理并返回新扫描。诊断传输类型通过 `/types` 重导出，不将 Host 实现引入浏览器。 `captureExternal()` 把在 PaperAI 之外被修改的工作文件记为一个新版本，并重新读取报告。
 

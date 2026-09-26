@@ -1264,10 +1264,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: '@Remote(\'overview\') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>',
-        description: 'Lazily initialize the selected Workspace\'s project and describe it: the template set it writes against and its tracked documents.',
-        parameters: [{ name: 'request', description: 'Workspace whose project should be described.' }, { name: 'signal', description: 'optional cancellation signal for project initialization.' }],
+        description: 'Describe a Workspace without initializing a project or changing its files. An uninitialized Workspace has no template decision or tracked documents.',
+        parameters: [{ name: 'request', description: 'Workspace whose project should be described.' }, { name: 'signal', description: 'optional cancellation signal for the read.' }],
         returns: 'the project name, template decision, and document rows.',
-        throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
+        throws: ['when the Workspace directory is unavailable or its registered project has a different root.'],
       },
       {
         signature: '@Remote(\'agentDiagnostics\') agentDiagnostics(): readonly PaperAIAgentDiagnostic[]',
