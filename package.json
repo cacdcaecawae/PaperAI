@@ -160,7 +160,7 @@
     "@types/mdast": "^4.0.4",
     "@types/node": "^22.20.0",
     "@types/spdx-expression-parse": "^4.0.0",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.11",
     "@yarnpkg/cli-dist": "4.17.1",
     "eslint-plugin-sonarjs": "^4.1.0",
     "execa": "^10.0.0",
@@ -185,6 +185,6 @@
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.11"
   }
 }

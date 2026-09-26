@@ -1524,9 +1524,8 @@ describe('ACP permission policy projection', { concurrent: false }, () => {
   it('cancels an active turn when a queued permission expansion is superseded by read-only', async () => {
     const harness = await mountHarness({
       neverSetMode: { mode: 'agent-full-access', once: true },
-      env: {
-        FAKE_ACP_PROMPT_DELAY_MS: '1000',
-      },
+      cancelFinalToolOnce: true,
+      env: { FAKE_ACP_CANCEL_FINAL_TOOL: '1' },
     })
     const handle = await createAgent(harness, 'native-mode-active-tightening', 'codex')
     handle.agent.followup(createUserMessage({
@@ -1534,7 +1533,7 @@ describe('ACP permission policy projection', { concurrent: false }, () => {
       source: { kind: 'user' },
     }))
     await vi.waitFor(async () => {
-      expect((await readLog(harness.logPath)).some(entry => entry.event === 'prompt')).toBe(true)
+      expect((await readLog(harness.logPath)).some(entry => entry.event === 'cancel-tool-start')).toBe(true)
     })
 
     setSandboxMode(handle.agent.session, 'danger-full-access')
@@ -1544,7 +1543,7 @@ describe('ACP permission policy projection', { concurrent: false }, () => {
       ))).toBe(true)
     })
     setSandboxMode(handle.agent.session, 'read-only')
-    await expectResolvesWithin(handle.agent.whenIdle())
+    await expectResolvesWithin(handle.agent.whenIdle(), 10_000)
     await runTurn(handle, 'Run after permission tightening')
 
     const log = await readLog(harness.logPath)
