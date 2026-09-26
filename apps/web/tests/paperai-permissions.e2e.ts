@@ -14,6 +14,7 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { DocumentCommitId, DocumentId, DocumentNodeId } from '@paperai/domain'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@paperai/workbench-service'
+import { DocumentId } from '@paperai/domain'
 import {
   assertFixtureInventory, compareOrRefreshGolden, captureStableAria,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
@@ -1431,6 +1432,36 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await page.getByRole('button', { name: '显示 Agent 协作', exact: true }).click()
   }, 180_000)
 
+  it('refuses exports over another document source, working file, or historical snapshot', async () => {
+    for (const name of ['Export safety', 'Export sibling']) {
+      await scaffold.ctx.paperaiWorkbench.importDocument({
+        workspaceId, sessionId: SessionId('export-safety-import'), fileName: `${name}.docx`,
+        contentBase64: fixtureDocxBase64(false, [name]), name,
+      })
+    }
+    const overview = await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })
+    const selected = overview.documents.find(row => row.fileName === 'Export safety.docx')!
+    const other = overview.documents.find(row => row.fileName === 'Export sibling.docx')!
+    const document = scaffold.ctx.paperDocuments.readDocument(DocumentId(selected.documentId))!.document
+    const sibling = scaffold.ctx.paperDocuments.readDocument(DocumentId(other.documentId))!.document
+    const history = scaffold.ctx.paperCommits.listHistory(sibling.id)
+    const outcomes: string[] = []
+    for (const [kind, destinationPath] of [
+      ['source', sibling.immutableSourcePath],
+      ['working', sibling.workingPath],
+      ['history', history[0]!.snapshotPath],
+    ] as const) {
+      const before = await readFile(destinationPath)
+      const failure = await scaffold.ctx.paperExports.exportDocument({
+        document, destinationPath, mode: 'draft-export', actor: { kind: 'human', name: 'User', client: 'paperai' },
+      }).catch((error: unknown) => error)
+      expect(failure).toMatchObject({ code: 'DESTINATION_PROTECTED' })
+      expect(await readFile(destinationPath)).toEqual(before)
+      outcomes.push(`${kind}: DESTINATION_PROTECTED; original bytes retained`)
+    }
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'export-protected.expected.md'), outcomes.join('\n'), MODE)
+  }, 90_000)
+
   it('exports the saved writing document to the displayed project path', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-draft-export'))
     await sidebarDocument('Paragraph editing.docx').click()
@@ -1611,6 +1642,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'cancel-before-prompt.expected.md',
       'cancel-final-tool.expected.md',
       'draft-export.expected.md',
+      'export-protected.expected.md',
       'external-update.expected.md',
       'external-format-conflict.expected.md',
       'deleted-paragraph-draft.expected.md',

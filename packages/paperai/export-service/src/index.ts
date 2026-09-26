@@ -38,6 +38,7 @@ import type {
 } from '@paperai/mcp'
 import type PaperMcpService from '@paperai/mcp'
 import type PaperTemplateService from '@paperai/template-service'
+import type PaperProjectService from '@paperai/project-service'
 import type {
   ExportDocumentRequest,
   ExportDocumentResult,
@@ -61,6 +62,7 @@ type ExportContext = Context & {
   readonly paperCommits: PaperCommitService
   readonly paperMcp: PaperMcpService
   readonly paperTemplates: PaperTemplateService
+  readonly paperProjects: PaperProjectService
 }
 
 /** Export-service deployment limits and publication policy. */
@@ -206,6 +208,7 @@ async function resolveDestination(
   protectedPaths: readonly string[],
   overwriteExisting: boolean,
   writableRoot: string | undefined,
+  exportRoot: string,
 ): Promise<string> {
   const trimmed = destinationPath.trim()
   if (!isAbsolute(trimmed) || extname(trimmed).toLocaleLowerCase('en-US') !== '.docx') {
@@ -215,6 +218,15 @@ async function resolveDestination(
     )
   }
   const parentPath = await realpath(dirname(trimmed))
+  const relativeParent = relative(pathKey(exportRoot), pathKey(parentPath))
+  if (pathKey(await realpath(exportRoot)) !== pathKey(exportRoot)
+    || (relativeParent !== '' && (relativeParent === '..' || relativeParent.startsWith(`..${sep}`)
+      || isAbsolute(relativeParent)))) {
+    throw new PaperExportError(
+      'DESTINATION_PROTECTED',
+      `export destination must remain inside the project's exports directory '${exportRoot}'`,
+    )
+  }
   const parent = await lstat(parentPath)
   if (!parent.isDirectory()) {
     throw new PaperExportError('DESTINATION_INVALID', `export parent '${parentPath}' is not a directory`)
@@ -250,6 +262,7 @@ async function publishSnapshot(
   protectedPaths: readonly string[],
   config: ResolvedConfig,
   writableRoot: string | undefined,
+  exportRoot: string,
 ): Promise<string> {
   const snapshotMetadata = await lstat(commit.snapshotPath)
   if (!snapshotMetadata.isFile() || snapshotMetadata.isSymbolicLink()) {
@@ -266,6 +279,7 @@ async function publishSnapshot(
     [...protectedPaths, commit.snapshotPath],
     config.overwriteExisting,
     writableRoot,
+    exportRoot,
   )
   const temporaryPath = join(
     dirname(destination),
@@ -293,6 +307,7 @@ async function publishSnapshot(
       [...protectedPaths, commit.snapshotPath],
       config.overwriteExisting,
       writableRoot,
+      exportRoot,
     )
     await rename(temporaryPath, destination)
     published = true
@@ -309,7 +324,7 @@ function milestoneLabel(mode: ExportDocumentRequest['mode'], outputPath: string)
 
 /** Template-checked atomic publisher and MCP export provider. */
 export class PaperExportService extends Service implements PaperMcpExportAdapter {
-  static inject = ['paperCommits', 'paperMcp', 'paperTemplates']
+  static inject = ['paperCommits', 'paperMcp', 'paperTemplates', 'paperProjects']
   static Config: z<Config> = z.object({
     maxExportBytes: z.number().default(DEFAULT_MAX_EXPORT_BYTES),
     overwriteExisting: z.boolean().default(true),
@@ -333,7 +348,8 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
 
   /**
    * Check template requirements, record an optimistic milestone, and publish
-   * its immutable snapshot. Draft findings are returned without blocking;
+   * its immutable snapshot inside the owning project's exports directory.
+   * Draft findings are returned without blocking;
    * delivery errors reject before any commit or output is created.
    * Cancellation is observed before milestone publication. Once the commit
    * completes, file publication reaches success or cleanup before settlement.
@@ -372,6 +388,9 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
 
   private async exportNow(request: ResolvedExportRequest): Promise<ExportDocumentResult & PaperMcpExportResult> {
     request.signal?.throwIfAborted()
+    const project = this.dependencies.paperProjects.get(request.document.projectId)
+    if (project === undefined) throw new Error(`unknown PaperAI project '${request.document.projectId}'`)
+    const exportRoot = join(await realpath(project.rootPath), 'exports')
     const report = await this.dependencies.paperTemplates.check({
       documentId: request.document.id,
       mode: request.mode,
@@ -388,6 +407,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
       [request.document.immutableSourcePath, request.document.workingPath],
       this.config.overwriteExisting,
       request.writableRoot,
+      exportRoot,
     )
     request.signal?.throwIfAborted()
     const label = milestoneLabel(request.mode, destination)
@@ -407,6 +427,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
       [request.document.immutableSourcePath, request.document.workingPath],
       this.config,
       request.writableRoot,
+      exportRoot,
     )
     const retainedReport = structuredClone(report)
     return {

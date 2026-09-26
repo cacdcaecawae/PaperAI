@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-26-paperai-output-and-tunnel-confinement.md
+2026-09-26-paperai-output-and-tunnel-confinement.md: b139b327da014f066eb81f0f43064da2198f7f4a
+2026-09-26-paperai-output-and-tunnel-confinement.zh.md: b2f66e9b2897f4c8f4e334b4ea47b4398760cf64

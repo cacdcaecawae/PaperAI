@@ -3419,7 +3419,7 @@ export interface Config {
 
 ## `@paperai/export-service`
 
-需要：`paperCommits` · `paperMcp` · `paperTemplates`
+需要：`paperCommits` · `paperMcp` · `paperTemplates` · `paperProjects`
 
 ```ts config-catalog
 /** Export-service deployment limits and publication policy. */
@@ -3431,7 +3431,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/export-service/src/index.ts:67`](../packages/paperai/export-service/src/index.ts)
+来源：[`packages/paperai/export-service/src/index.ts:69`](../packages/paperai/export-service/src/index.ts)
 
 <a id="paperaimcp"></a>
 

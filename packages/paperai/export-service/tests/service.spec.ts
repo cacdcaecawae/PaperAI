@@ -30,7 +30,7 @@ async function createHarness(...args: Parameters<typeof exportHarness>): Promise
 describe('PaperExportService', () => {
   it('exports a draft with findings from the new immutable milestone snapshot', async () => {
     const harness = await createHarness()
-    const outputPath = join(harness.root, 'draft.docx')
+    const outputPath = join(harness.outputRoot, 'draft.docx')
     const suppliedGate = report(harness.document.id, 'draft-export', true)
     const result = await harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -68,10 +68,10 @@ describe('PaperExportService', () => {
     const outside = await mkdtemp(join(tmpdir(), 'paperai-export-outside-'))
     try {
       // `exports` inside the workspace is a directory link to a place outside it.
-      await symlink(outside, join(harness.root, 'exports'), 'junction')
+      await symlink(outside, join(harness.outputRoot, 'exports'), 'junction')
       const escape = harness.ctx.paperExports.exportDocument({
         document: harness.document,
-        destinationPath: join(harness.root, 'exports', 'escape.docx'),
+        destinationPath: join(harness.outputRoot, 'exports', 'escape.docx'),
         writableRoot: harness.root,
         mode: 'draft-export',
         actor: humanActor,
@@ -79,35 +79,34 @@ describe('PaperExportService', () => {
       })
       await expect(escape).rejects.toMatchObject({
         name: 'PaperExportError',
-        code: 'DESTINATION_OUTSIDE_WORKSPACE',
+        code: 'DESTINATION_PROTECTED',
       })
       expect(await readdir(outside)).toEqual([])
       expect(harness.submit).not.toHaveBeenCalled()
 
-      // A link that stays inside the root is fine, and so is an unconfined export.
-      await mkdir(join(harness.root, 'delivery'))
-      await symlink(join(harness.root, 'delivery'), join(harness.root, 'published'), 'junction')
+      // Directory links may stay inside exports, but cannot escape without a writableRoot either.
+      await mkdir(join(harness.outputRoot, 'delivery'))
+      await symlink(join(harness.outputRoot, 'delivery'), join(harness.outputRoot, 'published'), 'junction')
       const inside = await harness.ctx.paperExports.exportDocument({
         document: harness.document,
-        destinationPath: join(harness.root, 'published', 'inside.docx'),
+        destinationPath: join(harness.outputRoot, 'published', 'inside.docx'),
         writableRoot: harness.root,
         mode: 'draft-export',
         actor: humanActor,
         gate: report(harness.document.id, 'draft-export', true),
       })
-      expect(inside.outputPath).toBe(join(await realpath(join(harness.root, 'delivery')), 'inside.docx'))
-      const unconfined = await harness.ctx.paperExports.exportDocument({
+      expect(inside.outputPath).toBe(join(await realpath(join(harness.outputRoot, 'delivery')), 'inside.docx'))
+      await expect(harness.ctx.paperExports.exportDocument({
         document: harness.document,
-        destinationPath: join(harness.root, 'exports', 'unconfined.docx'),
+        destinationPath: join(harness.outputRoot, 'exports', 'unconfined.docx'),
         mode: 'draft-export',
         actor: humanActor,
         gate: report(harness.document.id, 'draft-export', true),
-      })
-      expect(unconfined.outputPath).toBe(join(await realpath(outside), 'unconfined.docx'))
+      })).rejects.toMatchObject({ code: 'DESTINATION_PROTECTED' })
       await expect(harness.ctx.paperExports.exportDocument({
         document: harness.document,
-        destinationPath: join(harness.root, 'missing-root.docx'),
-        writableRoot: join(harness.root, 'does-not-exist'),
+        destinationPath: join(harness.outputRoot, 'missing-root.docx'),
+        writableRoot: join(harness.outputRoot, 'does-not-exist'),
         mode: 'draft-export',
         actor: humanActor,
         gate: report(harness.document.id, 'draft-export', true),
@@ -127,15 +126,15 @@ describe('PaperExportService', () => {
       const sibling = join(dirname(harness.root), swapped)
       await mkdir(sibling)
       try {
-        await symlink(sibling, join(harness.root, 'exports'), 'junction')
+        await symlink(sibling, join(harness.outputRoot, 'exports'), 'junction')
         await expect(harness.ctx.paperExports.exportDocument({
           document: harness.document,
-          destinationPath: join(harness.root, 'exports', 'escape.docx'),
+          destinationPath: join(harness.outputRoot, 'exports', 'escape.docx'),
           writableRoot: harness.root,
           mode: 'draft-export',
           actor: humanActor,
           gate: report(harness.document.id, 'draft-export', true),
-        })).rejects.toMatchObject({ code: 'DESTINATION_OUTSIDE_WORKSPACE' })
+        })).rejects.toMatchObject({ code: 'DESTINATION_PROTECTED' })
         expect(await readdir(sibling)).toEqual([])
         expect(harness.submit).not.toHaveBeenCalled()
       } finally {
@@ -146,7 +145,7 @@ describe('PaperExportService', () => {
 
   it('blocks a formal delivery before creating a commit or output', async () => {
     const harness = await createHarness({ blocked: true })
-    const outputPath = join(harness.root, 'delivery.docx')
+    const outputPath = join(harness.outputRoot, 'delivery.docx')
 
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -165,7 +164,7 @@ describe('PaperExportService', () => {
 
   it('preserves complete Agent provenance and supports an unborn document head', async () => {
     const harness = await createHarness({ unborn: true })
-    const outputPath = join(harness.root, 'delivery.docx')
+    const outputPath = join(harness.outputRoot, 'delivery.docx')
     const result = await harness.ctx.paperExports.exportDocument({
       document: harness.document,
       destinationPath: outputPath,
@@ -188,7 +187,7 @@ describe('PaperExportService', () => {
     const controller = new AbortController()
     await harness.ctx.paperExports.exportDocument({
       document: harness.document,
-      destinationPath: join(harness.root, 'signaled.docx'),
+      destinationPath: join(harness.outputRoot, 'signaled.docx'),
       mode: 'draft-export',
       actor: humanActor,
       signal: controller.signal,
@@ -209,7 +208,7 @@ describe('PaperExportService', () => {
     const document = structuredClone(harness.document)
     const exporting = harness.ctx.paperExports.exportDocument({
       document,
-      destinationPath: join(harness.root, 'retained.docx'),
+      destinationPath: join(harness.outputRoot, 'retained.docx'),
       mode: 'draft-export',
       actor,
     })
@@ -232,7 +231,7 @@ describe('PaperExportService', () => {
         throw error
       },
     })
-    const outputPath = join(harness.root, 'conflict.docx')
+    const outputPath = join(harness.outputRoot, 'conflict.docx')
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
       destinationPath: outputPath,
@@ -247,7 +246,7 @@ describe('PaperExportService', () => {
     ['absolute.txt', 'DESTINATION_INVALID'],
   ])('rejects invalid destination %s', async (name, code) => {
     const harness = await createHarness()
-    const destinationPath = name === 'absolute.txt' ? join(harness.root, name) : name
+    const destinationPath = name === 'absolute.txt' ? join(harness.outputRoot, name) : name
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
       destinationPath,
@@ -268,9 +267,39 @@ describe('PaperExportService', () => {
     expect(harness.submit).not.toHaveBeenCalled()
   })
 
+  it.each(['documents/source/other.docx', 'documents/working/other.docx',
+    '.paperai/objects/docx/ab/old.docx', 'templates/template.docx'])('protects %s from every export caller', async (path) => {
+    const harness = await createHarness()
+    const destinationPath = join(harness.root, path)
+    await mkdir(dirname(destinationPath), { recursive: true })
+    await writeFile(destinationPath, 'retained bytes')
+    await expect(harness.ctx.paperExports.exportDocument({
+      document: harness.document,
+      destinationPath,
+      mode: 'draft-export',
+      actor: agentActor,
+    })).rejects.toMatchObject({ code: 'DESTINATION_PROTECTED' })
+    expect(await contents(destinationPath)).toBe('retained bytes')
+    expect(harness.submit).not.toHaveBeenCalled()
+  })
+
+  it('refuses an exports directory redirected to managed document storage', async () => {
+    const harness = await createHarness()
+    await rm(harness.outputRoot, { recursive: true })
+    await symlink(dirname(harness.workingPath), harness.outputRoot, 'junction')
+    await expect(harness.ctx.paperExports.exportDocument({
+      document: harness.document,
+      destinationPath: join(harness.outputRoot, 'new.docx'),
+      mode: 'draft-export',
+      actor: agentActor,
+    })).rejects.toMatchObject({ code: 'DESTINATION_PROTECTED' })
+    expect(await readdir(dirname(harness.workingPath))).toEqual(['proposal.docx'])
+    expect(harness.submit).not.toHaveBeenCalled()
+  })
+
   it('rejects an existing hard link to the Working DOCX', async () => {
     const harness = await createHarness()
-    const destinationPath = join(harness.root, 'working-link.docx')
+    const destinationPath = join(harness.outputRoot, 'working-link.docx')
     await link(harness.workingPath, destinationPath)
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -286,7 +315,7 @@ describe('PaperExportService', () => {
     const document = { ...harness.document, immutableSourcePath: '\0protected.docx' }
     await expect(harness.ctx.paperExports.exportDocument({
       document,
-      destinationPath: join(harness.root, 'filesystem-error.docx'),
+      destinationPath: join(harness.outputRoot, 'filesystem-error.docx'),
       mode: 'draft-export',
       actor: humanActor,
     })).rejects.toThrow()
@@ -295,7 +324,7 @@ describe('PaperExportService', () => {
 
   it('requires a directory parent and a regular destination', async () => {
     const harness = await createHarness()
-    const fileParent = join(harness.root, 'not-a-directory')
+    const fileParent = join(harness.outputRoot, 'not-a-directory')
     await writeFile(fileParent, 'file')
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -304,7 +333,7 @@ describe('PaperExportService', () => {
       actor: humanActor,
     })).rejects.toMatchObject({ code: 'DESTINATION_INVALID' })
 
-    const directoryTarget = join(harness.root, 'directory.docx')
+    const directoryTarget = join(harness.outputRoot, 'directory.docx')
     await mkdir(directoryTarget)
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -317,7 +346,7 @@ describe('PaperExportService', () => {
 
   it('replaces an explicitly selected regular DOCX atomically by default', async () => {
     const harness = await createHarness()
-    const outputPath = join(harness.root, 'replace.docx')
+    const outputPath = join(harness.outputRoot, 'replace.docx')
     await writeFile(outputPath, 'old output')
     await harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -330,7 +359,7 @@ describe('PaperExportService', () => {
 
   it('can reject replacement through configuration', async () => {
     const harness = await createHarness({ config: { overwriteExisting: false } })
-    const outputPath = join(harness.root, 'existing.docx')
+    const outputPath = join(harness.outputRoot, 'existing.docx')
     await writeFile(outputPath, 'old output')
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
@@ -347,7 +376,7 @@ describe('PaperExportService', () => {
       config: { maxExportBytes: 3 },
       snapshotBytes: new TextEncoder().encode('four'),
     })
-    const outputPath = join(harness.root, 'too-large.docx')
+    const outputPath = join(harness.outputRoot, 'too-large.docx')
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
       destinationPath: outputPath,
@@ -360,7 +389,7 @@ describe('PaperExportService', () => {
 
   it('rejects a non-file snapshot before creating an output', async () => {
     const harness = await createHarness({ snapshotPath: '' })
-    const snapshotDirectory = join(harness.root, 'snapshot-directory')
+    const snapshotDirectory = join(harness.outputRoot, 'snapshot-directory')
     await mkdir(snapshotDirectory)
     harness.submit.mockResolvedValueOnce({
       id: DocumentCommitId('commit-directory'),
@@ -378,7 +407,7 @@ describe('PaperExportService', () => {
     })
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
-      destinationPath: join(harness.root, 'bad-snapshot.docx'),
+      destinationPath: join(harness.outputRoot, 'bad-snapshot.docx'),
       mode: 'draft-export',
       actor: humanActor,
     })).rejects.toMatchObject({ code: 'SNAPSHOT_CORRUPT' })
@@ -400,7 +429,7 @@ describe('PaperExportService', () => {
       operations: [],
       createdAt: '2026-08-28T00:01:00.000Z',
     })
-    const outputPath = join(harness.root, 'corrupt.docx')
+    const outputPath = join(harness.outputRoot, 'corrupt.docx')
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
       destinationPath: outputPath,
@@ -418,7 +447,7 @@ describe('PaperExportService', () => {
     immediate.abort(new Error('cancelled'))
     await expect(harness.ctx.paperExports.exportDocument({
       document: harness.document,
-      destinationPath: join(harness.root, 'cancelled.docx'),
+      destinationPath: join(harness.outputRoot, 'cancelled.docx'),
       mode: 'draft-export',
       actor: humanActor,
       signal: immediate.signal,
@@ -433,14 +462,14 @@ describe('PaperExportService', () => {
     })
     const first = harness.ctx.paperExports.exportDocument({
       document: harness.document,
-      destinationPath: join(harness.root, 'queued.docx'),
+      destinationPath: join(harness.outputRoot, 'queued.docx'),
       mode: 'draft-export',
       actor: humanActor,
     })
     const queued = new AbortController()
     const second = harness.ctx.paperExports.exportDocument({
       document: harness.document,
-      destinationPath: join(harness.root, 'queued.docx'),
+      destinationPath: join(harness.outputRoot, 'queued.docx'),
       mode: 'draft-export',
       actor: humanActor,
       signal: queued.signal,

@@ -15,12 +15,12 @@ export type PaperExportMode = Extract<GateMode, 'draft-export' | 'delivery-expor
 export interface ExportDocumentRequest {
   /** Document state observed before the export milestone is submitted. */
   readonly document: DocumentRecord
-  /** Absolute `.docx` path selected by the caller. */
+  /** Absolute `.docx` path inside the owning project's exports directory. */
   readonly destinationPath: string
   /**
    * Directory the published file must resolve inside, checked on real paths
    * at publish time so a link under it cannot carry the file elsewhere;
-   * absent leaves the destination unconfined.
+   * absent retains the project's exports-directory restriction.
    */
   readonly writableRoot?: string
   /** Draft exports retain findings; delivery exports reject blocking errors. */

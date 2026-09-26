@@ -1,9 +1,63 @@
 import { PassThrough } from 'node:stream'
+import { createServer } from 'node:http'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import { describe, expect, it } from 'vitest'
-import { forwardedPort, sshLaunch } from '../src/ssh.ts'
+import { forwardedPort, isolateSshMcp, sshLaunch } from '../src/ssh.ts'
 
 describe('ACP OpenSSH transport', () => {
+  it('requires one loopback HTTP descriptor with its own bearer credential', async () => {
+    const empty = await isolateSshMcp([])
+    expect(empty.servers).toEqual([])
+    await empty.close()
+    const descriptor = { name: 'paperai', type: 'http' as const, url: 'http://127.0.0.1:3210/mcp', headers: [] }
+    await expect(isolateSshMcp([descriptor, descriptor])).rejects.toThrow('one PaperAI')
+    await expect(isolateSshMcp([descriptor])).rejects.toThrow('bearer credential')
+    await expect(isolateSshMcp([{ ...descriptor, url: 'http://remote:3210/mcp' }])).rejects.toThrow('loopback')
+    await expect(isolateSshMcp([{ ...descriptor, url: 'http://user@127.0.0.1:3210/mcp' }])).rejects.toThrow('loopback')
+  })
+
+  it('forwards only authenticated MCP requests and closes the isolated listener', async () => {
+    const received: string[] = []
+    const host = createServer((request, response) => {
+      received.push(request.url ?? '')
+      request.pipe(response)
+    })
+    await new Promise<void>(resolve => host.listen(0, '127.0.0.1', resolve))
+    const address = host.address()
+    if (address === null || typeof address === 'string') throw new Error('expected TCP host')
+    const url = `http://127.0.0.1:${address.port}/api/paperai/mcp`
+    const isolated = await isolateSshMcp([{
+      name: 'paperai', type: 'http', url,
+      headers: [{ name: 'Authorization', value: 'Bearer session-token' }],
+    }])
+    const descriptor = isolated.servers[0]
+    if (descriptor === undefined || !('url' in descriptor)) throw new Error('expected HTTP descriptor')
+    const target = descriptor.url
+    try {
+      expect(new URL(target).port).not.toBe(String(address.port))
+      const headers = { Authorization: 'Bearer session-token' }
+      for (const path of ['/', '/api', '/api/paperai/mcp/../settings', '/api/paperai/mcp?path=/api']) {
+        expect((await fetch(new URL(path, target), { headers })).status).toBe(404)
+      }
+      expect((await fetch(target)).status).toBe(401)
+      expect((await fetch(target, { headers: { Authorization: 'Bearer other-session' } })).status).toBe(401)
+      expect(received).toEqual([])
+      const response = await fetch(target, { method: 'POST', headers, body: 'MCP request' })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('MCP request')
+      expect(received).toEqual(['/api/paperai/mcp'])
+      await isolated.close()
+      await isolated.close()
+      await expect(fetch(target)).rejects.toThrow()
+    } finally {
+      await isolated.close()
+      await new Promise<void>((resolve) => {
+        host.close(() => { resolve() })
+        host.closeAllConnections()
+      })
+    }
+  })
+
   it('uses strict host verification, isolated dynamic forwarding and no credentials in argv', () => {
     const launch = sshLaunch({ host: 'research', user: 'me', cwd: '/home/me/paper', node: "/opt/node's/bin/node" }, [{ name: 'paperai', type: 'http', url: 'http://127.0.0.1:3210/mcp', headers: [{ name: 'Authorization', value: 'secret' }] }])
     expect(launch.localPort).toBe(3210)

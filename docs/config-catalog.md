@@ -3417,7 +3417,7 @@ Source: [`packages/paperai/document-engine-officecli/src/index.ts:60`](../packag
 
 ## `@paperai/export-service`
 
-Requires: `paperCommits` · `paperMcp` · `paperTemplates`
+Requires: `paperCommits` · `paperMcp` · `paperTemplates` · `paperProjects`
 
 ```ts config-catalog
 /** Export-service deployment limits and publication policy. */
@@ -3429,7 +3429,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/export-service/src/index.ts:67`](../packages/paperai/export-service/src/index.ts)
+Source: [`packages/paperai/export-service/src/index.ts:69`](../packages/paperai/export-service/src/index.ts)
 
 <a id="paperaimcp"></a>
 

@@ -798,7 +798,8 @@ Template-checked atomic publisher and MCP export provider.
 ```ts cordis-catalog
 /**
  * Check template requirements, record an optimistic milestone, and publish
- * its immutable snapshot. Draft findings are returned without blocking;
+ * its immutable snapshot inside the owning project's exports directory.
+ * Draft findings are returned without blocking;
  * delivery errors reject before any commit or output is created.
  * Cancellation is observed before milestone publication. Once the commit
  * completes, file publication reaches success or cleanup before settlement.
