@@ -20,7 +20,11 @@ The document type decides the format. A document created from the project's set 
 
 A custom set is built by adding one Word file per document type with its usage: a form template is the document itself, and a formatting reference governs a manuscript the user uploads. Custom sets persist at `<storageRoot>/library/library.json` with their files in the template asset store; the built-in set comes from the shipped pack manifest. A custom set can be deleted while projects reference it: those projects show a missing template until they choose again, and documents keep their bound formats.
 
+Formatting references provide format evidence and generic structural headings, while form templates provide fields and fixed content. Example research headings, bibliography entries, cover annotations, and TOC entries cannot establish mandatory manuscript text. Changes to a built-in pack's compiled rules receive an explicit pack/member revision so an author can reapply the format; existing confirmed contracts remain immutable evidence for bound documents.
+
 ## Alternatives considered
+
+**Requiring every heading and institutional-name occurrence in a formatting example.** Rejected: those paragraphs can belong to the example's research subject, citations, or printing instructions. Treating them as required content forces an independent thesis to reproduce the example to pass delivery checks.
 
 **Templates as a level of the sidebar hierarchy.** Rejected: a template is configuration, not content of one project, and listing it beside documents and Sessions is what made the sidebar unreadable.
 

@@ -25,6 +25,8 @@ The template library holds the user's custom sets, one format per document type.
 
 The service publishes an evidence-only template source and compiled nodes before writing the contract record last. Template sources are excluded from normal Working-document lists. A failed compilation is therefore absent from template listings, and a deterministic retry can complete unpublished records.
 
+A formatting reference contributes required sections only for its standalone 摘要, Abstract, 目录, 参考文献, and 结论 headings. TOC entries, example research headings, citations, and annotated cover text do not become required content or fixed-text rules. Supported explicit formatting and quantitative instructions still compile; form templates retain their fields, fixed text, outline, and table requirements.
+
 ## Model Experience
 
 ### Template contracts and gate reports

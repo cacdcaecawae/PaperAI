@@ -45,7 +45,8 @@ export interface CompileTemplateDraftInput {
 }
 
 /**
- * Compile OfficeCLI text and format evidence into durable nodes and a draft contract.
+ * Compile OfficeCLI evidence into durable nodes and a draft contract. Formatting
+ * references contribute generic section titles, not fixed example research text.
  * @param engine - configured PaperAI document engine.
  * @param input - service-owned identities, provenance, roles, and immutable paths.
  * @param signal - optional cancellation signal.
@@ -223,7 +224,7 @@ function fieldFor(text: string): FieldDefinition | undefined {
 
 function compileRequiredSections(nodes: readonly DocumentNode[], usage: TemplateUsage): DocumentNode[] {
   if (usage === 'format-reference') {
-    return nodes.filter(node => node.kind === 'heading' && node.text.trim().length > 0 && node.text.length <= 100)
+    return nodes.filter(node => node.kind === 'heading' && /^(?:摘要|Abstract|目录|参考文献|结论)$/u.test(node.text.replaceAll(/\s+/gu, '')))
   }
   const sections: DocumentNode[] = []
   let inOutline = false
@@ -347,14 +348,15 @@ function isInstruction(text: string): boolean {
 }
 
 function isFixedText(text: string, usage: TemplateUsage): boolean {
+  if (usage === 'format-reference') return false
   const compact = text.replaceAll(/\s+/gu, '')
   if (/哈尔滨工业大学/u.test(compact)) return true
   if (/硕士学位(?:论文)?(?:开题|中期)报告/u.test(compact)) return true
-  if (usage === 'format-reference' && /^(?:摘要|Abstract|目录|参考文献|结论)$/u.test(compact)) return true
   return false
 }
 
 function isHeading(text: string, styleName: string | undefined): boolean {
+  if (/^(?:toc|目录)\s*\d+$/iu.test(styleName ?? '')) return false
   if (styleName?.toLowerCase().includes('heading') === true) return true
   const trimmed = text.trim()
   return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+|摘\s*要$|Abstract$|目\s*录$|参考文献$|结\s*论$)/u.test(trimmed)

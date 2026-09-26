@@ -3,7 +3,7 @@
   "id": "hit-master-thesis",
   "name": "HIT 硕士毕设",
   "description": "哈尔滨工业大学硕士学位论文开题、中期和论文书写模板",
-  "version": "provided-snapshot-2026-08-28",
+  "version": "provided-snapshot-2026-08-28-format-rules-v2",
   "sourceLabel": "哈尔滨工业大学模板（用户提供快照，2026-08-28）",
   "members": [
     {
@@ -50,7 +50,7 @@
       "description": "硕士论文页面、样式、章节结构和示例排版参考，不复制示例正文",
       "appliesToRoles": ["manuscript"],
       "usage": "format-reference",
-      "sourceVersion": "provided-snapshot-2026-08-28",
+      "sourceVersion": "provided-snapshot-2026-08-28-format-rules-v2",
       "source": {
         "file": "final-source.doc",
         "originalFileName": "hit-结题模板.doc",
