@@ -8,11 +8,12 @@ import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
+import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import PaperCommitService from '@paperai/commit-service'
 import { OfficeCliDocumentEngine } from '@paperai/document-engine-officecli'
 import PaperDocumentService from '@paperai/document-service'
-import { ProjectId } from '@paperai/domain'
 import PaperExportService from '@paperai/export-service'
+import PaperProjectService from '@paperai/project-service'
 import PaperRepository from '@paperai/repository'
 import PaperTemplateService from '@paperai/template-service'
 import { DOMParser, XMLSerializer, onWarningStopParsing } from '@xmldom/xmldom'
@@ -54,16 +55,17 @@ it.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('exports independent r
     await ctx.plugin(StorageSqlite, { path: join(root, 'paperai.sqlite'), journalMode: 'wal' })
     await ctx.plugin(StorageDomain, { backend: 'sqlite', routes: {} })
     await ctx.plugin(PaperRepository)
+    ctx.provide('sessionPersistence', { list: async () => [] } as never)
+    await ctx.plugin(WorkspaceRegistry)
+    await ctx.plugin(PaperProjectService)
     await ctx.plugin(PaperDocumentService)
     await ctx.plugin(PaperTemplateService, { storageRoot: join(root, 'templates') })
     await ctx.plugin(PaperCommitService)
     ctx.provide('paperMcp', { registerExportAdapter: () => () => {} } as never)
     await ctx.plugin(PaperExportService)
-    const projectId = ProjectId('hit-delivery')
-    await ctx.paperRepository.putProject({
-      id: projectId, name: 'Independent research', workspaceId: 'hit-workspace', rootPath: root,
-      createdAt: '2026-09-26T00:00:00.000Z', updatedAt: '2026-09-26T00:00:00.000Z',
-    })
+    const { project } = await ctx.paperProjects.create({ rootPath: join(root, 'project'), name: 'Independent research' })
+    const projectId = project.id
+    const exportPath = (name: string) => join(project.rootPath, 'exports', name)
     ctx.paperTemplates.registerPack(HIT_TEMPLATE_PACK)
     const member = HIT_TEMPLATE_PACK.members.find(candidate => candidate.usage === 'format-reference')!
     const [draft] = await ctx.paperTemplates.installPack({ projectId, packId: HIT_TEMPLATE_PACK.id, memberIds: [member.id] })
@@ -115,7 +117,7 @@ it.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('exports independent r
     await ctx.paperCommits.submit({ documentId: imported.document.id, actor, message: 'Apply HIT format',
       mutations: [{ type: 'bind-template', templateId: contract.id }] })
     const document = ctx.paperRepository.getDocument(imported.document.id)!
-    const result = await ctx.paperExports.exportDocument({ document, actor, destinationPath: join(root, 'delivery.docx'), mode: 'delivery-export' })
+    const result = await ctx.paperExports.exportDocument({ document, actor, destinationPath: exportPath('delivery.docx'), mode: 'delivery-export' })
     expect({ status: result.report.status, codes: result.report.findings.map(finding => finding.code), operation: result.commit.operations[0]?.type }).toMatchInlineSnapshot(`
       {
         "codes": [],
@@ -133,8 +135,8 @@ it.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('exports independent r
     await ctx.paperCommits.submit({ documentId: document.id, baseCommitId: result.commit.id, actor, message: 'Remove conclusion',
       mutations: [{ type: 'delete-node', nodeId: conclusion.id, baseText: conclusion.text }] })
     await expect(ctx.paperExports.exportDocument({ document: ctx.paperRepository.getDocument(document.id)!, actor,
-      destinationPath: join(root, 'incomplete.docx'), mode: 'delivery-export' })).rejects.toMatchObject({ code: 'DELIVERY_BLOCKED' })
-    await expect(readFile(join(root, 'incomplete.docx'))).rejects.toMatchObject({ code: 'ENOENT' })
+      destinationPath: exportPath('incomplete.docx'), mode: 'delivery-export' })).rejects.toMatchObject({ code: 'DELIVERY_BLOCKED' })
+    await expect(readFile(exportPath('incomplete.docx'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally {
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })

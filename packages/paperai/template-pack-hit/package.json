@@ -48,11 +48,12 @@
     "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/dsh-storage-sqlite": "workspace:^",
     "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "@deepseek-ai/dsh-workspace": "workspace:^",
     "@paperai/commit-service": "workspace:*",
     "@paperai/document-engine-officecli": "workspace:*",
     "@paperai/document-service": "workspace:*",
-    "@paperai/domain": "workspace:*",
     "@paperai/export-service": "workspace:*",
+    "@paperai/project-service": "workspace:*",
     "@paperai/repository": "workspace:*",
     "@paperai/template-service": "workspace:*",
     "@xmldom/xmldom": "0.9.12"

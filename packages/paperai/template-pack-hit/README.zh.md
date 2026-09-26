@@ -12,7 +12,7 @@
 
 `format-rules-v2` 后缀标识编译规则修订；所有原始与规范化资产字节仍保留 2026-08-28 快照的哈希。已有文档保留其已确认约定，直到作者重新应用论文格式。重新应用会安装修订后的通用章节规则，不会更改论文正文。
 
-可选的 `tests/hit-delivery.real.spec.ts` 编译随包提供的论文范例，并通过仓储、模板、文档、提交和导出服务导出独立研究。运行时设置 `DSH_PAPERAI_OFFICECLI_REAL=1`；使用外部 OfficeCLI 1.0.145 可执行文件时，另设 `DSH_PAPERAI_OFFICECLI_COMMAND`。
+可选的 `tests/hit-delivery.real.spec.ts` 编译随包提供的论文范例，并通过项目、仓储、模板、文档、提交和导出服务，将独立研究导出到项目的 `exports/` 目录。运行时设置 `DSH_PAPERAI_OFFICECLI_REAL=1`；使用外部 OfficeCLI 1.0.145 可执行文件时，另设 `DSH_PAPERAI_OFFICECLI_COMMAND`。
 
 ## 模型体验
 

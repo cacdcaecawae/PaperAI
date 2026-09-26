@@ -12,7 +12,7 @@ The plugin registers the pack through a Cordis effect and removes it when the pl
 
 The `format-rules-v2` suffix identifies a compilation revision; all original and normalized asset bytes retain their 2026-08-28 snapshot hashes. Existing documents keep their confirmed contracts until the author reapplies the manuscript format. Reapplication installs the revised generic-section rules without changing the manuscript body.
 
-The opt-in `tests/hit-delivery.real.spec.ts` compiles the shipped thesis example and exports independent research through the repository, template, document, commit, and export services. Run it with `DSH_PAPERAI_OFFICECLI_REAL=1` and, for an external OfficeCLI 1.0.145 binary, `DSH_PAPERAI_OFFICECLI_COMMAND`.
+The opt-in `tests/hit-delivery.real.spec.ts` compiles the shipped thesis example and exports independent research to the project's `exports/` directory through the project, repository, template, document, commit, and export services. Run it with `DSH_PAPERAI_OFFICECLI_REAL=1` and, for an external OfficeCLI 1.0.145 binary, `DSH_PAPERAI_OFFICECLI_COMMAND`.
 
 ## Model Experience
 
