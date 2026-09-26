@@ -542,7 +542,7 @@ describe('DocumentWorkbench', () => {
     expect(body.getAttribute('contenteditable')).toBe('true')
     body.textContent = 'Rewritten background'
     fireEvent.input(body)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Rewritten background' }))
   })
 
   it('maps each saved split paragraph for continued editing before the Host preview arrives', () => {
@@ -568,7 +568,7 @@ describe('DocumentWorkbench', () => {
       expect(block.style.textAlign).toBe(paragraphs[index]!.format.align)
       block.textContent += ' edited'
       fireEvent.input(block)
-      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], { text: `${paragraphs[index]!.text} edited` })
+      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], expect.objectContaining({ text: `${paragraphs[index]!.text} edited` }))
     })
   })
 
@@ -583,7 +583,7 @@ describe('DocumentWorkbench', () => {
     for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.getAttribute('contenteditable')).toBe('false')
     paragraphs[3]!.textContent = 'Changed'
     fireEvent.input(paragraphs[3]!)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Changed' })
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Changed' }))
   })
 
   it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
@@ -606,7 +606,7 @@ describe('DocumentWorkbench', () => {
     expect(cellBlock.getAttribute('contenteditable')).toBe(cell === 'editable' ? 'true' : 'false')
     cellBlock.textContent = 'Cell retyped'
     fireEvent.input(cellBlock)
-    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, { text: 'Cell retyped' })
+    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, expect.objectContaining({ text: 'Cell retyped' }))
     else expect(b.updateDraft).not.toHaveBeenCalled()
     b.updateDraft.mockClear()
     const paragraphs = [...shadow.querySelectorAll('p')].filter(element => element.closest('td') === null)
@@ -615,7 +615,7 @@ describe('DocumentWorkbench', () => {
       fireEvent.input(paragraph)
     }
     expect(b.updateDraft.mock.calls)
-      .toEqual([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
+      .toMatchObject([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
   })
 
   it('retains embedded raster figures while removing executable data URLs and handlers', () => {
@@ -714,7 +714,7 @@ describe('DocumentWorkbench', () => {
     expect(paragraph.getAttribute('contenteditable')).toBe('true')
     paragraph.textContent = 'Rewritten background'
     fireEvent.input(paragraph)
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Rewritten background' }))
     fireEvent.keyDown(paragraph, { key: 'Enter', ctrlKey: true })
     expect(b.commitEdit).toHaveBeenCalledOnce()
     fireEvent.keyDown(paragraph, { key: 'Escape' })
@@ -822,7 +822,7 @@ describe('DocumentWorkbench', () => {
     fireEvent.paste(paragraph, { clipboardData: { getData: () => '<b>粘贴</b>' } })
     expect(paragraph.textContent).toBe('<b>粘贴</b>')
     expect(paragraph.querySelector('b')).toBeNull()
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: '<b>粘贴</b>' })
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, expect.objectContaining({ text: '<b>粘贴</b>' }))
   })
 
   it('writes a retained draft back into a block as the runs it kept', () => {

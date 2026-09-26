@@ -711,7 +711,7 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     // The draft is untouched; what changes is the base it will be committed against, which is the
     // whole substance of keeping it: the commit service refuses a mutation whose baseText is stale.
     expect(store.getSnapshot().edits).toMatchObject([
-      { nodeId: NODE_PARAGRAPH, draft: 'Local draft', baseText: 'Rewritten by the agent', conflicted: false },
+      { nodeId: NODE_PARAGRAPH, draft: 'Local draft', baseText: 'Rewritten by the agent', baseRevision: REVISION_2, conflicted: false },
     ])
     // And now the block takes a draft again, which it refused while conflicted.
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft, merged by hand' })

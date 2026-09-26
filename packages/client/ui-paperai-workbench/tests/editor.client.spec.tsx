@@ -141,7 +141,7 @@ describe('Document editing commands', () => {
     fireEvent.input(container, { isComposing: true })
     expect(editor.onDraft).not.toHaveBeenCalled()
     fireEvent.compositionEnd(container)
-    expect(editor.onDraft).toHaveBeenLastCalledWith('node-1', { text: 'Wor中文ld' })
+    expect(editor.onDraft).toHaveBeenLastCalledWith('node-1', expect.objectContaining({ text: 'Wor中文ld' }))
     editor.select(second!.firstChild!, 5)
     fireEvent.keyDown(container, { key: 'Enter' })
     expect(readParagraphs(second!).map(part => part.text)).toEqual(['Wor中文', 'ld'])
@@ -167,7 +167,7 @@ describe('Document editing commands', () => {
     expect(fireEvent(container, new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true }))).toBe(true)
     text.nodeValue = 'Interior edit'
     fireEvent.input(container)
-    expect(editor.onDraft).toHaveBeenLastCalledWith(backward ? 'node-1' : 'node-0', { text: 'Interior edit' })
+    expect(editor.onDraft).toHaveBeenLastCalledWith(backward ? 'node-1' : 'node-0', expect.objectContaining({ text: 'Interior edit' }))
   })
 
   it('rejects native target ranges spanning originals and drag/drop mutations', () => {
@@ -287,11 +287,11 @@ describe('Document editing commands', () => {
     controller.dispose()
   })
 
-  it('repaints a restored draft as the outside version renders its block, instead of committing the formatting the draft captured', async () => {
+  it.each(['mine', 'theirs'] as const)('requires a %s choice for externally reformatted plain and split drafts', async (choice) => {
     const NODE_CLOSING = 'node-closing' as PaperAIDocumentNodeId
-    // An agent restated both paragraphs at 16pt without touching a character.
     const page = (size: string): string => '<html><body>'
-      + `<p data-path="/body/p[1]" style="font-size:10pt"><span style="font-size:${size}">Research background</span></p>`
+      + `<p data-path="/body/p[1]" style="font-size:10pt"><span style="font-size:${size}">Research</span>`
+      + `<span style="font-size:${size};font-weight:bold;font-family:Times New Roman"> background</span></p>`
       + `<p data-path="/body/p[2]" style="font-size:10pt"><span style="font-size:${size}">Closing remarks</span></p></body></html>`
     const remote = successfulRemote()
     const commit = vi.spyOn(remote, 'commit')
@@ -315,7 +315,8 @@ describe('Document editing commands', () => {
       return <DocumentPreview html={state.document.previewHtml} revision={state.document.revision} nodes={state.document.nodes}
         paragraphStyles={state.document.paragraphStyles} title="Document" edits={state.edits} saving={false} t={t}
         onSave={() => {}} onCancel={() => {}}
-        onDraft={(id, draft) => { flushSync(() => { controller.updateDraft(SESSION_ID, id, draft) }) }} />
+        onResolveConflict={(id) => { controller.resolveConflict(SESSION_ID, id) }}
+        onDraft={(id, draft) => { controller.updateDraft(SESSION_ID, id, draft) }} />
     }
     const view = render(<Live />)
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
@@ -348,19 +349,40 @@ describe('Document editing commands', () => {
     fireEvent.keyDown(closing, { key: 'Enter' })
     act(() => { closing.blur(); fireEvent.input(closing) })
     expect(store.getSnapshot().edits.map(edit => edit.runs?.[0]?.size ?? edit.paragraphs?.[0]?.runs?.[0]?.size)).toEqual(['12pt', '12pt'])
+    const drafts = store.getSnapshot().edits
     act(() => { controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' }) })
     await act(async () => { await controller.reloadExternal(SESSION_ID) })
-    expect(store.getSnapshot().edits.every(edit => edit.conflicted === false)).toBe(true)
-    // Both blocks read as this version renders them, so the keystrokes below restate no size of their own.
-    expect(blocks().map(block => runsOf(block)[0]?.size)).toEqual(['16pt', '16pt'])
-    type(0, '再')
-    type(1, '再')
-    await act(async () => { await controller.commitEdit(SESSION_ID) })
-    expect(commit.mock.calls[0]?.[0].mutations).toEqual([
-      { type: 'replace-text', nodeId: NODE_PARAGRAPH, baseText: 'Research background', nextText: '再前言Research background' },
-      { type: 'replace-text', nodeId: NODE_CLOSING, baseText: 'Closing remarks', nextText: '再Closing\n remarks',
-        paragraphs: [{ text: '再Closing' }, { text: ' remarks' }] },
-    ])
+    expect(store.getSnapshot().edits).toEqual(drafts.map(edit => ({ ...edit, conflicted: true })))
+    expect(blocks().map(block => runsOf(block)[0]?.size)).toEqual(['12pt', '12pt'])
+    expect(blocks()[0]!.querySelectorAll('span')).toHaveLength(2)
+    expect(runsOf(blocks()[0]!)[1]).toMatchObject({ text: ' background', bold: true, font: 'Times New Roman' })
+    expect(blocks().every(block => block.getAttribute('contenteditable') === 'false')).toBe(true)
+    expect(shadow.querySelectorAll('[data-paperai-conflict]')).toHaveLength(2)
+    await act(async () => { expect((await controller.commitEdit(SESSION_ID)).ok).toBe(false) })
+    expect(commit).not.toHaveBeenCalled()
+    for (const button of shadow.querySelectorAll<HTMLElement>(`[data-paperai-resolve="${choice}"]`)) fireEvent.click(button)
+    expect(shadow.querySelector('[data-paperai-conflict]')).toBeNull()
+    expect(blocks().every(block => block.getAttribute('contenteditable') === 'true')).toBe(true)
+    if (choice === 'mine') {
+      expect(store.getSnapshot().edits.every(edit => edit.baseRevision === REVISION_2)).toBe(true)
+      type(0, '再')
+      type(1, '再')
+      expect(shadow.querySelector('[data-paperai-conflict]')).toBeNull()
+      await act(async () => { expect((await controller.commitEdit(SESSION_ID)).ok).toBe(true) })
+      const mutations = commit.mock.calls[0]![0].mutations
+      expect(mutations).toMatchObject([
+        { nodeId: NODE_PARAGRAPH, nextText: '再前言Research background', runs: [{ text: '再前言Research background', size: '12pt' }] },
+        { nodeId: NODE_CLOSING, nextText: '再Closing\n remarks', paragraphs: [
+          { text: '再Closing', runs: [{ text: '再Closing', size: '12pt' }] },
+          { text: ' remarks', runs: [{ text: ' remarks', size: '12pt' }] },
+        ] },
+      ])
+    } else {
+      expect(store.getSnapshot().edits).toEqual([])
+      expect(runsOf(blocks()[0]!)).toMatchObject([
+        { text: 'Research', size: '16pt' }, { text: ' background', size: '16pt', bold: true, font: 'Times New Roman' },
+      ])
+    }
     controller.dispose()
   })
 
@@ -660,7 +682,7 @@ describe('Document editing commands', () => {
     expect(editor.onDraft).not.toHaveBeenCalled()
     fireEvent.compositionEnd(block)
     expect(editor.onDraft).toHaveBeenCalledTimes(1)
-    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', { text: 'Hello中文 world' })
+    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', expect.objectContaining({ text: 'Hello中文 world' }))
     fireEvent.keyDown(block, { key: 'z', ctrlKey: true })
     expect(block.textContent).toBe('Hello world')
   })
@@ -873,6 +895,47 @@ describe('Conflict resolution in the page', () => {
 describe('Conflict on a paragraph the browser cannot merge', () => {
   // A citation superscript is exactly what an Agent adds and what COMPLEX excludes from `mapping`.
   const PAGE = '<p data-path="/body/p[1]">文档改写后的这一段<sup>[1]</sup></p>'
+
+  it('keeps a deleted paragraph draft visible, copyable and separately discardable', async () => {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Deleted paragraph draft' })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Unrelated draft' })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
+      previewHtml: '<p data-path="/body/p[1]">Introduction</p>',
+      nodes: documentOpenResult().document.nodes.filter(node => node.nodeId === NODE_HEADING),
+    }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    function Live() {
+      const state = useSyncExternalStore(listener => store.subscribe(listener), () => store.getSnapshot())
+      return <DocumentPreview html={state.document!.previewHtml} revision={state.document!.revision} nodes={state.document!.nodes}
+        paragraphStyles={[]} title="Document" edits={state.edits} saving={false} t={t}
+        onSave={() => {}} onCancel={() => {}} onDraft={(id, draft) => { controller.updateDraft(SESSION_ID, id, draft) }} />
+    }
+    const view = render(<Live />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    let selected: Range | null = null
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      removeAllRanges: () => { selected = null }, addRange: (range: Range) => { selected = range },
+    }) })
+    const band = shadow.querySelector<HTMLElement>('[data-paperai-conflict]')!
+    expect(band.parentElement).toBe(shadow.querySelector('.paperai-doc'))
+    expect(band.dataset.paperaiConflictForm).toBe('draft')
+    expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('Deleted paragraph draft')
+    expect(band.querySelector('[data-paperai-resolve="mine"]')).toBeNull()
+    fireEvent.click(band.querySelector('[data-paperai-resolve="copy"]')!)
+    expect((selected as Range | null)?.toString()).toBe('Deleted paragraph draft')
+    const drop = band.querySelector('[data-paperai-resolve="drop"]')!
+    fireEvent.click(drop)
+    expect(store.getSnapshot().edits).toHaveLength(2)
+    fireEvent.click(drop)
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_HEADING, draft: 'Unrelated draft' }])
+    expect(shadow.querySelector('[data-paperai-conflict]')).toBeNull()
+    controller.dispose()
+  })
 
   it('quotes the draft for saving by hand instead of promising a merge it cannot deliver', () => {
     const editor = conflicted(PAGE, ['文档改写后的这一段[1]'], '文档保留原样的这一段')

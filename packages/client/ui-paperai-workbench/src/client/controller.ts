@@ -87,9 +87,7 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
 function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
   return edits.map((edit) => {
     const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
-    // Text alone decides this, so one external commit elsewhere no longer conflicts every unrelated draft. An
-    // outside reformat of this same block needs no conflict either: the preview repaints such a draft from the
-    // block's new rendering (DocumentPreview `painted`), so it commits its text and restates no formatting.
+    // The preview also reports formatting conflicts from its rendered readings; they survive later reloads.
     return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText }
   })
 }
@@ -509,6 +507,7 @@ export class PaperAIWorkbenchController {
           ...(draft.runs === undefined ? {} : { runs: draft.runs }),
           ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
           ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
+          ...(draft.conflicted === true ? { conflicted: true } : {}),
           // A retyped block is still a draft whose save failed, so the verdict travels with it.
           ...(previous?.saveFailed === true ? { saveFailed: true } : {}),
         }]
@@ -530,10 +529,11 @@ export class PaperAIWorkbenchController {
   resolveConflict(sessionId: SessionId, nodeId: PaperAIDocumentNodeId): void {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
-      const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
-      if (state.phase !== 'ready' || state.action !== null || node === undefined || !node.editable) return
+      const document = state.document
+      const node = document?.nodes.find(candidate => candidate.nodeId === nodeId)
+      if (state.phase !== 'ready' || state.action !== null || document === null || node === undefined || !node.editable) return
       state.edits = state.edits.map(edit => (edit.nodeId === nodeId && edit.conflicted === true
-        ? { ...edit, baseText: node.text, conflicted: false }
+        ? { ...edit, baseText: node.text, baseRevision: document.revision, conflicted: false }
         : edit))
     })
   }
@@ -996,7 +996,7 @@ export class PaperAIWorkbenchController {
    * A permanently bound beforeunload would cost the page its back/forward cache.
    */
   private syncUnloadGuard(): void {
-    // The effect this replaces was DOM-only by construction; a store subscription is not. The plugin's
+    // The browser controller owns this listener even while every document preview is unmounted.
     if (this.hasUnsavedDraft()) window.addEventListener('beforeunload', this.confirmUnload)
     else window.removeEventListener('beforeunload', this.confirmUnload)
   }
