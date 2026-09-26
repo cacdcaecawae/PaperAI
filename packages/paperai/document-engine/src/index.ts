@@ -35,11 +35,14 @@ export interface EngineTextRun {
   font?: string
 }
 
-/** Ordered mutation whose Office paths identify nodes in the document at batch start; insertion indices address the body at that step. */
+/**
+ * Ordered mutations identify original nodes; insertion indices address the current body.
+ * baseText must match the target (or insertion anchor) before that step.
+ */
 export type EngineMutation =
-  | { type: 'replace-text'; officePath: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }
-  | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; index?: number }
-  | { type: 'remove'; officePath: string }
+  | { type: 'replace-text'; officePath: string; baseText: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }
+  | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; baseText?: string; index?: number }
+  | { type: 'remove'; officePath: string; baseText: string }
 
 /** Validation payload intentionally retains OfficeCLI's structured evidence. */
 export interface EngineValidation {

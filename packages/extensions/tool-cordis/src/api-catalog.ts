@@ -4382,7 +4382,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineMutation',
-    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    text: string;\n    runs?: readonly EngineTextRun[];\n    paragraphs?: readonly DocumentParagraph[];\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n};',
+    declaration: 'export type EngineMutation = {\n    type: \'replace-text\';\n    officePath: string;\n    baseText: string;\n    text: string;\n    runs?: readonly EngineTextRun[];\n    paragraphs?: readonly DocumentParagraph[];\n} | {\n    type: \'insert-paragraph\';\n    text: string;\n    style?: string;\n    after?: string;\n    before?: string;\n    baseText?: string;\n    index?: number;\n} | {\n    type: \'remove\';\n    officePath: string;\n    baseText: string;\n};',
   },
   {
     name: 'EngineParagraphStyle',

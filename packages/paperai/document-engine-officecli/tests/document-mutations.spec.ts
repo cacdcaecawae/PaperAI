@@ -3,6 +3,7 @@ import type { EngineMutation } from '@paperai/document-engine'
 import { describe, expect, it, vi } from 'vitest'
 import { applyDocumentMutations as applyBatch } from '../src/document-mutations.ts'
 import { resolveOfficePath } from '../src/office-path.ts'
+import { replaceParagraphXml } from '../src/paragraph-xml.ts'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const document = (body: string) => new DOMParser().parseFromString(
@@ -13,14 +14,7 @@ const texts = (root: XmlElement) => Array.from(resolveOfficePath(root, '/body').
   .filter((node): node is XmlElement => node.nodeType === node.ELEMENT_NODE && node.localName === 'p')
   .map(node => node.textContent)
 const replace = (target: XmlElement, mutation: Extract<EngineMutation, { type: 'replace-text' }>) => {
-  const [first, ...rest] = mutation.paragraphs ?? [{ text: mutation.text }]
-  target.textContent = first!.text
-  const reference = target.nextSibling
-  for (const part of rest) {
-    const added = target.cloneNode(false) as XmlElement
-    added.textContent = part.text
-    target.parentNode!.insertBefore(added, reference)
-  }
+  replaceParagraphXml(target, mutation, style => style)
 }
 const applyDocumentMutations = (root: XmlElement, mutations: readonly EngineMutation[], edit: typeof replace) =>{
   applyBatch(root, mutations, edit, style => style) }
@@ -29,8 +23,8 @@ describe('ordered candidate document mutations', () => {
   it('keeps later original targets stable when an earlier original paragraph splits', () => {
     const root = document(paragraph('alpha') + paragraph('beta') + paragraph('gamma'))
     applyDocumentMutations(root, [
-      { type: 'replace-text', officePath: '/body/p[1]', text: 'first\ninserted', paragraphs: [{ text: 'first' }, { text: 'inserted' }] },
-      { type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
+      { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'first\ninserted', paragraphs: [{ text: 'first' }, { text: 'inserted' }] },
+      { baseText: 'beta', type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
     ], replace)
     expect(texts(root)).toEqual(['first', 'inserted', 'beta edited', 'gamma'])
   })
@@ -38,13 +32,13 @@ describe('ordered candidate document mutations', () => {
   it('preserves request order for repeated anchors, repeated replacement, and removal', () => {
     const root = document(paragraph('alpha') + paragraph('beta') + paragraph('gamma'))
     applyDocumentMutations(root, [
-      { type: 'insert-paragraph', after: '/body/p[1]', text: 'after A one' },
-      { type: 'insert-paragraph', after: '/body/p[1]', text: 'after A two' },
-      { type: 'insert-paragraph', before: '/body/p[2]', text: 'before B' },
-      { type: 'remove', officePath: '/body/p[1]' },
-      { type: 'replace-text', officePath: '/body/p[2]', text: 'beta intermediate' },
-      { type: 'replace-text', officePath: '/body/p[2]', text: 'beta final' },
-      { type: 'replace-text', officePath: '/body/p[3]', text: 'gamma final' },
+      { baseText: 'alpha', type: 'insert-paragraph', after: '/body/p[1]', text: 'after A one' },
+      { baseText: 'alpha', type: 'insert-paragraph', after: '/body/p[1]', text: 'after A two' },
+      { baseText: 'beta', type: 'insert-paragraph', before: '/body/p[2]', text: 'before B' },
+      { baseText: 'alpha', type: 'remove', officePath: '/body/p[1]' },
+      { baseText: 'beta', type: 'replace-text', officePath: '/body/p[2]', text: 'beta intermediate' },
+      { baseText: 'beta intermediate', type: 'replace-text', officePath: '/body/p[2]', text: 'beta final' },
+      { baseText: 'gamma', type: 'replace-text', officePath: '/body/p[3]', text: 'gamma final' },
     ], replace)
     expect(texts(root)).toEqual(['after A two', 'after A one', 'before B', 'beta final', 'gamma final'])
   })
@@ -53,21 +47,21 @@ describe('ordered candidate document mutations', () => {
     const root = document(paragraph('alpha'))
     const edit = vi.fn(replace)
     expect(() =>{  applyDocumentMutations(root, [
-      { type: 'replace-text', officePath: '/body/p[1]', text: 'edited' },
-      { type: 'remove', officePath: '/body/p[2]' },
+      { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' },
+      { baseText: 'beta', type: 'remove', officePath: '/body/p[2]' },
     ], edit) }).toThrow('INVALID_OFFICE_PATH')
     expect(edit).not.toHaveBeenCalled()
     expect(texts(root)).toEqual(['alpha'])
   })
 
   it.each<EngineMutation>([
-    { type: 'replace-text', officePath: '/body/p[1]', text: 'gone' },
-    { type: 'remove', officePath: '/body/p[1]' },
-    { type: 'insert-paragraph', after: '/body/p[1]', text: 'after gone' },
-    { type: 'insert-paragraph', before: '/body/p[1]', text: 'before gone' },
+    { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'gone' },
+    { baseText: 'alpha', type: 'remove', officePath: '/body/p[1]' },
+    { baseText: 'alpha', type: 'insert-paragraph', after: '/body/p[1]', text: 'after gone' },
+    { baseText: 'alpha', type: 'insert-paragraph', before: '/body/p[1]', text: 'before gone' },
   ])('rejects $type on an original node removed earlier', (mutation) => {
     const root = document(paragraph('alpha') + paragraph('beta'))
-    expect(() =>{  applyDocumentMutations(root, [{ type: 'remove', officePath: '/body/p[1]' }, mutation], replace) })
+    expect(() =>{  applyDocumentMutations(root, [{ baseText: 'alpha', type: 'remove', officePath: '/body/p[1]' }, mutation], replace) })
       .toThrow('INVALID_OFFICE_TARGET')
     expect(texts(root)).toEqual(['beta'])
   })
@@ -75,16 +69,16 @@ describe('ordered candidate document mutations', () => {
   it('rejects a table descendant after removal of its original ancestor', () => {
     const root = document(`<w:tbl><w:tr><w:tc>${paragraph('cell')}</w:tc></w:tr></w:tbl>`)
     expect(() =>{  applyDocumentMutations(root, [
-      { type: 'remove', officePath: '/body/tbl[1]' },
-      { type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'gone' },
+      { baseText: '[Table: 1 rows]', type: 'remove', officePath: '/body/tbl[1]' },
+      { baseText: '[Table: 1 rows]', type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'gone' },
     ], replace) }).toThrow('INVALID_OFFICE_TARGET')
   })
 
   it('inserts beside a nested paragraph and resolves later references in the same original cell', () => {
     const root = document(`<w:tbl><w:tr><w:tc>${paragraph('one')}${paragraph('two')}</w:tc></w:tr></w:tbl>`)
     applyDocumentMutations(root, [
-      { type: 'insert-paragraph', after: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'inserted' },
-      { type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[2]', text: 'two edited' },
+      { baseText: 'one', type: 'insert-paragraph', after: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'inserted' },
+      { baseText: 'two', type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[2]', text: 'two edited' },
     ], replace)
     const cell = resolveOfficePath(root, '/body/tbl[1]/tr[1]/tc[1]')
     expect(Array.from(cell.childNodes).map(node => node.textContent)).toEqual(['one', 'inserted', 'two edited'])
@@ -104,8 +98,8 @@ describe('ordered candidate document mutations', () => {
   })
 
   it.each<EngineMutation>([
-    { type: 'insert-paragraph', after: '/body/tbl[1]/tr[1]', text: 'invalid table child' },
-    { type: 'insert-paragraph', before: '/body/tbl[1]/tr[1]/tc[1]', text: 'invalid row child' },
+    { baseText: '[Table: 1 rows]', type: 'insert-paragraph', after: '/body/tbl[1]/tr[1]', text: 'invalid table child' },
+    { baseText: '[Table: 1 rows]', type: 'insert-paragraph', before: '/body/tbl[1]/tr[1]/tc[1]', text: 'invalid row child' },
   ])('rejects paragraph insertion beside a row or cell: $after $before', (mutation) => {
     const root = document(`<w:tbl><w:tr><w:tc>${paragraph('cell')}</w:tc></w:tr></w:tbl>`)
     const before = new XMLSerializer().serializeToString(root)
@@ -131,8 +125,8 @@ describe('ordered candidate document mutations', () => {
     { type: 'insert-paragraph', text: 'bad', index: -1 },
     { type: 'insert-paragraph', text: 'bad', index: 0.5 },
     { type: 'insert-paragraph', text: 'bad', index: 2 },
-    { type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', before: '/body/p[1]' },
-    { type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', index: 0 },
+    { baseText: 'alpha', type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', before: '/body/p[1]' },
+    { baseText: 'alpha', type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', index: 0 },
   ])('rejects invalid insertion positions: $index $after $before', (mutation) => {
     const root = document(paragraph('alpha'))
     expect(() =>{  applyDocumentMutations(root, [mutation], replace) }).toThrow('INVALID_INSERT_POSITION')
@@ -141,8 +135,8 @@ describe('ordered candidate document mutations', () => {
 
   it('prevents removing the body container and propagates paragraph editor failures', () => {
     const root = document(paragraph('alpha'))
-    expect(() =>{  applyDocumentMutations(root, [{ type: 'remove', officePath: '/body' }], replace) }).toThrow('INVALID_OFFICE_TARGET')
-    expect(() =>{  applyDocumentMutations(root, [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }], () => {
+    expect(() =>{  applyDocumentMutations(root, [{ baseText: 'alpha', type: 'remove', officePath: '/body' }], replace) }).toThrow('INVALID_OFFICE_TARGET')
+    expect(() =>{  applyDocumentMutations(root, [{ baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }], () => {
       throw new Error('paragraph blocked')
     }) }).toThrow('paragraph blocked')
     expect(texts(root)).toEqual(['alpha'])
@@ -152,9 +146,17 @@ describe('ordered candidate document mutations', () => {
     const root = document('<w:tbl/>')
     const edit = vi.fn(replace)
     expect(() => {
-      applyDocumentMutations(root, [{ type: 'replace-text', officePath: '/body/tbl[1]', text: 'bad' }], edit)
+      applyDocumentMutations(root, [{ baseText: '[Table: 1 rows]', type: 'replace-text', officePath: '/body/tbl[1]', text: 'bad' }], edit)
     }).toThrow('INVALID_OFFICE_TARGET')
     expect(edit).not.toHaveBeenCalled()
+  })
+
+  it('refuses removal of a structural node without an indexed text projection', () => {
+    const root = document('<w:tbl><w:tr><w:tc>' + paragraph('cell') + '</w:tc></w:tr></w:tbl>')
+    expect(() => applyDocumentMutations(root, [
+      { type: 'remove', officePath: '/body/tbl[1]/tr[1]', baseText: 'cell' },
+    ], replace)).toThrow('NODE_TEXT_CONFLICT')
+    expect(root.getElementsByTagNameNS(WORD_NS, 'tr')).toHaveLength(1)
   })
 
   it('resolves one explicit style for all inserted paragraphs before changing the body', () => {

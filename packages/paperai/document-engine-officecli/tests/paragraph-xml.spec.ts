@@ -27,8 +27,8 @@ function text(node: XmlElement): string {
   return all(node, 't').map(item => item.textContent).join('')
 }
 
-function edit(paragraph: XmlElement, mutation: Omit<Extract<EngineMutation, { type: 'replace-text' }>, 'type' | 'officePath'>): void {
-  replaceParagraphXml(paragraph, { type: 'replace-text', officePath: '/body/p[1]', ...mutation }, name => name)
+function edit(paragraph: XmlElement, mutation: Omit<Extract<EngineMutation, { type: 'replace-text' }>, 'type' | 'officePath' | 'baseText'>): void {
+  replaceParagraphXml(paragraph, { baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', ...mutation }, name => name)
 }
 
 describe('paragraph XML text and formatting', () => {
@@ -272,7 +272,7 @@ describe('paragraph layout and protected content', () => {
     const paragraph = all(root, 'p')[0]!
     const source = all(paragraph, 'r')[0]!
     const resolveStyle = vi.fn(() => 'Heading1')
-    replaceParagraphXml(paragraph, { type: 'replace-text', officePath: '/body/p[1]', text: 'same', paragraphs: [
+    replaceParagraphXml(paragraph, { baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'same', paragraphs: [
       { text: 'same', format: { style: 'Heading 1', align: 'justify', indent: '24pt', lineSpacing: '1.5x' } },
     ] }, resolveStyle)
     expect(all(paragraph, 'r')[0]).toBe(source)
