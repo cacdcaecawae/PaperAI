@@ -8,6 +8,8 @@ Service Definition for PaperAI's Word capability seam, exposed as `ctx.documentE
 
 Providers must serialize operations that address the same canonical Working DOCX. `applyMutations` owns one exclusive lease through save; consumers create and publish recoverable snapshots around that call. HTML is explicitly preview-only.
 
+Replacements and removals require `baseText`; anchored insertions require the anchor's `baseText`. Providers compare this text with the actual target before that mutation and reject a mismatch before writing the batch. Append and numeric-index insertions do not reference an existing text node.
+
 Replacement mutations can carry multiple paragraphs with character runs and paragraph layout. Providers bind every Office path to its original node before applying the batch in caller order, so insertions, splits, and removals cannot redirect subsequent references. Referencing a removed node rejects the batch. Omitted character fields preserve original properties; clients must state cleared values explicitly. Providers reject replacement of inline objects they cannot preserve, leaving the commit service to discard the candidate.
 
 ## Model Experience

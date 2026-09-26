@@ -128,6 +128,56 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     await native(['save', file])
   }
 
+  it('preserves indexed whitespace and targets the original numeric paragraphs after a content control', async () => {
+    await copyFile(fileURLToPath(new URL('./fixtures/numeric-content-control.docx', import.meta.url)), file)
+    const nodes = await ctx.documentEngine.readTextNodes(file)
+    expect(nodes.map(node => [node.officePath, node.text])).toMatchInlineSnapshot(`
+      [
+        [
+          "/body/p[1]",
+          "　　First",
+        ],
+        [
+          "/body/sdt[1]/p[2]",
+          "Inside",
+        ],
+        [
+          "/body/p[3]",
+          "\tThird",
+        ],
+        [
+          "/body/p[4]",
+          "HEAD
+      tail",
+        ],
+        [
+          "/body/p[5]",
+          "Fifth",
+        ],
+      ]
+    `)
+    const savedBytes = await readFile(file)
+    for (const type of ['replace-text', 'remove', 'insert-paragraph'] as const) {
+      const mutation = type === 'insert-paragraph'
+        ? { type, after: '/body/p[3]', baseText: 'Third', text: 'wrong' }
+        : { type, officePath: '/body/p[3]', baseText: 'Third', text: 'wrong' }
+      await expect(ctx.documentEngine.applyMutations(file, [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
+      expect(await readFile(file)).toEqual(savedBytes)
+    }
+    await ctx.documentEngine.applyMutations(file, [
+      { type: 'replace-text', officePath: '/body/p[1]', baseText: '　　First', text: '　　First!' },
+      { type: 'replace-text', officePath: '/body/p[3]', baseText: '\tThird', text: '\tThird!' },
+      { type: 'insert-paragraph', after: '/body/p[3]', baseText: '\tThird!', text: 'Inserted' },
+      { type: 'replace-text', officePath: '/body/p[4]', baseText: 'HEAD\ntail', text: 'HEAD\ntail!' },
+      { type: 'remove', officePath: '/body/p[5]', baseText: 'Fifth' },
+    ])
+    const expected = ['　　First!', 'Inside', '\tThird!', 'Inserted', 'HEAD', 'tail!']
+    expect((await ctx.documentEngine.readTextNodes(file)).map(node => node.text)).toEqual(expected)
+    await ctx.documentEngine.release(file)
+    expect((await ctx.documentEngine.readTextNodes(file)).map(node => node.text)).toEqual(expected)
+    expect(await ctx.documentEngine.validate(file)).toMatchObject({ success: true })
+  }, 120_000)
+
   it('edits Chinese text in the HIT template while retaining every original run property and untouched subtree', async () => {
     const before = await raw()
     expect(new XMLSerializer().serializeToString(before).length).toBeGreaterThan(32_768)
@@ -144,7 +194,7 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     const indexes = selected.map(paragraph => original.indexOf(paragraph))
     expect(await ctx.documentEngine.readTextNodes(file)).toContainEqual(expect.objectContaining({ text: '报告不要设置页眉。' }))
     expect((await ctx.documentEngine.previewHtml(file)).replace(/<[^>]*>/gu, '')).toContain('报告不要设置页眉。')
-    await ctx.documentEngine.applyMutations(file, selected.map(paragraph => ({
+    await ctx.documentEngine.applyMutations(file, selected.map(paragraph => ({ baseText: plainText(paragraph),
       type: 'replace-text', officePath: `/body/p[${original.indexOf(paragraph) + 1}]`, text: `${plainText(paragraph)}测`,
     })))
     const after = await raw()
@@ -188,7 +238,7 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     const oldProperties = children(before).find(element => element.localName === 'pPr')!.cloneNode(true) as XmlElement
     for (const style of Array.from(oldProperties.getElementsByTagNameNS(WORD, 'pStyle'))) style.parentNode!.removeChild(style)
     for (const { name, id } of [{ name: 'Body Text Indent 2', id: '2' }, { name: 'Normal', id: 'a' }]) {
-      await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[54]', text: plainText(before),
+      await ctx.documentEngine.applyMutations(file, [{ baseText: plainText(before), type: 'replace-text', officePath: '/body/p[54]', text: plainText(before),
         paragraphs: [{ text: plainText(before), format: { style: name } }],
       }])
       const after = paragraphs(await raw())[53]!
@@ -201,7 +251,7 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
       expect(canonical(properties)).toEqual(canonical(oldProperties))
     }
     const savedBytes = await readFile(file)
-    await expect(ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[54]', text: plainText(before),
+    await expect(ctx.documentEngine.applyMutations(file, [{ baseText: plainText(before), type: 'replace-text', officePath: '/body/p[54]', text: plainText(before),
       paragraphs: [{ text: plainText(before), format: { style: 'Heading1' } }],
     }])).rejects.toThrow('UNKNOWN_PARAGRAPH_STYLE')
     expect(await readFile(file)).toEqual(savedBytes)
@@ -212,7 +262,7 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     await setBody(`<w:body xmlns:w="${WORD}"><w:p>${pPr}<w:bookmarkStart w:id="12345" w:name="selection"/>`
       + `<w:r>${rPr}<w:t>甲乙丙丁</w:t></w:r><w:bookmarkEnd w:id="12345"/></w:p><w:sectPr/></w:body>`)
     const before = paragraphs(await raw())[0]!
-    await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[1]', text: '甲乙丙丁',
+    await ctx.documentEngine.applyMutations(file, [{ baseText: '甲乙丙丁', type: 'replace-text', officePath: '/body/p[1]', text: '甲乙丙丁',
       runs: [{ text: '甲乙', bold: true }, { text: '丙丁' }],
     }])
     const after = paragraphs(await raw())[0]!
@@ -232,7 +282,7 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
       + '<w:br w:type="textWrapping" w:clear="all"/><w:t>后行</w:t></w:r></w:p><w:sectPr/></w:body>')
     const before = paragraphs(await raw())[0]!
     expect(plainText(before)).toBe('前行\v后行')
-    await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[1]', text: '前行\v后行测' }])
+    await ctx.documentEngine.applyMutations(file, [{ baseText: '前行\v后行', type: 'replace-text', officePath: '/body/p[1]', text: '前行\v后行测' }])
     const after = paragraphs(await raw())[0]!
     expect(plainText(after)).toBe('前行\v后行测')
     expect(Array.from(after.getElementsByTagNameNS(WORD, 'br')).map(canonical))
@@ -246,11 +296,11 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     const properties = '<w:rPr><w:rFonts w:hAnsi="宋体"/><w:sz w:val="24"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr>'
     await setBody(`<w:body xmlns:w="${WORD}"><w:p>${pPr}<w:r>${properties}<w:t>中文ABC</w:t></w:r></w:p><w:sectPr/></w:body>`)
     const before = paragraphs(await raw())[0]!
-    await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[1]', text: '中文ABC测' }])
+    await ctx.documentEngine.applyMutations(file, [{ baseText: '中文ABC', type: 'replace-text', officePath: '/body/p[1]', text: '中文ABC测' }])
     const typed = paragraphs(await raw())[0]!
     expect(characters(typed).slice(0, -1)).toEqual(characters(before))
     expect(characters(typed).at(-1)?.properties).toEqual(characters(before).at(-1)?.properties)
-    await ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[1]', text: '中文ABC测',
+    await ctx.documentEngine.applyMutations(file, [{ baseText: '中文ABC测', type: 'replace-text', officePath: '/body/p[1]', text: '中文ABC测',
       runs: [{ text: '中文', bold: true }, { text: 'ABC测' }],
     }])
     const after = paragraphs(await raw())[0]!
@@ -275,9 +325,9 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
       + '<w:p><w:fldSimple w:instr="DATE"><w:r><w:t>日期</w:t></w:r></w:fldSimple></w:p><w:sectPr/></w:body>')
     const before = paragraphs(await raw())
     await ctx.documentEngine.applyMutations(file, [
-      { type: 'replace-text', officePath: '/body/p[1]', text: '甲乙\n丙丁', paragraphs: [{ text: '甲乙' }, { text: '丙丁' }] },
-      { type: 'replace-text', officePath: '/body/p[2]', text: '第二原段已改' },
-      { type: 'remove', officePath: '/body/p[3]' },
+      { baseText: '甲乙丙丁', type: 'replace-text', officePath: '/body/p[1]', text: '甲乙\n丙丁', paragraphs: [{ text: '甲乙' }, { text: '丙丁' }] },
+      { baseText: '相同原段', type: 'replace-text', officePath: '/body/p[2]', text: '第二原段已改' },
+      { baseText: '相同原段', type: 'remove', officePath: '/body/p[3]' },
     ])
     const updated = await raw()
     const after = paragraphs(updated)
@@ -290,7 +340,7 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     expect(updated.getElementsByTagNameNS(WORD, 'br')[0]!.getAttributeNS(WORD, 'type')).toBe('page')
     expect(updated.getElementsByTagNameNS(WORD, 'lastRenderedPageBreak').length).toBe(1)
     expect(canonical(after[3]!)).toEqual(canonical(before[3]!))
-    await expect(ctx.documentEngine.applyMutations(file, [{ type: 'replace-text', officePath: '/body/p[4]', text: '改动域' }]))
+    await expect(ctx.documentEngine.applyMutations(file, [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[4]', text: '改动域' }]))
       .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
     expect(canonical((await raw()).documentElement!)).toEqual(canonical(updated.documentElement!))
     await ctx.documentEngine.release(file)

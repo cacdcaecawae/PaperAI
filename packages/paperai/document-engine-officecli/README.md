@@ -6,6 +6,8 @@ OfficeCLI Service Provider for `ctx.documentEngine`. Each mutation batch reads a
 
 `readParagraphStyles()` reads `/styles` through the same file lease and parser used by style mutations. Only defined paragraph styles are returned; missing display names use the stored ID, and an absent styles part returns no choices. Exact IDs take precedence over colliding names, and unknown styles reject before writing.
 
+The text index reads OfficeCLI's JSON records, preserving leading and trailing whitespace, tabs, and embedded newlines. Numeric body paragraph and table addresses count first-level content-control children just as OfficeCLI's view does. Each replacement, removal, and anchored insertion compares its indexed `baseText` with the resolved XML target; a mismatch raises `NODE_TEXT_CONFLICT` before sending any write command. Paragraph checks use the editor's exact text projection; table checks use the indexed row-count label.
+
 Text differences retain each surviving character's original run properties. Inserted text inherits the surrounding run, or the replaced range's first run; empty paragraphs retain their character defaults. Explicit character values override the supported fields, while omitted values preserve original properties. East Asian font hints, per-script fonts, kerning, spacing, and other opaque run properties survive edits. Font and size overrides preserve script-specific details when the stored target property already matches. Browser submissions omit unchanged preview readings and state changed or cleared fields explicitly.
 
 Bookmarks, proofing markers, and manual or rendered page breaks retain their positions relative to edited text. Split paragraphs inherit paragraph properties; a section boundary remains on the last replacement paragraph. Paragraph format overrides cover existing styles, alignment, indentation, and line spacing. Fields, symbols, drawings, formulas, and other unsupported inline objects reject text replacement; unchanged paragraphs and other document parts remain in the candidate. OfficeCLI can normalize XML serialization and paragraph ids when saving; preservation is checked by document semantics rather than ZIP byte identity.
@@ -47,6 +49,7 @@ The Provider makes no model request. Changes to a Working DOCX affect cache reus
 ## Known Limitations and Deferred Work
 
 - The first Provider is local-process only; remote OfficeCLI execution would be a separate Provider.
+- Editing inside block content controls is unsupported. Text decorated by OfficeCLI, such as generated list markers, rejects mutation when it differs from the editable XML text.
 - The lease key is the supplied path. The document service must canonicalize Working DOCX paths before calling this seam so aliases cannot form parallel queues.
 - Preview output exceeding the configured bound fails explicitly rather than returning truncated HTML.
 - Legacy `.doc` normalization requires desktop Microsoft Word registered for the configured process identity; LibreOffice and server-side Word conversion are not fallback paths.

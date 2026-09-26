@@ -217,16 +217,23 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
 
   override readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
     return this.withLease(filePath, async () => {
-      const result = await this.run(['view', filePath, 'text', '--max-lines', '100000'], signal)
-      return result.stdout.split(/\r?\n/u).flatMap((line): EngineTextNode[] => {
-        const parsed = this.parseTextLine(line)
-        if (parsed === undefined) return []
+      const result = await this.run(['view', filePath, 'text', '--json'], signal)
+      const { elements } = this.parseEnvelope(result.stdout)
+      if (!Array.isArray(elements)) throw new OfficeCliError('OfficeCLI returned no text elements')
+      return elements.flatMap((element: unknown): EngineTextNode[] => {
+        if (element === null || typeof element !== 'object' || !('path' in element)
+          || typeof element.path !== 'string' || !element.path.startsWith('/')) {
+          throw new OfficeCliError('OfficeCLI returned an invalid text element')
+        }
+        // OfficeCLI omits text for structural records such as body bookmarks.
+        if (!('text' in element)) return []
+        if (typeof element.text !== 'string') throw new OfficeCliError('OfficeCLI returned invalid node text')
         return [{
-          officePath: parsed.officePath,
-          text: parsed.text,
-          kind: parsed.officePath.includes('/tbl[')
+          officePath: element.path,
+          text: element.text,
+          kind: element.path.includes('/tbl[')
             ? 'table'
-            : parsed.officePath.includes('/p[') ? 'paragraph' : 'unknown',
+            : element.path.includes('/p[') ? 'paragraph' : 'unknown',
         }]
       })
     })
@@ -413,23 +420,6 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       timer.unref()
       this.idle.set(filePath, timer)
     })
-  }
-
-  private parseTextLine(line: string): { officePath: string; text: string } | undefined {
-    if (!line.startsWith('[')) return undefined
-    let nested = 0
-    for (let index = 1; index < line.length; index += 1) {
-      if (line[index] === '[') nested += 1
-      if (line[index] !== ']') continue
-      if (nested > 0) {
-        nested -= 1
-        continue
-      }
-      const officePath = line.slice(1, index)
-      if (!officePath.startsWith('/')) return undefined
-      return { officePath, text: line.slice(index + 1).trimStart() }
-    }
-    return undefined
   }
 
   private parseEnvelope(stdout: string): Record<string, unknown> {

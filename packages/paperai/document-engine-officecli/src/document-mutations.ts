@@ -3,6 +3,7 @@
 import type { Document as XmlDocument, Element as XmlElement, Node as XmlNode } from '@xmldom/xmldom'
 import type { EngineMutation } from '@paperai/document-engine'
 import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
+import { paragraphText } from './paragraph-xml.ts'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const XML_NS = 'http://www.w3.org/XML/1998/namespace'
@@ -56,16 +57,28 @@ export function applyDocumentMutations(
     }
     return target
   }
+  const assertText = (target: XmlElement, path: string, baseText: string | undefined): void => {
+    const text = target.localName === 'p' ? paragraphText(target)
+      : target.localName === 'tbl'
+        ? `[Table: ${Array.from(target.childNodes).filter(child => child.nodeType === child.ELEMENT_NODE
+          && (child as XmlElement).namespaceURI === WORD_NS && (child as XmlElement).localName === 'tr').length} rows]`
+        : undefined
+    if (text === undefined || text !== baseText) {
+      throw new Error(`NODE_TEXT_CONFLICT: '${path}' text differs from the indexed base text; refresh the document before editing`)
+    }
+  }
   for (const mutation of mutations) {
     switch (mutation.type) {
       case 'replace-text': {
         const target = attached(mutation.officePath)
         if (target.localName !== 'p') throw new Error(`INVALID_OFFICE_TARGET: '${mutation.officePath}' is not a paragraph`)
+        assertText(target, mutation.officePath, mutation.baseText)
         replaceParagraph(target, mutation)
         break
       }
       case 'remove': {
         const target = attached(mutation.officePath)
+        assertText(target, mutation.officePath, mutation.baseText)
         const parent = target.parentNode as XmlNode
         parent.removeChild(target)
         break
@@ -77,11 +90,13 @@ export function applyDocumentMutations(
         let parent: XmlElement = body
         let reference: XmlNode | null
         if (mutation.after !== undefined || mutation.before !== undefined) {
-          const anchor = attached(mutation.after ?? mutation.before as string)
+          const anchorPath = (mutation.after ?? mutation.before) as string
+          const anchor = attached(anchorPath)
           parent = anchor.parentNode as XmlElement
           if (parent.localName !== 'body' && parent.localName !== 'tc') {
             throw new Error('INVALID_INSERT_POSITION: paragraphs must belong to the body or a table cell')
           }
+          assertText(anchor, anchorPath, mutation.baseText)
           reference = mutation.after === undefined ? anchor : anchor.nextSibling
         } else {
           const children = Array.from(body.childNodes).filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)

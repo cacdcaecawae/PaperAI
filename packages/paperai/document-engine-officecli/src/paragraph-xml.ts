@@ -170,6 +170,16 @@ function projection(paragraph: XmlElement): { characters: Character[]; markers: 
   return { characters, markers }
 }
 
+/**
+ * Read the exact text the paragraph editor can preserve.
+ * @param paragraph - Word paragraph selected for mutation.
+ * @returns text including whitespace, tabs, and soft breaks.
+ * @throws when the paragraph contains unsupported editable objects.
+ */
+export function paragraphText(paragraph: XmlElement): string {
+  return projection(paragraph).characters.map(character => character.text).join('')
+}
+
 function runCopy(paragraph: XmlElement, source: XmlElement | undefined, format?: EngineTextRun): XmlElement {
   const run = source === undefined ? element(paragraph, 'r') : clone(source, false)
   const props = source === undefined ? child(child(paragraph, 'pPr') ?? paragraph, 'rPr') : child(source, 'rPr')
