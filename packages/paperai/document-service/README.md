@@ -7,7 +7,7 @@ PaperAI document service exposed as `ctx.paperDocuments`. It imports Word source
 ## Service API
 
 - `importDocument(request, signal?)` accepts `.docx` and `.doc`. A successful result contains the durable document record and complete node index. Capability failures return `{ status: 'degraded', capability, health, detail }` and publish no document record.
-- `rollbackImport(documentId)` removes a Working import that has not acquired a head commit. Cleanup cannot be cancelled, deletes the service-owned immutable and Working copies plus their index, and never deletes the original source supplied to `importDocument`.
+- `rollbackImport(documentId)` removes a Working import that has neither a head commit nor an unresolved publication journal. A retained journal rejects cleanup with `IMPORT_ROLLBACK_FORBIDDEN`, preserving the files and records needed for recovery. Cleanup cannot be cancelled, deletes the service-owned immutable and Working copies plus their index, and never deletes the original source supplied to `importDocument`.
 - `listDocuments(projectId, role?)` returns deterministic project records with an optional exact role filter.
 - `readDocument(documentId)` returns repository metadata and ordered nodes without reading Word bytes again.
 - `verifyImmutableSource(documentId, signal?)` verifies that the imported source remains a read-only regular file whose bytes match the recorded SHA-256. Consumers call it before reading or copying source bytes.

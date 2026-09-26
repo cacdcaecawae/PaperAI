@@ -17,6 +17,7 @@ import {
   type ProjectRecord,
 } from '@paperai/domain'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { DocumentCommitPublication } from '@paperai/repository'
 import PaperDocumentService, {
   PaperDocumentError,
   type ImportDocumentResult,
@@ -31,6 +32,7 @@ class FakeRepository {
   failDocumentDelete = false
   failNodeDelete = false
   failNextUpdate = false
+  readonly getCommitPublication = vi.fn<() => DocumentCommitPublication | undefined>(() => undefined)
 
   getProject(id: ProjectIdType): ProjectRecord | undefined {
     return this.projects.get(id)
@@ -316,6 +318,23 @@ describe('PaperDocumentService', () => {
       .rejects.toMatchObject({ code: 'IMPORT_ROLLBACK_FORBIDDEN' })
     expect(await readFile(source, 'utf8')).toBe('template-source')
     expect(await readFile(result.document.workingPath, 'utf8')).toBe('template-source')
+  })
+
+  it('retains an uncommitted import while its publication journal is unresolved', async () => {
+    const { ctx, uploadRoot, projectId, repo, engine } = await fixture()
+    const source = join(uploadRoot, 'pending.docx')
+    await writeFile(source, 'pending')
+    engine.nodes = [{ officePath: '/body/p[1]', text: 'pending', kind: 'paragraph' }]
+    const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'manuscript' })
+    imported(result)
+    // Rollback only queries presence; the repository owns validation of the retained journal.
+    repo.getCommitPublication.mockReturnValue({ documentId: result.document.id } as DocumentCommitPublication)
+    await expect(ctx.paperDocuments.rollbackImport(result.document.id))
+      .rejects.toMatchObject({ code: 'IMPORT_ROLLBACK_FORBIDDEN' })
+    expect(repo.getDocument(result.document.id)).toEqual(result.document)
+    expect(repo.listNodes(result.document.id)).toHaveLength(1)
+    expect(await readFile(result.document.immutableSourcePath, 'utf8')).toBe('pending')
+    expect(await readFile(result.document.workingPath, 'utf8')).toBe('pending')
   })
 
   it('retains the import record as a retry receipt when its final deletion fails', async () => {

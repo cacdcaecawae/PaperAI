@@ -6,7 +6,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DocumentEngine } from '@paperai/document-engine'
 import type { EngineMutation, EngineTextNode, EngineValidation } from '@paperai/document-engine'
-import { DocumentId, DocumentNodeId, ProjectId } from '@paperai/domain'
+import { DocumentCommitId as CommitId, DocumentId, DocumentNodeId, ProjectId } from '@paperai/domain'
 import type {
   CapabilityHealth,
   DocumentCommit,
@@ -406,20 +406,50 @@ describe('PaperCommitService durable crash recovery', () => {
     expect(await readFile(reopened.workingPath, 'utf8')).toBe('alpha')
   })
 
-  it('retains the journal and unknown Working bytes when recovery cannot prove ownership', async () => {
+  it('retains unknown Working bytes while recovering and accepting commits for another document', async () => {
     const root = await createProjectRoot()
     const state = createRepositoryState()
     const first = await openBase(root, state)
     await seedProject(first)
     await mountCommits(first)
     const { publication } = await seedPublication(first, 'before')
+    const healthyId = DocumentId('document-2')
+    const healthyNode = DocumentNodeId('node-2')
+    const healthyPath = join(root, 'documents', 'healthy.docx')
+    const healthy = { ...structuredClone(publication), documentId: healthyId }
+    healthy.commit.documentId = healthyId
+    healthy.commit.id = CommitId('healthy-commit')
+    for (const side of [healthy.before, healthy.after]) {
+      side.document.id = healthyId
+      side.document.workingPath = healthyPath
+      for (const node of side.nodes) {
+        node.id = healthyNode
+        node.documentId = healthyId
+        if (node.lastCommitId !== undefined) node.lastCommitId = healthy.commit.id
+      }
+    }
+    healthy.after.document.headCommitId = healthy.commit.id
+    await writeFile(healthyPath, 'beta', 'utf8')
+    await first.ctx.paperRepository.putDocument(healthy.before.document)
+    for (const node of healthy.after.nodes) await first.ctx.paperRepository.putNode(node)
+    await first.ctx.paperRepository.putCommitPublication(healthy)
     await writeFile(first.workingPath, 'external Word edit', 'utf8')
     await disposeHarness(first)
 
     const reopened = await openBase(root, state)
-    await expect(mountCommits(reopened)).rejects.toMatchObject({ code: 'RECOVERY_FAILED' })
+    await mountCommits(reopened)
     expect(await readFile(reopened.workingPath, 'utf8')).toBe('external Word edit')
     expect(reopened.ctx.paperRepository.getCommitPublication(DOCUMENT_ID)).toEqual(publication)
     expect(reopened.ctx.paperRepository.getDocument(DOCUMENT_ID)?.headCommitId).toBeUndefined()
+    await expect(reopened.ctx.paperCommits.submit({
+      documentId: DOCUMENT_ID, message: 'Blocked', actor: { kind: 'human', name: 'ly' }, mutations: [{ type: 'milestone', label: 'Blocked' }],
+    })).rejects.toMatchObject({ code: 'RECOVERY_FAILED' })
+    expect(reopened.ctx.paperRepository.getCommitPublication(healthyId)).toBeUndefined()
+    expect(await readFile(healthyPath, 'utf8')).toBe('alpha')
+    await reopened.ctx.paperCommits.submit({
+      documentId: healthyId, message: 'Healthy edit', actor: { kind: 'human', name: 'ly' },
+      mutations: [{ type: 'replace-text', nodeId: healthyNode, baseText: 'alpha', nextText: 'gamma' }],
+    })
+    expect(await readFile(healthyPath, 'utf8')).toBe('gamma')
   })
 })

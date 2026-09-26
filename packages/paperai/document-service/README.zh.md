@@ -7,7 +7,7 @@ PaperAI 文档服务通过 `ctx.paperDocuments` 暴露。它将 Word 源文件�
 ## 服务 API
 
 - `importDocument(request, signal?)` 接受 `.docx` 和 `.doc`。成功结果包含已持久化的文档记录和完整节点索引；能力不可用时返回 `{ status: 'degraded', capability, health, detail }`，且不发布文档记录。
-- `rollbackImport(documentId)` 删除尚未获得 head commit 的 Working 导入。清理过程不可取消，会删除服务持有的不可变副本、Working 副本及其索引，但绝不删除传给 `importDocument` 的原始源文件。
+- `rollbackImport(documentId)` 删除既没有 head commit、也没有未完成发布日志的 Working 导入。存在保留日志时以 `IMPORT_ROLLBACK_FORBIDDEN` 拒绝清理，保留恢复所需的文件与记录。清理过程不可取消，会删除服务持有的不可变副本、Working 副本及其索引，但绝不删除传给 `importDocument` 的原始源文件。
 - `listDocuments(projectId, role?)` 按确定顺序返回项目文档，并可按角色精确筛选。
 - `readDocument(documentId)` 从仓库读取元数据和有序节点，不再次读取 Word 文件。
 - `verifyImmutableSource(documentId, signal?)` 校验导入源仍是只读普通文件，且内容与记录的 SHA-256 一致。Consumer 在读取或复制源文件字节前调用该方法。
