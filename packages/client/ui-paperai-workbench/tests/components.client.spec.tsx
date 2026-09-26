@@ -132,6 +132,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
     retryOpen: vi.fn(async () => {}),
     showPanel: vi.fn(),
     updateDraft: vi.fn(),
+    resolveConflict: vi.fn(),
     cancelEdit: vi.fn(),
     commitEdit: vi.fn(async () => ok),
     validate: vi.fn(async () => ok),
@@ -453,7 +454,13 @@ describe('DocumentWorkbench', () => {
     const discard = screen.getByRole<HTMLButtonElement>('button', { name: '放弃修改' })
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     expect(discard.disabled).toBe(true)
-    expect(shadow.querySelector('[contenteditable]')).toBeNull()
+    // Nothing takes a keystroke while the refresh runs. The conflict band is present and is itself
+    // contenteditable="false", so the invariant is the absence of a writable node, not of the attribute.
+    expect(shadow.querySelector('[contenteditable="true"]')).toBeNull()
+    // Its buttons are inert for the same reason: a resolve must not move the snapshot a commit holds.
+    const keep = shadow.querySelector<HTMLElement>('[data-paperai-resolve="mine"]')!
+    fireEvent.click(keep)
+    expect(b.resolveConflict).not.toHaveBeenCalled()
     fireEvent.click(discard)
     expect(b.cancelEdit).not.toHaveBeenCalled()
     act(() => { b.store.update((state) => { state.action = null }) })
@@ -535,7 +542,7 @@ describe('DocumentWorkbench', () => {
     expect(body.getAttribute('contenteditable')).toBe('true')
     body.textContent = 'Rewritten background'
     fireEvent.input(body)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Rewritten background' }))
   })
 
   it('maps each saved split paragraph for continued editing before the Host preview arrives', () => {
@@ -561,7 +568,7 @@ describe('DocumentWorkbench', () => {
       expect(block.style.textAlign).toBe(paragraphs[index]!.format.align)
       block.textContent += ' edited'
       fireEvent.input(block)
-      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], { text: `${paragraphs[index]!.text} edited` })
+      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], expect.objectContaining({ text: `${paragraphs[index]!.text} edited` }))
     })
   })
 
@@ -576,7 +583,7 @@ describe('DocumentWorkbench', () => {
     for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.getAttribute('contenteditable')).toBe('false')
     paragraphs[3]!.textContent = 'Changed'
     fireEvent.input(paragraphs[3]!)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Changed' })
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Changed' }))
   })
 
   it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
@@ -599,7 +606,7 @@ describe('DocumentWorkbench', () => {
     expect(cellBlock.getAttribute('contenteditable')).toBe(cell === 'editable' ? 'true' : 'false')
     cellBlock.textContent = 'Cell retyped'
     fireEvent.input(cellBlock)
-    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, { text: 'Cell retyped' })
+    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, expect.objectContaining({ text: 'Cell retyped' }))
     else expect(b.updateDraft).not.toHaveBeenCalled()
     b.updateDraft.mockClear()
     const paragraphs = [...shadow.querySelectorAll('p')].filter(element => element.closest('td') === null)
@@ -608,7 +615,7 @@ describe('DocumentWorkbench', () => {
       fireEvent.input(paragraph)
     }
     expect(b.updateDraft.mock.calls)
-      .toEqual([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
+      .toMatchObject([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
   })
 
   it('retains embedded raster figures while removing executable data URLs and handlers', () => {
@@ -707,7 +714,7 @@ describe('DocumentWorkbench', () => {
     expect(paragraph.getAttribute('contenteditable')).toBe('true')
     paragraph.textContent = 'Rewritten background'
     fireEvent.input(paragraph)
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Rewritten background' }))
     fireEvent.keyDown(paragraph, { key: 'Enter', ctrlKey: true })
     expect(b.commitEdit).toHaveBeenCalledOnce()
     fireEvent.keyDown(paragraph, { key: 'Escape' })
@@ -815,7 +822,7 @@ describe('DocumentWorkbench', () => {
     fireEvent.paste(paragraph, { clipboardData: { getData: () => '<b>粘贴</b>' } })
     expect(paragraph.textContent).toBe('<b>粘贴</b>')
     expect(paragraph.querySelector('b')).toBeNull()
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: '<b>粘贴</b>' })
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, expect.objectContaining({ text: '<b>粘贴</b>' }))
   })
 
   it('writes a retained draft back into a block as the runs it kept', () => {
@@ -1059,6 +1066,17 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...editing.props} />)
     expect(screen.getByRole('alert').textContent).toBe('请先保存或放弃页面上的修改。')
+  })
+
+  it.each([
+    ["internal: NODE_TEXT_CONFLICT: node 'node-paragraph' text changed since the mutation was prepared"],
+    ["internal: paperai-workbench: document 'doc-1' changed; reload before applying this action"],
+  ])('points a conflict failure at the refresh that can resolve it, not at a retry that cannot: %s', (error) => {
+    // Both of these mean the document moved under the save. Until the bands existed neither had a
+    // gesture behind it, so both landed on the generic retry and 保存 could be pressed forever.
+    const failed = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(), actionError: error }))
+    render(<DocumentWorkbench {...failed.props} />)
+    expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toContain(zh['workbench.reloadFirst'])
   })
 
   it('keeps the save failure beside the pending pill while the writer types on', () => {

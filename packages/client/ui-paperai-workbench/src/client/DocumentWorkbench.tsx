@@ -24,6 +24,10 @@ function actionErrorKey(error: string): PaperAIWorkbenchKey {
   if (error.includes('Working DOCX differs from head')) return 'workbench.workingChanged'
   if (error.startsWith('delivery blocked')) return 'export.blocked'
   if (error.startsWith('block changed externally')) return 'block.conflicted'
+  // Both real conflict failures, which until now landed on the generic retry: one from the commit
+  // service when a block's base text went stale, one from the workbench when the whole document did.
+  // Pressing 保存 again cannot clear either; reloading is what produces the bands that can.
+  if (error.includes('NODE_TEXT_CONFLICT') || error.includes('changed; reload before applying')) return 'workbench.reloadFirst'
   if (error === 'save or cancel the current block first') return 'block.busy'
   return 'workbench.actionError'
 }
@@ -147,7 +151,7 @@ function Actions({ state, exportDocument, focusActive, toggleFocus, t }: {
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
   closeDetails, prepareAgentFix, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
-  retryOpen, showPanel, updateDraft, cancelEdit, commitEdit, validate, suggestType,
+  retryOpen, showPanel, updateDraft, resolveConflict, cancelEdit, commitEdit, validate, suggestType,
   applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal, captureExternal,
   setDetailsFocus, showConversation, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
   useStore, actions,
@@ -291,6 +295,7 @@ export function DocumentWorkbench({
                 zoom={zoom}
                 onZoom={actions.setZoom}
                 onDraft={updateDraft}
+                onResolveConflict={resolveConflict}
                 onSave={() => { void commitEdit() }}
                 onCancel={cancelEdit}
                 t={t}

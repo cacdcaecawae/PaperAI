@@ -94,6 +94,12 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--paperai-page-shadow': pair('0 1px 2px rgba(28, 26, 23, 0.06), 0 12px 32px rgba(28, 26, 23, 0.08)', '0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.5)'),
   '--paperai-float-shadow': pair('0 4px 16px rgba(28, 26, 23, 0.08)', '0 4px 16px rgba(0, 0, 0, 0.4)'),
 
+  // Ink drawn ON the page. The sheet is white in both schemes, so a mark made on it holds one
+  // value instead of following the app: the gold aliases resolve to champagne #e2b457 in dark,
+  // which is 1.9:1 on white and unusable for a rule, an underline, or a label.
+  '--paperai-page-accent': pair('#9a6a1a', '#9a6a1a'),
+  '--paperai-page-loss': pair('#570c0c', '#570c0c'),
+
   // Document-type accents the workbench badges and icons read.
   '--paperai-type-proposal': pair('#2563eb', '#7fb0ff'),
   '--paperai-type-proposal-tint': pair('rgba(37, 99, 235, 0.12)', 'rgba(127, 176, 255, 0.16)'),

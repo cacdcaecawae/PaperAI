@@ -11,6 +11,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { DocumentCommitId, DocumentId, DocumentNodeId } from '@paperai/domain'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@paperai/workbench-service'
 import {
@@ -1509,6 +1510,92 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     ].join('\n'), MODE)
   }, 90_000)
 
+  it('preserves drafts after external formatting and paragraph deletion', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-format-and-deletion-conflicts'))
+    await page.getByRole('button', { name: '返回项目列表', exact: true }).click()
+    await page.getByRole('treeitem', { name: /Paper project/ }).click()
+    await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
+    const fileName = 'Conflict recovery.docx'
+    const original = 'Normal text and bold text'
+    await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('conflict-recovery-import'), fileName,
+      contentBase64: fixtureDocxBase64(false, [original, 'Keep this companion']), name: 'Conflict recovery',
+    })
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === fileName)!
+    const sessionId = SessionId('conflict-recovery-writer')
+    const read = () => scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId, resourceId: row.id })
+    const initial = await read()
+    await scaffold.ctx.paperaiWorkbench.commit({
+      sessionId, documentId: initial.document.documentId,
+      baseRevision: initial.document.revision, baseCommitId: initial.document.headCommitId,
+      mutations: [{ type: 'replace-text', nodeId: initial.document.nodes.find(node => node.text === original)!.nodeId,
+        baseText: original, nextText: original, runs: [{ text: 'Normal text and ', size: '12pt' }, { text: 'bold text', size: '12pt', bold: true }] }],
+    })
+    await sidebarDocument(fileName).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    const paragraph = preview.locator('[data-paperai-block]').filter({ hasText: original })
+    await paragraph.waitFor({ timeout: 30_000 })
+    await paragraph.click()
+    await page.keyboard.press('End')
+    await page.keyboard.insertText(' local draft')
+    const before = await read()
+    const target = before.document.nodes.find(node => node.text === original)!
+    await scaffold.ctx.paperaiWorkbench.commit({
+      sessionId, documentId: before.document.documentId,
+      baseRevision: before.document.revision, baseCommitId: before.document.headCommitId,
+      mutations: [{ type: 'replace-text', nodeId: target.nodeId, baseText: original, nextText: original,
+        runs: [{ text: 'Normal text and ', size: '16pt' }, { text: 'bold text', size: '16pt', bold: true }] }],
+    })
+    const banner = page.getByRole('status').filter({ hasText: '发现文档新版本' })
+    await banner.waitFor({ timeout: 15_000 })
+    await banner.getByRole('button', { name: '刷新', exact: true }).click()
+    const formatBand = preview.locator('[data-paperai-conflict-form="document"]')
+    await formatBand.waitFor({ timeout: 30_000 })
+    expect(await pending().getByRole('button', { name: '保存', exact: true }).isEnabled()).toBe(false)
+    expect(await paragraph.textContent()).toBe(`${original} local draft`)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'external-format-conflict.expected.md'), [
+      await formatBand.ariaSnapshot(), await pending().ariaSnapshot(),
+    ].join('\n'), MODE)
+    await formatBand.getByRole('button', { name: '用文档的', exact: true }).click()
+    await expect.poll(() => pending().count(), { timeout: 10_000 }).toBe(0)
+    expect(await paragraph.textContent()).toBe(original)
+    const rendered = await paragraph.locator('span').evaluateAll(elements => elements.map(element => ({
+      text: element.textContent, size: getComputedStyle(element).fontSize, weight: getComputedStyle(element).fontWeight,
+    })))
+    expect(rendered.some(run => run.text === 'bold text' && Number(run.weight) >= 700)).toBe(true)
+    expect(rendered.every(run => Number.parseFloat(run.size) > 21)).toBe(true)
+
+    await retype(paragraph, 'Draft from deleted paragraph')
+    await retype(preview.locator('[data-paperai-block]').filter({ hasText: 'Keep this companion' }), 'Companion local draft')
+    const current = await read()
+    await scaffold.ctx.paperCommits.submit({
+      documentId: DocumentId(current.document.documentId),
+      baseCommitId: DocumentCommitId(current.document.headCommitId!),
+      actor: { kind: 'agent', name: 'External writer', client: 'browser-test', model: 'scripted', sessionId },
+      message: 'Remove the externally edited paragraph',
+      mutations: [{ type: 'delete-node', nodeId: DocumentNodeId(target.nodeId) }],
+    })
+    await banner.waitFor({ timeout: 15_000 })
+    await banner.getByRole('button', { name: '刷新', exact: true }).click()
+    const deletedBand = preview.locator('[data-paperai-conflict-form="draft"]')
+    await deletedBand.waitFor({ timeout: 30_000 })
+    expect(await deletedBand.locator('.paperai-conflict-text').textContent()).toBe('Draft from deleted paragraph')
+    await deletedBand.getByRole('button', { name: '复制草稿', exact: true }).click()
+    expect(await deletedBand.evaluate((element) => {
+      const shadow = element.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null }
+      return (shadow.getSelection?.() ?? window.getSelection())?.toString()
+    })).toBe('Draft from deleted paragraph')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'deleted-paragraph-draft.expected.md'), [
+      await deletedBand.ariaSnapshot(), await pending().ariaSnapshot(),
+    ].join('\n'), MODE)
+    await deletedBand.getByRole('button', { name: '放弃这段草稿', exact: true }).click()
+    await deletedBand.getByRole('button', { name: '确认放弃', exact: true }).click()
+    await expect.poll(() => deletedBand.count(), { timeout: 10_000 }).toBe(0)
+    expect(await preview.locator('[data-paperai-changed]').textContent()).toBe('Companion local draft')
+    await pending().getByRole('button', { name: '放弃修改', exact: true }).click()
+    await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
+  }, 120_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -1525,6 +1612,8 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'cancel-final-tool.expected.md',
       'draft-export.expected.md',
       'external-update.expected.md',
+      'external-format-conflict.expected.md',
+      'deleted-paragraph-draft.expected.md',
       'formatting-comparison.expected.md',
       'format-intent.expected.md',
       'header-footer.expected.md',
