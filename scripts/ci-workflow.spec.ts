@@ -153,6 +153,13 @@ describe('CI workflow', () => {
       'packages/session/session-title/tests',
       'packages/host/apiproxy/tests/rpc-schemas.spec.ts',
       'packages/interaction/permission-presets/tests',
+      'packages/core/agent/tests/agent.spec.ts',
+      'packages/host/apiproxy/tests/api-proxy-cold.spec.ts',
+      'packages/api/remotes/tests/agent-lookup.spec.ts',
+      'packages/boot/app-boot/tests/profile.spec.ts',
+      'packages/client/ui-settings/tests/settings-scope.client.spec.ts',
+      'packages/client/ui-settings-models/tests/apply.client.spec.ts',
+      'scripts/release/families.spec.ts',
       'packages/paperai',
     ]) {
       expect(paperaiCodeScript).toContain(selection)
@@ -178,7 +185,8 @@ describe('CI workflow', () => {
     const uiCommands = commandText(ui.steps)
     expect(uiCommands).toContain('pnpm run build')
     expect(uiCommands).toContain('pnpm exec vitest run --config vitest.snapshot.config.ts')
-    expect(uiCommands).toContain('pnpm exec vitest run --config vitest.web.config.ts')
+    expect(uiCommands).toContain('pnpm run test:web:built apps/web/tests/')
+    expect(uiCommands).not.toContain('pnpm run test:web:ci')
     expect(uiCommands).not.toContain('pnpm run test:snapshot --')
     expect(uiCommands).not.toContain('pnpm run test:web:built --')
     expect(uiCommands).toContain('snapshot: pwsh-tool-turn matches')
@@ -188,6 +196,14 @@ describe('CI workflow', () => {
     expect(uiCommands).toContain('apps/web/tests/paperai-permissions.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-workspace-navigation.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
+    for (const suite of [
+      'agent-preset-authoring.e2e.ts', 'approval-composer.e2e.ts', 'background-job-list.e2e.ts',
+      'chat-continuous-conversation.e2e.ts', 'chat-long-interactions.e2e.ts', 'chat-scroll-contract.e2e.ts',
+      'code-mode-round.e2e.ts', 'goal-multi-turn-actions.e2e.ts', 'hmr-live.e2e.ts',
+      'minimal-preset.snapshot.ts', 'navigation-panes.e2e.ts', 'plugin-config.e2e.ts',
+      'replay-round-trip.e2e.ts', 'scaffold-hermetic.e2e.ts', 'settings-chrome.e2e.ts',
+      'shipped-composition.e2e.ts', 'turn-tail-actions.e2e.ts', 'workspace-management.e2e.ts',
+    ]) expect(uiCommands).toContain(`apps/web/tests/${suite}`)
 
     const windowsCommands = commandText(paperaiWindows.steps)
     expect(windowsCommands).toContain('pnpm run test:paperai:windows --maxWorkers=2')
@@ -196,6 +212,7 @@ describe('CI workflow', () => {
       env: { DSH_PAPERAI_OFFICECLI_REAL: '1' },
     }))
     expect(windowsCommands).toContain('snapshot: persistent-pwsh-tool-turn matches')
+    expect(windowsCommands).toContain('apps/web/tests/win32-directory-picker.snapshot.ts')
     expect(windowsCommands).not.toContain('check:ci:windows-complete')
     expect(typeof windowsNative['runs-on']).toBe('string')
     expect(windowsNative['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')

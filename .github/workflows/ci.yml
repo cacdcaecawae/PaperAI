@@ -552,7 +552,7 @@ jobs:
 
       - name: Replay PaperAI and affected assembled browser snapshots
         run: >-
-          pnpm exec vitest run --config vitest.web.config.ts
+          pnpm run test:web:built
           apps/web/tests/paperai-dsh-preset.e2e.ts
           apps/web/tests/paperai-acp-tool-failure.e2e.ts
           apps/web/tests/paperai-permissions.e2e.ts
@@ -564,6 +564,24 @@ jobs:
           apps/web/tests/max-tokens-notice.snapshot.ts
           apps/web/tests/search-card.snapshot.ts
           apps/web/tests/todo-row.snapshot.ts
+          apps/web/tests/agent-preset-authoring.e2e.ts
+          apps/web/tests/approval-composer.e2e.ts
+          apps/web/tests/background-job-list.e2e.ts
+          apps/web/tests/chat-continuous-conversation.e2e.ts
+          apps/web/tests/chat-long-interactions.e2e.ts
+          apps/web/tests/chat-scroll-contract.e2e.ts
+          apps/web/tests/code-mode-round.e2e.ts
+          apps/web/tests/goal-multi-turn-actions.e2e.ts
+          apps/web/tests/hmr-live.e2e.ts
+          apps/web/tests/minimal-preset.snapshot.ts
+          apps/web/tests/navigation-panes.e2e.ts
+          apps/web/tests/plugin-config.e2e.ts
+          apps/web/tests/replay-round-trip.e2e.ts
+          apps/web/tests/scaffold-hermetic.e2e.ts
+          apps/web/tests/settings-chrome.e2e.ts
+          apps/web/tests/shipped-composition.e2e.ts
+          apps/web/tests/turn-tail-actions.e2e.ts
+          apps/web/tests/workspace-management.e2e.ts
           --maxWorkers=1
           --testTimeout=120000
 
@@ -619,6 +637,15 @@ jobs:
           -t "snapshot: persistent-pwsh-tool-turn matches"
           --maxWorkers=1
           --testTimeout=30000
+
+      - name: Replay native Windows directory picker
+        shell: pwsh
+        env:
+          DSH_EXAMPLE_MODE: lib
+          DSH_SNAPSHOT: replay
+        run: |
+          pnpm run build
+          pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/win32-directory-picker.snapshot.ts --maxWorkers=1 --testTimeout=30000
 
   # Single stable required check for branch protection. Upstream validates its
   # release matrix; synchronized downstream repositories validate the three
