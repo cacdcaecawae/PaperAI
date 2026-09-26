@@ -1,0 +1,9 @@
+- text: 你的草稿 文档已删除这段，草稿仍可复制或单独丢弃
+- paragraph: Draft from deleted paragraph
+- button "复制草稿"
+- button "放弃这段草稿"
+- group "已修改 2 段":
+  - text: 已修改 2 段 草稿尚未写入文档，刷新会丢失
+  - alert: 文档版本已更新，冲突段落已锁定，草稿已保留供复制。保存只提交未冲突的段落，放弃修改会清除保留的草稿。
+  - button "放弃修改"
+  - button "保存"

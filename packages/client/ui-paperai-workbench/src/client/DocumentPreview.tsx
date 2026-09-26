@@ -42,12 +42,13 @@ export interface DocumentPreviewProps {
  * Copy printed on one conflict band.
  * @param form - `document` quotes the document and offers both sides; `draft` quotes a draft no keystroke can reach.
  * @param t - the workbench translator.
+ * @param missing - the document no longer contains the draft's paragraph.
  * @returns the resolved strings and the buttons this form can carry.
  */
-function bandCopy(form: ConflictBandSide['form'], t: PaperAIDocumentWorkbenchProps['t']): ConflictBandSide['copy'] {
+function bandCopy(form: ConflictBandSide['form'], t: PaperAIDocumentWorkbenchProps['t'], missing: boolean): ConflictBandSide['copy'] {
   return {
     who: t(form === 'draft' ? 'editor.conflictMine' : 'editor.conflictTheirs'),
-    legend: t(form === 'draft' ? 'editor.conflictUnmergeable' : 'editor.conflictLegend'),
+    legend: t(missing ? 'editor.conflictGone' : form === 'draft' ? 'editor.conflictUnmergeable' : 'editor.conflictLegend'),
     rewritten: t('editor.conflictRewritten'),
     empty: t('editor.conflictEmpty'),
     // No 用我的 on a draft band: no caret can enter that paragraph, so the button would promise a
@@ -465,7 +466,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         form,
         theirs: nodes.find(node => node.nodeId === edit.nodeId)?.text ?? edit.baseText,
         mine: edit.draft,
-        copy: bandCopy(form, t),
+        copy: bandCopy(form, t, seat === undefined),
       })
       if (seat !== undefined) seat.dataset.paperaiConflictSeat = form === 'draft' ? 'theirs' : 'mine'
       // A band never enters a table: it stands before the table its seat sits in, as a removed

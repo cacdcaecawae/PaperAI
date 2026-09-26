@@ -43,6 +43,7 @@ export const editorZh = {
   'editor.conflictCopy': '复制草稿',
   'editor.conflictDrop': '放弃这段草稿',
   'editor.conflictDropConfirm': '确认放弃',
+  'editor.conflictGone': '文档已删除这段，草稿仍可复制或单独丢弃',
   'editor.structureProtected': '此处不能拆分段落。请在普通正文段落中换段，或在 Word 中编辑。',
   'editor.saved': '已写入文档',
 } as const
@@ -92,6 +93,7 @@ export const editorEn: Record<keyof typeof editorZh, string> = {
   'editor.conflictCopy': 'Copy draft',
   'editor.conflictDrop': 'Discard this draft',
   'editor.conflictDropConfirm': 'Confirm discard',
+  'editor.conflictGone': 'This paragraph was deleted. Copy or discard its retained draft.',
   'editor.structureProtected': 'This paragraph cannot be split here. Use an ordinary body paragraph or edit it in Word.',
   'editor.saved': 'Written to document',
 }

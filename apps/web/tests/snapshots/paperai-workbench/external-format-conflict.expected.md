@@ -1,0 +1,11 @@
+- text: 文档现在是这样 下划线是文档新增的，删除线是你草稿里的
+- paragraph:
+  - text: Normal text and bold text
+  - deletion: local draft
+- button "用我的"
+- button "用文档的"
+- group "已修改 1 段":
+  - text: 已修改 1 段 草稿尚未写入文档，刷新会丢失
+  - alert: 文档版本已更新，冲突段落已锁定，草稿已保留供复制。保存只提交未冲突的段落，放弃修改会清除保留的草稿。
+  - button "放弃修改"
+  - button "保存" [disabled]
