@@ -18,7 +18,7 @@ Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与
 
 聚焦测试选择同时包含产品包测试与被修改共享模块的所属测试。产品测试间接执行共享代码，不能替代共享模块自身的行为覆盖；工作流回归测试约束这些共享测试套件的选择。CI 将 Vitest 选项直接放在 pnpm 脚本名之后，不插入会终止 Vitest 选项解析的 `--`。涉及路径的 MCP fixture（测试前置数据）使用当前平台的绝对路径和分隔符，使 Linux 与 Windows 验证相同的导出限制。
 
-共享测试选择覆盖 Agent 路由、API proxy 冷恢复、远程 Agent 查找、profile 加载、设置作用域、模型设置和发布族成员。浏览器 job 重放 PaperAI 修改过的共享浏览器套件；Windows job 构建应用后再重放原生目录选择器轨迹。`ci-master.yml` 和 `sandbox.yml` 保留上游的 `master` 触发条件，不提供下游 `main` 的检查。
+共享测试选择覆盖 Agent 路由、API proxy 冷恢复、远程 Agent 查找、profile 加载、设置作用域、模型设置和发布族成员。Linux 浏览器 job 先准备并功能探测 bubblewrap，再重放 PaperAI 修改过的共享浏览器套件；Windows job 构建应用后再重放原生目录选择器轨迹。`ci-master.yml` 和 `sandbox.yml` 保留上游的 `master` 触发条件，不提供下游 `main` 的检查。
 
 托管真实 API 工作流沿用已有凭证策略：上游默认启用，下游仓库只有在配置 `DEEPSEEK_API_KEY_EXTERNAL` 后，才用 `DSH_REAL_API_E2E_ENABLED=true` 显式启用。
 

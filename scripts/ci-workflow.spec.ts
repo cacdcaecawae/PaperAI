@@ -183,6 +183,10 @@ describe('CI workflow', () => {
     }
 
     const uiCommands = commandText(ui.steps)
+    expect(ui.steps).toContainEqual(expect.objectContaining({
+      name: 'Prepare bubblewrap (unrestrict userns)',
+      run: 'bash scripts/prepare-ci-bubblewrap.sh',
+    }))
     expect(uiCommands).toContain('pnpm run build')
     expect(uiCommands).toContain('pnpm exec vitest run --config vitest.snapshot.config.ts')
     expect(uiCommands).toContain('pnpm run test:web:built apps/web/tests/')
