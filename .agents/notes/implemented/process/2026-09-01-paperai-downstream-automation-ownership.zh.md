@@ -20,6 +20,8 @@ Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与
 
 共享测试选择覆盖 Agent 路由、API proxy 冷恢复、远程 Agent 查找、profile 加载、设置作用域、模型设置和发布族成员。Linux 浏览器 job 先准备并功能探测 bubblewrap，再重放 PaperAI 修改过的共享浏览器套件；Windows job 构建应用后再重放原生目录选择器轨迹。`ci-master.yml` 和 `sandbox.yml` 保留上游的 `master` 触发条件，不提供下游 `main` 的检查。
 
+跨平台 shell 回放保留记录中的命令结果：Goal 夹具中不可用的命令在 Bash 和 PowerShell 上均以 127 退出。Code Mode 断言遵循各 shell 渲染器支持的交互，同时要求真实子调用输出，以及点击行后详情栏保持关闭。
+
 托管真实 API 工作流沿用已有凭证策略：上游默认启用，下游仓库只有在配置 `DEEPSEEK_API_KEY_EXTERNAL` 后，才用 `DSH_REAL_API_E2E_ENABLED=true` 显式启用。
 
 npm、Python 与 GitHub Actions 的常规 Dependabot 版本更新通过 `open-pull-requests-limit: 0` 关闭。PaperAI 通过有意识的 DSH 同步与明确的产品依赖工作获取这些基线。Dependabot 安全更新是独立通道，不受版本更新数量限制。

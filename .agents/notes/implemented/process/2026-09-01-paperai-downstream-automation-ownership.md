@@ -20,6 +20,8 @@ Focused test selection includes the owning tests for changed shared modules as w
 
 The shared selection covers agent routing, cold API-proxy resume, remote agent lookup, profile loading, settings scope, model settings, and release-family membership. The Linux browser job prepares and functionally probes bubblewrap before replaying the shared browser suites modified by PaperAI; the Windows job builds the application before replaying its native directory-picker transcript. `ci-master.yml` and `sandbox.yml` retain their upstream `master` triggers: they do not provide downstream `main` coverage.
 
+Cross-platform shell replay retains the recorded command outcomes: the Goal fixture's unavailable command exits 127 on both Bash and PowerShell. Code Mode assertions follow each shell renderer's supported interaction while requiring real sub-dispatch output and a closed details panel after a row click.
+
 The hosted real-API workflow follows its existing credential policy: upstream is enabled by default, while a downstream repository opts in with `DSH_REAL_API_E2E_ENABLED=true` only after configuring `DEEPSEEK_API_KEY_EXTERNAL`.
 
 Routine Dependabot version updates are disabled for npm, Python, and GitHub Actions with `open-pull-requests-limit: 0`. PaperAI receives those baselines through deliberate DSH synchronization and explicit product dependency work. Dependabot security updates remain a separate channel and are not subject to the version-update limit.

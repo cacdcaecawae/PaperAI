@@ -248,13 +248,15 @@ describe('web e2e: Code Mode round renders nested sub-calls', () => {
     const frame = page.locator('[style*="grid-template-columns"]').first()
     const shellRow = nest.locator(SHELL_ROW_SELECTOR).first()
     expect(await frame.getAttribute('data-details-collapsed')).toBe('true')
-    expect(await shellRow.getAttribute('aria-expanded')).toBe('false')
+    // Code sub-dispatches have no terminal presentation. The generic Pwsh row
+    // expands its raw result; the dedicated Bash summary has no click target.
+    expect(await shellRow.getAttribute('aria-expanded')).toBe(WINDOWS_REPLAY ? 'false' : null)
     await shellRow.click()
-    await expect.poll(() => shellRow.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe('true')
+    await expect.poll(() => shellRow.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe(WINDOWS_REPLAY ? 'true' : null)
     // Tool rows do not drive layout geometry; the Session's default panel stays closed.
     await expect.poll(() => frame.getAttribute('data-details-collapsed'), { timeout: 5_000 }).toBe('true')
     await shellRow.click()
-    await expect.poll(() => shellRow.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe('false')
+    await expect.poll(() => shellRow.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe(WINDOWS_REPLAY ? 'false' : null)
   })
 
   it.skipIf(MODE === 'record')('matches the conversation aria golden with stable anchors', async () => {
