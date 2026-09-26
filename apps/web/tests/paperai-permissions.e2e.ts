@@ -1512,6 +1512,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
 
   it('preserves drafts after external formatting and paragraph deletion', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-format-and-deletion-conflicts'))
+    await page.getByRole('button', { name: '返回项目列表', exact: true }).click()
+    await page.getByRole('treeitem', { name: /Paper project/ }).click()
+    await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
     const fileName = 'Conflict recovery.docx'
     const original = 'Normal text and bold text'
     await scaffold.ctx.paperaiWorkbench.importDocument({
