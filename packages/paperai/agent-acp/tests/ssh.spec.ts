@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import { describe, expect, it } from 'vitest'
 import { forwardedPort, isolateSshMcp, sshLaunch } from '../src/ssh.ts'
@@ -49,6 +49,40 @@ describe('ACP OpenSSH transport', () => {
       await isolated.close()
       await isolated.close()
       await expect(fetch(target)).rejects.toThrow()
+    } finally {
+      await isolated.close()
+      await new Promise<void>((resolve) => {
+        host.close(() => { resolve() })
+        host.closeAllConnections()
+      })
+    }
+  })
+
+  it('terminates interrupted MCP streams and reports an unavailable upstream', async () => {
+    const streaming = Promise.withResolvers<ServerResponse>()
+    const host = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write('data: partial\n\n')
+      streaming.resolve(response)
+    })
+    await new Promise<void>(resolve => host.listen(0, '127.0.0.1', resolve))
+    const address = host.address()
+    if (address === null || typeof address === 'string') throw new Error('expected TCP host')
+    const isolated = await isolateSshMcp([{
+      name: 'paperai', type: 'http', url: `http://127.0.0.1:${address.port}/mcp`,
+      headers: [{ name: 'Authorization', value: 'Bearer session-token' }],
+    }])
+    const descriptor = isolated.servers[0]
+    if (descriptor === undefined || !('url' in descriptor)) throw new Error('expected HTTP descriptor')
+    try {
+      const headers = { Authorization: 'Bearer session-token' }
+      const response = await fetch(descriptor.url, { headers })
+      const body = expect(response.text()).rejects.toThrow()
+      const upstream = await streaming.promise
+      upstream.destroy()
+      await body
+      await new Promise<void>(resolve => host.close(() => { resolve() }))
+      expect((await fetch(descriptor.url, { headers })).status).toBe(502)
     } finally {
       await isolated.close()
       await new Promise<void>((resolve) => {
