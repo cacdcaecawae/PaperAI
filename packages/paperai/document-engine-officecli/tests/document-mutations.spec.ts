@@ -153,9 +153,11 @@ describe('ordered candidate document mutations', () => {
 
   it('refuses removal of a structural node without an indexed text projection', () => {
     const root = document('<w:tbl><w:tr><w:tc>' + paragraph('cell') + '</w:tc></w:tr></w:tbl>')
-    expect(() => applyDocumentMutations(root, [
-      { type: 'remove', officePath: '/body/tbl[1]/tr[1]', baseText: 'cell' },
-    ], replace)).toThrow('NODE_TEXT_CONFLICT')
+    expect(() => {
+      applyDocumentMutations(root, [
+        { type: 'remove', officePath: '/body/tbl[1]/tr[1]', baseText: 'cell' },
+      ], replace)
+    }).toThrow('NODE_TEXT_CONFLICT')
     expect(root.getElementsByTagNameNS(WORD_NS, 'tr')).toHaveLength(1)
   })
 
