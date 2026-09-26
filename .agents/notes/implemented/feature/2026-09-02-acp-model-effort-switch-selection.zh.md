@@ -34,4 +34,4 @@ PaperAI 的 Codex 与 Claude 引擎经固定版本的 ACP 适配器运行，两�
 
 ## Consequences
 
-等级按会话而非按模型通告，因此在提供方于切换后重新通告之前，菜单里每个模型显示的都是当前模型的等级；菜单每次打开都会重新加载，新列表在那时出现。开关值在 `LlmCallConfig` 里没有对应字段，所以只通过 `paperai/acp/config` 事件持久化，这是 PaperAI 自己的日志词汇而非核心请求头字段。提供方若连恢复步骤也拒绝，会话会停在中间状态直到重建：失败的选择返回 `restored: false`，半应用状态不会写入日志，新进程重新通告后日志追上提供方的真实选择。上游补丁集又多一条可叠加缝（`AgentModelController` 上的驱动方等级与开关、`ModelSelection` 与 `SessionModels` 上的 `switches`），后续合并 DSH 时必须保留。
+等级按会话而非按模型通告，因此在提供方于切换后重新通告之前，菜单里每个模型显示的都是当前模型的等级；菜单每次打开都会重新加载，新列表在那时出现。开关值在 `LlmCallConfig` 里没有对应字段，所以只通过 `paperai/acp/config` 事件持久化，这是 PaperAI 自己的日志词汇而非核心请求头字段。提供方若连恢复步骤也拒绝，会话会停在中间状态直到重建：失败的选择返回 `restored: false`，半应用状态不会写入日志，新进程会先恢复最后确认的日志选择，再发布实际配置，详见 [ACP 运行时恢复](../bug-fix/2026-09-26-paperai-acp-runtime-recovery.zh.md)。上游补丁集又多一条可叠加缝（`AgentModelController` 上的驱动方等级与开关、`ModelSelection` 与 `SessionModels` 上的 `switches`），后续合并 DSH 时必须保留。
