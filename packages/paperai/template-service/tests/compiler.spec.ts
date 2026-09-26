@@ -53,11 +53,41 @@ describe('compileTemplateDraft', () => {
     expect(compiled.contract.slots).toEqual([])
     expect(compiled.contract.pageSetup).toEqual({})
     expect(compiled.contract.rules.map(rule => rule.kind)).toEqual(expect.arrayContaining([
-      'fixed-text', 'required-section', 'reference-count', 'minimum-characters', 'font', 'font-size', 'paragraph-spacing',
+      'required-section', 'reference-count', 'minimum-characters', 'font', 'font-size', 'paragraph-spacing',
     ]))
     expect(compiled.contract.rules).not.toContainEqual(expect.objectContaining({ kind: 'table-structure' }))
     expect(compiled.nodes.at(-1)?.kind).toBe('table')
     expect(compiled.contract.styleMap).toHaveProperty('heading 1')
+  })
+
+  it('requires generic sections without copying research headings, annotations, citations, or TOC entries', async () => {
+    const examples = [
+      ['摘  要', 'heading 1'], ['Abstract', 'heading 1'], ['目  录', 'Normal'],
+      ['结  论', 'heading 1'], ['参考文献', 'heading 1'],
+      ['第4章  基于FLUENT软件的轴承静态特性研究', 'heading 1'],
+      ['6.2  多孔质石墨渗透率测试试验', 'heading 2'],
+      ['0.023 12', 'Normal'],
+      ['哈尔滨工业大学←（楷体小2号字加粗）', 'Normal'],
+      ['［12］谌颖．哈尔滨工业大学，1992：8-13.', 'Normal'],
+      ['摘  要\tI', '目录 1'], ['Abstract\tII', 'TOC 1'],
+      ['参考文献', 'TOC 1'], ['结论', '目录 1'],
+      ['（摘要应说明研究工作）', 'heading 1'],
+    ] as const
+    const nodes = examples.map(([text], index) => ({ officePath: `/body/p[${index + 1}]`, text, kind: 'paragraph' as const }))
+    const compiled = await compileTemplateDraft({
+      readTextNodes: vi.fn(async () => nodes),
+      inspect: vi.fn(async () => ({ results: [{ type: 'body', children: nodes.map((node, index) =>
+        inspected(node.officePath, node.text, examples[index]![1])) }] })),
+    } as never, { ...input('format', 'source'), usage: 'format-reference' })
+
+    expect(compiled.contract.fixedNodeIds).toEqual([])
+    expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([
+      ['required-section', { text: '摘  要' }],
+      ['required-section', { text: 'Abstract' }],
+      ['required-section', { text: '目  录' }],
+      ['required-section', { text: '结  论' }],
+      ['required-section', { text: '参考文献' }],
+    ])
   })
 
   it('detects text and date fields plus form tables', async () => {

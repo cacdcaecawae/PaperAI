@@ -37,13 +37,24 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
     "@paperai/template-service": "workspace:*"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@paperai/template-service": "workspace:*"
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-storage": "workspace:^",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/dsh-storage-sqlite": "workspace:^",
+    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "@paperai/commit-service": "workspace:*",
+    "@paperai/document-engine-officecli": "workspace:*",
+    "@paperai/document-service": "workspace:*",
+    "@paperai/domain": "workspace:*",
+    "@paperai/export-service": "workspace:*",
+    "@paperai/repository": "workspace:*",
+    "@paperai/template-service": "workspace:*",
+    "@xmldom/xmldom": "0.9.12"
   }
 }
