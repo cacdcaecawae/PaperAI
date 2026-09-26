@@ -101,7 +101,7 @@ export interface PaperAIDocumentRow {
   readonly updatedAt: string
 }
 
-/** Everything the sidebar and the project start page show for one project. */
+/** Read-only Workspace summary; without a PaperAI project, its template is undecided and documents are empty. */
 export interface PaperAIProjectOverview {
   readonly workspaceId: WorkspaceId
   readonly projectName: string

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -365,6 +365,20 @@ describe('workspace.insertBefore', () => {
 })
 
 describe('session creation and Workspace membership', () => {
+  it.each(['missing', 'file'])('rejects a %s Workspace root without creating a session or rebuilding its directory', async (kind) => {
+    const { api, ctx, root } = await harness()
+    const path = stageDir(root, 'removed-project')
+    const workspace = expectOk(await api.workspace.create(request({ path }))).workspace
+    rmSync(path, { recursive: true })
+    if (kind === 'file') writeFileSync(path, 'replacement file')
+    const sessionId = SessionId('missing-workspace-root')
+    const response = await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId }))
+    expect(response.result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(ctx.sessions.get(sessionId)).toBeUndefined()
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    expect(existsSync(path)).toBe(kind === 'file')
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace

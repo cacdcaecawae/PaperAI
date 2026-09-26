@@ -220,7 +220,11 @@ function commitRecord(id: string, parentId?: string): DocumentCommit {
   }
 }
 
-async function createHarness(rootPath = 'F:\\paper'): Promise<Harness> {
+async function createHarness(rootPath?: string): Promise<Harness> {
+  if (rootPath === undefined) {
+    rootPath = await mkdtemp(join(tmpdir(), 'paperai-workbench-'))
+    roots.push(rootPath)
+  }
   const ctx = new Context()
   contexts.push(ctx)
   const harness = {} as Harness
@@ -518,6 +522,51 @@ function templateContract(origin: 'built-in' | 'uploaded' = 'built-in'): Templat
 }
 
 describe('PaperAiWorkbenchService', () => {
+  it('reads an uninitialized Workspace without creating a project and refuses to open its documents', async () => {
+    const h = await createHarness()
+    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValue([])
+    const create = vi.spyOn(h.ctx.paperProjects, 'create')
+    const listDocuments = vi.spyOn(h.ctx.paperDocuments, 'listDocuments')
+    expect(await h.service.overview({ workspaceId: WORKSPACE_ID })).toEqual({
+      workspaceId: WORKSPACE_ID, projectName: '硕士论文', templateDecided: false,
+      templatePackId: null, template: null, documents: [],
+    })
+    await expect(openDocument(h)).rejects.toThrow('project is not initialized')
+    expect(create).not.toHaveBeenCalled()
+    expect(listDocuments).not.toHaveBeenCalled()
+    expect(await readdir(h.project.rootPath)).toEqual([])
+    await h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })
+    expect(create).toHaveBeenCalledExactlyOnceWith({ rootPath: h.project.rootPath, name: '硕士论文' })
+  })
+
+  it('does not create a project for an invalid template or a missing or non-directory Workspace root', async () => {
+    const h = await createHarness()
+    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValue([])
+    const create = vi.spyOn(h.ctx.paperProjects, 'create')
+    await expect(h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: 'missing' })).rejects.toThrow('not in the library')
+    const root = h.project.rootPath
+    h.project = { ...h.project, rootPath: join(root, 'moved-away') }
+    await expect(h.service.overview({ workspaceId: WORKSPACE_ID })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(h.service.importDocument({ workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, fileName: 'paper.docx', contentBase64: '' })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(h.service.createFromTemplate({ workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, documentType: 'proposal' })).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(root)).toEqual([])
+    await writeFile(h.project.rootPath, 'ordinary file')
+    await expect(h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })).rejects.toThrow('not a directory')
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('does not repair files while reading or reusing an existing project and rejects a mismatched project root', async () => {
+    const h = await createHarness()
+    const create = vi.spyOn(h.ctx.paperProjects, 'create')
+    await h.service.overview({ workspaceId: WORKSPACE_ID })
+    await openDocument(h)
+    await h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })
+    expect(create).not.toHaveBeenCalled()
+    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValue([{ ...h.project, rootPath: join(h.project.rootPath, 'another') }])
+    await expect(h.service.overview({ workspaceId: WORKSPACE_ID })).rejects.toThrow('root does not match')
+  })
+
   it('scans only existing projects and rejects repair plans owned by another project', async () => {
     const h = await createHarness()
     const create = vi.spyOn(h.ctx.paperProjects, 'create')

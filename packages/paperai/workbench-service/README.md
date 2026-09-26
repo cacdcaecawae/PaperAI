@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-Host Remote for the PaperAI workbench layered into the pinned DeepSeek Harness client. It lazily initializes the selected DSH Workspace as a PaperAI project, describes that project (its template set and its tracked documents), projects read-only OfficeCLI HTML and current plain text for each semantic node, and routes every save, template change, or restore through `ctx.paperCommits`.
+Host Remote for the PaperAI workbench layered into the pinned DeepSeek Harness client. It describes existing projects, projects read-only OfficeCLI HTML and current plain text for each semantic node, and routes every save, template change, or restore through `ctx.paperCommits`.
+
+`overview()` and `open()` never initialize or repair a project. An uninitialized Workspace's overview uses its title, an undecided template, and an empty document list; opening a document requires an existing project. Only `setProjectTemplate()`, `importDocument()`, and `createFromTemplate()` may initialize a project, and they require an existing Workspace directory before creating files. A registered project is reused without rewriting its context files. Missing directories are rejected, not recreated. [The initialization decision](../../../.agents/notes/implemented/architecture/2026-09-26-paperai-explicit-project-initialization.md) records the ownership rule.
 
 `agentDiagnostics()` reads the optional ACP provider's cached observations; absent providers return an empty roster. `probeAgent()` requests explicit bounded initialization and fails when no provider is composed. `inspectProject()` reads an already registered project without creating context files or initializing it. `recoverWorking()` verifies that the plan's document belongs to that Workspace before delegating to the commit service and returning a fresh scan. Diagnostic transport types are re-exported through `/types` without importing Host implementations into the browser. `captureExternal()` records a Working DOCX changed outside PaperAI as a version of its own and re-reads the report.
 

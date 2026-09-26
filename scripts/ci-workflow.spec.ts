@@ -152,6 +152,7 @@ describe('CI workflow', () => {
       'packages/client/ui-primitives/tests',
       'packages/session/session-title/tests',
       'packages/host/apiproxy/tests/rpc-schemas.spec.ts',
+      'packages/host/apiproxy/tests/api-proxy-workspace.spec.ts',
       'packages/interaction/permission-presets/tests',
       'packages/paperai',
     ]) {
@@ -186,6 +187,7 @@ describe('CI workflow', () => {
     expect(uiCommands).toContain('scripts/translation-prompt.snapshot.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-acp-tool-failure.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-permissions.e2e.ts')
+    expect(uiCommands).toContain('apps/web/tests/paperai-initialization.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/paperai-workspace-navigation.e2e.ts')
     expect(uiCommands).toContain('apps/web/tests/built-boot.snapshot.ts')
 

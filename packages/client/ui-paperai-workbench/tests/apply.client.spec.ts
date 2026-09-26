@@ -305,14 +305,14 @@ describe('PaperAI workbench browser plugin', () => {
     await b.ctx.fiber.dispose()
   })
 
-  it('initializes a PaperAI project as soon as a DSH Workspace enters the ledger', async () => {
+  it('leaves existing and newly observed DSH Workspaces unread until a project view requests them', async () => {
     const b = await bench()
     declare(b.slots)
     const overview = vi.spyOn(b.remote, 'overview')
+    b.workspaceList.set({ items: [{ workspaceId: WORKSPACE_ID, sessionIds: [] }] })
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     b.workspaceList.set({ items: [{ workspaceId: WORKSPACE_ID, sessionIds: [] }] })
-    await vi.waitFor(() => { expect(overview).toHaveBeenCalledOnce() })
-    expect(overview).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID }, expect.any(AbortSignal))
+    expect(overview).not.toHaveBeenCalled()
     await b.ctx.fiber.dispose()
   })
 
