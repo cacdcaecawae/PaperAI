@@ -10,13 +10,17 @@ PaperAI 在产品包所在仓库中保留了同步自 DeepSeek Harness 的工作
 
 ## 决策
 
-Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与故障转移 runner、逐文件 100% 覆盖率、Node 兼容矩阵、Python SDK 与 runtime 检查、Wine lane、完整原生 Windows 清单和全量快照清单。同步后的下游仓库只在标准托管 runner 上运行三个产品门禁：Linux 代码门禁负责静态检查、类型、lint、文档、聚焦产品测试，以及改动源码的逐文件覆盖率（语句、函数与行 85%，分支 65%）；Linux 组装 UI 门禁执行一次完整构建、发布产物检查、受影响的协议快照和 PaperAI 无密钥浏览器快照；聚焦的原生 Windows 门禁验证 ACP、OfficeCLI、导出、项目路径标识和持久 PowerShell 集成。快照 job 直接调用 Vitest 并显式指定配置与文件路径，命令转发不会把聚焦选择扩大成全量清单。持久 PowerShell 仅在原生 Windows 门禁验证，因为其终端行为与平台相关。所有产品可见的 PaperAI 浏览器快照仍是每个 pull request 的必需检查。
+Pull request CI 按仓库身份选择。DSH 保留完整发布矩阵、大型与故障转移 runner、逐文件 100% 覆盖率、Node 兼容矩阵、Python SDK 与 runtime 检查、Wine lane、完整原生 Windows 清单和全量快照清单。同步后的下游仓库只在标准托管 runner 上运行三个产品门禁：Linux 代码门禁负责静态检查、类型、lint、文档、聚焦产品测试，以及改动源码的逐文件覆盖率（语句、函数与行 85%，分支 65%）；Linux 组装 UI 门禁执行一次完整构建、发布产物检查、受影响的协议快照和 PaperAI 无密钥浏览器快照；聚焦的原生 Windows 门禁验证 ACP、OfficeCLI、导出、项目路径标识和持久 PowerShell 集成。快照 job 显式指定 Vitest 配置与文件路径。浏览器步骤将这些路径传给 `test:web:built`，使 HMR 子进程继承 pnpm 生命周期环境，不调用全量清单包装脚本。持久 PowerShell 仅在原生 Windows 门禁验证，因为其终端行为与平台相关。所有产品可见的 PaperAI 浏览器快照仍是每个 pull request 的必需检查。
 
 稳定的 `all checks passed` 结论只评估当前仓库拥有的 job 集合。PaperAI 在工作流源码中保留上游 job，使同步仍可审查，但会跳过这些 job，而不是重复执行另一产品的发布矩阵。拥有上游专属外部状态的自动化同样按仓库身份选择：DSH issue 自动化以及 DSH 或 vendored-framework npm 发布 job 只在 `deepseek-harness/deepseek-harness` 运行。跳过一个由上游拥有的 job 不算 PaperAI 产品失败。
 
 代码 job 通过 `fetch-depth: 0` 保留完整提交历史，并指定 `filter: blob:none`。Checkout 按需下载选定版本的文件内容，改动源码覆盖率和归档验证仍可读取 pull request 的精确基线。这避开了 GitHub 未过滤历史 pack 中无法解析的 blob delta，不会截断提交历史或削弱检查。读取历史文件可能需要额外网络请求。
 
 聚焦测试选择同时包含产品包测试与被修改共享模块的所属测试。产品测试间接执行共享代码，不能替代共享模块自身的行为覆盖；工作流回归测试约束这些共享测试套件的选择。CI 将 Vitest 选项直接放在 pnpm 脚本名之后，不插入会终止 Vitest 选项解析的 `--`。涉及路径的 MCP fixture（测试前置数据）使用当前平台的绝对路径和分隔符，使 Linux 与 Windows 验证相同的导出限制。
+
+共享测试选择覆盖 Agent 路由、API proxy 冷恢复、远程 Agent 查找、profile 加载、设置作用域、模型设置和发布族成员。Linux 浏览器 job 先准备并功能探测 bubblewrap，再重放 PaperAI 修改过的共享浏览器套件；Windows job 构建应用后再重放原生目录选择器轨迹。`ci-master.yml` 和 `sandbox.yml` 保留上游的 `master` 触发条件，不提供下游 `main` 的检查。
+
+跨平台 shell 回放保留记录中的命令结果：Goal 夹具中不可用的命令在 Bash 和 PowerShell 上均以 127 退出。Code Mode 断言遵循各 shell 渲染器支持的交互，同时要求真实子调用输出，以及点击行后详情栏保持关闭。
 
 托管真实 API 工作流沿用已有凭证策略：上游默认启用，下游仓库只有在配置 `DEEPSEEK_API_KEY_EXTERNAL` 后，才用 `DSH_REAL_API_E2E_ENABLED=true` 显式启用。
 

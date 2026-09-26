@@ -30,10 +30,10 @@
   - img
   - img
   - text: Bash Show working directory and its contents
-- 'button "Tool call get_goal · {}"':
+- button "Tool call Read current goal":
   - img
   - img
-  - text: "Tool call get_goal · {}"
+  - text: Tool call Read current goal
 - 'button "Think There''s a `packages` directory. Let me look inside to see what packages are available."':
   - img
   - img
@@ -131,15 +131,15 @@
   - text: ，turn 2：
   - code: token-meter
   - text: ）。这一轮到此结束。
-- 'button "Tool call get_goal · {}"':
+- button "Tool call Read current goal":
   - img
   - img
-  - text: "Tool call get_goal · {}"
+  - text: Tool call Read current goal
 - paragraph: 两个 turn 均已完成，目标达成，标记 goal 为完成。
-- button "Tool call update_goal · goal-{{uuid}}":
+- button "Tool call Complete goal":
   - img
   - img
-  - text: Tool call update_goal · goal-{{uuid}}
+  - text: Tool call Complete goal
 - 'button "Context injection tool-goal complete: 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的"':
   - img
   - img
