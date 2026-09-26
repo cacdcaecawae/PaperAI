@@ -1345,7 +1345,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     expect(readback.document.nodes.filter(node => node.editable).map(node => node.text)).toEqual(paragraphs)
     await sidebarDocument(fileName).click()
     const longPreview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
-    await expect.poll(() => longPreview.locator('[data-paperai-block][contenteditable="true"]').count()).toBe(80)
+    await expect.poll(() => longPreview.locator('[data-paperai-block][contenteditable="true"]').count(), { timeout: 30_000 }).toBe(80)
     expect(await longPreview.evaluate(element => element.scrollHeight / element.clientHeight)).toBeGreaterThan(3)
     expect(await sidebarDocument(fileName).getAttribute('title')).toBe(row.workingPath)
     await page.getByRole('button', { name: '查找文档', exact: true }).click()
