@@ -4,6 +4,8 @@ Status: implemented
 
 [English](2026-08-29-paperai-transient-state-lifetimes.md) | 中文
 
+部分被取代：本笔记描述的浏览器端冲突控件，随其所在的标签页编辑器一同移除，改由 [UI 总览决策](../feature/2026-09-03-paperai-ui-overhaul.zh.md) 的显式外部刷新策略承担。下文关于临时状态归属 revision 的部分仍然有效。
+
 ## 问题
 
 PaperAI 保存两类非持久工作台状态：浏览器中的选中节点草稿，以及 Host 中最近一次模板门禁报告。两者都必须继续归属于产生它们的文档 revision。

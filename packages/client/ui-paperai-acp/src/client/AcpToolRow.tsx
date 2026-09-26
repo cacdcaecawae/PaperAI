@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { Button, DisclosureRow, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import type { AcpKey } from './locales.ts'
+import type { AcpKey, AcpTranslate } from './locales.ts'
 import css from './AcpToolRow.module.css'
 
 /** Transcript tool name the Host gives PaperAI's own MCP tool calls; mirrors `PAPERAI_TOOL` in `@paperai/agent-acp`. */
@@ -32,6 +32,17 @@ const TOOL_KEYS = {
 const DOTS: Record<RowState, StateDotState> = { running: 'ongoing', ok: 'done', error: 'error' }
 /** The state a reader hears before the row; a completed call needs no announcement. */
 const STATE_KEYS: Record<RowState, AcpKey | null> = { running: 'tool.running', ok: null, error: 'tool.failed' }
+
+/** Failure codes PaperAI's own server raises, in words; mirrors `ToolFailure` in `@paperai/mcp`. An unlisted code reads its own message. */
+const FAILURE_KEYS = {
+  DOCUMENT_NOT_FOUND: 'fail.documentNotFound',
+  TEMPLATE_NOT_FOUND: 'fail.templateNotFound',
+  TEMPLATE_NOT_CONFIRMED: 'fail.templateNotConfirmed',
+  TEMPLATE_ROLE_INCOMPATIBLE: 'fail.templateRoleIncompatible',
+  INVALID_REQUEST: 'fail.invalidRequest',
+  DELIVERY_BLOCKED: 'fail.deliveryBlocked',
+  INVALID_EXPORT_PROVENANCE: 'fail.invalidExportProvenance',
+} as const satisfies Record<string, AcpKey>
 
 /** The tool's own name at the end of a provider name or title: `mcp__paperai__paperai_read_document` → `paperai_read_document`. */
 const OWN_NAME = /paperai_[a-z]+(?:_[a-z]+)*$/u
@@ -86,15 +97,25 @@ function readableOutput(output: string): string {
   return (record === null ? null : unwrapEnvelope(record)) ?? output
 }
 
+/** One failure field: a plain line, or the `{ code, message }` envelope PaperAI's own MCP server nests there. */
+function failureLine(candidate: unknown, t: AcpTranslate): string | null {
+  if (typeof candidate === 'string') return candidate === '' ? null : candidate
+  if (typeof candidate !== 'object' || candidate === null) return null
+  const { code, message } = candidate as { code?: unknown; message?: unknown }
+  const key = typeof code === 'string' ? (FAILURE_KEYS as Record<string, AcpKey | undefined>)[code] : undefined
+  if (key !== undefined) return t(key)
+  return typeof message === 'string' && message !== '' ? message : null
+}
+
 /** The line a failed call is remembered by: the JSON detail when the tool wrote one, else the first line of plain text. */
-function failureOf(output: string): string | null {
+function failureOf(output: string, t: AcpTranslate): string | null {
   const text = readableOutput(output).trim()
   if (text === '') return null
   const record = parseObject(text)
   if (record === null) return text.split('\n')[0] ?? null
   for (const key of ['detail', 'message', 'error']) {
-    const candidate = record[key]
-    if (typeof candidate === 'string' && candidate !== '') return candidate
+    const line = failureLine(record[key], t)
+    if (line !== null) return line
   }
   // A structure without a readable line stays behind the disclosure rather than being dumped into the row.
   return null
@@ -111,7 +132,7 @@ export function AcpToolRow({ toolName, block, inspect, t }: AcpToolRowProps): Re
   const state: RowState = result === null ? 'running' : result.isError ? 'error' : 'ok'
   const key = display.tool === null ? undefined : (TOOL_KEYS as Record<string, AcpKey | undefined>)[display.tool]
   const title = key === undefined ? (display.tool ?? display.title) : t(key)
-  const failure = state === 'error' ? failureOf(output) : null
+  const failure = state === 'error' ? failureOf(output, t) : null
   // A provider title that only repeats the tool name adds nothing beside the reading.
   const summary = failure ?? (display.title !== '' && !OWN_NAME.test(display.title) ? display.title : null)
   const input = display.input === undefined ? null : JSON.stringify(display.input, null, 2)

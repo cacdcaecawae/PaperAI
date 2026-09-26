@@ -31,10 +31,9 @@ export const editorZh = {
   'editor.findNext': '下一个匹配',
   'editor.findNone': '没有匹配文字',
   'editor.protected': '包含公式、图片、域或其他复杂内容的段落请在 Word 中编辑；其余段落可以继续编辑。',
-  'editor.conflict': '文档已更新。草稿保留供复制，请放弃冲突草稿后继续编辑。',
+  'editor.conflict': '文档已更新。冲突段落已锁定，草稿保留供复制；其余段落可以继续编辑和保存。',
   'editor.structureProtected': '此处不能拆分段落。请在普通正文段落中换段，或在 Word 中编辑。',
   'editor.saved': '已写入文档',
-  'editor.memoryDraft': '草稿仅保留在当前应用内，刷新会丢失',
 } as const
 
 /** English counterparts of every document-editor copy key. */
@@ -70,8 +69,7 @@ export const editorEn: Record<keyof typeof editorZh, string> = {
   'editor.findNext': 'Next match',
   'editor.findNone': 'No matching text',
   'editor.protected': 'Edit paragraphs containing equations, images, fields, or other complex content in Word. Other paragraphs remain editable.',
-  'editor.conflict': 'The document changed. Your draft is retained for copying; discard conflicting drafts before editing.',
+  'editor.conflict': 'The document changed. Paragraphs in conflict are locked with their drafts kept for copying; every other paragraph stays editable and saveable.',
   'editor.structureProtected': 'This paragraph cannot be split here. Use an ordinary body paragraph or edit it in Word.',
   'editor.saved': 'Written to document',
-  'editor.memoryDraft': 'Drafts remain in this app only and are lost on refresh',
 }

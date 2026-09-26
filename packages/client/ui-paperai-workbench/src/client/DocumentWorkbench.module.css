@@ -78,10 +78,6 @@
   color: var(--dsw-alias-state-business-primary);
 }
 
-.saveStatus[data-state='failed'] {
-  color: var(--dsw-alias-state-error-primary);
-}
-
 /* Header actions: the focus toggle beside export. */
 .actions {
   display: flex;
@@ -210,13 +206,20 @@
   flex-direction: row;
 }
 
+/* The desk sits a layer under the page, never on the page's own white: the page
+   hairline and its shadow need a ground, and a page break has to read as a
+   gutter rather than a seam. layer-2 is the one alias recessed from the base in
+   light and raised from it in dark, which is what a desk under chrome is in both
+   schemes; scrolling on that rung is what obliges the l2 scrollbar pair. */
 .preview {
   min-width: 0;
   min-height: 0;
   flex: 1;
   overflow: auto;
   padding: 24px 24px 48px;
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--dsw-alias-bg-layer-2);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .previewSeat {
@@ -366,6 +369,11 @@
 
 .pending > span:first-child {
   white-space: nowrap;
+}
+
+/* The draft warning reads as caption text beside the count, quieter than the state it qualifies. */
+.pendingNote {
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .pending [role='alert'] {
@@ -850,8 +858,10 @@
     padding-inline: 12px;
   }
 
+  /* Narrow gives the page every pixel it can, but not the ones its shadow
+     needs: zero inline padding clipped the shadow flat on both sides. */
   .preview {
-    padding: 0;
+    padding: 12px 16px 24px;
   }
 
   /* Both document and controls remain reachable in a narrow workbench. */

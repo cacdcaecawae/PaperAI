@@ -125,6 +125,25 @@ function restoreImage(image: BlockImage): void {
   else image.block.dataset.paperaiFormat = image.format
 }
 
+/**
+ * The draft as this block can still honour it: its text and paragraph structure, carrying the character
+ * formatting the block reads now instead of the formatting the draft captured against an older rendering.
+ * ponytail: the whole draft takes the block's first run, because matching drafted text to the new run
+ * boundaries needs a diff; upgrade when a run-level merge exists.
+ * @param edit - restored draft whose captured rendering is stale.
+ * @param base - the block's first run as it now reads, or undefined when the block states none.
+ * @returns the draft with every captured run restated from the block's own reading.
+ */
+function restated(edit: PaperAIBlockEdit, base: PaperAIDocumentTextRun | undefined): PaperAIBlockEdit {
+  return {
+    ...edit,
+    ...(edit.runs === undefined ? {} : { runs: [{ ...base, text: edit.draft }] }),
+    ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs.map(paragraph => ({
+      ...paragraph, runs: [{ ...base, text: paragraph.text }],
+    })) }),
+  }
+}
+
 /** Restore rejected, non-cancelable composition without replacing mapped node identities. */
 function compositionSnapshot(container: HTMLElement): () => void {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_ALL)
@@ -170,6 +189,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const [excerpt, setExcerpt] = useState<WordExcerpt | null>(null)
   const [historyState, setHistoryState] = useState({ undo: false, redo: false })
   const [notice, setNotice] = useState<'editor.protected' | 'editor.conflict' | 'editor.structureProtected' | null>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [changes, setChanges] = useState({ count: 0, index: 0 })
   // Where a right-click on selected text opened the selection menu.
   const [context, setContext] = useState<{ x: number; y: number } | null>(null)
@@ -181,7 +201,16 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const [pages, setPages] = useState({ current: 1, total: 0 })
   const [zoomOpen, setZoomOpen] = useState(false)
   const conflicted = edits.some(edit => edit.conflicted === true)
-  const editable = !comparing && !saving && !busy && !conflicted
+  // Not while the retry runs, and not over a conflict that already explains itself.
+  const saveFailed = !saving && !conflicted && edits.some(edit => edit.saveFailed === true)
+  const editable = !comparing && !saving && !busy
+  // ponytail: a conflicted block freezes instead of offering a merge, because no resolution UI exists yet.
+  // Its draft stays readable for copying while every other block keeps taking writes.
+  const conflicts = new Set(edits.filter(edit => edit.conflicted === true).map(edit => edit.nodeId))
+  const writable = (block: HTMLElement): boolean => {
+    const nodeId = mapping.current.get(block)
+    return nodeId !== undefined && !conflicts.has(nodeId)
+  }
 
   const selection = (): Selection | null =>
     (host.current?.shadowRoot as (ShadowRoot & { getSelection?: () => Selection | null }) | null)?.getSelection?.() ?? window.getSelection()
@@ -201,8 +230,10 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       }
       return
     }
-    target.current = { range: range.cloneRange(), blocks }
-    setCaret(editable ? selectionReading(range, blocks) : null)
+    // A frozen block retains no target and no ribbon reading, so the commands stay inert while its text is still selectable.
+    const frozen = blocks.some(block => !writable(block))
+    target.current = frozen ? null : { range: range.cloneRange(), blocks }
+    setCaret(editable && !frozen ? selectionReading(range, blocks) : null)
     setExcerpt(range.collapsed || range.toString().trim() === '' ? null : {
       nodeIds: blocks.flatMap((block) => {
         const id = mapping.current.get(block)
@@ -264,21 +295,33 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     if (editable) container?.setAttribute('contenteditable', 'true')
     else container?.removeAttribute('contenteditable')
     for (const block of shadow?.querySelectorAll<HTMLElement>('[data-paperai-block], [data-paperai-protected]') ?? []) {
-      if (editable) block.setAttribute('contenteditable', mapping.current.has(block) ? 'true' : 'false')
+      if (editable) block.setAttribute('contenteditable', writable(block) ? 'true' : 'false')
       else block.removeAttribute('contenteditable')
     }
     const focused = shadow?.activeElement
     const focusNode = focused === container ? rangeNow()?.startContainer : focused
     for (const [block, nodeId] of mapping.current) {
-      const edit = drafts.get(nodeId)
+      // Blocks are matched to head nodes by text, so on a compared page a head draft would paint into
+      // another version's paragraph and then wear the same mark as that version's own changes.
+      // ponytail: the mapping still names head nodes, so quoting a compared page hands the Agent head
+      // ids; name the version's own nodes once the diff carries its node index.
+      const edit = comparing ? undefined : drafts.get(nodeId)
       const original = originals.current.get(block)
+      // A draft captured its runs against the rendering it was typed into. When the block reads differently now,
+      // an outside version reformatted it while the draft waited: repainting the capture would put the old
+      // formatting back on screen, and the next keystroke would read it as an intended change and commit it over
+      // theirs. The text is the writer's; the formatting the block reads now is not theirs to restate.
+      const painted = edit === undefined || edit.formatting === undefined || original === undefined
+        || sameRuns(edit.formatting.before, original.effective)
+        ? edit
+        : restated(edit, original.runs[0])
       if (!block.contains(focusNode ?? null) && !publishing.current) {
-        if (edit?.paragraphs !== undefined && JSON.stringify(readParagraphs(block)) !== JSON.stringify(edit.paragraphs)) {
-          applyParagraphs(block, edit.paragraphs)
+        if (painted?.paragraphs !== undefined && JSON.stringify(readParagraphs(block)) !== JSON.stringify(painted.paragraphs)) {
+          applyParagraphs(block, painted.paragraphs)
         }
-        else if (edit?.runs !== undefined && !sameRuns(runsOf(block), edit.runs)) applyRuns(block, edit.runs)
-        else if (edit !== undefined && edit.paragraphs === undefined && textOf(block) !== edit.draft) {
-          applyRuns(block, [{ text: edit.draft }])
+        else if (painted?.runs !== undefined && !sameRuns(runsOf(block), painted.runs)) applyRuns(block, painted.runs)
+        else if (painted !== undefined && painted.paragraphs === undefined && textOf(block) !== painted.draft) {
+          applyRuns(block, [{ text: painted.draft }])
         }
         else if (edit === undefined && original !== undefined && block.hasAttribute('data-paperai-changed')) restoreImage(original.image)
       }
@@ -286,9 +329,14 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       block.toggleAttribute('data-paperai-conflicted', edit?.conflicted === true)
       latest.current.set(block, imageOf(block))
     }
-    if (conflicted) { setCaret(null); setNotice('editor.conflict') }
-  }, [edits, editable, html, nodes])
+    // The caret reading survives the conflict; only a selection inside a frozen block clears it, in capture.
+    if (conflicted) setNotice('editor.conflict')
+    // `editable` carries the flag already, but not while saving, busy, or conflicted: the drafts still
+    // have to come back when the comparison closes.
+  }, [comparing, edits, editable, html, nodes])
   useLayoutEffect(() => { if (active && host.current !== null) host.current.scrollTop = scrollTop }, [active, html])
+  // The pill leaves with the last draft while this component stays mounted: a half-pressed discard must not greet the next draft.
+  useEffect(() => { if (edits.length === 0) setConfirmDiscard(false) }, [edits.length])
   // The bar stays inside the stage: clamped sideways, and flipped above the selection when the room below runs out.
   useLayoutEffect(() => {
     const element = barRef.current
@@ -430,6 +478,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       range.collapsed ? block.contains(range.startContainer) : range.intersectsNode(block))
     const candidate = blocks.length === 1 ? blocks[0] : undefined
     const block = candidate?.contains(range.startContainer) === true && candidate.contains(range.endContainer) ? candidate : undefined
+    if (block !== undefined && !writable(block)) { setNotice('editor.conflict'); return }
     if (block === undefined || (split && block.closest('td, th') !== null)) { setNotice('editor.structureProtected'); return }
     const before = [imageOf(block)]
     if (split) select(insertParagraphText(range, block, text.replace(/\r\n?/gu, '\n').split('\n')))
@@ -480,6 +529,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         .find(block => block.contains(range.startContainer) && block.contains(range.endContainer))
       const outsideBlock = event.getTargetRanges().some(target =>
         block?.contains(target.startContainer) !== true || !block.contains(target.endContainer))
+      if (block !== undefined && !writable(block)) { event.preventDefault(); setNotice('editor.conflict'); return }
       if (blockedComposition.current !== null || block === undefined || outsideBlock
         || event.inputType === 'insertFromDrop' || event.inputType === 'deleteByDrag') {
         event.preventDefault(); setNotice('editor.structureProtected'); return
@@ -521,17 +571,19 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       if (event.key === 'Enter') { event.preventDefault(); insertText(event.shiftKey ? '\v' : '\n', !event.shiftKey) }
       if (event.key === 'Escape') {
         const original = originals.current.get(block)
-        if (original !== undefined && editable) { restoreImage(original.image); finish([block]); block.blur() }
+        // Escape restores the document's text; in a frozen block that would silently drop the draft it retains for copying.
+        if (original !== undefined && editable && writable(block)) { restoreImage(original.image); finish([block]); block.blur() }
       }
     }
     const compositionStart = (event: Event): void => {
       composing.current = true
       compositionBlock.current = blockOf(event) ?? null
       const range = rangeNow()
-      if (range !== null && ![...mapping.current.keys()]
-        .some(block => block.contains(range.startContainer) && block.contains(range.endContainer))) {
+      const inside = range === null ? undefined : [...mapping.current.keys()]
+        .find(block => block.contains(range.startContainer) && block.contains(range.endContainer))
+      if (range !== null && (inside === undefined || !writable(inside))) {
         blockedComposition.current = compositionSnapshot(container)
-        setNotice('editor.structureProtected')
+        setNotice(inside === undefined ? 'editor.structureProtected' : 'editor.conflict')
       }
     }
     const compositionEnd = (): void => {
@@ -671,13 +723,22 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
           <button type="button" aria-label={t('versions.next')} onClick={() =>{  goToChange(1) }}><IconChevronDownOutline14 /></button>
         </div>}
         {active && edits.length > 0 && <div className={clsx(css.floating, css.pending)} role="group" aria-label={t('block.pending', { count: edits.length })} data-paperai-pending>
-          <span title={t('status.memory')}>{t('block.pending', { count: edits.length })}</span>
+          <span>{t('block.pending', { count: edits.length })}</span>
+          <span className={css.pendingNote}>{t('status.memory')}</span>
           {conflicted && <span role="alert">{t('block.conflicted')}</span>}
-          <button className={css.chip} type="button" disabled={saving || busy} onClick={() => {
-            for (const original of originals.current.values()) restoreImage(original.image)
-            history.current = { past: [], future: [] }; updateHistory(); onCancel()
-          }}>{t('block.discard')}</button>
-          <button className={css.chip} type="button" data-kind="save" disabled={saving || busy || conflicted} onClick={onSave}>{saving ? t('block.saving') : t('block.save')}</button>
+          {saveFailed && <span role="alert">{t('block.saveFailed')}</span>}
+          {confirmDiscard
+            ? <>
+              <button className={css.chip} type="button" disabled={comparing || saving || busy} onClick={() => {
+                for (const original of originals.current.values()) restoreImage(original.image)
+                history.current = { past: [], future: [] }; updateHistory(); onCancel()
+              }}>{t('block.confirmDiscard')}</button>
+              <button className={css.chip} type="button" onClick={() => { setConfirmDiscard(false) }}>{t('block.cancelDiscard')}</button>
+            </>
+            // The drafts and the undo stack go together and live only in this browser, so the first press only asks.
+            : <button className={css.chip} type="button" disabled={comparing || saving || busy}
+              onClick={() => { setConfirmDiscard(true) }}>{t('block.discard')}</button>}
+          <button className={css.chip} type="button" data-kind="save" disabled={comparing || saving || busy || !edits.some(edit => edit.conflicted !== true)} onClick={onSave}>{saving ? t('block.saving') : t('block.save')}</button>
         </div>}
       </div>
     </div>

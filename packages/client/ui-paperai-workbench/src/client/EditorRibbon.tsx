@@ -95,7 +95,7 @@ export function EditorRibbon(props: EditorRibbonProps): ReactNode {
   const scope = caret === null ? t('editor.noCaret') : t(caret.collapsed ? 'editor.insertion' : 'editor.selection')
   const toggle = (name: Picker): void => { setPicker(current => current === name ? null : name) }
   const close = (name: Picker): void => { setPicker(current => current === name ? null : current) }
-  // The trigger reads the current value; inherited and mixed readings are muted words instead of a value.
+  // The trigger reads the current value; inherited, mixed, and caretless readings are muted words, never a dash to decode.
   const trigger = (name: Picker, label: string, reading: string, muted: boolean, title: string): ReactNode => (
     <button type="button" className={css.select} aria-label={label} title={title} aria-haspopup="menu" aria-expanded={picker === name}
       disabled={unavailable} data-muted={muted || undefined} onClick={() => { toggle(name) }}>
@@ -106,7 +106,7 @@ export function EditorRibbon(props: EditorRibbonProps): ReactNode {
 
   const fontValue = caret?.font ?? ''
   const fontMuted = fontValue === '' || fontValue === 'mixed' || caret?.fontSource === 'inherited'
-  const fontReading = caret === null ? '—' : fontValue === 'mixed' ? t('editor.mixed') : fontValue === '' ? t('editor.inherited') : fontValue
+  const fontReading = caret === null ? t('editor.font') : fontValue === 'mixed' ? t('editor.mixed') : fontValue === '' ? t('editor.inherited') : fontValue
   // Every list opens with the inherited reading, so a stated value can be taken back to the block's.
   const inherit: MenuEntry[] = [{ id: '', label: t('editor.inherited') }, { type: 'separator', id: 'inherit' }]
   const fontItems: MenuEntry[] = [...inherit, ...[...new Set([...props.fonts, ...(fontValue === '' || fontValue === 'mixed' ? [] : [fontValue])])]
@@ -114,7 +114,7 @@ export function EditorRibbon(props: EditorRibbonProps): ReactNode {
 
   const sizeValue = caret?.size ?? ''
   const sizeMuted = sizeValue === '' || sizeValue === 'mixed' || caret?.sizeSource === 'inherited'
-  const sizeReading = caret === null ? '—' : sizeValue === 'mixed' ? t('editor.mixed') : sizeValue === '' ? t('editor.inherited') : String(parseFloat(sizeValue))
+  const sizeReading = caret === null ? t('editor.size') : sizeValue === 'mixed' ? t('editor.mixed') : sizeValue === '' ? t('editor.inherited') : String(parseFloat(sizeValue))
   const sizeItems: MenuEntry[] = [...inherit, ...[...new Set([...SIZES, ...(sizeValue === '' || sizeValue === 'mixed' ? [] : [parseFloat(sizeValue)])])]
     .sort((a, b) => a - b).map(size => ({ id: `${size}pt`, label: String(size) }))]
 

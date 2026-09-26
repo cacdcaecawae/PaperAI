@@ -24,6 +24,15 @@ describe('PaperAI DSH-native styling', () => {
     expect(workbench).not.toContain('100vw')
   })
 
+  it('keeps the desk a layer under the page, with room for the page shadow at every width', () => {
+    expect(workbench).toMatch(/\n\.preview \{[^}]*background: var\(--dsw-alias-bg-layer-2\);/u)
+    // The desk scrolls on an elevated rung, which obliges the l2 scrollbar pair.
+    // ui-theme's scrollbar contract asserts that repo-wide, but it sits outside
+    // the PaperAI test lane, so the coupling is worth one assertion here too.
+    expect(workbench).toMatch(/\n\.preview \{[^}]*--dsh-scrollbar-thumb: var\(--dsw-alias-scrollbar-bg-l2\);/u)
+    expect(workbench).not.toMatch(/\n\s*\.preview \{\s*padding: 0;/u)
+  })
+
   it('follows the sidebar row and heading metrics of the DSH session list', () => {
     expect(sidebar).toContain('min-height: 36px')
     expect(sidebar).toContain('border-radius: 8px')
@@ -46,6 +55,9 @@ describe('PaperAI DSH-native styling', () => {
     expect(workbench).toContain('var(--dsw-alias-border-l2)')
     expect(workbench).toContain('var(--paperai-float-shadow)')
     expect(preview).toContain('var(--paperai-page-shadow)')
+    // Editability drops on every save and format read, so the disabled row is read many times an hour: 0.4 opacity left it at 2.5:1.
+    expect(ribbon).toContain('.tool:disabled, .select:disabled { cursor: default; color: var(--dsw-alias-label-tertiary); }')
+    expect(ribbon).not.toContain('opacity')
     expect(library).toContain('var(--dsw-alias-border-l2)')
   })
 

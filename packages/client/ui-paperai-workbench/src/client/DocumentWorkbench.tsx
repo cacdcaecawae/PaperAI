@@ -42,7 +42,7 @@ function Facts({ document, state, panel, showPanel, t }: {
     : document.gate.status === 'failed' ? 'toolbar.gateFailed' : 'toolbar.gateNotRun'
   const saveKey: PaperAIWorkbenchKey = state.action === 'committing'
     ? 'block.saving'
-    : state.actionError !== null ? 'status.failed' : state.edits.length > 0 ? 'status.unsaved' : 'status.saved'
+    : state.edits.length > 0 ? 'status.unsaved' : 'status.saved'
   const fact = (id: PaperAIWorkbenchPanel, label: ReactNode, extra: Record<string, string | undefined> = {}): ReactNode => (
     <button type="button" className={css.fact} data-kind={id} aria-pressed={panel === id} onClick={() => { showPanel(id) }} {...extra}>
       {label}
@@ -76,7 +76,7 @@ function Facts({ document, state, panel, showPanel, t }: {
         role="status"
         aria-live="polite"
         className={css.saveStatus}
-        data-state={saveKey === 'status.unsaved' ? 'unsaved' : saveKey === 'status.failed' ? 'failed' : undefined}
+        data-state={saveKey === 'status.unsaved' ? 'unsaved' : undefined}
       >
         {t(saveKey, { count: state.edits.length })}
       </span>
@@ -181,6 +181,7 @@ export function DocumentWorkbench({
   useEffect(() => {
     if (dialogOpen) void loadLibrary()
   }, [dialogOpen, loadLibrary])
+  // The unload guard is the controller's: it owns the drafts of documents this view no longer shows.
   const toggleFocus = (): void => {
     if (focusActive || panelOpen) showConversation()
     else actions.setWriting(true)

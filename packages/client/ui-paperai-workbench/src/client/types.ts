@@ -129,6 +129,8 @@ export interface PaperAIBlockEdit {
   readonly formatting?: PaperAIFormatComparison
   /** The current document changed this block; retain the draft for copying or discarding. */
   readonly conflicted?: boolean
+  /** The last save of this draft failed: the reason belongs to the draft, not to the keystroke that follows it. */
+  readonly saveFailed?: boolean
 }
 
 /** One version's diff loaded into the versions panel. */

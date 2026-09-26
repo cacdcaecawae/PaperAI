@@ -87,8 +87,10 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
 function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
   return edits.map((edit) => {
     const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
-    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable
-      || node.text !== edit.baseText || (edit.baseRevision !== undefined && edit.baseRevision !== document.revision) }
+    // Text alone decides this, so one external commit elsewhere no longer conflicts every unrelated draft. An
+    // outside reformat of this same block needs no conflict either: the preview repaints such a draft from the
+    // block's new rendering (DocumentPreview `painted`), so it commits its text and restates no formatting.
+    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText }
   })
 }
 
@@ -130,6 +132,8 @@ export class PaperAIWorkbenchController {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
   }>()
+  /** The one page-wide unload guard; preventDefault is the whole of the modern contract. */
+  private readonly confirmUnload = (event: BeforeUnloadEvent): void => { event.preventDefault() }
   private disposed = false
 
   /**
@@ -503,8 +507,11 @@ export class PaperAIWorkbenchController {
           ...(draft.runs === undefined ? {} : { runs: draft.runs }),
           ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
           ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
+          // A retyped block is still a draft whose save failed, so the verdict travels with it.
+          ...(previous?.saveFailed === true ? { saveFailed: true } : {}),
         }]
-      state.actionError = null
+      // A failed save keeps its reason while a draft still carries it; every other failure is stale once the writer types on.
+      if (!state.edits.some(edit => edit.saveFailed === true)) state.actionError = null
     })
   }
 
@@ -533,11 +540,11 @@ export class PaperAIWorkbenchController {
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
     if (state.action !== null) return { ok: false, error: 'workbench is busy' }
     if (state.edits.length === 0) return { ok: false, error: 'no block has changes' }
-    if (state.edits.some(edit => edit.conflicted === true)) {
-      return { ok: false, error: 'block changed externally; local draft retained' }
-    }
     const document = state.document
-    const edits = state.edits
+    // A conflicted draft cannot commit, but it must not hold the clean ones back: they commit and it stays.
+    const edits = state.edits.filter(edit => edit.conflicted !== true)
+    const retained = state.edits.filter(edit => edit.conflicted === true)
+    if (edits.length === 0) return { ok: false, error: 'block changed externally; local draft retained' }
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'committing'
@@ -567,7 +574,13 @@ export class PaperAIWorkbenchController {
         ...(edit.paragraphs === undefined ? {} : { paragraphs: edit.paragraphs }),
       }
     })
-    return this.settleCommit(entry, request, document, result, patches)
+    const settled = this.settleCommit(entry, request, document, result, patches)
+    // The commit republishes the document with an empty edit list, so the conflicts go back on top.
+    if (result.ok && settled.ok && retained.length > 0) {
+      const committed = result.value.document
+      entry.store.update((draft) => { draft.edits = restoreEdits(committed, retained) })
+    }
+    return settled
   }
 
   /**
@@ -926,6 +939,45 @@ export class PaperAIWorkbenchController {
     }
   }
 
+  /**
+   * Whether any block in this browser is retyped and unsaved: what the mounted
+   * views hold, plus the drafts kept for documents the preview budget has
+   * evicted. A document a view still holds is read from that view alone — its
+   * `drafts` entry is only rewritten on the next eviction, so it outlives the
+   * save that emptied it — while an entry for any other document is unsaved by
+   * construction, because `retain` deletes it when the view leaves clean.
+   */
+  private hasUnsavedDraft(): boolean {
+    for (const [sessionId, entry] of this.workbenches) {
+      const state = entry.store.getSnapshot()
+      const mounted = new Set<PaperAIResourceId>()
+      for (const view of [state, ...state.retained]) {
+        if (view.document === null) continue
+        mounted.add(view.document.resourceId)
+        if (view.edits.length > 0) return true
+      }
+      for (const resourceId of this.drafts.get(sessionId)?.keys() ?? []) {
+        if (!mounted.has(resourceId)) return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Bind the unload guard while a draft is unsaved and remove it otherwise.
+   * The controller owns it rather than the view because drafts outlive every
+   * mounted workbench: an evicted document and a closed details column both
+   * leave no view to arm one, and one controller per browser is what makes
+   * this exactly one listener however many views are mounted — re-adding the
+   * same callback is a no-op, so the DOM keeps it at one.
+   * A permanently bound beforeunload would cost the page its back/forward cache.
+   */
+  private syncUnloadGuard(): void {
+    // The effect this replaces was DOM-only by construction; a store subscription is not. The plugin's
+    if (this.hasUnsavedDraft()) window.addEventListener('beforeunload', this.confirmUnload)
+    else window.removeEventListener('beforeunload', this.confirmUnload)
+  }
+
   /** Abort active reads, release stores, and reject stale callbacks. */
   dispose(): void {
     if (this.disposed) return
@@ -943,6 +995,8 @@ export class PaperAIWorkbenchController {
     this.targets.clear()
     this.drafts.clear()
     this.positions.clear()
+    // Last: nothing is left to lose, so the guard goes with the controller.
+    this.syncUnloadGuard()
   }
 
   /**
@@ -1069,13 +1123,15 @@ export class PaperAIWorkbenchController {
       const created = entry
       // The outline follows the document by identity: a scroll or a draft leaves it as it is.
       const publish = (): void => {
+        // Every change to a Session's edits passes here, and one guard covers the page, so it re-reads every Session.
+        this.syncUnloadGuard()
         const document = created.store.getSnapshot().document
         if (document === this.outlineSources.get(sessionId)) return
         this.outlineSources.set(sessionId, document)
         const { [sessionId]: _closed, ...rest } = this.outlines.getSnapshot()
         this.outlines.set(document === null
           ? rest
-          : { ...rest, [sessionId]: { workspaceId: document.workspaceId, entries: outlineOf(document.nodes) } })
+          : { ...rest, [sessionId]: { workspaceId: document.workspaceId, entries: outlineOf(document.nodes, document.previewHtml) } })
       }
       this.outlineMirrors.set(sessionId, created.store.subscribe(publish))
     }
@@ -1196,6 +1252,8 @@ export class PaperAIWorkbenchController {
   /** Settle a failed action on either store kind: clear the action, keep the reason for the view. */
   private fail(store: PaperAIProjectStore | PaperAIWorkbenchStore, error: string): PaperAIActionResult {
     store.update((state: PaperAIProjectState | PaperAIWorkbenchState) => {
+      // A save is the one action the writer types over, so its verdict is kept on the drafts that are still only in the page.
+      if (state.action === 'committing') state.edits = state.edits.map(edit => ({ ...edit, saveFailed: true }))
       state.action = null
       state.actionError = error
     })

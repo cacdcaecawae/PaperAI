@@ -189,6 +189,14 @@ describe('WorkspaceContent', () => {
     expect(b.reveal).toHaveBeenCalledWith(SESSION_ID, 'n-1')
   })
 
+  it('tells the writer to apply Word heading styles when the open document states none', () => {
+    const b = workspaceProps(projectState(), {}, { [SESSION_ID]: { workspaceId: WORKSPACE_ID, entries: [] } })
+    render(<WorkspaceContent {...b.props} />)
+    // An open document with no heading is a reading the writer needs, so the outline says so rather than vanishing.
+    expect(screen.getByText(zh['outline.empty'])).toBeDefined()
+    expect(screen.queryByRole('navigation', { name: zh['outline.title'] })).toBeNull()
+  })
+
   it('offers to record an outside working edit from the project doctor', async () => {
     const report = {
       checkedAt: '2026-09-09T00:00:00.000Z', documents: 1, repairs: [],
@@ -428,6 +436,9 @@ describe('DocumentWorkbench', () => {
     }))
     const view = render(<DocumentWorkbench {...b.props} />)
     expect(screen.getByRole('alert').textContent).toBe(zh['workbench.unsupportedContent'])
+    // The alert band owns failures, so the save slot must keep reporting this document's own draft count.
+    const saveSlot = view.container.querySelector('[data-paperai-toolbar] [role="status"]')!
+    expect(saveSlot.textContent).toBe(zh['status.unsaved'].replace('{count}', '1'))
     expect(view.container.querySelector('[role="document"]')!.shadowRoot!.textContent).toContain('Retained draft')
     expect(screen.getByRole('button', { name: '放弃修改' })).toBeTruthy()
     expect(screen.queryByText(/UNSUPPORTED_DOCUMENT_CONTENT/u)).toBeNull()
@@ -448,7 +459,32 @@ describe('DocumentWorkbench', () => {
     act(() => { b.store.update((state) => { state.action = null }) })
     expect(discard.disabled).toBe(false)
     fireEvent.click(discard)
+    expect(b.cancelEdit).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: zh['block.confirmDiscard'] }))
     expect(b.cancelEdit).toHaveBeenCalledOnce()
+  })
+
+  it('asks once before dropping every draft and the undo history with them', () => {
+    const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(),
+      edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Retyped background' }],
+    }))
+    render(<DocumentWorkbench {...b.props} />)
+    fireEvent.click(screen.getByRole('button', { name: zh['block.discard'] }))
+    expect(b.cancelEdit).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: zh['block.cancelDiscard'] }))
+    expect(b.cancelEdit).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: zh['block.discard'] }))
+    fireEvent.click(screen.getByRole('button', { name: zh['block.confirmDiscard'] }))
+    expect(b.cancelEdit).toHaveBeenCalledOnce()
+    // Saving or an external refresh also empties the drafts: the next batch must start on the plain chip.
+    act(() => { b.store.set(workbenchState({ phase: 'ready', document: documentSnapshot() })) })
+    act(() => {
+      b.store.set(workbenchState({ phase: 'ready', document: documentSnapshot(),
+        edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Retyped again' }],
+      }))
+    })
+    expect(screen.getByRole('button', { name: zh['block.discard'] })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: zh['block.confirmDiscard'] })).toBeNull()
   })
 
   it('keeps Enter history after injected controller updates in the complete workbench', async () => {
@@ -690,6 +726,7 @@ describe('DocumentWorkbench', () => {
     fireEvent.click(within(screen.getByRole('group', { name: '已修改 1 段' })).getByRole('button', { name: '保存' }))
     expect(b.commitEdit).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: '放弃修改' }))
+    fireEvent.click(screen.getByRole('button', { name: zh['block.confirmDiscard'] }))
     expect(b.cancelEdit).toHaveBeenCalledOnce()
     act(() => { b.store.set(workbenchState({ phase: 'ready', document: snapshot })) })
     expect(paragraph.textContent).toBe('Research background')
@@ -1024,6 +1061,17 @@ describe('DocumentWorkbench', () => {
     expect(screen.getByRole('alert').textContent).toBe('请先保存或放弃页面上的修改。')
   })
 
+  it('keeps the save failure beside the pending pill while the writer types on', () => {
+    const failed = workbenchProps(workbenchState({
+      phase: 'ready', document: documentSnapshot(), actionError: 'internal: Host capability unavailable',
+      edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Rewritten background', saveFailed: true }],
+    }))
+    render(<DocumentWorkbench {...failed.props} />)
+    // The band carries the reason and the pill carries the verdict, so this state has two alerts.
+    expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toContain(zh['block.saveFailed'])
+    expect(screen.getByRole('button', { name: zh['block.save'] }).hasAttribute('disabled')).toBe(false)
+  })
+
   it('offers to record a Working DOCX changed outside PaperAI when a commit is refused for it', () => {
     const changed = workbenchProps(workbenchState({
       phase: 'ready', document: documentSnapshot(),
@@ -1137,7 +1185,7 @@ describe('DocumentWorkbench', () => {
       phase: 'ready', document: documentSnapshot(), actionError: 'block changed externally; local draft retained',
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('文档版本已更新。草稿已保留，请复制需要的内容后放弃修改，再编辑最新版本。')
+    expect(screen.getByRole('alert').textContent).toBe('文档版本已更新，冲突段落已锁定，草稿已保留供复制。保存只提交未冲突的段落，放弃修改会清除保留的草稿。')
   })
 
   it('renders a Remote failure with only its backed retry action', () => {

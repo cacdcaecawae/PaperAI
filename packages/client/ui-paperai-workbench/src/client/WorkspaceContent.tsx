@@ -53,7 +53,9 @@ export function WorkspaceContent({
   // The outline follows the selected Session's open document, and only under the project that owns it.
   const current = useSessions(sessions => sessions.current)
   const outline = useOutlines(outlines => (current === undefined ? undefined : outlines[current]))
-  const entries = active && outline !== undefined && outline.workspaceId === workspaceId ? outline.entries : []
+  // `null` is no open document; `[]` is an open document with no heading in it,
+  // which is a reading the writer needs to see rather than a missing section.
+  const entries = active && outline !== undefined && outline.workspaceId === workspaceId ? outline.entries : null
 
   useEffect(() => {
     void ensureProject(workspaceId)
@@ -100,27 +102,30 @@ export function WorkspaceContent({
           ))}
         </div>
       )}
-      {entries.length > 0 && current !== undefined && (
+      {entries !== null && current !== undefined && (
         <>
           <div className={css.heading}>
             <span className={css.headingIcon} aria-hidden="true"><IconListPenOutline16 /></span>
             <h3>{t('outline.title')}</h3>
-            <span className={css.count}>{entries.length}</span>
+            {entries.length > 0 && <span className={css.count}>{entries.length}</span>}
           </div>
-          <nav className={css.outline} aria-label={t('outline.title')}>
-            {entries.map(entry => (
-              <button
-                key={entry.nodeId}
-                type="button"
-                className={css.outlineRow}
-                data-level={entry.level}
-                title={entry.text}
-                onClick={() => { reveal(current, entry.nodeId) }}
-              >
-                {entry.text}
-              </button>
-            ))}
-          </nav>
+          {entries.length === 0 && <div className={css.empty} role="status">{t('outline.empty')}</div>}
+          {entries.length > 0 && (
+            <nav className={css.outline} aria-label={t('outline.title')}>
+              {entries.map(entry => (
+                <button
+                  key={entry.nodeId}
+                  type="button"
+                  className={css.outlineRow}
+                  data-level={entry.level}
+                  title={entry.text}
+                  onClick={() => { reveal(current, entry.nodeId) }}
+                >
+                  {entry.text}
+                </button>
+              ))}
+            </nav>
+          )}
         </>
       )}
       <ProjectDoctor

@@ -11,7 +11,10 @@ import { readParagraphs } from '../src/client/editor-dom.ts'
 import { runsOf } from '../src/client/preview-html.ts'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
 import { commitFormatting } from '../src/client/format-intent.ts'
-import { NODE_HEADING, NODE_PARAGRAPH, RESOURCE_ID, REVISION_1, SESSION_ID, WORKSPACE_ID, successfulRemote } from './fixtures.client.ts'
+import {
+  COMMIT_2, DOCUMENT_ID, NODE_HEADING, NODE_PARAGRAPH, RESOURCE_ID, REVISION_1, REVISION_2, SESSION_ID, WORKSPACE_ID,
+  documentOpenResult, successfulRemote,
+} from './fixtures.client.ts'
 
 afterEach(cleanup)
 // jsdom exposes InputEvent but does not implement the browser's target-range method.
@@ -281,6 +284,83 @@ describe('Document editing commands', () => {
     expect(store.getSnapshot().edits).toEqual(formatted)
     expect([first, second].map(block => readParagraphs(block!)[0]?.format)).toEqual([{ align: 'center' }, { align: 'center' }])
     expect([first, second].map(block => runsOf(block!)[0]?.size)).toEqual(['18pt', '18pt'])
+    controller.dispose()
+  })
+
+  it('repaints a restored draft as the outside version renders its block, instead of committing the formatting the draft captured', async () => {
+    const NODE_CLOSING = 'node-closing' as PaperAIDocumentNodeId
+    // An agent restated both paragraphs at 16pt without touching a character.
+    const page = (size: string): string => '<html><body>'
+      + `<p data-path="/body/p[1]" style="font-size:10pt"><span style="font-size:${size}">Research background</span></p>`
+      + `<p data-path="/body/p[2]" style="font-size:10pt"><span style="font-size:${size}">Closing remarks</span></p></body></html>`
+    const remote = successfulRemote()
+    const commit = vi.spyOn(remote, 'commit')
+    let opens = 0
+    remote.open = vi.fn<typeof remote.open>(async () => {
+      opens += 1
+      return { ok: true, value: documentOpenResult(opens > 1 ? REVISION_2 : REVISION_1, {
+        previewHtml: page(opens > 1 ? '16pt' : '12pt'),
+        nodes: [
+          { nodeId: NODE_PARAGRAPH, kind: 'paragraph', label: 'Research background', depth: 0, editable: true, text: 'Research background' },
+          { nodeId: NODE_CLOSING, kind: 'paragraph', label: 'Closing remarks', depth: 0, editable: true, text: 'Closing remarks' },
+        ],
+      }) }
+    })
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    function Live() {
+      const state = useSyncExternalStore(listener => store.subscribe(listener), () => store.getSnapshot())
+      if (state.document === null) return null
+      return <DocumentPreview html={state.document.previewHtml} revision={state.document.revision} nodes={state.document.nodes}
+        paragraphStyles={state.document.paragraphStyles} title="Document" edits={state.edits} saving={false} t={t}
+        onSave={() => {}} onCancel={() => {}}
+        onDraft={(id, draft) => { flushSync(() => { controller.updateDraft(SESSION_ID, id, draft) }) }} />
+    }
+    const view = render(<Live />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    let current: Range | null = null
+    Object.defineProperty(shadow, 'getSelection', { configurable: true, value: () => ({
+      get rangeCount() { return current === null ? 0 : 1 },
+      getRangeAt: () => current,
+      removeAllRanges: () => { current = null },
+      addRange: (range: Range) => { current = range },
+    }) })
+    const blocks = (): HTMLElement[] => [...shadow.querySelectorAll<HTMLElement>('[data-paperai-block]')]
+    const caret = (index: number, offset: number): HTMLElement => {
+      const block = blocks()[index]!
+      const node = block.querySelector('span')?.firstChild ?? block.firstChild!
+      const range = document.createRange()
+      range.setStart(node, offset); range.collapse(true); current = range
+      act(() => { block.focus(); fireEvent.keyUp(block, { key: 'Shift' }) })
+      return block
+    }
+    const type = (index: number, text: string): void => {
+      const block = caret(index, 0)
+      const node = block.querySelector('span')?.firstChild ?? block.firstChild!
+      node.nodeValue = `${text}${node.nodeValue!}`
+      fireEvent.input(block)
+      act(() => { block.blur() })
+    }
+    // One plain draft, and one that split its block into paragraphs.
+    type(0, '前言')
+    const closing = caret(1, 'Closing'.length)
+    fireEvent.keyDown(closing, { key: 'Enter' })
+    act(() => { closing.blur(); fireEvent.input(closing) })
+    expect(store.getSnapshot().edits.map(edit => edit.runs?.[0]?.size ?? edit.paragraphs?.[0]?.runs?.[0]?.size)).toEqual(['12pt', '12pt'])
+    act(() => { controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' }) })
+    await act(async () => { await controller.reloadExternal(SESSION_ID) })
+    expect(store.getSnapshot().edits.every(edit => edit.conflicted === false)).toBe(true)
+    // Both blocks read as this version renders them, so the keystrokes below restate no size of their own.
+    expect(blocks().map(block => runsOf(block)[0]?.size)).toEqual(['16pt', '16pt'])
+    type(0, '再')
+    type(1, '再')
+    await act(async () => { await controller.commitEdit(SESSION_ID) })
+    expect(commit.mock.calls[0]?.[0].mutations).toEqual([
+      { type: 'replace-text', nodeId: NODE_PARAGRAPH, baseText: 'Research background', nextText: '再前言Research background' },
+      { type: 'replace-text', nodeId: NODE_CLOSING, baseText: 'Closing remarks', nextText: '再Closing\n remarks',
+        paragraphs: [{ text: '再Closing' }, { text: ' remarks' }] },
+    ])
     controller.dispose()
   })
 
@@ -554,7 +634,8 @@ describe('Document editing commands', () => {
   it('keeps a cleared font cleared on both sides of Enter without storing the browser font', () => {
     const editor = setup('<p data-path="/body/p[1]" style="font-family:-apple-system,sans-serif"><span style="font-family:Arial">Hello world</span></p>')
     const block = editor.paragraphs()[0]!
-    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe('—')
+    expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe(zh['editor.font'])
+    expect(screen.getByRole('button', { name: zh['editor.size'] }).textContent).toBe(zh['editor.size'])
     editor.select(block, 0, block, block.childNodes.length)
     fireEvent.click(screen.getByRole('button', { name: zh['editor.clear'] }))
     expect(screen.getByRole('button', { name: zh['editor.font'] }).textContent).toBe(zh['editor.inherited'])

@@ -274,6 +274,12 @@ describe('PaperAIWorkbenchController documents', () => {
     await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: false, error: `internal: ${message}` })
     expect(store.getSnapshot()).toMatchObject({ action: null, actionError: `internal: ${message}`, edits: [{ draft: 'Keep my words' }] })
     expect(store.getSnapshot().document).toBe(original)
+    // Typing on after a failed save keeps its reason: the draft is still only in the page.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Keep my words, and these' })
+    expect(store.getSnapshot()).toMatchObject({ actionError: `internal: ${message}`, edits: [{ saveFailed: true }] })
+    // The next successful save takes the reason with it.
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot()).toMatchObject({ actionError: null, edits: [] })
     controller.dispose()
   })
 
@@ -541,18 +547,20 @@ describe('PaperAIWorkbenchController documents', () => {
     await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: false, error: 'no external document update' })
   })
 
-  it('retains formatting drafts as conflicts after an external revision changes no plain text', async () => {
+  it('keeps a draft through an external version that left its own block unchanged', async () => {
     const remote = successfulRemote()
     const commit = vi.spyOn(remote, 'commit')
     const { controller, store } = await openedController(remote)
-    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Introduction', runs: [{ text: 'Introduction', bold: true }] })
-    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Research background', runs: [{ text: 'Research background', bold: true }] })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
+      nodes: documentOpenResult().document.nodes.map(node => node.nodeId === NODE_HEADING ? { ...node, text: 'Changed elsewhere' } : node),
+    }) })
     controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-12T00:00:00.000Z' })
     await controller.reloadExternal(SESSION_ID)
-    expect(store.getSnapshot().edits).toMatchObject([{ baseRevision: REVISION_1, conflicted: true, runs: [{ bold: true }] }])
-    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Changed again' })
-    await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
-    expect(commit).not.toHaveBeenCalled()
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_PARAGRAPH, conflicted: false, runs: [{ bold: true }] }])
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({ baseRevision: REVISION_2, baseCommitId: COMMIT_2 }),
+      expect.any(AbortSignal))
   })
 })
 

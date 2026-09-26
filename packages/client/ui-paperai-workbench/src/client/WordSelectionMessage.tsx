@@ -11,6 +11,8 @@ interface Citation {
   revision: string
   blocks: string[]
   text: string
+  /** Absent in citations logged before the flag existed. */
+  includesUnsavedEdits?: boolean
 }
 
 function citation(text: string): Citation | undefined {
@@ -22,9 +24,11 @@ function citation(text: string): Citation | undefined {
   }
   if (value === null || typeof value !== 'object') return undefined
   const fields = value as Record<string, unknown>
-  if (Object.keys(fields).length !== 6
+  // ponytail: the six-key arm keeps citations logged before this flag renderable; drop it when those sessions stop mattering.
+  if (Object.keys(fields).length !== (fields.includesUnsavedEdits === undefined ? 6 : 7)
     || !['document', 'path', 'revision', 'text'].every(key => typeof fields[key] === 'string')
     || (fields.version !== null && typeof fields.version !== 'string')
+    || (fields.includesUnsavedEdits !== undefined && typeof fields.includesUnsavedEdits !== 'boolean')
     || !Array.isArray(fields.blocks) || !fields.blocks.every(block => typeof block === 'string')) return undefined
   return fields as unknown as Citation
 }
@@ -49,7 +53,9 @@ export function WordSelectionMessage({ matched, t }: PropsRuntime<'conversation.
           <span className={css.path}>{part.citation.path}</span>
           <dl>
             <dt>{t('selection.document')}</dt><dd>{part.citation.document}</dd>
-            <dt>{t('selection.version')}</dt><dd>{part.citation.version ?? part.citation.revision}</dd>
+            <dt>{t('selection.version')}</dt>
+            <dd>{part.citation.version ?? part.citation.revision}
+              {part.citation.includesUnsavedEdits === true && ` · ${t('selection.unsaved')}`}</dd>
             <dt>{t('selection.blocks')}</dt><dd>{part.citation.blocks.join(', ')}</dd>
           </dl>
         </details>

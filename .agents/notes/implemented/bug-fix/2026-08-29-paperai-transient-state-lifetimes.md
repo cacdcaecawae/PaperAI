@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-08-29-paperai-transient-state-lifetimes.zh.md)
 
+Partially superseded: the browser conflict controls this note describes were removed with the tab editor they lived in, and the explicit external-refresh policy in the [UI overhaul decision](../feature/2026-09-03-paperai-ui-overhaul.md) replaces them. The revision ownership of transient state below remains active.
+
 ## Problem
 
 PaperAI keeps two kinds of non-durable workbench state: the browser's selected-node draft and the Host's latest template-gate report. Both must remain attached to the document revision from which they were derived.

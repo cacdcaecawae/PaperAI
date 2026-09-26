@@ -6,13 +6,16 @@ describe('Word selection context', () => {
   it('freezes exact text, version and block provenance before the composer serializes it', async () => {
     const document = { ...documentSnapshot() }
     const excerpt = { nodeIds: [NODE_PARAGRAPH], text: 'Selected\n文字 "quoted"' }
-    const reference = wordSelectionReference(document, excerpt)
+    const reference = wordSelectionReference(document, excerpt, false)
     excerpt.text = 'another selection'
     document.path = 'another.docx'
     const text = await selectionSource().codec!.serialize(reference.ref, new AbortController().signal)
     expect(text).toBe(reference.clipboardText)
     const context = JSON.parse(text.split('[Word selection]\n')[1]!.split('\n')[0]!) as Record<string, unknown>
-    expect(context).toMatchObject({ version: COMMIT_1, blocks: [NODE_PARAGRAPH], text: 'Selected\n文字 "quoted"' })
+    expect(context).toMatchObject({
+      version: COMMIT_1, blocks: [NODE_PARAGRAPH], text: 'Selected\n文字 "quoted"', includesUnsavedEdits: false,
+    })
+    expect(wordSelectionReference(document, excerpt, true).ref).toContain('"includesUnsavedEdits":true')
     expect(context.path).not.toBe(document.path)
     const source = selectionSource()
     expect(source.codec!.clipboardText(reference.ref)).toBe(reference.clipboardText)
