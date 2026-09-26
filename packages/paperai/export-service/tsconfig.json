@@ -28,6 +28,9 @@
     },
     {
       "path": "../mcp"
+    },
+    {
+      "path": "../project-service"
     }
   ]
 }

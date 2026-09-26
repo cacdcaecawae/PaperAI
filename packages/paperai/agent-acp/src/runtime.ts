@@ -24,7 +24,7 @@ import { manageAcp } from './management.ts'
 import type { AcpManagementRequest, AcpManagementResult } from './diagnostic-types.ts'
 import { environmentSecrets, redactAcpText } from './redaction.ts'
 import { negotiateMcp } from './mcp.ts'
-import { sshLaunch, forwardedPort, type AcpSshConfig } from './ssh.ts'
+import { sshLaunch, forwardedPort, isolateSshMcp, type AcpSshConfig } from './ssh.ts'
 import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import { isAcpPermissionOption, modelStateFromConfigOptions, type AcpEffortState, type AcpModelState, type AcpSwitchState } from './catalog.ts'
 
@@ -297,6 +297,7 @@ export class AcpRuntime {
   private readonly earlyMetadata = new Map<string, { sessionId: string; update: SessionUpdate }>()
   private readonly sshStderr = new TextRetainer({ kind: 'tail', maxBytes: 65_536 })
   private forwardedServers: readonly McpServer[] | undefined
+  private sshMcp: Awaited<ReturnType<typeof isolateSshMcp>> | undefined
   private importing: SessionUpdate[] | undefined
 
   constructor(
@@ -583,7 +584,13 @@ export class AcpRuntime {
     signal.throwIfAborted()
     this.options.startupStage?.('spawn')
     const sshConfig = this.provider.ssh
-    const ssh = sshConfig === undefined ? undefined : sshLaunch(sshConfig, this.options.mcpServers ?? [])
+    if (sshConfig !== undefined) this.sshMcp = await isolateSshMcp(this.options.mcpServers ?? [])
+    if (this.closed) {
+      await this.sshMcp?.close()
+      throw new Error('ACP runtime is closed')
+    }
+    signal.throwIfAborted()
+    const ssh = sshConfig === undefined ? undefined : sshLaunch(sshConfig, this.sshMcp?.servers ?? [])
     const argv = ssh?.argv ?? resolveLaunch(this.provider)
     const env = {
       ...this.provider.env,
@@ -1168,7 +1175,7 @@ export class AcpRuntime {
       process?.stdin?.end()
       process?.terminate()
       try {
-        await this.callbacks.terminals?.close()
+        await Promise.all([this.callbacks.terminals?.close(), this.sshMcp?.close()])
       } finally {
         if (process !== undefined) await process.waitForExit()
         this.connection = undefined

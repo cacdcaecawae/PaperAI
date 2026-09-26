@@ -6397,6 +6397,9 @@ importers:
       '@paperai/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@paperai/project-service':
+        specifier: workspace:*
+        version: link:../project-service
       '@paperai/template-service':
         specifier: workspace:*
         version: link:../template-service
