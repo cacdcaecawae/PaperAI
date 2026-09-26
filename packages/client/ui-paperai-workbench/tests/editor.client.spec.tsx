@@ -10,6 +10,7 @@ import type { PaperAIDocumentWorkbenchProps } from '../src/client/slots.ts'
 import { readParagraphs } from '../src/client/editor-dom.ts'
 import { runsOf } from '../src/client/preview-html.ts'
 import { PaperAIWorkbenchController } from '../src/client/controller.ts'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { commitFormatting } from '../src/client/format-intent.ts'
 import {
   COMMIT_2, DOCUMENT_ID, NODE_HEADING, NODE_PARAGRAPH, RESOURCE_ID, REVISION_1, REVISION_2, SESSION_ID, WORKSPACE_ID,
@@ -72,6 +73,110 @@ function setup(body = '<p data-path="/body/p[1]" style="font-size:12pt;font-fami
 }
 
 describe('Document editing commands', () => {
+  it.each(['external head', 'deferred preview', 'forced projection'] as const)('retains IME input when an %s arrives', async (arrival) => {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const rendered = Promise.withResolvers<RemoteResult<ReturnType<typeof documentOpenResult>>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValue(rendered.promise)
+    if (arrival === 'deferred preview') {
+      remote.commit = vi.fn<typeof remote.commit>().mockResolvedValue({ ok: true,
+        value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+      })
+      controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed heading' })
+      await controller.commitEdit(SESSION_ID)
+    }
+    const store = controller.workbenchStore(SESSION_ID)
+    function Live() {
+      const state = useSyncExternalStore(listener => store.subscribe(listener), () => store.getSnapshot())
+      return <DocumentPreview html={state.document!.previewHtml} revision={state.document!.revision} nodes={state.document!.nodes}
+        paragraphStyles={state.document!.paragraphStyles} title="Document" edits={state.edits} saving={false}
+        busy={state.action !== null} t={t} onSave={() => {}} onCancel={() => {}}
+        onComposing={(active) => { controller.setComposing(SESSION_ID, active) }}
+        onDraft={(id, draft) => { controller.updateDraft(SESSION_ID, id, draft) }} />
+    }
+    const view = render(<Live />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const block = shadow.querySelector<HTMLElement>('p[data-paperai-node]')!
+    let range = document.createRange()
+    range.selectNodeContents(block); range.collapse(false)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({ rangeCount: 1, getRangeAt: () => range,
+      removeAllRanges: () => {}, addRange: (next: Range) => { range = next },
+    }) })
+    act(() => { block.focus() })
+    fireEvent.compositionStart(block)
+    block.textContent = 'Research background 中文输入'
+    fireEvent.input(block, { isComposing: true, inputType: 'insertCompositionText' })
+    await act(async () => {
+      if (arrival === 'external head') controller.handleDocumentChanged({
+        documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-26T00:00:00Z',
+      })
+      else if (arrival === 'deferred preview') rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2) })
+      else store.update((state) => {
+        state.document = documentOpenResult(REVISION_2, {
+          previewHtml: '<h1 data-path="/body/p[1]">Introduction</h1>',
+          nodes: documentOpenResult().document.nodes.filter(node => node.nodeId === NODE_HEADING),
+        }).document
+      })
+    })
+    if (arrival === 'forced projection') {
+      expect(block.isConnected).toBe(false)
+      expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_PARAGRAPH, draft: 'Research background 中文输入',
+        baseText: 'Research background', baseRevision: REVISION_1, conflicted: true }])
+      expect(shadow.querySelector('.paperai-conflict-text')?.textContent).toBe('Research background 中文输入')
+      const heading = shadow.querySelector<HTMLElement>('h1')!
+      fireEvent.compositionEnd(heading)
+      range.selectNodeContents(heading); range.collapse(false)
+      act(() => { heading.focus() })
+      fireEvent.compositionStart(heading)
+      heading.textContent = 'Introduction 下一句'
+      fireEvent.input(heading, { isComposing: true })
+      fireEvent.compositionEnd(heading)
+      expect(store.getSnapshot().edits).toMatchObject([
+        { nodeId: NODE_PARAGRAPH, conflicted: true }, { nodeId: NODE_HEADING, draft: 'Introduction 下一句', baseRevision: REVISION_2 },
+      ])
+      fireEvent.keyDown(heading, { key: 'z', ctrlKey: true })
+      expect(heading.textContent).toBe('Introduction')
+      view.unmount()
+      controller.dispose()
+      return
+    }
+    expect(shadow.querySelector('p[data-paperai-node]')).toBe(block)
+    expect(block.textContent).toBe('Research background 中文输入')
+    expect(store.getSnapshot().edits).toEqual([])
+    fireEvent.compositionEnd(block)
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_PARAGRAPH, draft: 'Research background 中文输入' }])
+    expect(remote.open).toHaveBeenCalledTimes(arrival === 'external head' ? 0 : 1)
+    fireEvent.keyDown(block, { key: 'z', ctrlKey: true })
+    expect(block.textContent).toBe('Research background')
+    view.unmount()
+    controller.dispose()
+  })
+
+  it('keeps comparison text selectable without quoting it as the current document', () => {
+    const onQuote = vi.fn()
+    const html = '<p data-path="/body/p[1]">Unchanged</p><p data-path="/body/p[2]"><del>Old</del><ins>New</ins></p>'
+    const props = { html, revision: REVISION_1, nodes: [
+      { nodeId: NODE_HEADING, text: 'Unchanged', label: 'Unchanged', kind: 'paragraph' as const, depth: 0, editable: true },
+    ], paragraphStyles: [], title: 'Document', edits: [], saving: false, t, onSave: vi.fn(), onCancel: vi.fn(), onDraft: vi.fn(), onQuote }
+    const view = render(<DocumentPreview {...props} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const block = shadow.querySelector('p')!
+    const range = document.createRange()
+    range.selectNodeContents(block)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({ rangeCount: 1, getRangeAt: () => range }) })
+    expect(fireEvent.contextMenu(block)).toBe(false)
+    expect(screen.getByRole('menuitem', { name: zh['selection.ask'] })).toBeDefined()
+    view.rerender(<DocumentPreview {...props} comparing />)
+    expect(screen.queryByRole('menuitem', { name: zh['selection.ask'] })).toBeNull()
+    range.setEndAfter(shadow.querySelector('ins')!)
+    expect(fireEvent.contextMenu(block)).toBe(true)
+    expect(range.toString()).toBe('UnchangedOldNew')
+    expect(onQuote).not.toHaveBeenCalled()
+    view.rerender(<DocumentPreview {...props} />)
+    expect(screen.queryByRole('menuitem', { name: zh['selection.ask'] })).toBeNull()
+  })
+
   it.each(['typing', 'bold', 'unbold'] as const)('keeps rendered fonts in the draft but sends only %s intent through the controller', async (action) => {
     const editor = setup('<p data-path="/body/p[1]" style="font-family:Calibri;font-size:12pt">'
       + `<span style="font-family:Times New Roman;${action === 'unbold' ? 'font-weight:bold;' : ''}">Research</span>`

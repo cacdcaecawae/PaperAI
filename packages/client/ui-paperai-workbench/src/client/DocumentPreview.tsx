@@ -31,6 +31,8 @@ export interface DocumentPreviewProps {
   readonly saving: boolean
   readonly busy?: boolean
   readonly onDraft: (nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null) => void
+  /** Report composition before input and release it after the completed draft is published. */
+  readonly onComposing?: (active: boolean) => void
   /** Keep the local draft on one conflicted block: rebase it onto the document's text and unfreeze it. */
   readonly onResolveConflict?: (nodeId: PaperAIDocumentNodeId) => void
   readonly onSave: () => void
@@ -269,7 +271,7 @@ function compositionSnapshot(container: HTMLElement): () => void {
 
 /** Render draft operations over the preview; successful Host commits replace the document revision. */
 export function DocumentPreview({ html, revision, nodes, paragraphStyles, title, edits, saving, onDraft, onSave, onCancel, t,
-  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, onResolveConflict, comparing = false, busy = false, reveal = null,
+  active = true, scrollTop = 0, zoom = 'fit', onScroll, onQuote, onZoom, onResolveConflict, onComposing, comparing = false, busy = false, reveal = null,
 }: DocumentPreviewProps): ReactNode {
   const host = useRef<HTMLDivElement>(null)
   const mapping = useRef(new Map<HTMLElement, PaperAIDocumentNodeId>())
@@ -288,8 +290,8 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const findCursor = useRef<{ query: string; block: HTMLElement; offset: number } | null>(null)
   /** The half-pressed 放弃这段草稿, if one is waiting for its second press. */
   const armed = useRef<HTMLElement | null>(null)
-  const callbacks = useRef({ onDraft, onSave })
-  callbacks.current = { onDraft, onSave }
+  const callbacks = useRef({ onDraft, onSave, onComposing })
+  callbacks.current = { onDraft, onSave, onComposing }
   const [caret, setCaret] = useState<EditorFormat | null>(null)
   const [excerpt, setExcerpt] = useState<WordExcerpt | null>(null)
   const [historyState, setHistoryState] = useState({ undo: false, redo: false })
@@ -325,6 +327,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     return current === null || current.rangeCount === 0 ? null : current.getRangeAt(0)
   }
   const capture = (range = rangeNow()): void => {
+    if (comparing) { target.current = null; setCaret(null); setExcerpt(null); return }
     if (range === null) return
     const blocks = [...mapping.current.keys()].filter(block =>
       range.collapsed ? block.contains(range.startContainer) : range.intersectsNode(block))
@@ -365,9 +368,21 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       : { current: current + 1, total: list.length }))
   }
 
+  // Forced projection or view changes retain the phrase against its original node index.
+  const interruptComposition = (): void => {
+    if (!composing.current) return
+    if (blockedComposition.current !== null) blockedComposition.current()
+    else if (compositionBlock.current !== null) report([compositionBlock.current], true)
+    composing.current = false
+    compositionBlock.current = null
+    blockedComposition.current = null
+    callbacks.current.onComposing?.(false)
+  }
+
   useLayoutEffect(() => {
     const element = host.current
     if (element === null) return
+    interruptComposition()
     const shadow = element.shadowRoot ?? element.attachShadow({ mode: 'open' })
     const content = sanitize(html)
     const style = document.createElement('style')
@@ -387,7 +402,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     }]))
     latest.current = new Map([...mapping.current.keys()].map(block => [block, imageOf(block)]))
     history.current = { past: [], future: [] }; updateHistory(); target.current = null
-    setCaret(null); setExcerpt(null)
+    setCaret(null); setExcerpt(null); setContext(null); setBar(null)
     setFonts([...new Set([...mapping.current.keys()].flatMap(block => [block, ...block.querySelectorAll<HTMLElement>('span')])
       .map(block => fontOf(getComputedStyle(block))).filter(Boolean).concat(['宋体', '黑体', '等线', 'Times New Roman', 'Arial']))])
     setChanges({ count: container.querySelectorAll('[data-paperai-change]').length, index: 0 })
@@ -409,8 +424,6 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     for (const [block, nodeId] of mapping.current) {
       // Blocks are matched to head nodes by text, so on a compared page a head draft would paint into
       // another version's paragraph and then wear the same mark as that version's own changes.
-      // ponytail: the mapping still names head nodes, so quoting a compared page hands the Agent head
-      // ids; name the version's own nodes once the diff carries its node index.
       const edit = comparing ? undefined : drafts.get(nodeId)
       const original = originals.current.get(block)
       if (active && edit !== undefined && edit.conflicted !== true && edit.baseRevision !== revision
@@ -484,8 +497,19 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     // have to come back when the comparison closes.
   }, [active, comparing, edits, editable, html, nodes, revision])
   useLayoutEffect(() => { if (active && host.current !== null) host.current.scrollTop = scrollTop }, [active, html])
+  useLayoutEffect(() => {
+    if (!active || comparing) interruptComposition()
+    target.current = null
+    setCaret(null); setExcerpt(null); setContext(null); setBar(null)
+  }, [active, comparing])
   // The pill leaves with the last draft while this component stays mounted: a half-pressed discard must not greet the next draft.
   useEffect(() => { if (edits.length === 0) setConfirmDiscard(false) }, [edits.length])
+  useEffect(() => () => {
+    if (composing.current) callbacks.current.onComposing?.(false)
+    composing.current = false
+    compositionBlock.current = null
+    blockedComposition.current = null
+  }, [])
   // The bar stays inside the stage: clamped sideways, and flipped above the selection when the room below runs out.
   useLayoutEffect(() => {
     const element = barRef.current
@@ -530,7 +554,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     return () =>{  observer.disconnect() }
   }, [html, zoom])
 
-  const report = (blocks: readonly HTMLElement[]): void => {
+  const report = (blocks: readonly HTMLElement[], conflict = false): void => {
     const drafts = blocks.flatMap<{ block: HTMLElement; nodeId: PaperAIDocumentNodeId; draft: PaperAIBlockDraft | null }>((block) => {
       const nodeId = mapping.current.get(block)
       if (nodeId === undefined) return []
@@ -544,6 +568,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       const formatted = stated(runs) || (original !== undefined && stated(original.runs))
       const stating = original === undefined ? runs : restateCleared(runs, original.runs, block)
       return [{ block, nodeId, draft: unchanged ? null : { text,
+        ...(conflict ? { conflicted: true } : {}),
         ...(structured ? { paragraphs: parts.map((part, index) => ({ ...part,
           runs: part.text === '' ? effectiveRunsOf(paragraphsOf(block)[index] as HTMLElement)
             : original === undefined ? part.runs ?? [] : restateCleared(part.runs ?? [], original.runs, block),
@@ -789,7 +814,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       }
     }
     const compositionStart = (event: Event): void => {
+      if (!editable) return
       composing.current = true
+      callbacks.current.onComposing?.(true)
       compositionBlock.current = blockOf(event) ?? null
       const range = rangeNow()
       const inside = range === null ? undefined : [...mapping.current.keys()]
@@ -800,19 +827,22 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       }
     }
     const compositionEnd = (): void => {
+      if (!composing.current) return
       composing.current = false; const block = compositionBlock.current; compositionBlock.current = null
       if (blockedComposition.current !== null) {
         blockedComposition.current()
         blockedComposition.current = null
         target.current = null
         setCaret(null)
+        callbacks.current.onComposing?.(false)
         return
       }
       if (block !== null && editable) finish([block])
+      callbacks.current.onComposing?.(false)
     }
     // Selected text in mapped blocks gets the selection menu instead of the browser's; anything else keeps the native one.
     const contextMenu = (event: Event): void => {
-      if (!(event instanceof MouseEvent) || onQuote === undefined) return
+      if (comparing || !(event instanceof MouseEvent) || onQuote === undefined) return
       const range = rangeNow()
       if (range === null || range.collapsed || range.toString().trim() === '' || ![...mapping.current.keys()].some(block => range.intersectsNode(block))) return
       event.preventDefault(); capture(range); setContext({ x: event.clientX, y: event.clientY }); setBar(null)
@@ -886,7 +916,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   }
   /** Hand the captured selection to the Agent with an optional canned request, and put the selection surfaces away. */
   const act = (request?: string): void => {
-    if (excerpt !== null && onQuote !== undefined) onQuote(excerpt, request)
+    if (!comparing && excerpt !== null && onQuote !== undefined) onQuote(excerpt, request)
     setExcerpt(null); setBar(null); setContext(null)
   }
   const requestFor = (id: string): string | undefined => {
@@ -901,7 +931,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         onToggle={toggle} onFormat={format} onParagraph={paragraph} onFind={find}
         onClear={() =>{  format({ 'font-weight': '', 'font-style': '', 'text-decoration': '', 'font-size': '', 'font-family': '', color: '' }) }} t={t} />}
       {active && notice !== null && <div className={css.notice} role="status">{t(notice)}</div>}
-      {active && context !== null && onQuote !== undefined && <Menu portal compact open
+      {active && !comparing && context !== null && onQuote !== undefined && <Menu portal compact open
         items={[{ id: 'ask', label: t('selection.ask') }, { type: 'separator', id: 'canned' },
           ...SELECTION_REQUESTS.map(([id, label]) => ({ id, label: t(label) }))]} anchor={<span hidden />}
         getAnchorRect={() => ({ left: context.x, right: context.x, top: context.y, bottom: context.y, width: 0, height: 0 } as DOMRect)}
@@ -910,7 +940,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       <div className={css.stage}>
         <div ref={host} className={css.preview} role="document" aria-label={title}
           onScroll={(event) => { if (active) onScroll?.(event.currentTarget.scrollTop); measurePages(); setBar(null) }} />
-        {active && bar !== null && excerpt !== null && onQuote !== undefined && (
+        {active && !comparing && bar !== null && excerpt !== null && onQuote !== undefined && (
           <div ref={barRef} className={clsx(css.floating, css.selectionBar)} role="toolbar" aria-label={t('selection.title')}
             style={{ left: bar.x, top: bar.y + 8 }} onMouseDown={(event) => { event.preventDefault() }}>
             <button type="button" onClick={() => { act() }}>{t('selection.ask')}</button>

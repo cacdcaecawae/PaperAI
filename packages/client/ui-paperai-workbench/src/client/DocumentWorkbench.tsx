@@ -151,7 +151,7 @@ function Actions({ state, exportDocument, focusActive, toggleFocus, t }: {
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
   closeDetails, prepareAgentFix, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
-  retryOpen, showPanel, updateDraft, resolveConflict, cancelEdit, commitEdit, validate, suggestType,
+  retryOpen, showPanel, updateDraft, setComposing, resolveConflict, cancelEdit, commitEdit, validate, suggestType,
   applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal, captureExternal,
   setDetailsFocus, showConversation, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
   useStore, actions,
@@ -274,7 +274,16 @@ export function DocumentWorkbench({
         )}
         {[...state.retained, ...(ready ? [state] : [])].map(view => (
           view.document === null ? null : view.document.previewHtml === ''
-            ? <p key={view.document.documentId} hidden={view !== state} className={css.centerMessage}>{t('preview.unavailable')}</p>
+            ? (
+              <div key={view.document.documentId} hidden={view !== state} className={css.failure} role="status">
+                <span>{t(view.previewLoading ? 'workbench.loading' : 'preview.unavailable')}</span>
+                {!view.previewLoading && (
+                  <Button variant="outline" size="sm" icon={<IconRefreshOutline14 />} onClick={() => { void retryOpen() }}>
+                    {t('workbench.retry')}
+                  </Button>
+                )}
+              </div>
+            )
             : (
               <DocumentPreview
                 key={view.document.documentId}
@@ -286,7 +295,9 @@ export function DocumentWorkbench({
                 scrollTop={view.scrollTop}
                 reveal={view === state ? state.reveal : null}
                 onScroll={setScroll}
-                onQuote={(excerpt, request) => { if (view.document !== null) quoteSelection(view.document, excerpt, request) }}
+                onQuote={(excerpt, request) => {
+                  if (view.document !== null && compare === null) quoteSelection(view.document, excerpt, request)
+                }}
                 title={t('preview.title')}
                 edits={view.edits}
                 comparing={view === state && compare !== null}
@@ -295,6 +306,7 @@ export function DocumentWorkbench({
                 zoom={zoom}
                 onZoom={actions.setZoom}
                 onDraft={updateDraft}
+                onComposing={setComposing}
                 onResolveConflict={resolveConflict}
                 onSave={() => { void commitEdit() }}
                 onCancel={cancelEdit}

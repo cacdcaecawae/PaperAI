@@ -108,7 +108,7 @@ export interface PaperAIBlockDraft {
   readonly paragraphs?: readonly PaperAIDocumentParagraph[]
   /** Local rendered readings used to omit unchanged formatting from the Word mutation. */
   readonly formatting?: PaperAIFormatComparison
-  /** The preview detected an external formatting change; saving requires a conflict choice. */
+  /** A refreshed preview conflicts with this draft; saving requires an explicit choice. */
   readonly conflicted?: boolean
 }
 
@@ -173,6 +173,8 @@ export interface PaperAIWorkbenchState {
   typeSuggestion: PaperAIDocumentTypeSuggestion | null
   exportReceipt: PaperAIExportReceipt | null
   externalUpdate: PaperAIExternalDocumentHead | null
+  /** The committed revision's deferred preview is being rendered. */
+  previewLoading: boolean
   error: string | null
   actionError: string | null
 }
