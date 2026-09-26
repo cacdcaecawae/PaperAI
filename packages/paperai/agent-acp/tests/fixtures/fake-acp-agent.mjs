@@ -12,6 +12,7 @@ let currentModel = process.env.FAKE_ACP_MODEL ?? 'fake-alpha'
 let currentEffort = 'medium'
 const effortId = process.env.FAKE_ACP_EFFORT_ID ?? 'effort'
 let fastMode = false
+let collaboration = 'solo'
 /** Comma-separated config values whose `session/set_config_option` is rejected. */
 const rejectedConfigValues = new Set(
   (process.env.FAKE_ACP_REJECT_SET_CONFIG_VALUE ?? '').split(',').filter(value => value.length > 0),
@@ -66,7 +67,10 @@ function modelOptions() {
     description: '1.5x speed, increased usage',
     category: 'model_config',
     currentValue: fastMode,
-  }]
+  }, ...(process.env.FAKE_ACP_GENERAL_OPTION === '1' ? [{
+    type: 'select', id: 'collaboration', name: 'Collaboration', currentValue: collaboration,
+    options: [{ value: 'solo', name: 'Solo' }, { value: 'team', name: 'Team' }],
+  }] : [])]
 }
 
 function modes() {
@@ -164,7 +168,7 @@ function makeAgent(connection) {
       while (process.env.FAKE_ACP_LOAD_GATE === '1' && existsSync(`${logPath}.load-gate`)) {
         await new Promise(resolve => setTimeout(resolve, 20))
       }
-      if (process.env.FAKE_ACP_FAIL_LOAD === '1') {
+      if (process.env.FAKE_ACP_FAIL_LOAD === '1' || existsSync(`${logPath}.fail-load`)) {
         throw new Error('scripted ACP load-session failure')
       }
       if (process.env.FAKE_ACP_HISTORY === '1') await connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: 'user_message_chunk', messageId: 'user-original', content: { type: 'text', text: 'Original question' } } })
@@ -242,6 +246,8 @@ function makeAgent(connection) {
         currentEffort = String(params.value)
       } else if (params.configId === 'fast') {
         fastMode = params.value === true
+      } else if (params.configId === 'collaboration') {
+        collaboration = String(params.value)
       } else {
         currentModel = String(params.value)
         // Like real adapters, a model switch may re-advertise the effort at the
@@ -262,6 +268,10 @@ function makeAgent(connection) {
     async prompt(params) {
       log('prompt', { sessionId: params.sessionId, prompt: params.prompt })
       if (process.env.FAKE_ACP_CRASH_ON_PROMPT === '1') process.exit(7)
+      if (process.env.FAKE_ACP_CRASH_ON_PROMPT === 'once' && !existsSync(`${logPath}.crashed`)) {
+        writeFileSync(`${logPath}.crashed`, 'crashed', 'utf8')
+        process.exit(7)
+      }
       const promptText = params.prompt
         .filter(block => block.type === 'text')
         .map(block => block.text)

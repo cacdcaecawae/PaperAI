@@ -287,6 +287,7 @@ export class AcpRuntime {
   private initialized: InitializeResponse | undefined
   /** Depth of running `selectModel` transactions; provider notifications stay internal while positive. */
   private selectionDepth = 0
+  private starting = false
   private modeState: SessionModeState | undefined
   private replaying = false
   private steeringSupported = false
@@ -334,6 +335,7 @@ export class AcpRuntime {
       ...(this.optionsState.some(
         option =>
           option.type === 'select' &&
+          !isAcpPermissionOption(option) &&
           option.id !== this.modelState.configId &&
           option.id !== this.modelState.effort?.configId,
       )
@@ -343,6 +345,7 @@ export class AcpRuntime {
               .filter(
                 option =>
                   option.type === 'select' &&
+                    !isAcpPermissionOption(option) &&
                     option.id !== this.modelState.configId &&
                     option.id !== this.modelState.effort?.configId,
               )
@@ -391,6 +394,7 @@ export class AcpRuntime {
    * @param replaceFailedLoad Whether a rejected load may create a replacement provider session.
    * Callers may enable it only when no provider conversation history exists.
    * @param lifetimeSignal Closes the provider process when this runtime generation is retired.
+   * @param selection Last confirmed conversation settings to restore before publishing this generation.
    * @returns Initialization metadata and the model selector advertised by the active session.
    * @throws When initialization, a non-replaceable load, session creation, or native-mode synchronization fails.
    */
@@ -400,7 +404,9 @@ export class AcpRuntime {
     signal: AbortSignal,
     replaceFailedLoad = false,
     lifetimeSignal: AbortSignal = signal,
+    selection?: AcpSelection,
   ): Promise<AcpSessionStart> {
+    this.starting = true
     try {
       const initialized = await this.connect(sandboxMode, signal, lifetimeSignal)
       const connection = this.requireConnection()
@@ -455,6 +461,7 @@ export class AcpRuntime {
         }
         if (this.externalSessionId !== undefined) {
           await this.selectSandboxMode(sandboxMode, signal)
+          await this.restoreConfiguration(selection, signal)
           return {
             externalSessionId: previousExternalSessionId,
             resumed: true,
@@ -482,6 +489,7 @@ export class AcpRuntime {
       }
       this.earlyMetadata.clear()
       await this.selectSandboxMode(sandboxMode, signal)
+      await this.restoreConfiguration(selection, signal)
       return {
         externalSessionId: created.sessionId,
         resumed: false,
@@ -498,7 +506,30 @@ export class AcpRuntime {
         ),
         { cause: error },
       )
+    } finally {
+      this.starting = false
     }
+  }
+
+  private async restoreConfiguration(selection: AcpSelection | undefined, signal: AbortSignal): Promise<void> {
+    if (selection === undefined) return
+    const apply = async (id: string | undefined, value: string | boolean): Promise<void> => {
+      signal.throwIfAborted()
+      if (this.optionsState.some(option => option.id === id && option.currentValue === value)) return
+      try {
+        if (id === undefined) throw new AcpOptionUnavailableError('The saved selector is unavailable')
+        await raceAbort(this.selectConfigOption(id, value), signal)
+      } catch (error: unknown) {
+        signal.throwIfAborted()
+        if (!this.connected
+          || !(error instanceof AcpOptionUnavailableError || (error instanceof AcpSelectionError && error.restored))) throw error
+        this.ctx.logger.warn('%s ACP saved option %s is unavailable; keeping the provider selection', this.provider.id, id ?? 'model or reasoning effort')
+      }
+    }
+    await apply(this.modelState.configId, selection.model)
+    if (selection.reasoningEffort !== undefined) await apply(this.modelState.effort?.configId, selection.reasoningEffort)
+    for (const [id, value] of Object.entries(selection.switches ?? {})) await apply(id, value)
+    for (const [id, value] of Object.entries(selection.configOptions ?? {})) await apply(id, value)
   }
 
   /**
@@ -1025,7 +1056,7 @@ export class AcpRuntime {
   }
 
   private publishSelection(): void {
-    this.callbacks.modelChanged(this.currentModel)
+    if (!this.starting) this.callbacks.modelChanged(this.currentModel)
   }
 
   private assertEffortAdvertised(effortId: string): AcpEffortState {

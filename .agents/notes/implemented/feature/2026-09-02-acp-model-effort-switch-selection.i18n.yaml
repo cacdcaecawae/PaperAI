@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-acp-model-effort-switch-selection.md
-2026-09-02-acp-model-effort-switch-selection.md: c498440256177ed423af35574679d9ca580089b8
-2026-09-02-acp-model-effort-switch-selection.zh.md: 9a0bb48a0aa72edc8a8b9667ecb3e64d1e167799
+2026-09-02-acp-model-effort-switch-selection.md: 2d816c3cd7c94a29160dac43b9218e637bd3efab
+2026-09-02-acp-model-effort-switch-selection.zh.md: 7714c87d4cd275b923e9bdbbfc4ca111bc03a0f5

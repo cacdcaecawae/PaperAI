@@ -933,6 +933,59 @@ describe('PaperAI ACP routed Agent lifecycle', { concurrent: false }, () => {
       .toMatchObject({ sessionId: 'external-paper-session', label: 'codex' })
   }, 20_000)
 
+  it('restores confirmed conversation settings on cold resume before logging or prompting', async () => {
+    const records = new Map<string, StoredSession>()
+    const env = { FAKE_ACP_GENERAL_OPTION: '1', FAKE_ACP_NOTIFY_CONFIG_UPDATES: '1', FAKE_ACP_MODEL_RESETS_EFFORT: '1' }
+    const source = await mountHarness({ records, env })
+    const created = await createAgent(source, 'resume-selection')
+    await created.agent.modelController?.selectModel('fake-beta', { reasoningEffort: 'high', switches: { fast: true } })
+    await source.ctx.paperAiAcpAgents.selectOption(created.agent.session.id, 'collaboration', 'team')
+    const selections = created.agent.session.events.filter(event => event.type === 'paperai/acp/config')
+    source.persistence.capture(created.agent.session)
+    await created.dispose()
+    const target = await mountHarness({ records, env })
+    const resumed = await target.ctx.agents.resume({ resumeSessionId: SessionId('resume-selection'), factoryRoute: 'codex' })
+    expect(resumed.agent.session.events.filter(event => event.type === 'paperai/acp/config')).toEqual(selections)
+    await runTurn(resumed, 'Continue with saved settings')
+    const log = await readLog(target.logPath)
+    expect(log.filter(entry => entry.event === 'set-config-option').map(entry => [entry['configId'], entry['value']]))
+      .toEqual([['model', 'fake-beta'], ['effort', 'high'], ['fast', true], ['collaboration', 'team']])
+    expect(resumed.agent.session.requestHeader()?.config).toMatchObject({ model: 'fake-beta', reasoningEffort: 'high' })
+  })
+
+  it('logs only accepted recovery settings when saved options become unavailable or are rejected', async () => {
+    const records = new Map<string, StoredSession>()
+    const source = await mountHarness({ records, env: { FAKE_ACP_GENERAL_OPTION: '1' } })
+    const created = await createAgent(source, 'resume-rejected-selection')
+    await created.agent.modelController?.selectModel('fake-beta', { reasoningEffort: 'high', switches: { fast: true } })
+    await source.ctx.paperAiAcpAgents.selectOption(created.agent.session.id, 'collaboration', 'team')
+    source.persistence.capture(created.agent.session)
+    const originalCount = created.agent.session.events.length
+    await created.dispose()
+    const target = await mountHarness({ records, env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high', FAKE_ACP_NOTIFY_CONFIG_UPDATES: '1' } })
+    const warn = vi.spyOn(target.ctx.logger, 'warn').mockImplementation(() => undefined)
+    const resumed = await target.ctx.agents.resume({ resumeSessionId: SessionId('resume-rejected-selection'), factoryRoute: 'codex' })
+    expect(resumed.agent.session.events.slice(originalCount).filter(event => event.type === 'paperai/acp/config').map(event => event.data))
+      .toEqual([{ provider: 'codex', model: 'fake-beta', reasoningEffort: 'medium', switches: { fast: true } }])
+    expect(warn).toHaveBeenCalledTimes(2)
+    await runTurn(resumed, 'Use the accepted settings')
+    expect(resumed.agent.session.requestHeader()?.config).toMatchObject({ model: 'fake-beta', reasoningEffort: 'medium' })
+  })
+
+  it('refuses recovery when a saved option rejection cannot restore the provider configuration', async () => {
+    const records = new Map<string, StoredSession>()
+    const source = await mountHarness({ records })
+    const created = await createAgent(source, 'resume-unrestored-selection')
+    await created.agent.modelController?.selectModel('fake-beta', { reasoningEffort: 'high' })
+    source.persistence.capture(created.agent.session)
+    await created.dispose()
+    const target = await mountHarness({ records, env: { FAKE_ACP_REJECT_SET_CONFIG_VALUE: 'high,medium' } })
+    await expect(target.ctx.agents.resume({ resumeSessionId: SessionId('resume-unrestored-selection'), factoryRoute: 'codex' }))
+      .rejects.toThrow('could not be fully restored')
+    expect(target.ctx.paperAiAcpAgents.diagnosticStatus().every(entry => !entry.connected)).toBe(true)
+    expect((await readLog(target.logPath)).filter(entry => entry.event === 'prompt')).toEqual([])
+  })
+
   it('replaces a failed provider load only when the persisted DSH session is blank', async () => {
     const records = new Map<string, StoredSession>()
     const sourceHarness = await mountHarness({
@@ -1618,8 +1671,14 @@ describe('ACP permission policy projection', { concurrent: false }, () => {
     provider,
     nativeMode,
   }) => {
-    const harness = await mountHarness({ env: { FAKE_ACP_PROMPT_DELAY_MS: '300' } })
+    const harness = await mountHarness({ env: {
+      FAKE_ACP_PROMPT_DELAY_MS: '300', FAKE_ACP_GENERAL_OPTION: '1', FAKE_ACP_PERMISSION_OPTION: '1',
+      FAKE_ACP_NOTIFY_CONFIG_UPDATES: '1', FAKE_ACP_MODEL_RESETS_EFFORT: '1',
+    } })
     const handle = await createAgent(harness, `native-mode-restart-${provider}`, provider)
+    await handle.agent.modelController?.selectModel('fake-beta', { reasoningEffort: 'high', switches: { fast: true } })
+    await harness.ctx.paperAiAcpAgents.selectOption(handle.agent.session.id, 'collaboration', 'team')
+    const selections = handle.agent.session.events.filter(event => event.type === 'paperai/acp/config')
     setSandboxMode(handle.agent.session, 'read-only')
     await vi.waitFor(async () => {
       expect((await readLog(harness.logPath)).findLast(entry => entry.event === 'set-mode'))
@@ -1640,6 +1699,11 @@ describe('ACP permission policy projection', { concurrent: false }, () => {
     const log = await readLog(harness.logPath)
     const initialized = log.filter(entry => entry.event === 'initialize')
     expect(initialized).toHaveLength(2)
+    expect(log.slice(log.findLastIndex(entry => entry.event === 'initialize'))
+      .filter(entry => entry.event === 'set-config-option').map(entry => [entry['configId'], entry['value']]))
+      .toEqual([['model', 'fake-beta'], ['effort', 'high'], ['fast', true], ['collaboration', 'team']])
+    expect(handle.agent.session.events.filter(event => event.type === 'paperai/acp/config')).toEqual(selections)
+    expect(handle.agent.session.requestHeader()?.config).toMatchObject({ model: 'fake-beta', reasoningEffort: 'high' })
     if (provider === 'codex') {
       expect(initialized[1]?.['environment']).toMatchObject({ initialAgentMode: nativeMode })
     } else {
@@ -2245,6 +2309,42 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
       .toEqual([['codex', false], ['claude', true]])
     await runTurn(claude, 'Continue Claude independently')
     expect((await readLog(harness.logPath)).filter(entry => entry.event === 'prompt' && entry.label === 'claude')).toHaveLength(2)
+  })
+
+  it.each(['prompt', 'models'] as const)('recovers a crashed provider before the next %s operation', async (operation) => {
+    const harness = await mountHarness({ env: { FAKE_ACP_CRASH_ON_PROMPT: 'once' } })
+    const handle = await createAgent(harness, `crash-recovery-${operation}`)
+    const connectionStates: boolean[] = []
+    harness.ctx.on('paperai/acp-changed', () => {
+      connectionStates.push(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected === true)
+    })
+    await handle.agent.modelController?.selectModel('fake-beta', { reasoningEffort: 'high' })
+    await runTurn(handle, 'Crash this process once')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(false)
+    connectionStates.length = 0
+    if (operation === 'models') await handle.agent.modelController?.listModels()
+    await runTurn(handle, 'Continue the same conversation')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+    expect(connectionStates).toContain(true)
+    const log = await readLog(harness.logPath)
+    expect(log.filter(entry => entry.event === 'initialize')).toHaveLength(2)
+    expect(log.filter(entry => entry.event === 'new-session')).toHaveLength(1)
+    expect(log.filter(entry => entry.event === 'load-session')).toHaveLength(1)
+    expect(log.filter(entry => entry.event === 'prompt')).toHaveLength(2)
+    expect(handle.agent.session.requestHeader()?.config).toMatchObject({ model: 'fake-beta', reasoningEffort: 'high' })
+  })
+
+  it('keeps diagnostics readable and retries a failed crash recovery without replacing history', async () => {
+    const harness = await mountHarness({ env: { FAKE_ACP_CRASH_ON_PROMPT: 'once' } })
+    const handle = await createAgent(harness, 'crash-retry')
+    await runTurn(handle, 'Crash')
+    await writeFile(`${harness.logPath}.fail-load`, 'fail')
+    await expect(handle.agent.modelController?.listModels()).rejects.toThrow('failed to start')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)).toMatchObject({ connected: false, options: [] })
+    await rm(`${harness.logPath}.fail-load`)
+    await runTurn(handle, 'Retry after provider recovery')
+    expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(1)
   })
 
   it('clears connected status after the provider process exits unexpectedly', async () => {

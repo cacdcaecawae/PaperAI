@@ -613,16 +613,16 @@ export class AcpAgent implements Agent {
    * @returns provider capabilities and currently advertised options.
    */
   details(): AcpSessionDetails {
-    const runtime = this.requireRuntime()
+    const runtime = this.runtime
     return {
       provider: this.provider.id,
       name: this.provider.name,
-      externalSessionId: runtime.sessionId ?? null,
+      externalSessionId: runtime?.sessionId ?? null,
       connected: this.connected,
       capabilities:
-        diagnosticCapabilities({ protocolVersion: 1, agentCapabilities: runtime.capabilities ?? {} }).capabilities ??
+        diagnosticCapabilities({ protocolVersion: 1, agentCapabilities: runtime?.capabilities ?? {} }).capabilities ??
         {},
-      options: runtime.configuration.map(option => ({
+      options: (runtime?.configuration ?? []).map(option => ({
         id: option.id,
         name: option.name,
         description: option.description ?? null,
@@ -798,6 +798,7 @@ export class AcpAgent implements Agent {
       signal,
       this.providerSessionIsReplaceable(),
       lifetimeSignal,
+      this.previousSelection(),
     )
     this.applyRuntimeStart(started)
     if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
@@ -1514,7 +1515,7 @@ export class AcpAgent implements Agent {
   }
 
   private needsRuntimeRestart(): boolean {
-    return this.runtimeNeedsRestart
+    return this.runtimeNeedsRestart || this.runtime?.connected !== true
   }
 
   private async runtimeForTurn(signal: AbortSignal): Promise<AcpRuntime> {
@@ -1522,7 +1523,7 @@ export class AcpAgent implements Agent {
   }
 
   private async runtimeForSandboxMode(mode: SandboxMode, signal: AbortSignal): Promise<AcpRuntime> {
-    if (!this.runtimeNeedsRestart) return this.requireRuntime()
+    if (!this.needsRuntimeRestart()) return this.requireRuntime()
     const lifecycleSignal = this.lifecycleSignal
     if (lifecycleSignal === undefined) throw new Error(`${this.provider.name} ACP lifecycle is unavailable`)
     const previousExternalSessionId = this.previousExternalSessionId()
@@ -1539,6 +1540,7 @@ export class AcpAgent implements Agent {
         AbortSignal.any([lifecycleSignal, signal]),
         this.providerSessionIsReplaceable(),
         lifetimeSignal,
+        this.previousSelection(),
       )
       this.applyRuntimeStart(started)
       if (previousExternalSessionId !== started.externalSessionId || !started.resumed) {
@@ -1557,6 +1559,13 @@ export class AcpAgent implements Agent {
       this.runtime = undefined
       throw error
     }
+  }
+
+  private previousSelection(): AcpLoggedSelection | undefined {
+    const event = this.session.events.findLast(
+      event => event.type === 'paperai/acp/config' && event.data.provider === this.provider.id,
+    )
+    return event?.type === 'paperai/acp/config' ? event.data : undefined
   }
 
   private previousExternalSessionId(): string | undefined {
@@ -1585,6 +1594,7 @@ export class AcpAgent implements Agent {
     this.modelChanged(this.requireRuntime().currentModel)
     this.recordSelection()
     this.imageInput = started.initialized.agentCapabilities?.promptCapabilities?.image === true
+    if (this.sessionLive) this.hostCtx.emit('paperai/acp-changed', this.id)
   }
 
   private currentSandboxMode(): SandboxMode {
