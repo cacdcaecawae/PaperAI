@@ -471,7 +471,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       if (seat !== undefined) seat.dataset.paperaiConflictSeat = form === 'draft' ? 'theirs' : 'mine'
       // A band never enters a table: it stands before the table its seat sits in, as a removed
       // paragraph's placeholder already does on a compared page.
-      if (seat === undefined) container?.append(band)
+      if (seat === undefined) container?.insertBefore(band, container.querySelector('.page') ?? container.firstChild)
       else (seat.closest('table') ?? seat).before(band)
       // Next frame, so the row and the opacity have an initial style to transition from and the
       // thesis is pushed down rather than jumped.

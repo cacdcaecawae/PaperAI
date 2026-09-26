@@ -904,7 +904,7 @@ describe('Conflict on a paragraph the browser cannot merge', () => {
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Deleted paragraph draft' })
     controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Unrelated draft' })
     remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
-      previewHtml: '<p data-path="/body/p[1]">Introduction</p>',
+      previewHtml: '<div class="page"><p data-path="/body/p[1]">Introduction</p></div>',
       nodes: documentOpenResult().document.nodes.filter(node => node.nodeId === NODE_HEADING),
     }) })
     controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' })
@@ -923,6 +923,7 @@ describe('Conflict on a paragraph the browser cannot merge', () => {
     }) })
     const band = shadow.querySelector<HTMLElement>('[data-paperai-conflict]')!
     expect(band.parentElement).toBe(shadow.querySelector('.paperai-doc'))
+    expect(band.nextElementSibling).toBe(shadow.querySelector('.page'))
     expect(band.dataset.paperaiConflictForm).toBe('draft')
     expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('Deleted paragraph draft')
     expect(band.querySelector('[data-paperai-resolve="mine"]')).toBeNull()
