@@ -41,6 +41,7 @@ const WORKBENCH_INITIAL: PaperAIWorkbenchState = Object.freeze({
   typeSuggestion: null,
   exportReceipt: null,
   externalUpdate: null,
+  previewLoading: false,
   error: null,
   actionError: null,
 })
@@ -126,6 +127,7 @@ export class PaperAIWorkbenchController {
   private readonly outlineMirrors = new Map<SessionId, () => void>()
   private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, readonly PaperAIBlockEdit[]>>()
   private readonly positions = new Map<SessionId, Map<PaperAIResourceId, number>>()
+  private readonly composing = new Map<SessionId, PaperAIDocumentSnapshot>()
   private readonly targets = new Map<SessionId, {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
@@ -372,7 +374,7 @@ export class PaperAIWorkbenchController {
     this.assertLive()
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
-    if (state.action !== null) {
+    if (state.action !== null || this.composing.has(sessionId)) {
       entry.store.update((draft) => { draft.actionError = 'wait for the current document action before opening another document' })
       return
     }
@@ -424,6 +426,22 @@ export class PaperAIWorkbenchController {
     return target === undefined
       ? Promise.resolve()
       : this.openDocument(target.workspaceId, sessionId, target.resourceId, true)
+  }
+
+  /**
+   * Protect the active IME phrase until the editor publishes its completed draft.
+   * @param sessionId - Session whose editor owns the composition.
+   * @param active - whether the browser is composing text.
+   */
+  setComposing(sessionId: SessionId, active: boolean): void {
+    if (this.disposed) return
+    const state = this.workbenchEntry(sessionId).store.getSnapshot()
+    if (active && state.document !== null) this.composing.set(sessionId, state.document)
+    else this.composing.delete(sessionId)
+    this.syncUnloadGuard()
+    if (!active && state.externalUpdate !== null && state.action === null && !hasUnsavedEdit(state)) {
+      void this.reloadExternal(sessionId)
+    }
   }
 
   /**
@@ -491,23 +509,26 @@ export class PaperAIWorkbenchController {
   updateDraft(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null): void {
     this.assertLive()
     this.workbenchEntry(sessionId).store.update((state) => {
-      const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
-      if (state.phase !== 'ready' || state.action !== null || state.document === null) return
+      const composition = this.composing.get(sessionId)
+      const source = composition ?? state.document
+      const node = source?.nodes.find(candidate => candidate.nodeId === nodeId)
+      if (state.phase !== 'ready' || (state.action !== null && composition === undefined)
+        || state.document === null || source?.documentId !== state.document.documentId) return
       const others = state.edits.filter(edit => edit.nodeId !== nodeId)
       const previous = state.edits.find(edit => edit.nodeId === nodeId)
       // A draft can always be abandoned. Writing one needs a block that still takes writes, but the
       // block a draft was typed into may since have become a formula or left the document, and
       // refusing the drop there would trap that text in the store with no gesture left to clear it.
       if (draft !== null) {
-        if (node === undefined || !node.editable || previous?.conflicted === true) return
+        if (node === undefined || !node.editable || (previous?.conflicted === true && composition === undefined)) return
         state.edits = [...others, {
           nodeId, baseText: previous?.baseText ?? node.text,
-          baseRevision: previous?.baseRevision ?? state.document.revision,
+          baseRevision: previous?.baseRevision ?? source.revision,
           draft: draft.text,
           ...(draft.runs === undefined ? {} : { runs: draft.runs }),
           ...(draft.paragraphs === undefined ? {} : { paragraphs: draft.paragraphs }),
           ...(draft.formatting === undefined ? {} : { formatting: draft.formatting }),
-          ...(draft.conflicted === true ? { conflicted: true } : {}),
+          ...(draft.conflicted === true || source.revision !== state.document.revision ? { conflicted: true } : {}),
           // A retyped block is still a draft whose save failed, so the verdict travels with it.
           ...(previous?.saveFailed === true ? { saveFailed: true } : {}),
         }]
@@ -561,7 +582,7 @@ export class PaperAIWorkbenchController {
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
-    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    if (state.action !== null || this.composing.has(sessionId)) return { ok: false, error: 'workbench is busy' }
     if (state.edits.length === 0) return { ok: false, error: 'no block has changes' }
     const document = state.document
     // A conflicted draft cannot commit, but it must not hold the clean ones back: they commit and it stays.
@@ -709,7 +730,7 @@ export class PaperAIWorkbenchController {
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
     if (state.phase !== 'ready' || state.document === null) return { ok: false, error: 'no open document' }
-    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    if (state.action !== null || this.composing.has(sessionId)) return { ok: false, error: 'workbench is busy' }
     if (state.diff?.commitId === commitId && state.diff.baseCommitId === baseCommitId && state.diff.error === null) {
       entry.store.update((draft) => { draft.diff = null })
       return OK
@@ -822,7 +843,7 @@ export class PaperAIWorkbenchController {
       if (state.document?.documentId !== change.documentId
         || state.document.headCommitId === change.headCommitId) continue
       entry.store.update((draft) => { draft.externalUpdate = change })
-      if (state.action === null && !hasUnsavedEdit(state)) {
+      if (state.action === null && !hasUnsavedEdit(state) && !this.composing.has(sessionId)) {
         void this.reloadExternal(sessionId)
       }
     }
@@ -843,7 +864,7 @@ export class PaperAIWorkbenchController {
       return { ok: false, error: 'no open document' }
     }
     if (state.externalUpdate === null) return { ok: false, error: 'no external document update' }
-    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    if (state.action !== null || this.composing.has(sessionId)) return { ok: false, error: 'workbench is busy' }
     const pending = state.externalUpdate
     const request = this.begin(entry)
     entry.store.update((draft) => {
@@ -868,7 +889,7 @@ export class PaperAIWorkbenchController {
     if (state.phase !== 'ready' || state.document === null || target === undefined) {
       return { ok: false, error: 'no open document' }
     }
-    if (state.action !== null) return { ok: false, error: 'workbench is busy' }
+    if (state.action !== null || this.composing.has(sessionId)) return { ok: false, error: 'workbench is busy' }
     const documentId = state.document.documentId
     const request = this.begin(entry)
     entry.store.update((draft) => {
@@ -997,7 +1018,7 @@ export class PaperAIWorkbenchController {
    */
   private syncUnloadGuard(): void {
     // The browser controller owns this listener even while every document preview is unmounted.
-    if (this.hasUnsavedDraft()) window.addEventListener('beforeunload', this.confirmUnload)
+    if (this.composing.size > 0 || this.hasUnsavedDraft()) window.addEventListener('beforeunload', this.confirmUnload)
     else window.removeEventListener('beforeunload', this.confirmUnload)
   }
 
@@ -1005,6 +1026,7 @@ export class PaperAIWorkbenchController {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.composing.clear()
     for (const entry of this.projects.values()) entry.abort?.abort()
     this.library.abort?.abort()
     for (const entry of this.workbenches.values()) entry.abort?.abort()
@@ -1209,7 +1231,7 @@ export class PaperAIWorkbenchController {
     if (state.phase !== 'ready' || state.document === null) {
       return { ok: false, result: { ok: false, error: 'no open document' } }
     }
-    if (state.action !== null) return { ok: false, result: { ok: false, error: 'workbench is busy' } }
+    if (state.action !== null || this.composing.has(sessionId)) return { ok: false, result: { ok: false, error: 'workbench is busy' } }
     if (hasUnsavedEdit(state)) {
       return { ok: false, result: this.fail(entry.store, 'save or cancel the current block first') }
     }
@@ -1233,15 +1255,18 @@ export class PaperAIWorkbenchController {
     if (!commitMatches(result.value, document)) {
       return this.fail(entry.store, 'paperaiWorkbench returned an invalid commit projection')
     }
-    // The Host defers the preview after a commit: keep the one on screen with the
-    // committed text written in, and swap in the rendered preview when it arrives.
+    // Only text commits describe how to patch the old page. Restores and template
+    // changes must wait for their own render before any paragraph can be edited.
     const committed = result.value.document
-    const deferred = committed.previewHtml === '' && document.previewHtml !== ''
-    this.publishOpenResult(entry.store, deferred
+    const deferred = committed.previewHtml === ''
+    this.publishOpenResult(entry.store, deferred && patches.length > 0
       ? { ...result.value, document: { ...committed, previewHtml: patchPreviewHtml(document.previewHtml, patches),
         paragraphStyles: committed.paragraphStyles.length === 0 ? document.paragraphStyles : committed.paragraphStyles } }
       : result.value)
-    if (deferred) void this.refreshPreview(entry, committed)
+    if (deferred) {
+      entry.store.update((state) => { state.previewLoading = true })
+      void this.refreshPreview(entry, committed)
+    }
     return OK
   }
 
@@ -1257,15 +1282,19 @@ export class PaperAIWorkbenchController {
       sessionId: committed.sessionId,
       resourceId: committed.resourceId,
     }))
-    if (!result.ok || this.disposed) return
-    const fresh = result.value.document
+    if (this.disposed) return
     entry.store.update((draft) => {
       const view = draft.document?.documentId === committed.documentId ? draft
         : draft.retained.find(retained => retained.document?.documentId === committed.documentId)
       if (view?.document?.revision !== committed.revision) return
+      view.previewLoading = false
+      if (!result.ok) return
+      const fresh = result.value.document
+      if (fresh.documentId !== committed.documentId || fresh.resourceId !== committed.resourceId
+        || fresh.workspaceId !== committed.workspaceId || fresh.sessionId !== committed.sessionId) return
       if (fresh.revision === committed.revision) {
         view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
-          ...(view.edits.length === 0 ? { previewHtml: fresh.previewHtml } : {}) }
+          ...(view.edits.length === 0 && !this.composing.has(committed.sessionId) ? { previewHtml: fresh.previewHtml } : {}) }
       } else if (fresh.headCommitId !== view.document.headCommitId) {
         view.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
       }
@@ -1300,6 +1329,7 @@ export class PaperAIWorkbenchController {
       action: null,
       panel: sameDocument ? previous.panel : null,
       diff: null,
+      previewLoading: false,
       typeSuggestion: sameDocument ? previous.typeSuggestion : null,
       exportReceipt: sameDocument ? previous.exportReceipt : null,
       externalUpdate: consumedExternalUpdate === undefined

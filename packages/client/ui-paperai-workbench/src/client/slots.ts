@@ -140,6 +140,8 @@ export interface PaperAIDocumentWorkbenchInjected extends PaperAILibraryInjected
   showPanel: (panel: PaperAIWorkbenchPanel | null) => void
   /** Record what one block now reads in the page; `null` drops its draft. */
   updateDraft: (nodeId: PaperAIDocumentNodeId, draft: import('./types.ts').PaperAIBlockDraft | null) => void
+  /** Hold automatic refresh until the editor has published the completed IME phrase. */
+  setComposing: (active: boolean) => void
   /** Keep the draft on one conflicted block: rebase it onto the document's text and unfreeze the block. */
   resolveConflict: (nodeId: PaperAIDocumentNodeId) => void
   /** Discard every block draft. */

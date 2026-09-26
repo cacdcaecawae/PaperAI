@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { inspect } from 'node:util'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { DocumentCommitId, DocumentId, DocumentNodeId } from '@paperai/domain'
@@ -1596,6 +1596,86 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
   }, 120_000)
 
+  it('keeps restore previews, comparison quotations and IME input on their own revision', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-preview-and-ime'))
+    const fileName = 'Preview ownership.docx'
+    const sessionId = SessionId('preview-ownership-writer')
+    await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId, fileName, contentBase64: fixtureDocxBase64(false, ['Stable paragraph', 'Original second paragraph']),
+      name: 'Preview ownership',
+    })
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === fileName)!
+    const read = () => scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId, resourceId: row.id })
+    const replace = async (before: string, after: string): Promise<void> => {
+      const current = await read()
+      await scaffold.ctx.paperaiWorkbench.commit({
+        sessionId, documentId: current.document.documentId, baseRevision: current.document.revision,
+        baseCommitId: current.document.headCommitId,
+        mutations: [{ type: 'replace-text', nodeId: current.document.nodes.find(node => node.text === before)!.nodeId,
+          baseText: before, nextText: after }],
+      })
+    }
+    await replace('Stable paragraph', 'Stable paragraph normalized')
+    await replace('Original second paragraph', 'Later second paragraph')
+    await sidebarDocument(fileName).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    await preview.getByText('Later second paragraph', { exact: true }).waitFor({ timeout: 30_000 })
+    await page.locator('[data-paperai-toolbar] button[data-kind="versions"]').click()
+    const versions = page.getByRole('complementary', { name: '版本', exact: true })
+    await versions.locator('ol > li button').first().click()
+    await preview.locator('del').waitFor({ timeout: 30_000 })
+    await selectBlockText(preview.getByText('Stable paragraph normalized', { exact: true }))
+    await preview.getByText('Stable paragraph normalized', { exact: true }).click({ button: 'right' })
+    expect(await page.getByRole('menuitem', { name: '交给 Agent', exact: true }).count()).toBe(0)
+    expect(await page.getByRole('button', { name: '交给 Agent', exact: true }).count()).toBe(0)
+    await page.keyboard.press('Escape')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'comparison-selection.expected.md'), await preview.ariaSnapshot(), MODE)
+
+    await versions.locator('ol > li button').nth(1).click()
+    await versions.getByRole('button', { name: '恢复到此版本', exact: true }).click()
+    // Hold only the external renderer; publication, RPC and the client still run through the shipped composition.
+    const gate = Promise.withResolvers<undefined>()
+    const render = scaffold.ctx.documentEngine.previewHtml.bind(scaffold.ctx.documentEngine)
+    const delayed = vi.spyOn(scaffold.ctx.documentEngine, 'previewHtml').mockImplementationOnce(async (...args) => {
+      await gate.promise
+      return render(...args)
+    })
+    try {
+      await versions.getByRole('button', { name: '确认恢复并创建新版本', exact: true }).click()
+      const loading = page.getByRole('status').filter({ hasText: '正在打开文档' })
+      await loading.waitFor({ timeout: 30_000 })
+      expect(await preview.count()).toBe(0)
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'restore-preview-loading.expected.md'), await loading.ariaSnapshot(), MODE)
+    } finally {
+      gate.resolve(undefined)
+      delayed.mockRestore()
+    }
+    await preview.getByText('Original second paragraph', { exact: true }).waitFor({ timeout: 30_000 })
+    expect(await preview.getByText('Later second paragraph', { exact: true }).count()).toBe(0)
+    await versions.getByRole('button', { name: '关闭面板', exact: true }).click()
+
+    const paragraph = preview.locator('[data-paperai-block]').filter({ hasText: 'Stable paragraph normalized' })
+    await selectBlockText(paragraph)
+    const input = await page.context().newCDPSession(page)
+    try {
+      await input.send('Input.imeSetComposition', { text: '中文输入', selectionStart: 4, selectionEnd: 4 })
+      await replace('Original second paragraph', 'Agent changed another paragraph')
+      const notice = page.getByRole('status').filter({ hasText: '发现文档新版本' })
+      await notice.waitFor({ timeout: 15_000 })
+      expect(await preview.locator('[data-paperai-block]').first().textContent()).toBe('中文输入')
+      expect(await pending().count()).toBe(0)
+      await input.send('Input.insertText', { text: '中文输入完整' })
+      await pending().waitFor({ timeout: 10_000 })
+      expect(await preview.locator('[data-paperai-changed]').textContent()).toBe('中文输入完整')
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'ime-external-update.expected.md'), [
+        await notice.ariaSnapshot(), await preview.ariaSnapshot(), await pending().ariaSnapshot(),
+      ].join('\n'), MODE)
+      await page.keyboard.press('ControlOrMeta+z')
+      expect(await preview.locator('[data-paperai-block]').first().textContent()).toBe('Stable paragraph normalized')
+      expect(await pending().count()).toBe(0)
+    } finally { await input.detach() }
+  }, 120_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -1614,6 +1694,9 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'external-update.expected.md',
       'external-format-conflict.expected.md',
       'deleted-paragraph-draft.expected.md',
+      'comparison-selection.expected.md',
+      'restore-preview-loading.expected.md',
+      'ime-external-update.expected.md',
       'formatting-comparison.expected.md',
       'format-intent.expected.md',
       'header-footer.expected.md',

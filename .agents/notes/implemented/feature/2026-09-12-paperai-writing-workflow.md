@@ -26,6 +26,8 @@ This partially supersedes the [UI overhaul](2026-09-03-paperai-ui-overhaul.md) a
 
 ## Alternatives considered
 
+**Reuse the old page after every commit.** Text mutations supply patches that keep an interim page aligned with its indexed nodes. Restores and template changes supply no such patches, so their old page is withheld until rendering succeeds, with a read retry after failure. Active IME composition also prevents a background render or automatic external reload from replacing the editing DOM; its completed draft is published before the hold is released. Comparison selections have no version-specific node index, so they retain native copying but offer no Agent quotation action.
+
 **A separate rich-editor document store.** It would require independent addressing and DOCX serialization. Original-node drafts extend the existing transaction without making browser HTML authoritative.
 
 **Persist all layout state.** Restoring a temporary comparison panel or focus claim can hide a newly selected conversation. Only user preferences are persisted; document content and transient surfaces follow their existing lifetimes.

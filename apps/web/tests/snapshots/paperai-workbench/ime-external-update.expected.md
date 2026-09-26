@@ -1,0 +1,13 @@
+- status:
+  - strong: 发现文档新版本
+  - text: 其他会话或 Agent 已提交修改。
+  - button "刷新":
+    - img
+    - text: 刷新
+- document "文档预览":
+  - paragraph: ✎ 中文输入完整
+  - paragraph: Original second paragraph
+- group "已修改 1 段":
+  - text: 已修改 1 段 草稿尚未写入文档，刷新会丢失
+  - button "放弃修改"
+  - button "保存"

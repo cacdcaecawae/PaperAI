@@ -299,6 +299,7 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
           },
           showPanel: (panel) => { controller.showPanel(sessionId, panel) },
           updateDraft: (nodeId, draft) => { controller.updateDraft(sessionId, nodeId, draft) },
+          setComposing: (active) => { controller.setComposing(sessionId, active) },
           resolveConflict: (nodeId) => { controller.resolveConflict(sessionId, nodeId) },
           cancelEdit: () => { controller.cancelEdit(sessionId) },
           commitEdit: () => controller.commitEdit(sessionId),

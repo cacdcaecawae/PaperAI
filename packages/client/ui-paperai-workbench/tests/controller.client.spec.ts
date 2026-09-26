@@ -565,6 +565,45 @@ describe('PaperAIWorkbenchController documents', () => {
 })
 
 describe('PaperAIWorkbenchController deferred previews', () => {
+  it.each(['restore', 'applyTemplate', 'detachTemplate'] as const)('withholds the old page while %s renders and lets a failed render be retried', async (operation) => {
+    const remote = successfulRemote()
+    const committed = { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) }
+    remote.restore = vi.fn<typeof remote.restore>().mockResolvedValue({ ok: true, value: committed })
+    remote.applyTemplate = vi.fn<typeof remote.applyTemplate>().mockResolvedValue({ ok: true, value: committed })
+    remote.detachTemplate = vi.fn<typeof remote.detachTemplate>().mockResolvedValue({ ok: true, value: committed })
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    const result = operation === 'restore' ? await controller.restore(SESSION_ID, COMMIT_0)
+      : operation === 'applyTemplate' ? await controller.applyTemplate(SESSION_ID, 'manuscript')
+        : await controller.detachTemplate(SESSION_ID)
+    expect(result).toEqual({ ok: true })
+    expect(store.getSnapshot()).toMatchObject({
+      action: null, previewLoading: true, document: { headCommitId: COMMIT_2, previewHtml: '' },
+    })
+    rendered.resolve(REMOTE_FAILURE)
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot()).toMatchObject({ phase: 'ready', actionError: null, document: committed.document })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    await controller.retryOpen(SESSION_ID)
+    expect(store.getSnapshot().document).toEqual(documentOpenResult(REVISION_2).document)
+    controller.dispose()
+  })
+
+  it('waits for composition to finish before automatically loading an external head', async () => {
+    const { controller, remote, store } = await openedController()
+    const open = vi.spyOn(remote, 'open').mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.setComposing(SESSION_ID, true)
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-26T00:00:00Z' })
+    expect(open).not.toHaveBeenCalled()
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toMatchObject({ ok: false })
+    await expect(controller.restore(SESSION_ID, COMMIT_0)).resolves.toMatchObject({ ok: false })
+    controller.setComposing(SESSION_ID, false)
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.headCommitId).toBe(COMMIT_2) })
+    expect(open).toHaveBeenCalledOnce()
+    controller.dispose()
+  })
+
   it('paints a commit into the current preview and swaps in the rendered one', async () => {
     const remote = successfulRemote()
     remote.commit = vi.fn<typeof remote.commit>(async request => ({
