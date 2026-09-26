@@ -14,7 +14,6 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { DocumentCommitId, DocumentId, DocumentNodeId } from '@paperai/domain'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@paperai/workbench-service'
-import { DocumentId } from '@paperai/domain'
 import {
   assertFixtureInventory, compareOrRefreshGolden, captureStableAria,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
