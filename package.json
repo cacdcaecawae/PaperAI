@@ -160,7 +160,7 @@
     "@types/mdast": "^4.0.4",
     "@types/node": "^22.20.0",
     "@types/spdx-expression-parse": "^4.0.0",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.11",
     "@yarnpkg/cli-dist": "4.17.1",
     "eslint-plugin-sonarjs": "^4.1.0",
     "execa": "^10.0.0",
@@ -174,17 +174,17 @@
     "lightningcss": "^1.32.0",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-gfm": "^3.1.0",
-    "mermaid": "11.16.0",
+    "mermaid": "11.16.1",
     "micromark-extension-gfm": "^3.0.0",
     "oxlint": "1.76.0",
     "oxlint-tsgolint": "7.0.2001",
     "publint": "^0.3.21",
-    "smol-toml": "^1.7.1",
+    "smol-toml": "^1.7.2",
     "spdx-expression-parse": "^5.0.0",
     "tsdown": "^0.22.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.11"
   }
 }
