@@ -397,4 +397,29 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
       .toEqual(['eq x=1', 'after equation', 'before cr', 'a\vb', '[Table: 1 rows]', 'after table', 'tail'])
     await ctx.documentEngine.release(file)
   }, 120_000)
+
+  it('removes and anchors on directly and style-numbered paragraphs by their marked indexed text', async () => {
+    await setBody(`<w:body xmlns:w="${WORD}"><w:p><w:r><w:t>item one</w:t></w:r></w:p><w:p><w:r><w:t>item two</w:t></w:r></w:p>`
+      + '<w:p><w:pPr><w:pStyle w:val="PaperChapter"/></w:pPr><w:r><w:t>chapter</w:t></w:r></w:p>'
+      + '<w:p><w:r><w:t>tail</w:t></w:r></w:p><w:sectPr/></w:body>')
+    await native(['add', file, '/numbering', '--type', 'num', '--prop', 'format=decimal', '--prop', 'text=第%1章'])
+    await native(['add', file, '/styles', '--type', 'style', '--prop', 'id=PaperChapter', '--prop', 'name=PaperChapter', '--prop', 'numId=1'])
+    await native(['set', file, '/body/p[1]', '--prop', 'listStyle=ordered'])
+    await native(['set', file, '/body/p[2]', '--prop', 'listStyle=bullet'])
+    const nodes = await ctx.documentEngine.readTextNodes(file)
+    expect(nodes.map(node => node.text)).toEqual(['1. item one', '• item two', '第1章 chapter', 'tail'])
+    const [ordered, bullet, chapter] = nodes as [EngineTextNode, EngineTextNode, EngineTextNode, EngineTextNode]
+    const savedBytes = await readFile(file)
+    await expect(ctx.documentEngine.applyMutations(file, [{ type: 'remove', officePath: ordered.officePath, baseText: 'item one' }]))
+      .rejects.toThrow('NODE_TEXT_CONFLICT')
+    expect(await readFile(file)).toEqual(savedBytes)
+    await ctx.documentEngine.applyMutations(file, [
+      { type: 'insert-paragraph', after: ordered.officePath, baseText: ordered.text, text: 'after list' },
+      { type: 'remove', officePath: bullet.officePath, baseText: bullet.text },
+      { type: 'insert-paragraph', after: chapter.officePath, baseText: chapter.text, text: 'section body' },
+    ])
+    expect((await ctx.documentEngine.readTextNodes(file)).map(node => node.text))
+      .toEqual(['1. item one', 'after list', '第1章 chapter', 'section body', 'tail'])
+    await ctx.documentEngine.release(file)
+  }, 120_000)
 })

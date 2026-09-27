@@ -6,6 +6,7 @@ import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
 import { paragraphText } from './paragraph-xml.ts'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+const WORD_ID_NS = 'http://schemas.microsoft.com/office/word/2010/wordml'
 const XML_NS = 'http://www.w3.org/XML/1998/namespace'
 
 function insertedParagraph(body: XmlElement, text: string, style: string | undefined): XmlElement {
@@ -69,13 +70,13 @@ export function applyDocumentMutations(
   }
   // Removals and anchors only identify their target, so they compare the engine's own reading of it, which covers
   // equations, fields, and wrappers the editor cannot project; a node rewritten earlier compares the rewrite.
-  const indexedText = new Map<XmlElement, string>()
-  for (const node of indexed) {
-    try {
-      indexedText.set(resolveOfficePath(root, node.officePath), node.text)
-    } catch {
-      // Entries outside the addressable body (content controls, headers) cannot be mutation targets.
-    }
+  // Keyed by path so a batch looks up only its own targets instead of resolving the whole index.
+  const indexedText = new Map(indexed.map(node => [node.officePath.replace(/^\/document(?=\/)/u, ''), node.text]))
+  const indexedReading = (path: string, target: XmlElement): string | undefined => {
+    const key = path.replace(/^\/document(?=\/)/u, '')
+    // The engine addresses a paragraph by its paraId once it has one, even when the batch used its ordinal.
+    const paraId = target.localName === 'p' ? target.getAttributeNS(WORD_ID_NS, 'paraId') : null
+    return indexedText.get(key) ?? (paraId ? indexedText.get(key.replace(/[^/]+$/u, `p[@paraId=${paraId}]`)) : undefined)
   }
   const projected = (target: XmlElement): string => group(target).map(paragraphText).join('\n')
   const assertText = (path: string, baseText: string, text: string | undefined): void => {
@@ -84,9 +85,11 @@ export function applyDocumentMutations(
     }
   }
   // Where the XML itself yields the text, it must agree with the index, so a misresolved address still conflicts.
-  const identified = (target: XmlElement): string | undefined => {
+  const identified = (path: string): string | undefined => {
+    const target = targets.get(path) as XmlElement
     if (groups.has(target)) return projected(target)
     let text: string | undefined
+    let numbered = false
     if (target.localName === 'tbl') {
       text = `[Table: ${Array.from(target.childNodes).filter(child => child.nodeType === child.ELEMENT_NODE
         && (child as XmlElement).namespaceURI === WORD_NS && (child as XmlElement).localName === 'tr').length} rows]`
@@ -96,9 +99,14 @@ export function applyDocumentMutations(
       } catch {
         // Content the editor cannot project, such as an equation, leaves the index as the only reading.
       }
+      // Numbering set directly or by a paragraph style prefixes the engine's reading with its generated marker.
+      const properties = Array.from(target.childNodes).find(child => (child as XmlElement).localName === 'pPr') as XmlElement | undefined
+      numbered = properties !== undefined && (properties.getElementsByTagNameNS(WORD_NS, 'numPr').length > 0
+        || properties.getElementsByTagNameNS(WORD_NS, 'pStyle').length > 0)
     }
-    const indexedReading = indexedText.get(target)
-    return text === undefined || text === indexedReading ? indexedReading : undefined
+    const reading = indexedReading(path, target)
+    return text === undefined || text === reading
+      || (numbered && reading !== undefined && reading.length > text.length && reading.endsWith(text)) ? reading : undefined
   }
   for (const mutation of mutations) {
     switch (mutation.type) {
@@ -111,7 +119,7 @@ export function applyDocumentMutations(
       }
       case 'remove': {
         const target = attached(mutation.officePath)
-        assertText(mutation.officePath, mutation.baseText, identified(target))
+        assertText(mutation.officePath, mutation.baseText, identified(mutation.officePath))
         for (const node of group(target)) (node.parentNode as XmlNode).removeChild(node)
         break
       }
@@ -128,7 +136,7 @@ export function applyDocumentMutations(
           if (parent.localName !== 'body' && parent.localName !== 'tc') {
             throw new Error('INVALID_INSERT_POSITION: paragraphs must belong to the body or a table cell')
           }
-          assertText(anchorPath, mutation.baseText, identified(anchor))
+          assertText(anchorPath, mutation.baseText, identified(anchorPath))
           const anchors = group(anchor)
           reference = mutation.after === undefined ? anchors[0] : (anchors.at(-1) as XmlElement).nextSibling
         } else {

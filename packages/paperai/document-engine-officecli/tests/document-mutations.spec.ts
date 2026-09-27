@@ -5,6 +5,11 @@ import { applyDocumentMutations as applyBatch } from '../src/document-mutations.
 import { resolveOfficePath } from '../src/office-path.ts'
 import { replaceParagraphXml } from '../src/paragraph-xml.ts'
 
+vi.mock('../src/office-path.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/office-path.ts')>()
+  return { ...actual, resolveOfficePath: vi.fn(actual.resolveOfficePath) }
+})
+
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const document = (body: string) => new DOMParser().parseFromString(
   `<w:document xmlns:w="${WORD_NS}"><w:body>${body}</w:body></w:document>`, 'application/xml',
@@ -96,6 +101,45 @@ describe('ordered candidate document mutations', () => {
     const root = document(paragraph('beta') + `<w:tbl><w:tr><w:tc>${paragraph('cell')}</w:tc></w:tr></w:tbl>`)
     const indexed = [{ officePath: '/body/p[1]', text: 'alpha' }, { officePath: '/body/tbl[1]', text: '[Table: 2 rows]' }]
     expect(() => { applyDocumentMutations(root, [mutation], replace, indexed) }).toThrow('NODE_TEXT_CONFLICT')
+    expect(texts(root)).toEqual(['beta'])
+  })
+
+  it.each<[string, string]>([
+    ['direct numbering', '<w:numPr><w:numId w:val="1"/></w:numPr>'],
+    ['a numbered paragraph style', '<w:pStyle w:val="Heading1"/>'],
+  ])('identifies a paragraph with %s by the engine reading that carries its generated marker', (_label, properties) => {
+    const numbered = `<w:p><w:pPr>${properties}</w:pPr><w:r><w:t>item one</w:t></w:r></w:p>`
+    const indexed = [{ officePath: '/body/p[1]', text: '1. item one' }, { officePath: '/body/p[2]', text: 'beta' }]
+    const root = document(numbered + paragraph('beta'))
+    applyDocumentMutations(root, [
+      { baseText: '1. item one', type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' },
+      { baseText: '1. item one', type: 'remove', officePath: '/body/p[1]' },
+    ], replace, indexed)
+    expect(texts(root)).toEqual(['inserted', 'beta'])
+    expect(() => {
+      applyDocumentMutations(document(numbered), [{ baseText: 'item one', type: 'remove', officePath: '/body/p[1]' }], replace, indexed)
+    }).toThrow('NODE_TEXT_CONFLICT')
+    // Without numbering, a longer engine reading is a different paragraph, not a marker.
+    expect(() => {
+      applyDocumentMutations(document(paragraph('item one')), [{ baseText: '1. item one', type: 'remove', officePath: '/body/p[1]' }], replace, indexed)
+    }).toThrow('NODE_TEXT_CONFLICT')
+  })
+
+  it('finds the engine reading of an ordinal target under the paraId address the engine indexed it by', () => {
+    const root = document('<w:p xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" w14:paraId="0A1B2C3D">'
+      + '<w:r><w:t>alpha</w:t></w:r></w:p>' + paragraph('beta'))
+    applyDocumentMutations(root, [{ baseText: 'alpha', type: 'remove', officePath: '/document/body/p[1]' }], replace,
+      [{ officePath: '/body/p[@paraId=0A1B2C3D]', text: 'alpha' }])
+    expect(texts(root)).toEqual(['beta'])
+  })
+
+  it('looks up only its own targets in the text index instead of resolving every entry', () => {
+    const root = document(paragraph('alpha') + paragraph('beta'))
+    const indexed = Array.from({ length: 500 }, (_, index) => ({ officePath: `/body/p[${index + 1}]`, text: index === 0 ? 'alpha' : 'other' }))
+    vi.mocked(resolveOfficePath).mockClear()
+    applyDocumentMutations(root, [{ baseText: 'alpha', type: 'remove', officePath: '/body/p[1]' }], replace, indexed)
+    // The body lookup; the target binding happens inside the path module.
+    expect(resolveOfficePath).toHaveBeenCalledOnce()
     expect(texts(root)).toEqual(['beta'])
   })
 
