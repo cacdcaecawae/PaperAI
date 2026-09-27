@@ -225,8 +225,9 @@ function fieldFor(text: string): FieldDefinition | undefined {
   return FIELDS.find(field => field.pattern.test(text))
 }
 
-// Arabic or Chinese chapter numbers, 1.2 / 一、 / 1、 enumerations, Chapter N, and figure or table captions.
-const NUMBERED_HEADING = /^(?:第\s*[\d一二三四五六七八九十百零〇两]+\s*章|[\d一二三四五六七八九十百零〇两]+(?:\.\d+)*[\s、．.]|chapter\s+\d+|[图表]\s*\d)/iu
+// Arabic or Chinese chapter and section numbers (第N章, 第N节), 1.2 / 一、 / 1、 / 1) enumerations, circled
+// numbers, Chapter N, and figure or table captions. Spelled-out or Roman chapter numbers are not recognized.
+const NUMBERED_HEADING = /^(?:第\s*[\d一二三四五六七八九十百零〇两]+\s*[章节]|[\d一二三四五六七八九十百零〇两]+(?:\.\d+)*[\s、．.)）]|[①-⑳]|chapter\s+\d+|[图表]\s*\d)/iu
 
 function compileRequiredSections(
   nodes: readonly DocumentNode[],
