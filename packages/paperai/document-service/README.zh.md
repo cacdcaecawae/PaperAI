@@ -7,13 +7,13 @@ PaperAI 文档服务通过 `ctx.paperDocuments` 暴露。它将 Word 源文件�
 ## 服务 API
 
 - `importDocument(request, signal?)` 接受 `.docx` 和 `.doc`。成功结果包含已持久化的文档记录和完整节点索引；能力不可用时返回 `{ status: 'degraded', capability, health, detail }`，且不发布文档记录。
-- `rollbackImport(documentId)` 删除尚未获得 head commit 的 Working 导入。清理过程不可取消，会删除服务持有的不可变副本、Working 副本及其索引，但绝不删除传给 `importDocument` 的原始源文件。
+- `rollbackImport(documentId)` 删除既没有 head commit、也没有未完成发布日志的 Working 导入。存在保留日志时以 `PUBLICATION_PENDING` 拒绝清理，即使文档记录已不存在也是如此，以保留恢复所需的文件与记录；只有记录与日志都不存在的标识才按幂等成功返回。清理过程不可取消，会删除服务持有的不可变副本、Working 副本及其索引，但绝不删除传给 `importDocument` 的原始源文件。
 - `listDocuments(projectId, role?)` 按确定顺序返回项目文档，并可按角色精确筛选。
 - `readDocument(documentId)` 从仓库读取元数据和有序节点，不再次读取 Word 文件。
 - `verifyImmutableSource(documentId, signal?)` 校验导入源仍是只读普通文件，且内容与记录的 SHA-256 一致。Consumer 在读取或复制源文件字节前调用该方法。
 - `previewHtml(documentId, signal?)` 渲染当前 Working DOCX；HTML 只用于预览。
 - `readParagraphStyles(documentId, signal?)` 通过文档引擎读取当前 Working DOCX 定义的段落样式 ID 与显示名称。
-- `rebuildIndex(documentId, signal?)` 重新读取 Working DOCX 并替换语义索引，不创建文档提交。
+- `rebuildIndex(documentId, signal?)` 重新读取 Working DOCX 并替换语义索引，不创建文档提交。存在保留的发布日志时以 `PUBLICATION_PENDING` 拒绝重建，因为恢复会将该日志与已存储节点逐一精确比对。
 
 ## 文件与索引语义
 
@@ -44,3 +44,4 @@ PaperAI 文档服务通过 `ctx.paperDocuments` 暴露。它将 Word 源文件�
 - 文本节点读取不能提供完整样式或父级元数据。重建时会为匹配节点保留已有样式，新节点以空样式记录开始。
 - 文件发布与仓库写入不能共享一个文件系统/SQLite 事务。服务先发布文件，并在仓库写入失败时回滚；只有进程恰好在两个持久化点之间崩溃时，才可能留下未被记录引用的文件。
 - 在配置的文档引擎实现 `LegacyDocumentNormalizer` 前，旧版 `.doc` 支持保持降级状态。
+- `rebuildIndex` 只持有 document-service 租约，不在 commit-service 的 FIFO 中排队。它在引擎读取前后都会拒绝已存在的发布日志，但若某次提交在该读取期间完整完成，或在写入重建节点期间开始，其结果仍会被覆盖。根本修复是让 commit-service 与 document-service 对同一文档的所有写入共享同一个按文档划分的租约。

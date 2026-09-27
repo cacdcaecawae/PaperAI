@@ -38,9 +38,10 @@ import {
   replaceRegularFile,
   resolveCommitFilePaths,
   storeSnapshot,
+  verifyProjectPath,
 } from './files.ts'
 import type { CommitFilePaths, FileImage } from './files.ts'
-import { inspectProject, verifyProjectPath, type ProjectIntegrityReport, type WorkingRecoveryPlan } from './doctor.ts'
+import { inspectProject, type ProjectIntegrityReport, type WorkingRecoveryPlan } from './doctor.ts'
 export type { ProjectIntegrityReport, ProjectIntegrityIssue, WorkingRecoveryPlan } from './doctor.ts'
 import {
   DocumentHeadConflictError,
@@ -210,12 +211,18 @@ export class PaperCommitService extends Service {
     super(ctx, 'paperCommits')
   }
 
-  /** Recover every durable publication before the service accepts document work. */
+  /** Recover retained publications; an unresolved journal blocks only its document's FIFO. */
   protected async [Service.init](): Promise<void> {
     const publications = this.dependencies.paperRepository.listCommitPublications()
       .map(publication => structuredClone(publication))
       .sort((left, right) => left.documentId.localeCompare(right.documentId))
-    for (const publication of publications) await this.recoverPublication(publication)
+    for (const publication of publications) {
+      try {
+        await this.recoverPublication(publication)
+      } catch (error) {
+        this.ctx.logger.warn(`document '${publication.documentId}' publication recovery remains pending: ${String(error)}`)
+      }
+    }
   }
 
   /**
@@ -874,7 +881,7 @@ export class PaperCommitService extends Service {
     try {
       await this.ensurePublicationCommit(publication)
       await this.dependencies.documentEngine.release(request.paths.workingPath)
-      await replaceRegularFile(request.paths.workingPath, candidate.bytes, request.original.mode)
+      await replaceRegularFile(request.paths, candidate.bytes, request.original.mode)
       await this.replaceIndex(currentNodes, nextNodes)
       await repository.updateDocument(request.document.id, (current) => {
         if (!isDeepStrictEqual(current, documentBefore)) {
@@ -969,7 +976,7 @@ export class PaperCommitService extends Service {
         if (working.sha256 !== original.sha256
           || (working.mode & 0o777) !== (publication.before.working.mode & 0o777)) {
           await this.dependencies.documentEngine.release(paths.workingPath)
-          await replaceRegularFile(paths.workingPath, original.bytes, publication.before.working.mode)
+          await replaceRegularFile(paths, original.bytes, publication.before.working.mode)
         }
       } catch (error) {
         failures.push(error)

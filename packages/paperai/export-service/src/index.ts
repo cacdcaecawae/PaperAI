@@ -6,15 +6,16 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { constants, createReadStream } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import {
-  copyFile,
+  type FileHandle,
   lstat,
   open,
   realpath,
   rename,
   rm,
   stat,
+  writeFile,
 } from 'node:fs/promises'
 import {
   basename,
@@ -38,6 +39,7 @@ import type {
 } from '@paperai/mcp'
 import type PaperMcpService from '@paperai/mcp'
 import type PaperTemplateService from '@paperai/template-service'
+import type PaperProjectService from '@paperai/project-service'
 import type {
   ExportDocumentRequest,
   ExportDocumentResult,
@@ -61,6 +63,7 @@ type ExportContext = Context & {
   readonly paperCommits: PaperCommitService
   readonly paperMcp: PaperMcpService
   readonly paperTemplates: PaperTemplateService
+  readonly paperProjects: PaperProjectService
 }
 
 /** Export-service deployment limits and publication policy. */
@@ -206,6 +209,7 @@ async function resolveDestination(
   protectedPaths: readonly string[],
   overwriteExisting: boolean,
   writableRoot: string | undefined,
+  exportRoot: string,
 ): Promise<string> {
   const trimmed = destinationPath.trim()
   if (!isAbsolute(trimmed) || extname(trimmed).toLocaleLowerCase('en-US') !== '.docx') {
@@ -215,6 +219,15 @@ async function resolveDestination(
     )
   }
   const parentPath = await realpath(dirname(trimmed))
+  const relativeParent = relative(pathKey(exportRoot), pathKey(parentPath))
+  if (pathKey(await realpath(exportRoot)) !== pathKey(exportRoot)
+    || (relativeParent !== '' && (relativeParent === '..' || relativeParent.startsWith(`..${sep}`)
+      || isAbsolute(relativeParent)))) {
+    throw new PaperExportError(
+      'DESTINATION_PROTECTED',
+      `export destination must remain inside the project's exports directory '${exportRoot}'`,
+    )
+  }
   const parent = await lstat(parentPath)
   if (!parent.isDirectory()) {
     throw new PaperExportError('DESTINATION_INVALID', `export parent '${parentPath}' is not a directory`)
@@ -238,9 +251,9 @@ async function resolveDestination(
   return canonical
 }
 
-async function sha256(path: string): Promise<string> {
+async function sha256(handle: FileHandle): Promise<string> {
   const hash = createHash('sha256')
-  await pipeline(createReadStream(path), hash)
+  await pipeline(handle.createReadStream({ start: 0, autoClose: false }), hash)
   return hash.digest('hex')
 }
 
@@ -250,6 +263,7 @@ async function publishSnapshot(
   protectedPaths: readonly string[],
   config: ResolvedConfig,
   writableRoot: string | undefined,
+  exportRoot: string,
 ): Promise<string> {
   const snapshotMetadata = await lstat(commit.snapshotPath)
   if (!snapshotMetadata.isFile() || snapshotMetadata.isSymbolicLink()) {
@@ -266,39 +280,62 @@ async function publishSnapshot(
     [...protectedPaths, commit.snapshotPath],
     config.overwriteExisting,
     writableRoot,
+    exportRoot,
   )
   const temporaryPath = join(
     dirname(destination),
     `.${basename(destination)}.paperai-${randomUUID()}.tmp`,
   )
-  let published = false
+  // Exclusive creation never reuses an existing entry, and the handle pins
+  // the one file this export publishes or, on failure, empties.
+  const handle = await open(temporaryPath, 'wx+', snapshotMetadata.mode & 0o777)
+  let renamed = false
+  let confirmed = false
   try {
-    await copyFile(commit.snapshotPath, temporaryPath, constants.COPYFILE_EXCL)
-    const temporary = await lstat(temporaryPath)
-    if (!temporary.isFile() || temporary.size !== snapshotMetadata.size
-      || await sha256(temporaryPath) !== commit.documentSha256) {
+    await writeFile(handle, createReadStream(commit.snapshotPath))
+    const temporary = await handle.stat({ bigint: true })
+    if (temporary.size !== BigInt(snapshotMetadata.size) || await sha256(handle) !== commit.documentSha256) {
       throw new PaperExportError(
         'SNAPSHOT_CORRUPT',
         `commit snapshot '${commit.snapshotPath}' does not match commit '${commit.id}'`,
       )
     }
-    const handle = await open(temporaryPath, 'r+')
-    try {
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
+    await handle.sync()
     await resolveDestination(
       destination,
       [...protectedPaths, commit.snapshotPath],
       config.overwriteExisting,
       writableRoot,
+      exportRoot,
     )
+    // FIXME: Node has no renameat()/openat() on a pinned directory handle, so an
+    // ancestor swapped for a link between the check above and rename()'s own
+    // path walk redirects the rename into the directory the link names (it can
+    // succeed only where the temporary file then is), replacing a same-named
+    // file there. The confirmation below detects the escape and empties the
+    // output, but cannot restore a replaced file, and is itself two path
+    // lookups. Close the window once Node exposes directory handles.
     await rename(temporaryPath, destination)
-    published = true
+    renamed = true
+    const parent = await realpath(dirname(destination))
+    const published = await lstat(destination, { bigint: true })
+    if (pathKey(parent) !== pathKey(dirname(destination))
+      || published.dev !== temporary.dev || published.ino !== temporary.ino) {
+      throw new PaperExportError(
+        'DESTINATION_PROTECTED',
+        `export destination '${destination}' was redirected during publication; the output was withdrawn`,
+      )
+    }
+    confirmed = true
     return destination
   } finally {
-    if (!published) await rm(temporaryPath, { force: true })
+    try {
+      // Emptied through the handle, never by path, so a swapped link cannot aim this elsewhere.
+      if (!confirmed) await handle.truncate(0)
+    } finally {
+      await handle.close()
+    }
+    if (!renamed) await rm(temporaryPath, { force: true })
   }
 }
 
@@ -309,7 +346,7 @@ function milestoneLabel(mode: ExportDocumentRequest['mode'], outputPath: string)
 
 /** Template-checked atomic publisher and MCP export provider. */
 export class PaperExportService extends Service implements PaperMcpExportAdapter {
-  static inject = ['paperCommits', 'paperMcp', 'paperTemplates']
+  static inject = ['paperCommits', 'paperMcp', 'paperTemplates', 'paperProjects']
   static Config: z<Config> = z.object({
     maxExportBytes: z.number().default(DEFAULT_MAX_EXPORT_BYTES),
     overwriteExisting: z.boolean().default(true),
@@ -333,7 +370,8 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
 
   /**
    * Check template requirements, record an optimistic milestone, and publish
-   * its immutable snapshot. Draft findings are returned without blocking;
+   * its immutable snapshot inside the owning project's exports directory.
+   * Draft findings are returned without blocking;
    * delivery errors reject before any commit or output is created.
    * Cancellation is observed before milestone publication. Once the commit
    * completes, file publication reaches success or cleanup before settlement.
@@ -372,6 +410,9 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
 
   private async exportNow(request: ResolvedExportRequest): Promise<ExportDocumentResult & PaperMcpExportResult> {
     request.signal?.throwIfAborted()
+    const project = this.dependencies.paperProjects.get(request.document.projectId)
+    if (project === undefined) throw new Error(`unknown PaperAI project '${request.document.projectId}'`)
+    const exportRoot = join(await realpath(project.rootPath), 'exports')
     const report = await this.dependencies.paperTemplates.check({
       documentId: request.document.id,
       mode: request.mode,
@@ -388,6 +429,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
       [request.document.immutableSourcePath, request.document.workingPath],
       this.config.overwriteExisting,
       request.writableRoot,
+      exportRoot,
     )
     request.signal?.throwIfAborted()
     const label = milestoneLabel(request.mode, destination)
@@ -407,6 +449,7 @@ export class PaperExportService extends Service implements PaperMcpExportAdapter
       [request.document.immutableSourcePath, request.document.workingPath],
       this.config,
       request.writableRoot,
+      exportRoot,
     )
     const retainedReport = structuredClone(report)
     return {

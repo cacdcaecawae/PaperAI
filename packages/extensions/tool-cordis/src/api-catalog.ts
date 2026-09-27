@@ -1532,7 +1532,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Remove a Working import after its root-commit attempt has settled without a commit. Cleanup is non-cancellable, deletes only service-published copies, and removes the document record last so a failed attempt can be retried with the same identity.',
         parameters: [{ name: 'documentId', description: 'identity returned by a successful {@link importDocument} call.' }],
         returns: 'after the record, semantic nodes, immutable copy, and Working copy are absent.',
-        throws: ['PaperDocumentError when the record is not a Working import or has acquired a head commit.'],
+        throws: ['PaperDocumentError when a publication journal remains, even without a record, or the record is not a Working import or has a head.'],
       },
       {
         signature: 'listDocuments(projectId: ProjectId, role?: DocumentRole): DocumentRecord[]',
@@ -1585,7 +1585,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Re-read the Working DOCX and replace its semantic index while preserving prior node identity where content or structure still identifies lineage.',
         parameters: [{ name: 'documentId', description: 'document identity.' }, { name: 'signal', description: 'optional engine cancellation.' }],
         returns: 'updated repository snapshot.',
-        throws: ['PaperDocumentError when the document is missing or engine nodes are invalid.'],
+        throws: ['PaperDocumentError when the document is missing, retains a publication journal, or engine nodes are invalid.'],
       },
     ],
   },
@@ -1596,7 +1596,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'exportDocument(request: ExportDocumentRequest): Promise<ExportDocumentResult & PaperMcpExportResult>',
-        description: 'Check template requirements, record an optimistic milestone, and publish its immutable snapshot. Draft findings are returned without blocking; delivery errors reject before any commit or output is created. Cancellation is observed before milestone publication. Once the commit completes, file publication reaches success or cleanup before settlement.',
+        description: 'Check template requirements, record an optimistic milestone, and publish its immutable snapshot inside the owning project\'s exports directory. Draft findings are returned without blocking; delivery errors reject before any commit or output is created. Cancellation is observed before milestone publication. Once the commit completes, file publication reaches success or cleanup before settlement.',
         parameters: [{ name: 'request', description: 'observed document, destination, mode, and provenance.' }],
         returns: 'canonical output path, fresh report, and recoverable commit.',
       },
