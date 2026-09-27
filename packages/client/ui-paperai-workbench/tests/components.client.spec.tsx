@@ -132,6 +132,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
     retryOpen: vi.fn(async () => {}),
     showPanel: vi.fn(),
     updateDraft: vi.fn(),
+    resolveConflict: vi.fn(),
     cancelEdit: vi.fn(),
     commitEdit: vi.fn(async () => ok),
     validate: vi.fn(async () => ok),
@@ -453,7 +454,13 @@ describe('DocumentWorkbench', () => {
     const discard = screen.getByRole<HTMLButtonElement>('button', { name: '放弃修改' })
     const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
     expect(discard.disabled).toBe(true)
-    expect(shadow.querySelector('[contenteditable]')).toBeNull()
+    // Nothing takes a keystroke while the refresh runs. The conflict band is present and is itself
+    // contenteditable="false", so the invariant is the absence of a writable node, not of the attribute.
+    expect(shadow.querySelector('[contenteditable="true"]')).toBeNull()
+    // Its buttons are inert for the same reason: a resolve must not move the snapshot a commit holds.
+    const keep = shadow.querySelector<HTMLElement>('[data-paperai-resolve="mine"]')!
+    fireEvent.click(keep)
+    expect(b.resolveConflict).not.toHaveBeenCalled()
     fireEvent.click(discard)
     expect(b.cancelEdit).not.toHaveBeenCalled()
     act(() => { b.store.update((state) => { state.action = null }) })
@@ -535,7 +542,7 @@ describe('DocumentWorkbench', () => {
     expect(body.getAttribute('contenteditable')).toBe('true')
     body.textContent = 'Rewritten background'
     fireEvent.input(body)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Rewritten background' }))
   })
 
   it('maps each saved split paragraph for continued editing before the Host preview arrives', () => {
@@ -561,7 +568,7 @@ describe('DocumentWorkbench', () => {
       expect(block.style.textAlign).toBe(paragraphs[index]!.format.align)
       block.textContent += ' edited'
       fireEvent.input(block)
-      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], { text: `${paragraphs[index]!.text} edited` })
+      expect(b.updateDraft).toHaveBeenLastCalledWith(ids[index], expect.objectContaining({ text: `${paragraphs[index]!.text} edited` }))
     })
   })
 
@@ -576,7 +583,7 @@ describe('DocumentWorkbench', () => {
     for (const paragraph of paragraphs.slice(0, 3)) expect(paragraph.getAttribute('contenteditable')).toBe('false')
     paragraphs[3]!.textContent = 'Changed'
     fireEvent.input(paragraphs[3]!)
-    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, { text: 'Changed' })
+    expect(b.updateDraft).toHaveBeenCalledExactlyOnceWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Changed' }))
   })
 
   it.each(['unindexed', 'readonly', 'editable'] as const)('keeps %s table cells separate from repeated body paragraphs', (cell) => {
@@ -599,7 +606,7 @@ describe('DocumentWorkbench', () => {
     expect(cellBlock.getAttribute('contenteditable')).toBe(cell === 'editable' ? 'true' : 'false')
     cellBlock.textContent = 'Cell retyped'
     fireEvent.input(cellBlock)
-    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, { text: 'Cell retyped' })
+    if (cell === 'editable') expect(b.updateDraft).toHaveBeenCalledWith(NODE_TABLE, expect.objectContaining({ text: 'Cell retyped' }))
     else expect(b.updateDraft).not.toHaveBeenCalled()
     b.updateDraft.mockClear()
     const paragraphs = [...shadow.querySelectorAll('p')].filter(element => element.closest('td') === null)
@@ -608,7 +615,7 @@ describe('DocumentWorkbench', () => {
       fireEvent.input(paragraph)
     }
     expect(b.updateDraft.mock.calls)
-      .toEqual([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
+      .toMatchObject([[NODE_PARAGRAPH, { text: 'Research background retyped' }], [NODE_HEADING, { text: 'Research background retyped' }]])
   })
 
   it('retains embedded raster figures while removing executable data URLs and handlers', () => {
@@ -626,6 +633,30 @@ describe('DocumentWorkbench', () => {
     expect(shadow.querySelector('#figure')?.hasAttribute('onerror')).toBe(false)
     for (const id of ['svg', 'html']) expect(shadow.querySelector(`#${id}`)?.hasAttribute('src')).toBe(false)
     for (const id of ['download', 'script']) expect(shadow.querySelector(`#${id}`)?.hasAttribute('href')).toBe(false)
+  })
+
+  it('quotes only document words when a selection crosses a conflict band', () => {
+    const b = workbenchProps(workbenchState({
+      phase: 'ready', document: documentSnapshot(),
+      edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'My background', conflicted: true }],
+    }))
+    const view = render(<DocumentWorkbench {...b.props} />)
+    const shadow = view.container.querySelector<HTMLElement>('[role="document"]')!.shadowRoot!
+    const firstText = (element: Node): Node => document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode()!
+    const heading = [...shadow.querySelectorAll<HTMLElement>('[data-path]')].find(element => element.textContent === 'Introduction')!
+    const seat = shadow.querySelector<HTMLElement>('[data-paperai-conflict-seat]')!
+    const range = document.createRange()
+    range.setStart(firstText(heading), 0)
+    range.setEnd(firstText(seat), 2)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({
+      isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => range.toString(),
+      removeAllRanges: () => {}, addRange: () => {},
+    }) })
+    // The band sits inside the range: Range.toString alone would read its label, legend and buttons.
+    expect(range.toString()).toContain(zh['editor.conflictKeep'])
+    fireEvent.keyUp(heading, { key: 'Shift' })
+    fireEvent.click(within(screen.getByRole('toolbar', { name: '选中的文字' })).getByRole('button', { name: '交给 Agent' }))
+    expect(b.quoteSelection).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ text: 'IntroductionMy' }), undefined)
   })
 
   it('quotes an exact shadow-tree selection from its context menu and preserves its scroll without starting a block edit', () => {
@@ -707,7 +738,7 @@ describe('DocumentWorkbench', () => {
     expect(paragraph.getAttribute('contenteditable')).toBe('true')
     paragraph.textContent = 'Rewritten background'
     fireEvent.input(paragraph)
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: 'Rewritten background' })
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, expect.objectContaining({ text: 'Rewritten background' }))
     fireEvent.keyDown(paragraph, { key: 'Enter', ctrlKey: true })
     expect(b.commitEdit).toHaveBeenCalledOnce()
     fireEvent.keyDown(paragraph, { key: 'Escape' })
@@ -815,7 +846,7 @@ describe('DocumentWorkbench', () => {
     fireEvent.paste(paragraph, { clipboardData: { getData: () => '<b>粘贴</b>' } })
     expect(paragraph.textContent).toBe('<b>粘贴</b>')
     expect(paragraph.querySelector('b')).toBeNull()
-    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, { text: '<b>粘贴</b>' })
+    expect(b.updateDraft).toHaveBeenCalledWith(NODE_PARAGRAPH, expect.objectContaining({ text: '<b>粘贴</b>' }))
   })
 
   it('writes a retained draft back into a block as the runs it kept', () => {
@@ -962,6 +993,22 @@ describe('DocumentWorkbench', () => {
     expect(b.setDetailsFocus).toHaveBeenLastCalledWith(false)
   })
 
+  it('guesses a free document\u2019s type only while no draft is on the page', () => {
+    // prepareAction refuses a dirty workbench, and typing clears the refusal: guessing with drafts would fail
+    // again on every keystroke.
+    const state = (edits: PaperAIWorkbenchState['edits']) => workbenchState({
+      phase: 'ready', panel: 'template', edits,
+      document: documentSnapshot(REVISION_2, { template: null, documentType: 'other', projectFormatAvailable: false }),
+    })
+    const drafting = workbenchProps(state([{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Rewritten' }]))
+    const { unmount } = render(<DocumentWorkbench {...drafting.props} />)
+    expect(drafting.suggestType).not.toHaveBeenCalled()
+    unmount()
+    const clean = workbenchProps(state([]))
+    render(<DocumentWorkbench {...clean.props} />)
+    expect(clean.suggestType).toHaveBeenCalledOnce()
+  })
+
   it('applies the project template by type, guessing first, and detaches a bound format', async () => {
     const free = workbenchProps(workbenchState({
       phase: 'ready', panel: 'template',
@@ -1059,6 +1106,32 @@ describe('DocumentWorkbench', () => {
     }))
     render(<DocumentWorkbench {...editing.props} />)
     expect(screen.getByRole('alert').textContent).toBe('请先保存或放弃页面上的修改。')
+  })
+
+  // Verbatim as they reach the browser: the gateway forwards a Host failure as `internal: <message>`, so a
+  // commit-service code such as NODE_TEXT_CONFLICT is never part of the string (commit-service errors.ts).
+  const overtaken = [
+    ["internal: node 'node-paragraph' text changed since the mutation was prepared"],
+    ["internal: node 'node-paragraph' text changed since the deletion was prepared"],
+    ["internal: document 'document-paper' head changed: expected commit-1, actual commit-2"],
+    ["internal: paperai-workbench: document 'document-paper' changed; reload before applying this action"],
+  ]
+
+  it.each(overtaken)('points a save the document overtook at the refresh that can resolve it: %s', (error) => {
+    // Each means the document moved under the save; pressing 保存 again cannot clear it.
+    const failed = workbenchProps(workbenchState({
+      phase: 'ready', document: documentSnapshot(), actionError: error,
+      edits: [{ nodeId: NODE_PARAGRAPH, baseText: 'Research background', draft: 'Rewritten background', saveFailed: true }],
+    }))
+    render(<DocumentWorkbench {...failed.props} />)
+    expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toContain(zh['workbench.reloadFirst'])
+  })
+
+  it.each(overtaken)('promises no bands when an action that runs without drafts was overtaken: %s', (error) => {
+    // An export, check, restore or template change runs only with no drafts, so a refresh brings no band.
+    const failed = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(), actionError: error }))
+    render(<DocumentWorkbench {...failed.props} />)
+    expect(screen.getByRole('alert').textContent).toBe(zh['workbench.reloadAction'])
   })
 
   it('keeps the save failure beside the pending pill while the writer types on', () => {
@@ -1180,12 +1253,12 @@ describe('DocumentWorkbench', () => {
     expect(b.exportDocument).toHaveBeenCalledWith('delivery-export')
   })
 
-  it('tells the writer when a refresh retains a conflicting draft', () => {
+  it('says why a save found nothing to commit when every draft left is in conflict', () => {
     const b = workbenchProps(workbenchState({
       phase: 'ready', document: documentSnapshot(), actionError: 'block changed externally; local draft retained',
     }))
     render(<DocumentWorkbench {...b.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('文档版本已更新，冲突段落已锁定，草稿已保留供复制。保存只提交未冲突的段落，放弃修改会清除保留的草稿。')
+    expect(screen.getByRole('alert').textContent).toBe(zh['block.conflicted'])
   })
 
   it('renders a Remote failure with only its backed retry action', () => {

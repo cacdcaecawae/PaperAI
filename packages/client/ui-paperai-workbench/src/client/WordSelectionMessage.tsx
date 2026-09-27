@@ -24,7 +24,7 @@ function citation(text: string): Citation | undefined {
   }
   if (value === null || typeof value !== 'object') return undefined
   const fields = value as Record<string, unknown>
-  // ponytail: the six-key arm keeps citations logged before this flag renderable; drop it when those sessions stop mattering.
+  // TODO: the six-key arm keeps citations logged before this flag renderable; drop it when those sessions stop mattering.
   if (Object.keys(fields).length !== (fields.includesUnsavedEdits === undefined ? 6 : 7)
     || !['document', 'path', 'revision', 'text'].every(key => typeof fields[key] === 'string')
     || (fields.version !== null && typeof fields.version !== 'string')
