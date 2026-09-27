@@ -6,7 +6,7 @@
 
 ## Host 服务
 
-插件提供 `ctx.paperMcp`，并在 `ctx.webServer` 注册一个精确匹配的 Streamable HTTP 路由。`issueDescriptor(actor, scope)` 返回兼容 ACP 的 HTTP MCP descriptor 及幂等 disposer。随机 Bearer token 绑定由 lease 管理的 Agent 身份，因此调用方不能通过工具参数伪造或改写修改来源。lease 的访问范围记录所属会话的工作区根目录，并按请求读取其沙箱模式：每个工具都解析拥有该根目录的 PaperAI 项目，其他项目的记录一律以 `PROJECT_OUT_OF_SCOPE` 拒绝（没有项目拥有该工作区时为 `NO_PROJECT_FOR_SESSION`），修改类工具在 `read-only` 下以 `READ_ONLY_SESSION` 拒绝——与原生 DSH 文档工具施加的是 `@paperai/domain` 里同一套共享检查，因此在 DSH 会话上执行 `/permission` 切换后，下一次 MCP 调用即受其约束，无需重新签发 descriptor。导出工具还会像文件系统工具约束写入那样约束目标路径：`workspace-write` 下解析后的路径必须位于会话工作区内（相对路径按工作区解析），否则以 `WRITE_OUTSIDE_WORKSPACE` 失败；工作区还会作为 `writableRoot` 传给导出提供方，由它在发布时按真实路径复查父目录，工作区内的目录链接也无法把文件带出去（`DESTINATION_OUTSIDE_WORKSPACE`）；只有 `danger-full-access` 才能发布到别处。
+插件提供 `ctx.paperMcp`，并在 `ctx.webServer` 注册一个精确匹配的 Streamable HTTP 路由。`issueDescriptor(actor, scope)` 返回兼容 ACP 的 HTTP MCP descriptor 及幂等 disposer。随机 Bearer token 绑定由 lease 管理的 Agent 身份，因此调用方不能通过工具参数伪造或改写修改来源。lease 的访问范围记录所属会话的工作区根目录，并按请求读取其沙箱模式：每个工具都解析拥有该根目录的 PaperAI 项目，其他项目的记录一律以 `PROJECT_OUT_OF_SCOPE` 拒绝（没有项目拥有该工作区时为 `NO_PROJECT_FOR_SESSION`），修改类工具在 `read-only` 下以 `READ_ONLY_SESSION` 拒绝——与原生 DSH 文档工具施加的是 `@paperai/domain` 里同一套共享检查，因此在 DSH 会话上执行 `/permission` 切换后，下一次 MCP 调用即受其约束，无需重新签发 descriptor。导出工具还会像文件系统工具约束写入那样约束目标路径：`workspace-write` 下解析后的路径必须位于会话工作区内（相对路径按工作区解析），否则以 `WRITE_OUTSIDE_WORKSPACE` 失败；工作区还会作为 `writableRoot` 传给导出提供方，由它在发布时按真实路径复查父目录，工作区内的目录链接也无法把文件带出去（`DESTINATION_OUTSIDE_WORKSPACE`）；导出提供方还会独立将所有模式限制在所属项目的 `exports/` 目录内。
 
 ACP 会话所有者让 descriptor lease 与 Agent 生命周期一致：
 
