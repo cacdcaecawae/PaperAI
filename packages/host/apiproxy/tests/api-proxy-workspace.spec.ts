@@ -379,6 +379,18 @@ describe('session creation and Workspace membership', () => {
     expect(existsSync(path)).toBe(kind === 'file')
   })
 
+  it('rejects a removed Workspace root even when the Session already has a live agent', async () => {
+    const { api, root } = await harness()
+    const path = stageDir(root, 'removed-after-create')
+    const workspace = expectOk(await api.workspace.create(request({ path }))).workspace
+    const sessionId = SessionId('workspace-root-removed-live')
+    expectOk(await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId })))
+    rmSync(path, { recursive: true })
+    const response = await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId }))
+    expect(response.result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(existsSync(path)).toBe(false)
+  })
+
   it('does not recreate a Workspace root removed while session creation is in flight', async () => {
     const { api, ctx, root } = await harness()
     const path = stageDir(root, 'removed-during-create')

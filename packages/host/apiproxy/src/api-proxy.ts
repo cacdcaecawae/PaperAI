@@ -2185,6 +2185,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
         try {
+          // Also covers an already-live agent, which ensureSession returns without reaching its own check.
+          if (workspace !== undefined) await requireDirectory(workspace.path)
           await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, workspace !== undefined)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
