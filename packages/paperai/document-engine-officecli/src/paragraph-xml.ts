@@ -180,24 +180,6 @@ export function paragraphText(paragraph: XmlElement): string {
   return projection(paragraph).characters.map(character => character.text).join('')
 }
 
-/**
- * Read a paragraph's text as OfficeCLI's text view indexes it, without requiring the paragraph to be editable.
- * @param paragraph - Word paragraph that a removal or insertion identifies but does not rewrite.
- * @returns text, tabs, and soft breaks of runs placed directly in the paragraph or in a hyperlink, smart tag,
- * custom XML, or inserted-revision wrapper; field codes, deleted text, and other content contribute nothing.
- */
-export function indexedParagraphText(paragraph: XmlElement): string {
-  return children(paragraph).flatMap(node => node.namespaceURI !== W ? []
-    : node.localName === 'r' ? [node]
-      : ['hyperlink', 'smartTag', 'customXml', 'ins', 'moveTo'].includes(node.localName ?? '')
-        ? children(node).filter(run => run.namespaceURI === W && run.localName === 'r') : [])
-    .flatMap(run => children(run)).map(inline => inline.namespaceURI !== W ? ''
-      : inline.localName === 't' ? inline.textContent ?? ''
-        : inline.localName === 'tab' ? '\t'
-          : inline.localName === 'br' && ['', 'textWrapping'].includes(inline.getAttributeNS(W, 'type') ?? '') ? '\v' : '')
-    .join('')
-}
-
 function runCopy(paragraph: XmlElement, source: XmlElement | undefined, format?: EngineTextRun): XmlElement {
   const run = source === undefined ? element(paragraph, 'r') : clone(source, false)
   const props = source === undefined ? child(child(paragraph, 'pPr') ?? paragraph, 'rPr') : child(source, 'rPr')

@@ -8,7 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { DOMParser, XMLSerializer, onWarningStopParsing } from '@xmldom/xmldom'
 import type { Document as XmlDocument, Element as XmlElement, Node as XmlNode } from '@xmldom/xmldom'
-import type { EngineMutation } from '@paperai/document-engine'
+import type { EngineMutation, EngineTextNode } from '@paperai/document-engine'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { OfficeCliDocumentEngine } from '../src/index.ts'
 
@@ -366,6 +366,35 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     ])
     expect((await ctx.documentEngine.readTextNodes(file)).map(node => node.text))
       .toEqual(['see link[1]', 'inserted', 'first', 'second!', 'after split'])
+    await ctx.documentEngine.release(file)
+  }, 120_000)
+
+  it('removes and anchors on paragraphs with equations, nested wrappers, and carriage returns by their indexed text', async () => {
+    const revision = 'w:id="1" w:author="a" w:date="2026-01-01T00:00:00Z"'
+    await setBody(`<w:body xmlns:w="${WORD}" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">`
+      + '<w:p><w:r><w:t xml:space="preserve">eq </w:t></w:r><m:oMath><m:r><m:t>x=1</m:t></m:r></m:oMath></w:p>'
+      + `<w:p><w:hyperlink w:anchor="ref"><w:ins ${revision}><w:r><w:t>nested</w:t></w:r></w:ins></w:hyperlink></w:p>`
+      + '<w:p><w:r><w:t>a</w:t><w:cr/><w:t>b</w:t></w:r></w:p>'
+      + '<w:p><w:smartTag w:uri="u" w:element="e"><w:hyperlink w:anchor="ref"><w:r><w:t>st</w:t></w:r></w:hyperlink></w:smartTag></w:p>'
+      + '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+      + '<w:p><w:r><w:t>tail</w:t></w:r></w:p><w:sectPr/></w:body>')
+    const nodes = await ctx.documentEngine.readTextNodes(file)
+    expect(nodes.map(node => node.text)).toEqual(['eq x=1', 'nested', 'a\vb', 'st', '[Table: 1 rows]', 'tail'])
+    type Node = EngineTextNode
+    const [equation, nested, carriage, smart, table] = nodes as [Node, Node, Node, Node, Node, Node]
+    const savedBytes = await readFile(file)
+    await expect(ctx.documentEngine.applyMutations(file, [{ type: 'remove', officePath: equation.officePath, baseText: 'eq ' }]))
+      .rejects.toThrow('NODE_TEXT_CONFLICT')
+    expect(await readFile(file)).toEqual(savedBytes)
+    await ctx.documentEngine.applyMutations(file, [
+      { type: 'insert-paragraph', after: equation.officePath, baseText: equation.text, text: 'after equation' },
+      { type: 'remove', officePath: nested.officePath, baseText: nested.text },
+      { type: 'insert-paragraph', before: carriage.officePath, baseText: carriage.text, text: 'before cr' },
+      { type: 'remove', officePath: smart.officePath, baseText: smart.text },
+      { type: 'insert-paragraph', after: table.officePath, baseText: table.text, text: 'after table' },
+    ])
+    expect((await ctx.documentEngine.readTextNodes(file)).map(node => node.text))
+      .toEqual(['eq x=1', 'after equation', 'before cr', 'a\vb', '[Table: 1 rows]', 'after table', 'tail'])
     await ctx.documentEngine.release(file)
   }, 120_000)
 })

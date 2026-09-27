@@ -216,26 +216,28 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
   }
 
   override readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
-    return this.withLease(filePath, async () => {
-      const result = await this.run(['view', filePath, 'text', '--json'], signal)
-      const { elements } = this.parseEnvelope(result.stdout)
-      if (!Array.isArray(elements)) throw new OfficeCliError('OfficeCLI returned no text elements')
-      return elements.flatMap((element: unknown): EngineTextNode[] => {
-        if (element === null || typeof element !== 'object' || !('path' in element)
-          || typeof element.path !== 'string' || !element.path.startsWith('/')) {
-          throw new OfficeCliError('OfficeCLI returned an invalid text element')
-        }
-        // OfficeCLI omits text for structural records such as body bookmarks.
-        if (!('text' in element)) return []
-        if (typeof element.text !== 'string') throw new OfficeCliError('OfficeCLI returned invalid node text')
-        return [{
-          officePath: element.path,
-          text: element.text,
-          kind: element.path.includes('/tbl[')
-            ? 'table'
-            : element.path.includes('/p[') ? 'paragraph' : 'unknown',
-        }]
-      })
+    return this.withLease(filePath, () => this.textNodes(filePath, signal))
+  }
+
+  private async textNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
+    const result = await this.run(['view', filePath, 'text', '--json'], signal)
+    const { elements } = this.parseEnvelope(result.stdout)
+    if (!Array.isArray(elements)) throw new OfficeCliError('OfficeCLI returned no text elements')
+    return elements.flatMap((element: unknown): EngineTextNode[] => {
+      if (element === null || typeof element !== 'object' || !('path' in element)
+        || typeof element.path !== 'string' || !element.path.startsWith('/')) {
+        throw new OfficeCliError('OfficeCLI returned an invalid text element')
+      }
+      // OfficeCLI omits text for structural records such as body bookmarks.
+      if (!('text' in element)) return []
+      if (typeof element.text !== 'string') throw new OfficeCliError('OfficeCLI returned invalid node text')
+      return [{
+        officePath: element.path,
+        text: element.text,
+        kind: element.path.includes('/tbl[')
+          ? 'table'
+          : element.path.includes('/p[') ? 'paragraph' : 'unknown',
+      }]
     })
   }
 
@@ -274,6 +276,9 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       const raw = await this.run(['raw', filePath, '/document', '--json'], signal)
       const data = this.parseEnvelope(raw.stdout).data
       const root = parseWordXml(data, 'document')
+      const identifies = mutations.some(mutation => mutation.type === 'remove' || (mutation.type === 'insert-paragraph'
+        && (mutation.after !== undefined || mutation.before !== undefined)))
+      const indexed = identifies ? await this.textNodes(filePath, signal) : []
       const stylesNeeded = mutations.some(mutation => mutation.type === 'insert-paragraph'
         ? mutation.style !== undefined
         : mutation.type === 'replace-text' && mutation.paragraphs?.some(paragraph => paragraph.format?.style !== undefined))
@@ -285,7 +290,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
         if (style === undefined) throw new OfficeCliError(`UNKNOWN_PARAGRAPH_STYLE: '${name}' is not a paragraph style in this document`)
         return style.id
       }
-      applyDocumentMutations(root, mutations,
+      applyDocumentMutations(root, mutations, indexed,
         (group, mutation) => replaceParagraphXml(group, mutation, resolveStyle), resolveStyle)
       const body = resolveOfficePath(root, '/body')
       // The package part preserves legacy attributes; the /document alias reparses typed OpenXML and renames them.

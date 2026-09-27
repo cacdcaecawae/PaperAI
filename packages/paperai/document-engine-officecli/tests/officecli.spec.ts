@@ -12,6 +12,7 @@ import type {
 import type { EngineMutation } from '@paperai/document-engine'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OfficeCliDocumentEngine, OfficeCliError, officeCliBin } from '../src/index.ts'
+import { resolveOfficePath } from '../src/office-path.ts'
 
 interface Reply {
   stdout?: string
@@ -93,8 +94,20 @@ function fixture(respond: (spec: SubprocessSpawnSpec) => Reply) {
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const documentXml = (body: string) => '<w:document xmlns:w="' + W + '"><w:body>' + body + '</w:body></w:document>'
 const paragraphXml = (text: string) => '<w:p><w:r><w:t>' + text + '</w:t></w:r></w:p>'
+// OfficeCLI's text view of the fixture: every addressable body paragraph as its plain text.
+const textElements = (body: string) => {
+  const root = new DOMParser().parseFromString(documentXml(body), 'application/xml').documentElement!
+  return Array.from(root.getElementsByTagNameNS(W, 'p'), (_, index) => `/body/p[${index + 1}]`).flatMap((path) => {
+    try {
+      return [{ path, text: resolveOfficePath(root, path).textContent }]
+    } catch {
+      return []
+    }
+  })
+}
 const xmlFixture = (body: string) => fixture(spec => spec.argv.includes('/document')
-  ? { stdout: JSON.stringify({ data: documentXml(body) }) } : {})
+  ? { stdout: JSON.stringify({ data: documentXml(body) }) }
+  : spec.argv.includes('text') ? { stdout: JSON.stringify({ data: { elements: textElements(body) } }) } : {})
 const writtenBody = (test: ReturnType<typeof fixture>) => new DOMParser().parseFromString(test.batches[0]!.xml, 'application/xml').documentElement!
 const childElements = (node: XmlElement) => Array.from(node.childNodes)
   .filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)
@@ -156,7 +169,7 @@ describe('OfficeCliDocumentEngine', () => {
     await expect(engine.readTextNodes('paper.docx')).rejects.toThrow(OfficeCliError)
   })
 
-  it('applies ordered structural mutations with one document read and one command-file batch', async () => {
+  it('applies ordered structural mutations with one document read, one index read, and one command-file batch', async () => {
     const test = xmlFixture(paragraphXml('alpha') + paragraphXml('beta') + paragraphXml('gamma'))
     await test.engine.applyMutations('paper.docx', [
       { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' },
@@ -165,7 +178,7 @@ describe('OfficeCliDocumentEngine', () => {
       { baseText: 'gamma', type: 'remove', officePath: '/body/p[3]' },
     ])
     expect(childElements(writtenBody(test)).map(node => node.textContent)).toEqual(['edited', 'inserted', 'beta edited'])
-    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch', 'save'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'view', 'batch', 'save'])
     expect(test.batches).toHaveLength(1)
     expect(test.batches[0]).toMatchObject({ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace' })
     expect(existsSync(test.batches[0]!.input)).toBe(false)
@@ -191,7 +204,7 @@ describe('OfficeCliDocumentEngine', () => {
   ])('rejects $type when indexed whitespace or text differs from the actual target before sending a write', async (mutation) => {
     const test = xmlFixture(paragraphXml('　　original\ntail'))
     await expect(test.engine.applyMutations('paper.docx', [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
-    expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
+    expect(test.calls.map(call => call.argv[1])).not.toContain('batch')
     expect(test.batches).toEqual([])
   })
 
@@ -293,7 +306,7 @@ describe('OfficeCliDocumentEngine', () => {
       { baseText: 'original', type: 'insert-paragraph', before: '/body/tbl[1]/tr[1]/tc[1]', text: 'invalid' },
     ])).rejects.toThrow('INVALID_INSERT_POSITION')
     expect(test.batches).toEqual([])
-    expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'view'])
   })
 
   it('reads defined paragraph style IDs and display names without changing the document', async () => {

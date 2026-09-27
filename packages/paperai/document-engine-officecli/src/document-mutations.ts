@@ -1,9 +1,9 @@
 /** Ordered edits against original nodes in one candidate Word document XML. */
 
 import type { Document as XmlDocument, Element as XmlElement, Node as XmlNode } from '@xmldom/xmldom'
-import type { EngineMutation } from '@paperai/document-engine'
+import type { EngineMutation, EngineTextNode } from '@paperai/document-engine'
 import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
-import { indexedParagraphText, paragraphText } from './paragraph-xml.ts'
+import { paragraphText } from './paragraph-xml.ts'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const XML_NS = 'http://www.w3.org/XML/1998/namespace'
@@ -36,6 +36,8 @@ function insertedParagraph(body: XmlElement, text: string, style: string | undef
  * Apply a batch in caller order while retaining all original node identities.
  * @param root - independently parsed candidate Word document element.
  * @param mutations - original-address mutations; insertion indices refer to the current body.
+ * @param indexed - the engine's text index of the unmodified document; a removal or insertion anchor that no
+ * earlier step rewrote must match its entry.
  * @param replaceParagraph - synchronous editor that replaces a paragraph group's joined text, preserves the first
  * paragraph object, and returns the resulting group including any split siblings.
  * @param resolveStyle - resolve an explicit paragraph style name or ID to an existing Word style ID.
@@ -44,6 +46,7 @@ function insertedParagraph(body: XmlElement, text: string, style: string | undef
 export function applyDocumentMutations(
   root: XmlElement,
   mutations: readonly EngineMutation[],
+  indexed: readonly Pick<EngineTextNode, 'officePath' | 'text'>[],
   replaceParagraph: (
     group: readonly [XmlElement, ...XmlElement[]],
     mutation: Extract<EngineMutation, { type: 'replace-text' }>,
@@ -64,29 +67,51 @@ export function applyDocumentMutations(
     }
     return target
   }
-  // Only a rewrite needs the editor's strict projection; removals and anchors compare the indexed reading.
-  const assertText = (target: XmlElement, path: string, baseText: string, read: (paragraph: XmlElement) => string): void => {
-    const text = target.localName === 'p' ? group(target).map(read).join('\n')
-      : target.localName === 'tbl'
-        ? `[Table: ${Array.from(target.childNodes).filter(child => child.nodeType === child.ELEMENT_NODE
-          && (child as XmlElement).namespaceURI === WORD_NS && (child as XmlElement).localName === 'tr').length} rows]`
-        : undefined
+  // Removals and anchors only identify their target, so they compare the engine's own reading of it, which covers
+  // equations, fields, and wrappers the editor cannot project; a node rewritten earlier compares the rewrite.
+  const indexedText = new Map<XmlElement, string>()
+  for (const node of indexed) {
+    try {
+      indexedText.set(resolveOfficePath(root, node.officePath), node.text)
+    } catch {
+      // Entries outside the addressable body (content controls, headers) cannot be mutation targets.
+    }
+  }
+  const projected = (target: XmlElement): string => group(target).map(paragraphText).join('\n')
+  const assertText = (path: string, baseText: string, text: string | undefined): void => {
     if (text === undefined || text !== baseText) {
       throw new Error(`NODE_TEXT_CONFLICT: '${path}' text differs from the indexed base text; refresh the document before editing`)
     }
+  }
+  // Where the XML itself yields the text, it must agree with the index, so a misresolved address still conflicts.
+  const identified = (target: XmlElement): string | undefined => {
+    if (groups.has(target)) return projected(target)
+    let text: string | undefined
+    if (target.localName === 'tbl') {
+      text = `[Table: ${Array.from(target.childNodes).filter(child => child.nodeType === child.ELEMENT_NODE
+        && (child as XmlElement).namespaceURI === WORD_NS && (child as XmlElement).localName === 'tr').length} rows]`
+    } else if (target.localName === 'p') {
+      try {
+        text = paragraphText(target)
+      } catch {
+        // Content the editor cannot project, such as an equation, leaves the index as the only reading.
+      }
+    }
+    const indexedReading = indexedText.get(target)
+    return text === undefined || text === indexedReading ? indexedReading : undefined
   }
   for (const mutation of mutations) {
     switch (mutation.type) {
       case 'replace-text': {
         const target = attached(mutation.officePath)
         if (target.localName !== 'p') throw new Error(`INVALID_OFFICE_TARGET: '${mutation.officePath}' is not a paragraph`)
-        assertText(target, mutation.officePath, mutation.baseText, paragraphText)
+        assertText(mutation.officePath, mutation.baseText, projected(target))
         groups.set(target, replaceParagraph(group(target), mutation))
         break
       }
       case 'remove': {
         const target = attached(mutation.officePath)
-        assertText(target, mutation.officePath, mutation.baseText, indexedParagraphText)
+        assertText(mutation.officePath, mutation.baseText, identified(target))
         for (const node of group(target)) (node.parentNode as XmlNode).removeChild(node)
         break
       }
@@ -103,7 +128,7 @@ export function applyDocumentMutations(
           if (parent.localName !== 'body' && parent.localName !== 'tc') {
             throw new Error('INVALID_INSERT_POSITION: paragraphs must belong to the body or a table cell')
           }
-          assertText(anchor, anchorPath, mutation.baseText, indexedParagraphText)
+          assertText(anchorPath, mutation.baseText, identified(anchor))
           const anchors = group(anchor)
           reference = mutation.after === undefined ? anchors[0] : (anchors.at(-1) as XmlElement).nextSibling
         } else {
