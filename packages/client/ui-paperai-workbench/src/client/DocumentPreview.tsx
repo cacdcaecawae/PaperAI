@@ -39,6 +39,29 @@ export interface DocumentPreviewProps {
 }
 
 /**
+ * Where a cell sits in its table's grid, counting merged cells: `cellIndex` counts cell elements, so a cell after
+ * a two-column merge would name the wrong column, and a band standing before the table is found only by this.
+ * @param cell - the cell to place.
+ * @returns its 1-based row and column, or undefined when it is not in a table's rows.
+ */
+function cellPlace(cell: HTMLTableCellElement): { row: number; column: number } | undefined {
+  const rows = cell.closest('table')?.rows ?? []
+  const taken: boolean[][] = []
+  for (let row = 0; row < rows.length; row += 1) {
+    let column = 0
+    for (const candidate of rows[row]?.cells ?? []) {
+      while (taken[row]?.[column] === true) column += 1
+      if (candidate === cell) return { row: row + 1, column: column + 1 }
+      for (let down = 0; down < Math.max(1, candidate.rowSpan); down += 1) {
+        for (let across = 0; across < Math.max(1, candidate.colSpan); across += 1) (taken[row + down] ??= [])[column + across] = true
+      }
+      column += Math.max(1, candidate.colSpan)
+    }
+  }
+  return undefined
+}
+
+/**
  * Copy printed on one conflict band.
  * @param form - `document` quotes the document and offers both sides; `draft` quotes a draft no keystroke can reach.
  * @param t - the workbench translator.
@@ -58,9 +81,8 @@ function bandCopy(
   // A cell's band stands before the whole table, beside the bands of any other cells in it, so each
   // names the cell it speaks for.
   const cell = seat?.closest<HTMLTableCellElement>('td, th') ?? undefined
-  const row = cell?.parentElement
-  const who = cell === undefined || !(row instanceof HTMLTableRowElement) ? side
-    : `${t('editor.conflictCell', { row: row.rowIndex + 1, column: cell.cellIndex + 1 })} · ${side}`
+  const place = cell === undefined ? undefined : cellPlace(cell)
+  const who = place === undefined ? side : `${t('editor.conflictCell', place)} · ${side}`
   const chars = Array.from(quoted.replace(/\s+/gu, ' ').trim())
   const excerpt = chars.length === 0 ? t('editor.conflictEmpty') : `${chars.slice(0, 24).join('')}${chars.length > 24 ? '…' : ''}`
   return {
@@ -717,6 +739,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       // so the report `finish` publishes would be dropped in the same tick.
       onResolveConflict?.(nodeId)
       finish([block])
+      // A choice is a new decision: after 用文档的 was undone, redo must not replay it over this one. The block
+      // already shows the draft, so finish records nothing and would leave that redo in place.
+      history.current.future = []; updateHistory()
     }
     else {
       const original = originals.current.get(block)

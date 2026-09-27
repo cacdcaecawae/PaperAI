@@ -806,6 +806,7 @@ function conflicted(body: string, texts: readonly string[], draft: string, confl
           ...current.find(edit => edit.nodeId === nodeId),
           nodeId, baseText: current.find(edit => edit.nodeId === nodeId)?.baseText ?? '', draft: next.text,
           ...(next.runs === undefined ? {} : { runs: next.runs }),
+          ...(next.conflicted === true ? { conflicted: true } : {}),
         }])])
       }} />
   }
@@ -1033,6 +1034,31 @@ describe('Conflict resolution in the page', () => {
     fireEvent.click(shadow.querySelector('[data-paperai-conflict="node-0"] [data-paperai-resolve="theirs"]')!)
     fireEvent.click(screen.getByRole('button', { name: t('block.conflicts', { count: 2 }) }))
     expect(visited).toEqual(['node-0', 'node-1'])
+  })
+
+  it('lets 用我的 after an undone 用文档的 end the redo that would replay the older choice', () => {
+    const editor = conflicted('<p data-path="/body/p[1]">文档改写后的这一段</p>', ['文档改写后的这一段'], '文档保留原样的这一段')
+    fireEvent.click(editor.act('theirs')!)
+    fireEvent.click(screen.getByRole('button', { name: zh['editor.undo'] }))
+    // The undo hands the draft back in conflict, band and all.
+    expect(editor.act('mine')).not.toBeNull()
+    expect(screen.getByRole('button', { name: zh['editor.redo'] }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(editor.act('mine')!)
+    // Redo would reapply 用文档的 and drop the draft the writer has just chosen to keep.
+    expect(screen.getByRole('button', { name: zh['editor.redo'] }).hasAttribute('disabled')).toBe(true)
+    expect(editor.blocks()[0]!.textContent).toBe('文档保留原样的这一段')
+  })
+
+  it.each([
+    ['after a two-column merge', '<tr><td colspan="2"><p data-path="/body/tbl[1]/tr[1]/tc[1]/p[1]">甲</p></td>'
+      + '<td><p data-path="/body/tbl[1]/tr[1]/tc[2]/p[1]">文档改写后的乙</p></td></tr>', ['甲', '文档改写后的乙'], 1, { row: 1, column: 3 }],
+    ['beside a two-row merge', '<tr><td rowspan="2"><p data-path="/body/tbl[1]/tr[1]/tc[1]/p[1]">甲</p></td>'
+      + '<td><p data-path="/body/tbl[1]/tr[1]/tc[2]/p[1]">乙</p></td></tr>'
+      + '<tr><td><p data-path="/body/tbl[1]/tr[2]/tc[1]/p[1]">文档改写后的丙</p></td></tr>', ['甲', '乙', '文档改写后的丙'], 2, { row: 2, column: 2 }],
+  ] as const)('names a cell by its place in the grid %s', (_case, rows, texts, index, place) => {
+    const editor = conflicted(`<table>${rows}</table>`, texts, '草稿', index, 'table-cell')
+    expect(editor.band()!.querySelector('.paperai-conflict-who')!.textContent)
+      .toBe(`${t('editor.conflictCell', place)} · ${zh['editor.conflictTheirs']}`)
   })
 
   it('names the cell a band speaks for, since every cell band stands before the table', () => {

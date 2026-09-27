@@ -83,6 +83,11 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
   return state.edits.length > 0
 }
 
+/** Where a set-aside draft is kept: node ids are only unique within their document. */
+function setAsideKey(documentId: PaperAIDocumentSnapshot['documentId'], nodeId: PaperAIDocumentNodeId): string {
+  return `${documentId}\u0000${nodeId}`
+}
+
 /** A conflicted draft set aside with 用文档的, and the document and revision of the page that took it. */
 interface SetAsideDraft {
   readonly documentId: PaperAIDocumentSnapshot['documentId']
@@ -154,7 +159,7 @@ export class PaperAIWorkbenchController {
    * conflict; it survives switching documents, because a retained preview keeps its undo stack, while any
    * other revision means a rebuilt page whose undo stack no longer reaches it.
    */
-  private readonly abandoned = new Map<SessionId, Map<PaperAIDocumentNodeId, SetAsideDraft>>()
+  private readonly abandoned = new Map<SessionId, Map<string, SetAsideDraft>>()
   /** The one page-wide unload guard; preventDefault is the whole of the modern contract. */
   private readonly confirmUnload = (event: BeforeUnloadEvent): void => { event.preventDefault() }
   private disposed = false
@@ -561,20 +566,22 @@ export class PaperAIWorkbenchController {
     // updateDraft's own guard: where it does nothing, neither does this.
     if (snapshot.phase !== 'ready' || snapshot.action !== null || open === null) return false
     const current = snapshot.edits.find(edit => edit.nodeId === nodeId)
-    const kept = this.abandoned.get(sessionId) ?? new Map<PaperAIDocumentNodeId, SetAsideDraft>()
+    const kept = this.abandoned.get(sessionId) ?? new Map<string, SetAsideDraft>()
     this.abandoned.set(sessionId, kept)
+    // By document and node: a retained preview keeps its own undo stack, and node ids are only a document's own.
+    const key = setAsideKey(open.documentId, nodeId)
     if (draft === null) {
       // The drop itself still happens in updateDraft; this only remembers what it takes.
-      if (current?.conflicted === true) kept.set(nodeId, { documentId: open.documentId, revision: open.revision, edit: current })
+      if (current?.conflicted === true) kept.set(key, { documentId: open.documentId, revision: open.revision, edit: current })
       return false
     }
-    const back = kept.get(nodeId)
+    const back = kept.get(key)
     const node = open.nodes.find(candidate => candidate.nodeId === nodeId)
     // Only the page's undo of 用文档的 marks its report conflicted; a formatting edit that leaves the same words
     // is a new draft, not the one set aside.
     if (draft.conflicted !== true || current !== undefined || back === undefined || node === undefined || !node.editable
       || back.documentId !== open.documentId || back.revision !== open.revision || back.edit.draft !== draft.text) return false
-    kept.delete(nodeId)
+    kept.delete(key)
     store.update((state) => {
       state.edits = [...state.edits, back.edit]
       if (!state.edits.some(edit => edit.saveFailed === true)) state.actionError = null
@@ -608,7 +615,11 @@ export class PaperAIWorkbenchController {
    */
   cancelEdit(sessionId: SessionId): void {
     this.assertLive()
-    this.abandoned.delete(sessionId)
+    // Only this document's: a retained preview of another keeps its undo stack, and with it what 用文档的 set aside.
+    const discarding = this.workbenchEntry(sessionId).store.getSnapshot().document?.documentId
+    for (const [key, kept] of this.abandoned.get(sessionId) ?? []) {
+      if (kept.documentId === discarding) this.abandoned.get(sessionId)?.delete(key)
+    }
     this.workbenchEntry(sessionId).store.update((state) => {
       if (state.action !== null) return
       state.edits = []

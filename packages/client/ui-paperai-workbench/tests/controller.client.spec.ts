@@ -892,6 +892,24 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     controller.dispose()
   })
 
+  it('keeps a retained document\u2019s set-aside draft when another document\u2019s drafts are discarded', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    const reopen = remote.open
+    const second = 'document:second' as typeof RESOURCE_ID
+    remote.open = vi.fn<typeof remote.open>(async request => (request.resourceId === second
+      ? { ok: true as const, value: documentOpenResult(REVISION_2, { resourceId: second, documentId: 'second' as never }) }
+      : reopen(request)))
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, second)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A draft in the second document' })
+    // Discarding here clears this document's drafts; the first document's retained preview still has its undo stack.
+    controller.cancelEdit(SESSION_ID)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
   it('forgets a set-aside draft once the page moves to another revision', async () => {
     const { controller, remote, store } = await withConflict()
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
