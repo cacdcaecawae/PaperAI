@@ -10,9 +10,9 @@ Status: implemented
 
 ## Decision
 
-[提交服务](../../../../packages/paperai/commit-service/README.zh.md) 独立尝试每条启动恢复并记录失败，保留未完成日志，在受影响文档的 FIFO 入口重试恢复；其他文档仍可使用。[导入回滚](../../../../packages/paperai/document-service/README.zh.md) 拒绝删除存在保留发布日志的文档。
+[提交服务](../../../../packages/paperai/commit-service/README.zh.md) 独立尝试每条启动恢复并记录失败，保留未完成日志，在受影响文档的 FIFO 入口重试恢复；其他文档仍可使用。[文档服务](../../../../packages/paperai/document-service/README.zh.md)的写入操作（导入回滚与索引重建）遇到存在保留发布日志的文档时以 `PUBLICATION_PENDING` 拒绝。
 
-发布在链接快照或替换 Working DOCX 前刷新临时文件字节。支持的平台会同步包含文件的目录及新建快照目录的祖先。损坏的普通快照可以由调用方持有、且通过相同摘要校验的字节原子替换。未知 Working 字节、符号链接和非普通快照仍受保护，不会被自动替换。只读 Project Doctor 检查保留现有恢复策略。
+发布在链接快照或替换 Working DOCX 前刷新临时文件字节。支持的平台会同步包含文件的目录，并逐级同步快照的全部祖先目录至项目根目录，因为已存在的目录可能由尚未同步它的另一次发布创建。损坏的普通快照可以由调用方持有、且通过相同摘要校验的字节原子替换。未知 Working 字节、符号链接和非普通快照仍受保护，不会被自动替换。只读 Project Doctor 检查保留现有恢复策略。
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ Status: implemented
 
 ## Consequences
 
-针对性恢复测试保留一条无法恢复的日志，同时恢复并提交另一文档，验证导入回滚保留待发布数据，并覆盖快照修复及发布刷新顺序。Windows 会刷新文件字节，但 Node 不支持该平台的目录 fsync。未知发布状态仍须修复，该文档才能接受新操作。
+针对性恢复测试保留一条无法恢复的日志，同时恢复并提交另一文档，验证导入回滚与索引重建保留待发布数据，验证桶目录已存在时仍同步快照祖先，并覆盖快照修复及发布刷新顺序。Windows 会刷新文件字节，但 Node 不支持该平台的目录 fsync。未知发布状态仍须修复，该文档才能接受新操作。

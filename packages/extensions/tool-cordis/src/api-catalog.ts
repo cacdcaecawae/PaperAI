@@ -1585,7 +1585,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Re-read the Working DOCX and replace its semantic index while preserving prior node identity where content or structure still identifies lineage.',
         parameters: [{ name: 'documentId', description: 'document identity.' }, { name: 'signal', description: 'optional engine cancellation.' }],
         returns: 'updated repository snapshot.',
-        throws: ['PaperDocumentError when the document is missing or engine nodes are invalid.'],
+        throws: ['PaperDocumentError when the document is missing, retains a publication journal, or engine nodes are invalid.'],
       },
     ],
   },

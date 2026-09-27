@@ -19,6 +19,7 @@ export type PaperDocumentErrorCode =
   | 'DOCUMENT_NOT_FOUND'
   | 'DOCUMENT_INDEX_INVALID'
   | 'IMPORT_ROLLBACK_FORBIDDEN'
+  | 'PUBLICATION_PENDING'
   | 'WORKING_COPY_INVALID'
 
 /** User request to snapshot one Word file into a PaperAI project. */

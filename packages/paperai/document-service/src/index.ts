@@ -271,10 +271,10 @@ export class PaperDocumentService extends Service {
     await this.withDocumentLease(documentId, async () => {
       const current = this.ctx.paperRepository.getDocument(documentId)
       if (current === undefined) return
-      if (current.documentKind !== 'working' || current.headCommitId !== undefined
-        || this.ctx.paperRepository.getCommitPublication(documentId) !== undefined) {
+      this.requireNoPendingPublication(documentId)
+      if (current.documentKind !== 'working' || current.headCommitId !== undefined) {
         throw new PaperDocumentError(
-          `PaperAI import '${String(documentId)}' is not an uncommitted Working document without a pending publication`,
+          `PaperAI import '${String(documentId)}' is not an uncommitted Working document`,
           'IMPORT_ROLLBACK_FORBIDDEN',
         )
       }
@@ -411,11 +411,12 @@ export class PaperDocumentService extends Service {
    * @param documentId - document identity.
    * @param signal - optional engine cancellation.
    * @returns updated repository snapshot.
-   * @throws PaperDocumentError when the document is missing or engine nodes are invalid.
+   * @throws PaperDocumentError when the document is missing, retains a publication journal, or engine nodes are invalid.
    */
   rebuildIndex(documentId: DocumentId, signal?: AbortSignal): Promise<PaperDocumentSnapshot> {
     return this.withDocumentLease(documentId, async () => {
       const document = this.requireDocument(documentId)
+      this.requireNoPendingPublication(documentId)
       const previous = this.ctx.paperRepository.listNodes(documentId)
       const updatedAt = new Date().toISOString()
       const engineNodes = await this.ctx.documentEngine.readTextNodes(document.workingPath, signal)
@@ -467,6 +468,16 @@ export class PaperDocumentService extends Service {
       throw new PaperDocumentError(`PaperAI document '${String(documentId)}' does not exist`, 'DOCUMENT_NOT_FOUND')
     }
     return document
+  }
+
+  /** Recovery compares the retained journal with exact files and nodes, so no writer may change them first. */
+  private requireNoPendingPublication(documentId: DocumentId): void {
+    if (this.ctx.paperRepository.getCommitPublication(documentId) !== undefined) {
+      throw new PaperDocumentError(
+        `PaperAI document '${String(documentId)}' has a publication awaiting recovery`,
+        'PUBLICATION_PENDING',
+      )
+    }
   }
 
   private buildIndex(

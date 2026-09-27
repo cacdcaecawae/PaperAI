@@ -54,6 +54,28 @@ describe('commit-service file operations', () => {
     expect(await readFile(fixture.workingPath)).toEqual(bytes)
   })
 
+  it('syncs every snapshot ancestor through the project root when the bucket already exists', async () => {
+    const fixture = await fileFixture()
+    const bytes = Buffer.from('shared bucket')
+    const bucket = join(fixture.paths.objectRoot, sha256Bytes(bytes).slice(0, 2))
+    // Another publication may have created the bucket without having synced its parent entries yet.
+    await mkdir(bucket, { recursive: true })
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' })
+    vi.mocked(open).mockImplementation(async () => ({ sync: async () => {}, close: async () => {} }) as never)
+    try {
+      await storeSnapshot(fixture.paths, bytes, sha256Bytes(bytes))
+    } finally {
+      Object.defineProperty(process, 'platform', platform)
+      vi.mocked(open).mockImplementation(actual.open)
+    }
+    const synced = vi.mocked(open).mock.calls.map(([path]) => path)
+    for (const directory of [bucket, fixture.paths.objectRoot, join(fixture.root, '.paperai', 'objects'), join(fixture.root, '.paperai'), fixture.root]) {
+      expect(synced).toContain(directory)
+    }
+  })
+
   it.each(['snapshot', 'working'] as const)('leaves published files untouched when the %s write cannot flush', async (target) => {
     const fixture = await fileFixture()
     const bytes = Buffer.from('durable')

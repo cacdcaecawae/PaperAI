@@ -782,7 +782,7 @@ async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise
  * @param documentId - document identity.
  * @param signal - optional engine cancellation.
  * @returns updated repository snapshot.
- * @throws PaperDocumentError when the document is missing or engine nodes are invalid.
+ * @throws PaperDocumentError when the document is missing, retains a publication journal, or engine nodes are invalid.
  */
 rebuildIndex(documentId: DocumentId, signal?: AbortSignal): Promise<PaperDocumentSnapshot>
 ```

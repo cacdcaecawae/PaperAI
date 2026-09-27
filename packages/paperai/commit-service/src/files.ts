@@ -176,12 +176,11 @@ export async function storeSnapshot(
     throw new PaperCommitError('SNAPSHOT_CORRUPT', 'candidate bytes do not match their proposed content address')
   }
   const destination = snapshotPath(paths, digest)
-  const created = await mkdir(dirname(destination), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
-  if (created !== undefined) {
-    for (let directory = dirname(destination); isContained(paths.projectRoot, directory); directory = dirname(directory)) {
-      await syncDirectory(directory)
-      if (directory === paths.projectRoot) break
-    }
+  await mkdir(dirname(destination), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  // A concurrent publication may have created these directories without syncing them yet.
+  for (let directory = dirname(destination); isContained(paths.projectRoot, directory); directory = dirname(directory)) {
+    await syncDirectory(directory)
+    if (directory === paths.projectRoot) break
   }
   const temporary = `${destination}.${randomBytes(8).toString('hex')}.tmp`
   try {

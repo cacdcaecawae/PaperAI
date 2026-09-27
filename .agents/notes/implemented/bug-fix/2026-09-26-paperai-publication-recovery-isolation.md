@@ -10,9 +10,9 @@ A retained publication may encounter an externally edited Working DOCX or unavai
 
 ## Decision
 
-The [commit service](../../../../packages/paperai/commit-service/README.md) attempts each startup recovery independently and logs failures. It retains unresolved journals and retries recovery at the affected document's FIFO; unrelated documents remain usable. [Import rollback](../../../../packages/paperai/document-service/README.md) refuses any document with a retained publication journal.
+The [commit service](../../../../packages/paperai/commit-service/README.md) attempts each startup recovery independently and logs failures. It retains unresolved journals and retries recovery at the affected document's FIFO; unrelated documents remain usable. The [document service](../../../../packages/paperai/document-service/README.md) writers, import rollback and index rebuild, refuse any document with a retained publication journal with `PUBLICATION_PENDING`.
 
-Publication flushes temporary file bytes before linking snapshots or replacing Working DOCX. Supported platforms sync containing directories and newly created snapshot ancestors. A corrupt regular snapshot can be atomically replaced from caller bytes verified against the same digest. Unknown Working bytes, symlinks, and non-regular snapshots remain protected from automatic replacement. Read-only Project Doctor inspection retains its existing recovery policy.
+Publication flushes temporary file bytes before linking snapshots or replacing Working DOCX. Supported platforms sync containing directories and every snapshot ancestor through the project root, because an existing directory may have been created by a publication that has not synced it yet. A corrupt regular snapshot can be atomically replaced from caller bytes verified against the same digest. Unknown Working bytes, symlinks, and non-regular snapshots remain protected from automatic replacement. Read-only Project Doctor inspection retains its existing recovery policy.
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ Publication flushes temporary file bytes before linking snapshots or replacing W
 
 ## Consequences
 
-Focused recovery tests retain one unrecoverable journal while recovering and committing another document, verify import rollback preserves pending publication data, and exercise snapshot repair and publication flush ordering. Windows flushes file bytes but Node does not support directory fsync there. Unknown publication state still requires repair before that document accepts new work.
+Focused recovery tests retain one unrecoverable journal while recovering and committing another document, verify import rollback and index rebuild preserve pending publication data, sync snapshot ancestors when the bucket already exists, and exercise snapshot repair and publication flush ordering. Windows flushes file bytes but Node does not support directory fsync there. Unknown publication state still requires repair before that document accepts new work.

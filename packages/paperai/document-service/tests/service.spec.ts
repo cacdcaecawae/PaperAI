@@ -330,11 +330,30 @@ describe('PaperDocumentService', () => {
     // Rollback only queries presence; the repository owns validation of the retained journal.
     repo.getCommitPublication.mockReturnValue({ documentId: result.document.id } as DocumentCommitPublication)
     await expect(ctx.paperDocuments.rollbackImport(result.document.id))
-      .rejects.toMatchObject({ code: 'IMPORT_ROLLBACK_FORBIDDEN' })
+      .rejects.toMatchObject({ code: 'PUBLICATION_PENDING' })
     expect(repo.getDocument(result.document.id)).toEqual(result.document)
     expect(repo.listNodes(result.document.id)).toHaveLength(1)
     expect(await readFile(result.document.immutableSourcePath, 'utf8')).toBe('pending')
     expect(await readFile(result.document.workingPath, 'utf8')).toBe('pending')
+  })
+
+  it('refuses to rebuild the index while a publication journal is unresolved', async () => {
+    const { ctx, uploadRoot, projectId, repo, engine } = await fixture()
+    const source = join(uploadRoot, 'pending.docx')
+    await writeFile(source, 'pending')
+    engine.nodes = [{ officePath: '/body/p[1]', text: 'pending', kind: 'paragraph' }]
+    const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'manuscript' })
+    imported(result)
+    const nodes = structuredClone(repo.listNodes(result.document.id))
+    engine.nodes = [
+      { officePath: '/body/p[1]', text: 'rebuilt', kind: 'paragraph' },
+      { officePath: '/body/p[2]', text: 'extra', kind: 'paragraph' },
+    ]
+    repo.getCommitPublication.mockReturnValue({ documentId: result.document.id } as DocumentCommitPublication)
+    await expect(ctx.paperDocuments.rebuildIndex(result.document.id))
+      .rejects.toMatchObject({ code: 'PUBLICATION_PENDING' })
+    expect(repo.getDocument(result.document.id)).toEqual(result.document)
+    expect(repo.listNodes(result.document.id)).toEqual(nodes)
   })
 
   it('retains the import record as a retry receipt when its final deletion fails', async () => {
