@@ -1,0 +1,11 @@
+- group "你的草稿：Draft from deleted parag…":
+  - text: 你的草稿 文档已删除这段，草稿仍可复制或单独丢弃
+  - paragraph: Draft from deleted paragraph
+  - button "复制草稿"
+  - button "放弃这段草稿"
+- group "已修改 2 段":
+  - text: 已修改 2 段 草稿尚未写入文档，关闭或重新载入网页会丢失
+  - alert:
+    - button "1 处冲突"
+  - button "放弃修改"
+  - button "保存"

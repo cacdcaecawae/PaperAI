@@ -1,0 +1,11 @@
+- group "文档现在是这样：Normal text and bold tex…":
+  - text: 文档现在是这样 文档只改了这段的格式，文字和你动笔时一样
+  - paragraph: Normal text and bold text
+  - button "用我的"
+  - button "用文档的"
+- group "已修改 1 段":
+  - text: 已修改 1 段 草稿尚未写入文档，关闭或重新载入网页会丢失
+  - alert:
+    - button "1 处冲突"
+  - button "放弃修改"
+  - button "保存" [disabled]
