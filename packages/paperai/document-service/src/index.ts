@@ -421,6 +421,11 @@ export class PaperDocumentService extends Service {
       const updatedAt = new Date().toISOString()
       const engineNodes = await this.ctx.documentEngine.readTextNodes(document.workingPath, signal)
       const nodes = this.buildIndex(documentId, engineNodes, previous, updatedAt)
+      // A commit may have written its journal during the engine read; refuse before any write.
+      // TODO: this lease does not exclude the commit-service FIFO, so a commit that finishes
+      // during the read, or starts during the writes below, is still overwritten. Fix by sharing
+      // one per-document lease between commit-service and document-service for all writes.
+      this.requireNoPendingPublication(documentId)
       const updatedDocument = await this.persistRebuiltIndex(document, previous, nodes, updatedAt)
       return { document: updatedDocument, nodes }
     })

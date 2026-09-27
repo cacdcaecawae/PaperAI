@@ -44,3 +44,4 @@ PaperAI 文档服务通过 `ctx.paperDocuments` 暴露。它将 Word 源文件�
 - 文本节点读取不能提供完整样式或父级元数据。重建时会为匹配节点保留已有样式，新节点以空样式记录开始。
 - 文件发布与仓库写入不能共享一个文件系统/SQLite 事务。服务先发布文件，并在仓库写入失败时回滚；只有进程恰好在两个持久化点之间崩溃时，才可能留下未被记录引用的文件。
 - 在配置的文档引擎实现 `LegacyDocumentNormalizer` 前，旧版 `.doc` 支持保持降级状态。
+- `rebuildIndex` 只持有 document-service 租约，不在 commit-service 的 FIFO 中排队。它在引擎读取前后都会拒绝已存在的发布日志，但若某次提交在该读取期间完整完成，或在写入重建节点期间开始，其结果仍会被覆盖。根本修复是让 commit-service 与 document-service 对同一文档的所有写入共享同一个按文档划分的租约。

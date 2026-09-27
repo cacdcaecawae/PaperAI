@@ -356,6 +356,28 @@ describe('PaperDocumentService', () => {
     expect(repo.listNodes(result.document.id)).toEqual(nodes)
   })
 
+  it('refuses to persist a rebuild when a publication journal appears during the engine read', async () => {
+    const { ctx, uploadRoot, projectId, repo, engine } = await fixture()
+    const source = join(uploadRoot, 'racing.docx')
+    await writeFile(source, 'racing')
+    engine.nodes = [{ officePath: '/body/p[1]', text: 'racing', kind: 'paragraph' }]
+    const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath: source, role: 'manuscript' })
+    imported(result)
+    const nodes = structuredClone(repo.listNodes(result.document.id))
+    engine.nodes = [{ officePath: '/body/p[1]', text: 'stale read', kind: 'paragraph' }]
+    const original = engine.readTextNodes.bind(engine)
+    engine.readTextNodes = async (path: string) => {
+      const read = await original(path)
+      // A concurrent commit writes its journal while the engine read is in flight.
+      repo.getCommitPublication.mockReturnValue({ documentId: result.document.id } as DocumentCommitPublication)
+      return read
+    }
+    await expect(ctx.paperDocuments.rebuildIndex(result.document.id))
+      .rejects.toMatchObject({ code: 'PUBLICATION_PENDING' })
+    expect(repo.getDocument(result.document.id)).toEqual(result.document)
+    expect(repo.listNodes(result.document.id)).toEqual(nodes)
+  })
+
   it('retains the import record as a retry receipt when its final deletion fails', async () => {
     const { ctx, uploadRoot, projectId, repo, engine } = await fixture()
     const source = join(uploadRoot, '可重试回滚.docx')
