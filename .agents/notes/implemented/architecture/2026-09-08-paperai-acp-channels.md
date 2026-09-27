@@ -32,7 +32,7 @@ Codex-owned terminals report output through tool metadata rather than client ter
 
 Managed npm installations publish a new directory atomically after validation. Cancellation preserves the previous installation. Uninstall targets only the current managed generation; bundled and external installations remain separate. Previous generations remain available for another process that may still own them.
 
-SSH starts an installed adapter on an explicitly configured POSIX host. Launch data goes through stdin, host-key checking is strict, and the session's revocable HTTP MCP endpoint travels over a private reverse tunnel. Remote adapters do not receive local filesystem or terminal callbacks. HTTP MCP falls back to a standard stdio bridge only for local adapters that lack HTTP support.
+SSH starts an installed adapter on an explicitly configured POSIX host. Launch data goes through stdin, host-key checking is strict, and the session's revocable HTTP MCP endpoint travels through a dedicated path-and-token proxy over a reverse tunnel, as defined by [PaperAI output and tunnel confinement](../bug-fix/2026-09-26-paperai-output-and-tunnel-confinement.md). Remote adapters do not receive local filesystem or terminal callbacks. HTTP MCP falls back to a standard stdio bridge only for local adapters that lack HTTP support.
 
 ## Alternatives considered
 
