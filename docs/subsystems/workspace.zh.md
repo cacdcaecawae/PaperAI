@@ -713,7 +713,8 @@ async importDocument(request: ImportDocumentRequest, signal?: AbortSignal): Prom
  * document record last so a failed attempt can be retried with the same identity.
  * @param documentId - identity returned by a successful {@link importDocument} call.
  * @returns after the record, semantic nodes, immutable copy, and Working copy are absent.
- * @throws PaperDocumentError when the record is not a Working import or has acquired a head commit.
+ * @throws PaperDocumentError when a publication journal remains, even without a record,
+ * or the record is not a Working import or has a head.
  */
 async rollbackImport(documentId: DocumentId): Promise<void>
 
@@ -782,7 +783,7 @@ async readParagraphStyles(documentId: DocumentId, signal?: AbortSignal): Promise
  * @param documentId - document identity.
  * @param signal - optional engine cancellation.
  * @returns updated repository snapshot.
- * @throws PaperDocumentError when the document is missing or engine nodes are invalid.
+ * @throws PaperDocumentError when the document is missing, retains a publication journal, or engine nodes are invalid.
  */
 rebuildIndex(documentId: DocumentId, signal?: AbortSignal): Promise<PaperDocumentSnapshot>
 ```

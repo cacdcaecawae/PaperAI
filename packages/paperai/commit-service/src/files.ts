@@ -5,7 +5,9 @@ import {
   link,
   lstat,
   mkdir,
+  open,
   readFile,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -23,6 +25,17 @@ import { PaperCommitError } from './errors.ts'
 
 const PRIVATE_FILE_MODE = 0o600
 const PRIVATE_DIRECTORY_MODE = 0o700
+
+async function syncDirectory(path: string): Promise<void> {
+  // Node cannot open Windows directories for fsync; file data is still flushed before publication.
+  if (process.platform === 'win32') return
+  const handle = await open(path, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
 
 /** Immutable bytes and metadata captured from one regular file. */
 export interface FileImage {
@@ -51,6 +64,43 @@ export function sha256Bytes(bytes: Uint8Array): string {
 function isContained(parent: string, child: string): boolean {
   const path = relative(parent, child)
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+}
+
+/**
+ * Verify a project-owned path and its existing ancestors without following a link outside the project.
+ * @param root - absolute project root.
+ * @param file - absolute artifact path, which may not exist yet.
+ * @returns after all existing ancestors are verified as contained non-symlinks.
+ */
+export async function verifyProjectPath(root: string, file: string): Promise<void> {
+  const base = resolve(root)
+  const target = resolve(file)
+  const suffix = relative(base, target)
+  if (!isAbsolute(file) || suffix === '' || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+    throw new Error('artifact path is outside the project')
+  }
+  const canonicalRoot = await realpath(base)
+  let cursor = target
+  while (cursor !== base) {
+    let info
+    try { info = await lstat(cursor) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    if (info !== undefined) {
+      if (info.isSymbolicLink()) throw new Error('artifact path contains a symbolic link')
+      const actual = relative(canonicalRoot, await realpath(cursor))
+      if (actual === '..' || actual.startsWith(`..${sep}`) || isAbsolute(actual)) throw new Error('artifact resolves outside the project')
+    }
+    cursor = dirname(cursor)
+  }
+}
+
+/** Create the directory for a commit-owned file without letting an ancestor link redirect it outside the project. */
+async function createOwnedDirectory(paths: CommitFilePaths, filePath: string): Promise<void> {
+  await verifyProjectPath(paths.projectRoot, filePath)
+  await mkdir(dirname(filePath), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  // An ancestor may have been swapped for a link while mkdir ran.
+  await verifyProjectPath(paths.projectRoot, filePath)
 }
 
 /**
@@ -112,8 +162,8 @@ export async function readFileImage(
  * @returns the fresh candidate path.
  */
 export async function createCandidateFile(paths: CommitFilePaths, source: Uint8Array): Promise<string> {
-  await mkdir(paths.temporaryRoot, { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
   const candidatePath = join(paths.temporaryRoot, `${randomUUID()}.docx`)
+  await createOwnedDirectory(paths, candidatePath)
   await writeFile(candidatePath, source, { flag: 'wx', mode: PRIVATE_FILE_MODE })
   return candidatePath
 }
@@ -164,16 +214,30 @@ export async function storeSnapshot(
     throw new PaperCommitError('SNAPSHOT_CORRUPT', 'candidate bytes do not match their proposed content address')
   }
   const destination = snapshotPath(paths, digest)
-  await mkdir(dirname(destination), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  await createOwnedDirectory(paths, destination)
+  // A concurrent publication may have created these directories without syncing them yet.
+  for (let directory = dirname(destination); isContained(paths.projectRoot, directory); directory = dirname(directory)) {
+    await syncDirectory(directory)
+    if (directory === paths.projectRoot) break
+  }
   const temporary = `${destination}.${randomBytes(8).toString('hex')}.tmp`
-  await writeFile(temporary, bytes, { flag: 'wx', mode: PRIVATE_FILE_MODE })
   try {
+    await writeFile(temporary, bytes, { flag: 'wx', mode: PRIVATE_FILE_MODE, flush: true })
     try {
       await link(temporary, destination)
     } catch (cause) {
       /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
       if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause
+      try {
+        await verifySnapshot(destination, digest)
+      } catch (error) {
+        if (!(error instanceof PaperCommitError) || error.code !== 'SNAPSHOT_CORRUPT') throw error
+        await verifyProjectPath(paths.projectRoot, destination)
+        if (!(await lstat(destination)).isFile()) throw error
+        await rename(temporary, destination)
+      }
     }
+    await syncDirectory(dirname(destination))
   } finally {
     await rm(temporary, { force: true })
   }
@@ -217,16 +281,19 @@ export async function readSnapshot(
 }
 
 /**
- * Atomically replace a non-symlink regular file with complete binary content.
- * @param filePath - exact existing destination path.
+ * Atomically replace the Working DOCX, a non-symlink regular file, with complete binary content.
+ * @param paths - validated commit-owned paths; the Working DOCX and its ancestors must stay inside the project.
  * @param bytes - complete replacement bytes.
  * @param mode - permission bits for the fresh replacement inode.
  */
 export async function replaceRegularFile(
-  filePath: string,
+  paths: CommitFilePaths,
   bytes: Uint8Array,
   mode: number,
 ): Promise<void> {
+  const filePath = paths.workingPath
+  // A linked ancestor would redirect both the temporary write and the rename outside the project.
+  await verifyProjectPath(paths.projectRoot, filePath)
   const before = await lstat(filePath)
   if (!before.isFile() || before.isSymbolicLink()) {
     throw new PaperCommitError(
@@ -236,8 +303,9 @@ export async function replaceRegularFile(
   }
   const temporary = `${filePath}.${randomBytes(8).toString('hex')}.paperai.tmp`
   try {
-    await writeFile(temporary, bytes, { flag: 'wx', mode })
+    await writeFile(temporary, bytes, { flag: 'wx', mode, flush: true })
     await rename(temporary, filePath)
+    await syncDirectory(dirname(filePath))
   } finally {
     await rm(temporary, { force: true })
   }

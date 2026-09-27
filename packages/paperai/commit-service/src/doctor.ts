@@ -1,42 +1,13 @@
 /** Read-only project integrity diagnostics and revision-bound recovery plans. */
 
-import { lstat, realpath } from 'node:fs/promises'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { lstat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import type { DocumentId, ProjectRecord } from '@paperai/domain'
 import type PaperRepository from '@paperai/repository'
-import { readFileImage, readSnapshot, resolveCommitFilePaths } from './files.ts'
+import { readFileImage, readSnapshot, resolveCommitFilePaths, verifyProjectPath } from './files.ts'
 
 import type { ProjectIntegrityIssue, ProjectIntegrityReport, WorkingRecoveryPlan } from './doctor-types.ts'
 export type { ProjectIntegrityIssue, ProjectIntegrityReport, WorkingRecoveryPlan } from './doctor-types.ts'
-
-/**
- * Verify a project-owned path and its existing ancestors without following a link outside the project.
- * @param root - absolute project root.
- * @param file - absolute artifact path, which may not exist yet.
- * @returns after all existing ancestors are verified as contained non-symlinks.
- */
-export async function verifyProjectPath(root: string, file: string): Promise<void> {
-  const base = resolve(root)
-  const target = resolve(file)
-  const suffix = relative(base, target)
-  if (!isAbsolute(file) || suffix === '' || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
-    throw new Error('artifact path is outside the project')
-  }
-  const canonicalRoot = await realpath(base)
-  let cursor = target
-  while (cursor !== base) {
-    let info
-    try { info = await lstat(cursor) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    if (info !== undefined) {
-      if (info.isSymbolicLink()) throw new Error('artifact path contains a symbolic link')
-      const actual = relative(canonicalRoot, await realpath(cursor))
-      if (actual === '..' || actual.startsWith(`..${sep}`) || isAbsolute(actual)) throw new Error('artifact resolves outside the project')
-    }
-    cursor = dirname(cursor)
-  }
-}
 
 /**
  * Read document ownership, immutable sources, working bytes, and all retained snapshots.
