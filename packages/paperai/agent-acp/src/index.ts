@@ -496,7 +496,7 @@ export class PaperAiAcpAgents extends Service {
       if (id !== except && matches(agent.session.events, agent.session.header.seedLength ?? 0)) return id
     const persistence = this.ctx.get('sessionPersistence')
     if (persistence === undefined) return null
-    // ponytail: explicit imports scan stored logs; add a persisted index if history size makes this operation slow.
+    // TODO: explicit imports scan stored logs; add a persisted index if history size makes this operation slow.
     for (const header of await persistence.list(signal)) {
       if (
         header.id === except ||
