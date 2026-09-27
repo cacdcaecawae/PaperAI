@@ -38,9 +38,10 @@ import {
   replaceRegularFile,
   resolveCommitFilePaths,
   storeSnapshot,
+  verifyProjectPath,
 } from './files.ts'
 import type { CommitFilePaths, FileImage } from './files.ts'
-import { inspectProject, verifyProjectPath, type ProjectIntegrityReport, type WorkingRecoveryPlan } from './doctor.ts'
+import { inspectProject, type ProjectIntegrityReport, type WorkingRecoveryPlan } from './doctor.ts'
 export type { ProjectIntegrityReport, ProjectIntegrityIssue, WorkingRecoveryPlan } from './doctor.ts'
 import {
   DocumentHeadConflictError,

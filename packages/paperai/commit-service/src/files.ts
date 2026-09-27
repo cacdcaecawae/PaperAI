@@ -7,6 +7,7 @@ import {
   mkdir,
   open,
   readFile,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -63,6 +64,43 @@ export function sha256Bytes(bytes: Uint8Array): string {
 function isContained(parent: string, child: string): boolean {
   const path = relative(parent, child)
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+}
+
+/**
+ * Verify a project-owned path and its existing ancestors without following a link outside the project.
+ * @param root - absolute project root.
+ * @param file - absolute artifact path, which may not exist yet.
+ * @returns after all existing ancestors are verified as contained non-symlinks.
+ */
+export async function verifyProjectPath(root: string, file: string): Promise<void> {
+  const base = resolve(root)
+  const target = resolve(file)
+  const suffix = relative(base, target)
+  if (!isAbsolute(file) || suffix === '' || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+    throw new Error('artifact path is outside the project')
+  }
+  const canonicalRoot = await realpath(base)
+  let cursor = target
+  while (cursor !== base) {
+    let info
+    try { info = await lstat(cursor) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    if (info !== undefined) {
+      if (info.isSymbolicLink()) throw new Error('artifact path contains a symbolic link')
+      const actual = relative(canonicalRoot, await realpath(cursor))
+      if (actual === '..' || actual.startsWith(`..${sep}`) || isAbsolute(actual)) throw new Error('artifact resolves outside the project')
+    }
+    cursor = dirname(cursor)
+  }
+}
+
+/** Create the directory for a commit-owned file without letting an ancestor link redirect it outside the project. */
+async function createOwnedDirectory(paths: CommitFilePaths, filePath: string): Promise<void> {
+  await verifyProjectPath(paths.projectRoot, filePath)
+  await mkdir(dirname(filePath), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  // An ancestor may have been swapped for a link while mkdir ran.
+  await verifyProjectPath(paths.projectRoot, filePath)
 }
 
 /**
@@ -124,8 +162,8 @@ export async function readFileImage(
  * @returns the fresh candidate path.
  */
 export async function createCandidateFile(paths: CommitFilePaths, source: Uint8Array): Promise<string> {
-  await mkdir(paths.temporaryRoot, { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
   const candidatePath = join(paths.temporaryRoot, `${randomUUID()}.docx`)
+  await createOwnedDirectory(paths, candidatePath)
   await writeFile(candidatePath, source, { flag: 'wx', mode: PRIVATE_FILE_MODE })
   return candidatePath
 }
@@ -176,7 +214,7 @@ export async function storeSnapshot(
     throw new PaperCommitError('SNAPSHOT_CORRUPT', 'candidate bytes do not match their proposed content address')
   }
   const destination = snapshotPath(paths, digest)
-  await mkdir(dirname(destination), { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  await createOwnedDirectory(paths, destination)
   // A concurrent publication may have created these directories without syncing them yet.
   for (let directory = dirname(destination); isContained(paths.projectRoot, directory); directory = dirname(directory)) {
     await syncDirectory(directory)
@@ -194,8 +232,8 @@ export async function storeSnapshot(
         await verifySnapshot(destination, digest)
       } catch (error) {
         if (!(error instanceof PaperCommitError) || error.code !== 'SNAPSHOT_CORRUPT') throw error
-        const existing = await lstat(destination)
-        if (!existing.isFile() || existing.isSymbolicLink()) throw error
+        await verifyProjectPath(paths.projectRoot, destination)
+        if (!(await lstat(destination)).isFile()) throw error
         await rename(temporary, destination)
       }
     }

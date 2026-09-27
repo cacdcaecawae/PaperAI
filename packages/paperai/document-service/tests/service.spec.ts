@@ -337,6 +337,17 @@ describe('PaperDocumentService', () => {
     expect(await readFile(result.document.workingPath, 'utf8')).toBe('pending')
   })
 
+  it('refuses to report a missing import as rolled back while its publication journal remains', async () => {
+    const { ctx, repo } = await fixture()
+    const documentId = DocumentId('journal-without-record')
+    // Startup recovery retains a journal whose document record is missing.
+    repo.getCommitPublication.mockImplementation(() => ({ documentId } as DocumentCommitPublication))
+    await expect(ctx.paperDocuments.rollbackImport(documentId))
+      .rejects.toMatchObject({ code: 'PUBLICATION_PENDING' })
+    repo.getCommitPublication.mockImplementation(() => undefined)
+    await expect(ctx.paperDocuments.rollbackImport(documentId)).resolves.toBeUndefined()
+  })
+
   it('refuses to rebuild the index while a publication journal is unresolved', async () => {
     const { ctx, uploadRoot, projectId, repo, engine } = await fixture()
     const source = join(uploadRoot, 'pending.docx')

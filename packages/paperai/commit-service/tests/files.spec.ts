@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { link, mkdtemp, mkdir, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, mkdtemp, mkdir, open, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PaperCommitError } from '../src/errors.ts'
 import {
@@ -154,15 +154,50 @@ describe('commit-service file operations', () => {
     expect((await readSnapshot(fixture.paths, snapshot, digest)).bytes).toEqual(bytes)
   })
 
-  it('does not repair a snapshot symlink or replace its target', async () => {
+  it('does not repair a snapshot symlink or directory, or replace a link target', async () => {
     const fixture = await fileFixture()
     const bytes = Buffer.from('snapshot')
     const digest = sha256Bytes(bytes)
     const snapshot = await storeSnapshot(fixture.paths, bytes, digest)
     await rm(snapshot)
     await symlink(fixture.workingPath, snapshot, 'file')
-    await expect(storeSnapshot(fixture.paths, bytes, digest)).rejects.toThrow('non-symlink regular file')
+    await expect(storeSnapshot(fixture.paths, bytes, digest)).rejects.toThrow('symbolic link')
     expect(await readFile(fixture.workingPath, 'utf8')).toBe('alpha')
+    await rm(snapshot)
+    await mkdir(snapshot)
+    await expect(storeSnapshot(fixture.paths, bytes, digest)).rejects.toThrow('non-symlink regular file')
+    expect(await readdir(snapshot)).toEqual([])
+  })
+
+  it.each(['.paperai', 'objects/docx', 'digest bucket'] as const)('does not create or repair a snapshot through a linked %s outside the project', async (ancestor) => {
+    const fixture = await fileFixture()
+    const outside = await mkdtemp(join(tmpdir(), 'paperai-commit-outside-'))
+    roots.push(outside)
+    const bytes = Buffer.from('snapshot')
+    const digest = sha256Bytes(bytes)
+    const destination = join(fixture.paths.objectRoot, digest.slice(0, 2), `${digest}.docx`)
+    const linked = ancestor === '.paperai'
+      ? join(fixture.root, '.paperai')
+      : ancestor === 'objects/docx' ? fixture.paths.objectRoot : dirname(destination)
+    // The outside file sits where the linked ancestor would place the corrupt snapshot.
+    const victim = join(outside, relative(linked, destination))
+    await mkdir(dirname(victim), { recursive: true })
+    await writeFile(victim, 'outside', 'utf8')
+    await mkdir(dirname(linked), { recursive: true })
+    // A junction needs no privilege on Windows; POSIX ignores the type and creates a directory symlink.
+    await symlink(outside, linked, 'junction')
+    await expect(storeSnapshot(fixture.paths, bytes, digest)).rejects.toThrow(/symbolic link|outside the project/)
+    expect(await readFile(victim, 'utf8')).toBe('outside')
+    expect(await readdir(dirname(victim))).toEqual([`${digest}.docx`])
+  })
+
+  it('does not stage a candidate through a linked metadata directory outside the project', async () => {
+    const fixture = await fileFixture()
+    const outside = await mkdtemp(join(tmpdir(), 'paperai-commit-outside-'))
+    roots.push(outside)
+    await symlink(outside, join(fixture.root, '.paperai'), 'junction')
+    await expect(createCandidateFile(fixture.paths, Buffer.from('candidate'))).rejects.toThrow('symbolic link')
+    expect(await readdir(outside)).toEqual([])
   })
 
   it('atomically replaces regular files and refuses a directory target', async () => {

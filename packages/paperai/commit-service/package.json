@@ -46,11 +46,20 @@
     "@paperai/template-service": "workspace:*"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/cordis-plugin-include": "workspace:^",
+    "@deepseek-ai/cordis-plugin-loader": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-storage": "workspace:^",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/dsh-storage-sqlite": "workspace:^",
+    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "@deepseek-ai/dsh-workspace": "workspace:^",
     "@paperai/document-engine": "workspace:*",
+    "@paperai/document-service": "workspace:*",
     "@paperai/domain": "workspace:*",
-    "@paperai/repository": "workspace:*"
+    "@paperai/project-service": "workspace:*",
+    "@paperai/repository": "workspace:*",
+    "@paperai/template-service": "workspace:*"
   }
 }

@@ -265,13 +265,15 @@ export class PaperDocumentService extends Service {
    * document record last so a failed attempt can be retried with the same identity.
    * @param documentId - identity returned by a successful {@link importDocument} call.
    * @returns after the record, semantic nodes, immutable copy, and Working copy are absent.
-   * @throws PaperDocumentError when the record is not a Working import, has a head, or retains a publication journal.
+   * @throws PaperDocumentError when a publication journal remains, even without a record,
+   * or the record is not a Working import or has a head.
    */
   async rollbackImport(documentId: DocumentId): Promise<void> {
     await this.withDocumentLease(documentId, async () => {
+      // A journal can outlive its record; only an absent journal makes a missing record idempotent.
+      this.requireNoPendingPublication(documentId)
       const current = this.ctx.paperRepository.getDocument(documentId)
       if (current === undefined) return
-      this.requireNoPendingPublication(documentId)
       if (current.documentKind !== 'working' || current.headCommitId !== undefined) {
         throw new PaperDocumentError(
           `PaperAI import '${String(documentId)}' is not an uncommitted Working document`,

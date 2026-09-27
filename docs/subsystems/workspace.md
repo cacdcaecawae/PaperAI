@@ -713,7 +713,8 @@ async importDocument(request: ImportDocumentRequest, signal?: AbortSignal): Prom
  * document record last so a failed attempt can be retried with the same identity.
  * @param documentId - identity returned by a successful {@link importDocument} call.
  * @returns after the record, semantic nodes, immutable copy, and Working copy are absent.
- * @throws PaperDocumentError when the record is not a Working import, has a head, or retains a publication journal.
+ * @throws PaperDocumentError when a publication journal remains, even without a record,
+ * or the record is not a Working import or has a head.
  */
 async rollbackImport(documentId: DocumentId): Promise<void>
 
