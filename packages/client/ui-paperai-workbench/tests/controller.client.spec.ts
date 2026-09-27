@@ -730,6 +730,33 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     controller.dispose()
   })
 
+  it.each([false, true])('fetches a render held back by composition once it ends (draft published: %s)', async (drafted) => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed text' })
+    await controller.commitEdit(SESSION_ID)
+    const patched = store.getSnapshot().document?.previewHtml
+    controller.setComposing(SESSION_ID, true)
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Held back</p>' }) })
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+    vi.mocked(remote.open).mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
+    if (drafted) controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Composed phrase' })
+    controller.setComposing(SESSION_ID, false)
+    if (drafted) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(remote.open).toHaveBeenCalledOnce()
+      expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+    }
+    else await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe('<p>Fresh render</p>') })
+    controller.dispose()
+  })
+
   it('records an outside working edit as a version and reopens the document with the draft kept', async () => {
     const remote = successfulRemote()
     const { controller, store } = await openedController(remote)

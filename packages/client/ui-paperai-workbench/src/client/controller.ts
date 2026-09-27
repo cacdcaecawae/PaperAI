@@ -153,6 +153,8 @@ export class PaperAIWorkbenchController {
   private readonly composing = new Map<SessionId, PaperAIDocumentSnapshot>()
   /** Sessions whose reconnect read arrived during composition. */
   private readonly reconnectReads = new Set<SessionId>()
+  /** Each Session's commit whose deferred render arrived while its document was composing, so was not shown. */
+  private readonly composedRenders = new Map<SessionId, PaperAIDocumentSnapshot>()
   private readonly targets = new Map<SessionId, {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
@@ -471,6 +473,7 @@ export class PaperAIWorkbenchController {
     if (active && state.document !== null) this.composing.set(sessionId, state.document)
     else this.composing.delete(sessionId)
     this.syncUnloadGuard()
+    if (!active) this.retryComposedRender(sessionId)
     if (!active && this.reconnectReads.delete(sessionId)) this.refreshSession(sessionId)
     else if (!active && state.externalUpdate !== null && state.action === null && !hasUnsavedEdit(state)) {
       void this.reloadExternal(sessionId)
@@ -588,7 +591,9 @@ export class PaperAIWorkbenchController {
     const { store } = this.workbenchEntry(sessionId)
     const snapshot = store.getSnapshot()
     const open = snapshot.document
-    // updateDraft's own guard: where it does nothing, neither does this.
+    // Mirrors updateDraft's guard outside a composition. During one, updateDraft also takes a report while an action
+    // runs, reading nodes and revision from the composition snapshot; skipping it here loses nothing, because a
+    // composing report never matches a set-aside draft, which needs back.revision === open.revision.
     if (snapshot.phase !== 'ready' || snapshot.action !== null || open === null) return false
     const current = snapshot.edits.find(edit => edit.nodeId === nodeId)
     const kept = this.abandoned.get(sessionId) ?? new Map<string, SetAsideDraft>()
@@ -1118,6 +1123,7 @@ export class PaperAIWorkbenchController {
     this.disposed = true
     this.composing.clear()
     this.reconnectReads.clear()
+    this.composedRenders.clear()
     for (const entry of this.projects.values()) entry.abort?.abort()
     this.library.abort?.abort()
     for (const entry of this.workbenches.values()) entry.abort?.abort()
@@ -1385,13 +1391,36 @@ export class PaperAIWorkbenchController {
       if (fresh.documentId !== committed.documentId || fresh.resourceId !== committed.resourceId
         || fresh.workspaceId !== committed.workspaceId || fresh.sessionId !== committed.sessionId) return
       if (fresh.revision === committed.revision) {
+        const composing = this.composing.get(committed.sessionId)?.documentId === committed.documentId
+        if (composing) this.composedRenders.set(committed.sessionId, committed)
         view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
-          ...(view.edits.length === 0 && this.composing.get(committed.sessionId)?.documentId !== committed.documentId
-            ? { previewHtml: fresh.previewHtml } : {}) }
+          ...(view.edits.length === 0 && !composing ? { previewHtml: fresh.previewHtml } : {}) }
       } else if (fresh.headCommitId !== view.document.headCommitId) {
         view.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
       }
     })
+  }
+
+  /**
+   * Fetch again the render `refreshPreview` held back from a composing document, once the phrase is done.
+   * A phrase that left a draft keeps the patched page until its own save renders; one that changed nothing
+   * would otherwise keep it until some later read.
+   */
+  private retryComposedRender(sessionId: SessionId): void {
+    const committed = this.composedRenders.get(sessionId)
+    if (committed === undefined) return
+    this.composedRenders.delete(sessionId)
+    const entry = this.workbenchEntry(sessionId)
+    const state = entry.store.getSnapshot()
+    const view = state.document?.documentId === committed.documentId ? state
+      : state.retained.find(retained => retained.document?.documentId === committed.documentId)
+    if (view?.document?.revision !== committed.revision || view.edits.length > 0) return
+    entry.store.update((draft) => {
+      const target = draft.document?.documentId === committed.documentId ? draft
+        : draft.retained.find(retained => retained.document?.documentId === committed.documentId)
+      if (target !== undefined) target.previewLoading = true
+    })
+    void this.refreshPreview(entry, committed)
   }
 
   /** Settle a failed action on either store kind: clear the action, keep the reason for the view. */
