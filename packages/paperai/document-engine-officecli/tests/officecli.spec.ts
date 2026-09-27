@@ -9,6 +9,7 @@ import type {
   SubprocessOutputRead,
   SubprocessSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
+import type { EngineMutation } from '@paperai/document-engine'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OfficeCliDocumentEngine, OfficeCliError, officeCliBin } from '../src/index.ts'
 
@@ -183,12 +184,12 @@ describe('OfficeCliDocumentEngine', () => {
       .toEqual(['First', 'InSdt', 'Third edited', 'Inserted', 'Fifth'])
   })
 
-  it.each(['replace-text', 'remove', 'insert-paragraph'] as const)
-  ('rejects %s when indexed whitespace or text differs from the actual target before sending a write', async (type) => {
+  it.each<EngineMutation>([
+    { type: 'replace-text', officePath: '/body/p[1]', baseText: 'original', text: 'edited' },
+    { type: 'remove', officePath: '/body/p[1]', baseText: 'original' },
+    { type: 'insert-paragraph', after: '/body/p[1]', baseText: 'original', text: 'inserted' },
+  ])('rejects $type when indexed whitespace or text differs from the actual target before sending a write', async (mutation) => {
     const test = xmlFixture(paragraphXml('　　original\ntail'))
-    const mutation = type === 'insert-paragraph'
-      ? { type, after: '/body/p[1]', baseText: 'original', text: 'inserted' }
-      : { type, officePath: '/body/p[1]', baseText: 'original', text: 'edited' }
     await expect(test.engine.applyMutations('paper.docx', [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
     expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
     expect(test.batches).toEqual([])
@@ -196,9 +197,10 @@ describe('OfficeCliDocumentEngine', () => {
 
   it('refuses an insertion anchor without indexed text', async () => {
     const test = xmlFixture(paragraphXml('original'))
-    await expect(test.engine.applyMutations('paper.docx', [
-      { type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' },
-    ])).rejects.toThrow('NODE_TEXT_CONFLICT')
+    // Statically rejected (anchored insertions require baseText); the runtime check stays for dynamic callers.
+    // @ts-expect-error an insertion anchor requires baseText
+    const mutation: EngineMutation = { type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' }
+    await expect(test.engine.applyMutations('paper.docx', [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
     expect(test.batches).toEqual([])
   })
 

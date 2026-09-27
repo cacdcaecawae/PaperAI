@@ -180,6 +180,24 @@ export function paragraphText(paragraph: XmlElement): string {
   return projection(paragraph).characters.map(character => character.text).join('')
 }
 
+/**
+ * Read a paragraph's text as OfficeCLI's text view indexes it, without requiring the paragraph to be editable.
+ * @param paragraph - Word paragraph that a removal or insertion identifies but does not rewrite.
+ * @returns text, tabs, and soft breaks of runs placed directly in the paragraph or in a hyperlink, smart tag,
+ * custom XML, or inserted-revision wrapper; field codes, deleted text, and other content contribute nothing.
+ */
+export function indexedParagraphText(paragraph: XmlElement): string {
+  return children(paragraph).flatMap(node => node.namespaceURI !== W ? []
+    : node.localName === 'r' ? [node]
+      : ['hyperlink', 'smartTag', 'customXml', 'ins', 'moveTo'].includes(node.localName ?? '')
+        ? children(node).filter(run => run.namespaceURI === W && run.localName === 'r') : [])
+    .flatMap(run => children(run)).map(inline => inline.namespaceURI !== W ? ''
+      : inline.localName === 't' ? inline.textContent ?? ''
+        : inline.localName === 'tab' ? '\t'
+          : inline.localName === 'br' && ['', 'textWrapping'].includes(inline.getAttributeNS(W, 'type') ?? '') ? '\v' : '')
+    .join('')
+}
+
 function runCopy(paragraph: XmlElement, source: XmlElement | undefined, format?: EngineTextRun): XmlElement {
   const run = source === undefined ? element(paragraph, 'r') : clone(source, false)
   const props = source === undefined ? child(child(paragraph, 'pPr') ?? paragraph, 'rPr') : child(source, 'rPr')
@@ -202,27 +220,33 @@ function appendText(run: XmlElement, text: string): void {
 
 /**
  * Edit original text and explicit formatting while retaining opaque run properties and range markers.
- * @param paragraph - original bound paragraph; its object identity remains intact for later mutations.
- * @param mutation - replacement text, optional character overrides, and optional paragraph splits.
+ * @param group - original bound paragraph, followed by any paragraphs an earlier replacement split from it;
+ * the first keeps its object identity for later mutations.
+ * @param mutation - replacement for the group's line-feed-joined text, optional character overrides, and optional paragraph splits.
  * @param resolveStyle - resolve explicit paragraph style names through the document's styles.
- * @throws before writing when the paragraph contains unprojected editable objects.
+ * @returns the paragraphs holding the replacement, starting with the original.
+ * @throws before writing when a paragraph contains unprojected editable objects.
  */
 export function replaceParagraphXml(
-  paragraph: XmlElement,
+  group: readonly [XmlElement, ...XmlElement[]],
   mutation: Extract<EngineMutation, { type: 'replace-text' }>,
   resolveStyle: (name: string) => string,
-): void {
+): readonly [XmlElement, ...XmlElement[]] {
+  const [paragraph] = group
   const replacements = mutation.paragraphs ?? splitReplacement(mutation)
   const first = replacements[0] as DocumentParagraph
-  if (replacements.length === 1 && first.runs === undefined) {
-    const current = projection(paragraph)
-    if (current.characters.map(item => item.text).join('') === first.text) {
-      formatParagraph(paragraph, first.format ?? {}, resolveStyle)
-      return
-    }
+  const original: Character[] = []
+  const markers: Marker[] = []
+  for (const [index, part] of group.map(projection).entries()) {
+    if (index > 0) original.push({ text: '\n', run: original.at(-1)?.run })
+    markers.push(...part.markers.map(marker => ({ ...marker, offset: marker.offset + original.length })))
+    original.push(...part.characters)
   }
-  const { characters: original, markers } = projection(paragraph)
-  const emptyRun = children(paragraph).findLast(node => node.namespaceURI === W && node.localName === 'r')
+  if (replacements.length === 1 && first.runs === undefined && original.map(item => item.text).join('') === first.text) {
+    formatParagraph(paragraph, first.format ?? {}, resolveStyle)
+    return group
+  }
+  const emptyRun = group.flatMap(children).findLast(node => node.namespaceURI === W && node.localName === 'r')
   const text = replacements.map(item => item.text).join('\n')
   const characters: Character[] = []
   const left: number[] = [0]
@@ -257,16 +281,24 @@ export function replaceParagraphXml(
   const skeleton = clone(paragraph, false)
   skeleton.removeAttributeNS(W14, 'paraId')
   skeleton.removeAttributeNS(W14, 'textId')
-  const originalProperties = child(paragraph, 'pPr')
-  const paragraphProperties = originalProperties === undefined ? undefined : clone(originalProperties, true)
-  const section = paragraphProperties === undefined ? undefined : child(paragraphProperties, 'sectPr')
-  if (section !== undefined) (paragraphProperties as XmlElement).removeChild(section)
+  // An earlier split left any section boundary on the group's last paragraph.
+  const lastProperties = child(group.at(-1) as XmlElement, 'pPr')
+  const section = lastProperties === undefined ? undefined : child(lastProperties, 'sectPr')
+  if (section !== undefined) (lastProperties as XmlElement).removeChild(section)
+  // Each resulting paragraph takes the properties of the group paragraph at its position, or of the last one.
+  const properties = group.map(item => child(item, 'pPr')).map(props => props === undefined ? undefined : clone(props, true))
   for (const node of Array.from(paragraph.childNodes)) paragraph.removeChild(node)
+  for (const node of group.slice(1)) (node.parentNode as XmlNode).removeChild(node)
+  const targets: [XmlElement, ...XmlElement[]] = [paragraph]
   let start = 0
   let previous = paragraph
   for (const [index, replacement] of replacements.entries()) {
     const target = index === 0 ? paragraph : clone(skeleton, false)
-    if (index > 0) (previous.parentNode as XmlNode).insertBefore(target, previous.nextSibling)
+    if (index > 0) {
+      (previous.parentNode as XmlNode).insertBefore(target, previous.nextSibling)
+      targets.push(target)
+    }
+    const paragraphProperties = properties[Math.min(index, properties.length - 1)]
     if (paragraphProperties !== undefined) target.appendChild(paragraphProperties.cloneNode(true))
     if (section !== undefined && index === replacements.length - 1) {
       const props = ensureProperties(target, 'pPr')
@@ -318,6 +350,7 @@ export function replaceParagraphXml(
     start += length + 1
     previous = target
   }
+  return targets
 }
 
 function splitReplacement(mutation: Extract<EngineMutation, { type: 'replace-text' }>): DocumentParagraph[] {

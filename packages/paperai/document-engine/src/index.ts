@@ -37,11 +37,13 @@ export interface EngineTextRun {
 
 /**
  * Ordered mutations identify original nodes; insertion indices address the current body.
- * baseText must match the target (or insertion anchor) before that step.
+ * baseText must match the target (or insertion anchor) before that step; an index or append insertion has no anchor.
  */
 export type EngineMutation =
   | { type: 'replace-text'; officePath: string; baseText: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }
-  | { type: 'insert-paragraph'; text: string; style?: string; after?: string; before?: string; baseText?: string; index?: number }
+  | { type: 'insert-paragraph'; text: string; style?: string; after: string; before?: never; index?: never; baseText: string }
+  | { type: 'insert-paragraph'; text: string; style?: string; before: string; after?: never; index?: never; baseText: string }
+  | { type: 'insert-paragraph'; text: string; style?: string; index?: number; after?: never; before?: never; baseText?: never }
   | { type: 'remove'; officePath: string; baseText: string }
 
 /** Validation payload intentionally retains OfficeCLI's structured evidence. */

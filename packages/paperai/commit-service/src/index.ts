@@ -615,8 +615,8 @@ export class PaperCommitService extends Service {
             type: 'insert-paragraph',
             text: mutation.text,
             ...(mutation.style === undefined ? {} : { style: mutation.style }),
-            ...(after === undefined ? {} : { after: after.officePath, baseText: after.text }),
-            ...(before === undefined ? {} : { before: before.officePath, baseText: before.text }),
+            ...(after !== undefined ? { after: after.officePath, baseText: after.text }
+              : before !== undefined ? { before: before.officePath, baseText: before.text } : {}),
           })
           operations.push({
             type: mutation.type,

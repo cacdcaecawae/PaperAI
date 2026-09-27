@@ -8,6 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { DOMParser, XMLSerializer, onWarningStopParsing } from '@xmldom/xmldom'
 import type { Document as XmlDocument, Element as XmlElement, Node as XmlNode } from '@xmldom/xmldom'
+import type { EngineMutation } from '@paperai/document-engine'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { OfficeCliDocumentEngine } from '../src/index.ts'
 
@@ -157,10 +158,12 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
       ]
     `)
     const savedBytes = await readFile(file)
-    for (const type of ['replace-text', 'remove', 'insert-paragraph'] as const) {
-      const mutation = type === 'insert-paragraph'
-        ? { type, after: '/body/p[3]', baseText: 'Third', text: 'wrong' }
-        : { type, officePath: '/body/p[3]', baseText: 'Third', text: 'wrong' }
+    const stale: EngineMutation[] = [
+      { type: 'replace-text', officePath: '/body/p[3]', baseText: 'Third', text: 'wrong' },
+      { type: 'remove', officePath: '/body/p[3]', baseText: 'Third' },
+      { type: 'insert-paragraph', after: '/body/p[3]', baseText: 'Third', text: 'wrong' },
+    ]
+    for (const mutation of stale) {
       await expect(ctx.documentEngine.applyMutations(file, [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
       expect(await readFile(file)).toEqual(savedBytes)
     }
@@ -343,6 +346,26 @@ describe.skipIf(process.env.DSH_PAPERAI_OFFICECLI_REAL !== '1')('native OfficeCL
     await expect(ctx.documentEngine.applyMutations(file, [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[4]', text: '改动域' }]))
       .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
     expect(canonical((await raw()).documentElement!)).toEqual(canonical(updated.documentElement!))
+    await ctx.documentEngine.release(file)
+  }, 120_000)
+
+  it('matches indexed text through hyperlinks and field results, and keeps a split paragraph one node for later steps', async () => {
+    await setBody(`<w:body xmlns:w="${WORD}"><w:p><w:r><w:t xml:space="preserve">see </w:t></w:r>`
+      + '<w:hyperlink w:anchor="ref"><w:r><w:t>link</w:t></w:r></w:hyperlink><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+      + '<w:r><w:instrText> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>[1]</w:t></w:r>'
+      + '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p><w:p><w:hyperlink w:anchor="ref"><w:r><w:t>second link</w:t></w:r></w:hyperlink></w:p>'
+      + '<w:p><w:r><w:t>alpha</w:t></w:r></w:p><w:sectPr/></w:body>')
+    const nodes = await ctx.documentEngine.readTextNodes(file)
+    expect(nodes.map(node => node.text)).toEqual(['see link[1]', 'second link', 'alpha'])
+    await ctx.documentEngine.applyMutations(file, [
+      { type: 'insert-paragraph', after: '/body/p[1]', baseText: 'see link[1]', text: 'inserted' },
+      { type: 'remove', officePath: '/body/p[2]', baseText: 'second link' },
+      { type: 'replace-text', officePath: '/body/p[3]', baseText: 'alpha', text: 'first\nsecond' },
+      { type: 'insert-paragraph', after: '/body/p[3]', baseText: 'first\nsecond', text: 'after split' },
+      { type: 'replace-text', officePath: '/body/p[3]', baseText: 'first\nsecond', text: 'first\nsecond!' },
+    ])
+    expect((await ctx.documentEngine.readTextNodes(file)).map(node => node.text))
+      .toEqual(['see link[1]', 'inserted', 'first', 'second!', 'after split'])
     await ctx.documentEngine.release(file)
   }, 120_000)
 })

@@ -12,7 +12,7 @@ Rebuilding a paragraph from the browser's editable fields loses Word properties 
 
 The OfficeCLI Provider reads document XML once under its existing file lease and binds every original Office path to an XML node before applying mutations in caller order. References stay attached through insertions and splits; using a removed node rejects the batch before writing. Workbench, direct service, and MCP callers share this rule regardless of ordering or `paraId` availability.
 
-The text index uses OfficeCLI's JSON output so whitespace and literal newlines remain data rather than record separators. Numeric body counters include first-level content-control children; unqualified body paths cannot bind to those children. Every targeted mutation carries the indexed original text and compares it with the bound XML before editing. An index-only comparison cannot detect parser loss or an incorrectly resolved address. A mismatch rejects the entire write batch, including deletions and anchored insertions.
+The text index uses OfficeCLI's JSON output so whitespace and literal newlines remain data rather than record separators. Numeric body counters include first-level content-control children; unqualified body paths cannot bind to those children. Every targeted mutation carries the indexed original text and compares it with the bound XML before editing. An index-only comparison cannot detect parser loss or an incorrectly resolved address. A mismatch rejects the entire write batch, including deletions and anchored insertions. Replacement compares the editor's projection. Removals and anchors do not rewrite the anchor's inline content, so they compare a read-only projection that matches OfficeCLI's index through hyperlinks, smart tags, custom XML, and inserted revisions. A paragraph split earlier in the batch stays one node: later checks join its paragraphs with line feeds, as the commit service records the replacement text, and removal, anchoring, and further replacement act on the whole group.
 
 Character differences reuse original run properties for surviving text. Insertions inherit nearby properties, replacements inherit the start of the replaced range, and empty paragraphs retain a character seed. Explicit formatting overrides represented fields; omitted fields retain metadata. The [format-intent decision](2026-09-13-paperai-rendered-format-intent.md) owns which browser readings become explicit overrides. Bookmarks and pagination markers retain text-relative positions; split paragraphs inherit layout, with section properties on the final replacement. Unsupported editable objects still reject replacement.
 
@@ -30,13 +30,15 @@ This partially supersedes engine reconstruction and run inheritance in [characte
 
 **Read again after each structural operation.** Repeated parsing adds latency and still needs original identity tracking. One bound projection meets both requirements without a long-lived cache.
 
+**Reject later references to a split paragraph when compiling the batch.** This is simpler but refuses valid sequential edits, such as splitting a paragraph and then inserting after it; tracking the resulting group keeps them working.
+
 <a id="word-edit-tests"></a>
 
 ## Testing
 
 Unit tests verify metadata mapping, empty paragraph inheritance, explicit clearing, markers, section order, original-node references, file cleanup, and one document read per batch. The native Windows CI test requires OfficeCLI 1.0.145, edits the real HIT proposal template, compares untouched XML subtrees, checks bidirectional legacy indentation, and verifies resident and reopened text. Real direct-service and SDK-to-MCP readbacks exercise documents with and without paragraph ids, mixed operations, and published version contents. Assembled browser scenarios verify editing and delayed Agent-model replacement.
 
-The native content-control fixture has no paragraph ids and fixes its whitespace-preserving index in a keyless snapshot. It covers full-width indentation, tabs, literal newlines, mixed edits after the content control, and byte-for-byte unchanged files after rejected stale operands.
+The native content-control fixture has no paragraph ids and fixes its whitespace-preserving index in a keyless snapshot. It covers full-width indentation, tabs, literal newlines, mixed edits after the content control, and byte-for-byte unchanged files after rejected stale operands. A second native fixture checks the read-only projection against OfficeCLI's index for hyperlink and field-result paragraphs, and anchors and replaces again after a split within one batch.
 
 ## Consequences
 

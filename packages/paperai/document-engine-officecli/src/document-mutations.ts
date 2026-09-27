@@ -3,7 +3,7 @@
 import type { Document as XmlDocument, Element as XmlElement, Node as XmlNode } from '@xmldom/xmldom'
 import type { EngineMutation } from '@paperai/document-engine'
 import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
-import { paragraphText } from './paragraph-xml.ts'
+import { indexedParagraphText, paragraphText } from './paragraph-xml.ts'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const XML_NS = 'http://www.w3.org/XML/1998/namespace'
@@ -36,18 +36,25 @@ function insertedParagraph(body: XmlElement, text: string, style: string | undef
  * Apply a batch in caller order while retaining all original node identities.
  * @param root - independently parsed candidate Word document element.
  * @param mutations - original-address mutations; insertion indices refer to the current body.
- * @param replaceParagraph - synchronous editor that preserves its target object and inserts any split siblings.
+ * @param replaceParagraph - synchronous editor that replaces a paragraph group's joined text, preserves the first
+ * paragraph object, and returns the resulting group including any split siblings.
  * @param resolveStyle - resolve an explicit paragraph style name or ID to an existing Word style ID.
  * @throws when a referenced node was removed earlier, a position is invalid, or paragraph editing fails.
  */
 export function applyDocumentMutations(
   root: XmlElement,
   mutations: readonly EngineMutation[],
-  replaceParagraph: (target: XmlElement, mutation: Extract<EngineMutation, { type: 'replace-text' }>) => void,
+  replaceParagraph: (
+    group: readonly [XmlElement, ...XmlElement[]],
+    mutation: Extract<EngineMutation, { type: 'replace-text' }>,
+  ) => readonly [XmlElement, ...XmlElement[]],
   resolveStyle: (style: string) => string,
 ): void {
   const body = resolveOfficePath(root, '/body')
   const targets = bindMutationTargets(root, mutations)
+  // A split replacement stays one node for later mutations, as the text index records it until the next read.
+  const groups = new Map<XmlElement, readonly [XmlElement, ...XmlElement[]]>()
+  const group = (target: XmlElement): readonly [XmlElement, ...XmlElement[]] => groups.get(target) ?? [target]
   const attached = (path: string): XmlElement => {
     const target = targets.get(path) as XmlElement
     let ancestor: XmlNode | null = target
@@ -57,8 +64,9 @@ export function applyDocumentMutations(
     }
     return target
   }
-  const assertText = (target: XmlElement, path: string, baseText: string | undefined): void => {
-    const text = target.localName === 'p' ? paragraphText(target)
+  // Only a rewrite needs the editor's strict projection; removals and anchors compare the indexed reading.
+  const assertText = (target: XmlElement, path: string, baseText: string, read: (paragraph: XmlElement) => string): void => {
+    const text = target.localName === 'p' ? group(target).map(read).join('\n')
       : target.localName === 'tbl'
         ? `[Table: ${Array.from(target.childNodes).filter(child => child.nodeType === child.ELEMENT_NODE
           && (child as XmlElement).namespaceURI === WORD_NS && (child as XmlElement).localName === 'tr').length} rows]`
@@ -72,15 +80,14 @@ export function applyDocumentMutations(
       case 'replace-text': {
         const target = attached(mutation.officePath)
         if (target.localName !== 'p') throw new Error(`INVALID_OFFICE_TARGET: '${mutation.officePath}' is not a paragraph`)
-        assertText(target, mutation.officePath, mutation.baseText)
-        replaceParagraph(target, mutation)
+        assertText(target, mutation.officePath, mutation.baseText, paragraphText)
+        groups.set(target, replaceParagraph(group(target), mutation))
         break
       }
       case 'remove': {
         const target = attached(mutation.officePath)
-        assertText(target, mutation.officePath, mutation.baseText)
-        const parent = target.parentNode as XmlNode
-        parent.removeChild(target)
+        assertText(target, mutation.officePath, mutation.baseText, indexedParagraphText)
+        for (const node of group(target)) (node.parentNode as XmlNode).removeChild(node)
         break
       }
       case 'insert-paragraph': {
@@ -90,14 +97,15 @@ export function applyDocumentMutations(
         let parent: XmlElement = body
         let reference: XmlNode | null
         if (mutation.after !== undefined || mutation.before !== undefined) {
-          const anchorPath = (mutation.after ?? mutation.before) as string
+          const anchorPath = mutation.after ?? mutation.before
           const anchor = attached(anchorPath)
           parent = anchor.parentNode as XmlElement
           if (parent.localName !== 'body' && parent.localName !== 'tc') {
             throw new Error('INVALID_INSERT_POSITION: paragraphs must belong to the body or a table cell')
           }
-          assertText(anchor, anchorPath, mutation.baseText)
-          reference = mutation.after === undefined ? anchor : anchor.nextSibling
+          assertText(anchor, anchorPath, mutation.baseText, indexedParagraphText)
+          const anchors = group(anchor)
+          reference = mutation.after === undefined ? anchors[0] : (anchors.at(-1) as XmlElement).nextSibling
         } else {
           const children = Array.from(body.childNodes).filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)
           const section = children.find(child => child.namespaceURI === WORD_NS && child.localName === 'sectPr')

@@ -13,9 +13,8 @@ const paragraph = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`
 const texts = (root: XmlElement) => Array.from(resolveOfficePath(root, '/body').childNodes)
   .filter((node): node is XmlElement => node.nodeType === node.ELEMENT_NODE && node.localName === 'p')
   .map(node => node.textContent)
-const replace = (target: XmlElement, mutation: Extract<EngineMutation, { type: 'replace-text' }>) => {
-  replaceParagraphXml(target, mutation, style => style)
-}
+const replace = (group: readonly [XmlElement, ...XmlElement[]], mutation: Extract<EngineMutation, { type: 'replace-text' }>) =>
+  replaceParagraphXml(group, mutation, style => style)
 const applyDocumentMutations = (root: XmlElement, mutations: readonly EngineMutation[], edit: typeof replace) =>{
   applyBatch(root, mutations, edit, style => style) }
 
@@ -27,6 +26,54 @@ describe('ordered candidate document mutations', () => {
       { baseText: 'beta', type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
     ], replace)
     expect(texts(root)).toEqual(['first', 'inserted', 'beta edited', 'gamma'])
+  })
+
+  it.each<[EngineMutation, (string | null)[]]>([
+    [{ baseText: 'first\nsecond', type: 'replace-text', officePath: '/body/p[1]', text: 'one\ntwo\nthree' }, ['one', 'two', 'three', 'beta']],
+    [{ baseText: 'first\nsecond', type: 'replace-text', officePath: '/body/p[1]', text: 'merged' }, ['merged', 'beta']],
+    [{ baseText: 'first\nsecond', type: 'remove', officePath: '/body/p[1]' }, ['beta']],
+    [{ baseText: 'first\nsecond', type: 'insert-paragraph', after: '/body/p[1]', text: 'after' }, ['first', 'second', 'after', 'beta']],
+    [{ baseText: 'first\nsecond', type: 'insert-paragraph', before: '/body/p[1]', text: 'before' }, ['before', 'first', 'second', 'beta']],
+  ])('treats every paragraph of an earlier split as the original node for a later $type', (mutation, expected) => {
+    const root = document(paragraph('alpha') + paragraph('beta'))
+    applyDocumentMutations(root, [
+      { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'first\nsecond' },
+      mutation,
+    ], replace)
+    expect(texts(root)).toEqual(expected)
+  })
+
+  it('keeps paragraph properties by position and the section break last when a split paragraph is replaced again', () => {
+    const root = document(`<w:p><w:pPr><w:sectPr><w:pgSz w:w="123"/></w:sectPr></w:pPr><w:r><w:t>alpha</w:t></w:r></w:p>${paragraph('beta')}`)
+    applyDocumentMutations(root, [
+      { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'title\nbody',
+        paragraphs: [{ text: 'title', format: { style: 'Heading1' } }, { text: 'body' }] },
+      { baseText: 'title\nbody', type: 'replace-text', officePath: '/body/p[1]', text: 'title\nbody\nmore' },
+    ], replace)
+    expect(texts(root)).toEqual(['title', 'body', 'more', 'beta'])
+    const paragraphs = Array.from(root.getElementsByTagNameNS(WORD_NS, 'p'))
+    expect(paragraphs.map(node => node.getElementsByTagNameNS(WORD_NS, 'pStyle')[0]?.getAttributeNS(WORD_NS, 'val')))
+      .toEqual(['Heading1', undefined, undefined, undefined])
+    expect(paragraphs.map(node => node.getElementsByTagNameNS(WORD_NS, 'sectPr').length)).toEqual([0, 0, 1, 0])
+  })
+
+  it.each<[string, (baseText: string) => EngineMutation, string[]]>([
+    ['removal', baseText => ({ baseText, type: 'remove', officePath: '/body/p[1]' }), ['beta']],
+    ['insertion after', baseText => ({ baseText, type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' }),
+      ['see link ADDIN CITATION [1]', 'inserted', 'beta']],
+    ['insertion before', baseText => ({ baseText, type: 'insert-paragraph', before: '/body/p[1]', text: 'inserted' }),
+      ['inserted', 'see link ADDIN CITATION [1]', 'beta']],
+  ])('identifies the %s target by its indexed text through hyperlinks and field codes', (_label, mutation, expected) => {
+    const linked = '<w:p><w:r><w:t xml:space="preserve">see </w:t></w:r><w:hyperlink w:anchor="ref"><w:r><w:t>link</w:t></w:r></w:hyperlink>'
+      + '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> ADDIN CITATION </w:instrText></w:r>'
+      + '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>[1]</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+    const root = document(linked + paragraph('beta'))
+    applyDocumentMutations(root, [mutation('see link[1]')], replace)
+    expect(texts(root)).toEqual(expected)
+    expect(() => { applyDocumentMutations(document(linked), [mutation('see link')], replace) }).toThrow('NODE_TEXT_CONFLICT')
+    expect(() => {
+      applyDocumentMutations(document(linked), [{ baseText: 'see link[1]', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }], replace)
+    }).toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
   })
 
   it('preserves request order for repeated anchors, repeated replacement, and removal', () => {
@@ -125,8 +172,9 @@ describe('ordered candidate document mutations', () => {
     { type: 'insert-paragraph', text: 'bad', index: -1 },
     { type: 'insert-paragraph', text: 'bad', index: 0.5 },
     { type: 'insert-paragraph', text: 'bad', index: 2 },
-    { baseText: 'alpha', type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', before: '/body/p[1]' },
-    { baseText: 'alpha', type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', index: 0 },
+    // Statically rejected (one position per insertion); the runtime check stays for dynamic callers.
+    { baseText: 'alpha', type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', before: '/body/p[1]' } as unknown as EngineMutation,
+    { baseText: 'alpha', type: 'insert-paragraph', text: 'bad', after: '/body/p[1]', index: 0 } as unknown as EngineMutation,
   ])('rejects invalid insertion positions: $index $after $before', (mutation) => {
     const root = document(paragraph('alpha'))
     expect(() =>{  applyDocumentMutations(root, [mutation], replace) }).toThrow('INVALID_INSERT_POSITION')

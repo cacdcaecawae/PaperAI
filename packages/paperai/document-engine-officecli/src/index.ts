@@ -286,7 +286,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
         return style.id
       }
       applyDocumentMutations(root, mutations,
-        (paragraph, mutation) => { replaceParagraphXml(paragraph, mutation, resolveStyle) }, resolveStyle)
+        (group, mutation) => replaceParagraphXml(group, mutation, resolveStyle), resolveStyle)
       const body = resolveOfficePath(root, '/body')
       // The package part preserves legacy attributes; the /document alias reparses typed OpenXML and renames them.
       const commands = [{ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace',
