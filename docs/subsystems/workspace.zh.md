@@ -847,14 +847,17 @@ Idempotent PaperAI project lifecycle with no separate open-project action.
 
 ```ts cordis-catalog
 /**
- * Create or adopt one directory, initialize missing project artifacts, and
- * publish exactly one ProjectRecord associated with its DSH workspace.
- * Repeating the operation for the same canonical path preserves the first
- * record identity, name, creation time, and all existing files. The writing
- * charter is synchronized before the record is published, and a failed
- * publication restores the charter files it created or rewrote.
+ * Create or adopt one directory and publish exactly one ProjectRecord
+ * associated with its DSH workspace. A directory without a project record
+ * is initialized: missing project artifacts are created, the writing charter
+ * is synchronized before the record is published, and a failed publication
+ * restores the charter files it created or rewrote. A directory that already
+ * holds a recorded project must still be a directory and is adopted without
+ * touching its files: the record keeps its identity, name, creation time,
+ * and template decision, and only a stale Workspace association or root
+ * spelling is rewritten.
  * @param input - Selected directory and optional first-use display name.
- * @returns the durable record, context-file outcome, and Git readiness.
+ * @returns the durable record, plus the context-file, charter, and Git outcomes of an initialization.
  */
 create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult>
 
@@ -880,17 +883,6 @@ list(): ProjectRecord[]
  * @returns the updated record.
  */
 setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord>
-
-/**
- * Reuse the project already recorded for a Workspace's directory without
- * touching its files: no layout, context, charter, or Git work runs. A
- * record still naming an earlier registration of the directory is pointed
- * at this Workspace, keeping its identity. The call shares the
- * initialization queue.
- * @param workspace - registered Workspace whose existing directory may hold a project.
- * @returns the associated record, or `undefined` when no project records the directory.
- */
-adopt(workspace: Workspace): Promise<ProjectRecord | undefined>
 
 /**
  * Resolve a project by an existing directory spelling.

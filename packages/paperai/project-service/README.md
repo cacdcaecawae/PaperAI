@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`ctx.paperProjects` owns the single PaperAI create-or-adopt operation. A user selects or supplies a directory; the service idempotently initializes it, associates its canonical path with the DSH workspace registry, and writes one `ProjectRecord` through `ctx.paperRepository`. There is no separate open-project operation.
+`ctx.paperProjects` owns the single PaperAI create-or-adopt operation. A user selects or supplies a directory; the service initializes it, or adopts the project already recorded for it, associates its canonical path with the DSH workspace registry, and writes one `ProjectRecord` through `ctx.paperRepository`. There is no separate open-project operation.
 
 ## Project layout
 
@@ -48,15 +48,15 @@ interface CreatePaperProjectInput {
 interface CreatePaperProjectResult {
   project: ProjectRecord
   projectCreated: boolean
-  contextFile: 'created' | 'preserved'
-  charter: WritingCharterSyncResult
-  git: ProjectGitStatus
+  contextFile?: 'created' | 'preserved'
+  charter?: WritingCharterSyncResult
+  git?: ProjectGitStatus
 }
 ```
 
-`create(input)` serializes initialization calls. Repeating it for the same canonical path preserves the project id, name, creation time, context file, and all user files. If a DSH workspace exists for the path, the service reuses it. If the project record points at a workspace registration that was recreated, the service repairs the association without changing project identity. A missing project directory is created, except with `existingRoot: true`, which requires it to be an existing directory and fails otherwise without creating it. Creating the project's subdirectories never recreates a root that disappears meanwhile.
+`create(input)` serializes initialization calls. A directory without a project record is initialized. A missing directory is created, except with `existingRoot: true`, which requires it to be an existing directory and fails otherwise without creating it. Creating the project's subdirectories never recreates a root that disappears meanwhile. If a DSH workspace exists for the path, the service reuses it.
 
-`adopt(workspace)` reuses the project already recorded for a Workspace's existing directory without touching its files: no layout, context-file, charter, or Git work runs. A record that still names an earlier registration of the directory is pointed at this Workspace with its identity, name, and template decision preserved. It returns `undefined` when no project records the directory, rejects a missing directory, and shares the initialization queue.
+A directory that a project already records is adopted instead, without touching its files: no layout, context-file, charter, or Git work runs, and the result carries only `project` and `projectCreated: false`. The record keeps its id, name, creation time, and template decision. When it points at a workspace registration that was recreated, or at another spelling of the root, only that association is rewritten. An adopted directory must still be a directory: a missing one fails with `ENOENT` instead of being recreated, and a regular file fails before any record is published.
 
 `setTemplateChoice(id, packId)` records the template set the project writes against — a template set id, or `null` for the explicit choice to write without one. Both spellings stamp `templateDecidedAt`, so the browser's first-open template prompt does not return; `templatePackId` is written or removed accordingly, and every other field of the `ProjectRecord` is preserved. The call shares the initialization queue and fails for an unknown project.
 

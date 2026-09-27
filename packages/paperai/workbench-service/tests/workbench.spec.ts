@@ -344,16 +344,16 @@ async function createHarness(rootPath?: string): Promise<Harness> {
   } as never)
   ctx.provide('documentEngine', { readTextNodes, previewHtml } as never)
   ctx.provide('paperProjects', {
-    create: async () => ({
-      project: structuredClone(harness.project), projectCreated: false, contextFile: 'preserved', git: { status: 'ready' },
-    }),
+    // Adopting a recorded directory re-associates it with its Workspace; anything else stands in for initialization.
+    create: async (input: { rootPath: string }) => {
+      if (ctx.paperRepository.listProjects().some(project => project.rootPath === input.rootPath)) {
+        harness.project = { ...harness.project, workspaceId: WORKSPACE_ID }
+        return { project: structuredClone(harness.project), projectCreated: false }
+      }
+      return { project: structuredClone(harness.project), projectCreated: false, contextFile: 'preserved', git: { status: 'ready' } }
+    },
     get: (id: typeof PROJECT_ID) => id === PROJECT_ID ? structuredClone(harness.project) : undefined,
     findByPath: async (path: string) => ctx.paperRepository.listProjects().find(project => project.rootPath === path),
-    adopt: async (workspace: { id: string; path: string }) => {
-      if (!ctx.paperRepository.listProjects().some(project => project.rootPath === workspace.path)) return undefined
-      harness.project = { ...harness.project, workspaceId: workspace.id }
-      return structuredClone(harness.project)
-    },
     setTemplateChoice: async (id: typeof PROJECT_ID, packId: string | null) => {
       expect(id).toBe(PROJECT_ID)
       const { templatePackId: _dropped, ...rest } = harness.project
@@ -572,24 +572,21 @@ describe('PaperAiWorkbenchService', () => {
     expect(setTemplateChoice).not.toHaveBeenCalled()
   })
 
-  it('adopts a project re-registered under a new Workspace for an explicit action instead of initializing it again', async () => {
+  it('adopts a project re-registered under a new Workspace through create for an explicit action', async () => {
     const h = await createHarness()
     h.project = { ...h.project, workspaceId: 'workspace-deleted' }
     const create = vi.spyOn(h.ctx.paperProjects, 'create')
-    const adopt = vi.spyOn(h.ctx.paperProjects, 'adopt')
     expect(await h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })).toMatchObject({
       workspaceId: WORKSPACE_ID, templateDecided: true, documents: [{ documentId: DOCUMENT_ID }],
     })
-    expect(adopt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: WORKSPACE_ID, path: h.project.rootPath }))
+    expect(create).toHaveBeenCalledExactlyOnceWith({ rootPath: h.project.rootPath, name: h.project.name, existingRoot: true })
     expect(h.project.workspaceId).toBe(WORKSPACE_ID)
-    expect(create).not.toHaveBeenCalled()
     expect(await readdir(h.project.rootPath)).toEqual([])
 
     h.project = { ...h.project, workspaceId: 'workspace-deleted' }
-    adopt.mockResolvedValueOnce(undefined)
+    create.mockResolvedValueOnce({ project: structuredClone(h.project), projectCreated: false })
     await expect(h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null }))
       .rejects.toThrow('associated with another Workspace')
-    expect(create).toHaveBeenCalledOnce()
   })
 
   it('keeps a Workspace root removed after its directory check absent instead of recreating it for a write', async () => {

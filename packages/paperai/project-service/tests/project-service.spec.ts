@@ -61,11 +61,9 @@ describe('PaperProjectService', () => {
     const second = await service.create({ rootPath: `${root}/.`, name: '不会改名' })
 
     expect(first.projectCreated).toBe(true)
-    expect(second.projectCreated).toBe(false)
-    expect(second.project).toEqual(first.project)
+    expect(second).toEqual({ project: first.project, projectCreated: false })
     expect(first.project.name).toBe('硕士论文')
     expect(first.contextFile).toBe('preserved')
-    expect(second.contextFile).toBe('preserved')
     expect(first.git).toMatchObject({ status: 'degraded' })
     expect(await readFile(join(root, PAPERAI_CONTEXT_FILE), 'utf8')).toBe(context)
     expect(await readFile(join(root, 'figures', 'existing.svg'), 'utf8')).toBe('<svg/>')
@@ -194,7 +192,7 @@ describe('PaperProjectService', () => {
     expect(harness.putProject).toHaveBeenCalledTimes(1)
   })
 
-  it('adopts a re-registered directory by repairing only its association, without touching project files', async () => {
+  it('adopts a recorded directory through create by repairing only its association, without touching project files', async () => {
     const parent = await temporaryRoot('adopt')
     const root = join(parent, 'canonical')
     const alias = join(parent, 'alias')
@@ -214,23 +212,30 @@ describe('PaperProjectService', () => {
     const { service } = await harness.load()
     const workspace = await harness.createWorkspace(root, '重新注册')
 
-    const adopted = await service.adopt(workspace)
+    const { project: adopted, ...outcome } = await service.create({ rootPath: root, existingRoot: true })
 
-    expect(adopted).toEqual({ ...prior, workspaceId: workspace.id, rootPath: await realpath(root), updatedAt: adopted?.updatedAt })
-    expect(adopted?.updatedAt).not.toBe(prior.updatedAt)
+    expect(outcome).toEqual({ projectCreated: false })
+    expect(adopted).toEqual({ ...prior, workspaceId: workspace.id, rootPath: await realpath(root), updatedAt: adopted.updatedAt })
+    expect(adopted.updatedAt).not.toBe(prior.updatedAt)
     expect(harness.projects).toEqual([adopted])
     expect((await readdir(root)).sort()).toEqual(['AGENTS.md'])
     expect(await readFile(join(root, 'AGENTS.md'), 'utf8')).toBe('# 用户说明\n')
-    await expect(service.adopt(workspace)).resolves.toEqual(adopted)
-    harness.projects[0] = { ...adopted!, rootPath: alias }
-    await expect(service.adopt(workspace)).resolves.toMatchObject({ rootPath: await realpath(root) })
+    await expect(service.create({ rootPath: alias, existingRoot: true })).resolves.toEqual({ project: adopted, projectCreated: false })
+    harness.projects[0] = { ...adopted, rootPath: alias }
+    await expect(service.create({ rootPath: root })).resolves.toMatchObject({ project: { rootPath: await realpath(root) } })
     expect(harness.putProject).toHaveBeenCalledTimes(2)
+    expect(harness.createWorkspace).toHaveBeenCalledOnce()
 
-    const unrelated = await temporaryRoot('adopt-none')
-    await expect(service.adopt(await harness.createWorkspace(unrelated))).resolves.toBeUndefined()
-    expect(await readdir(unrelated)).toEqual([])
-    await expect(service.adopt({ ...workspace, path: join(parent, 'removed') })).rejects.toMatchObject({ code: 'ENOENT' })
+    // A recorded directory is never recreated, nor adopted through a regular file that replaced it.
+    const moved = join(parent, 'moved')
+    harness.projects.push({ ...prior, id: ProjectId('project-moved'), rootPath: moved })
+    await expect(service.create({ rootPath: moved })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(moved)).rejects.toMatchObject({ code: 'ENOENT' })
+    await writeFile(moved, 'ordinary file')
+    await expect(service.create({ rootPath: moved, existingRoot: true })).rejects.toThrow('not a directory')
+    expect(await readFile(moved, 'utf8')).toBe('ordinary file')
     expect(harness.putProject).toHaveBeenCalledTimes(2)
+    expect(harness.createWorkspace).toHaveBeenCalledOnce()
   })
 
   it('refuses to create or recreate a required existing root that is missing or not a directory', async () => {

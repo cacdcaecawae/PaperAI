@@ -1628,9 +1628,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult>',
-        description: 'Create or adopt one directory, initialize missing project artifacts, and publish exactly one ProjectRecord associated with its DSH workspace. Repeating the operation for the same canonical path preserves the first record identity, name, creation time, and all existing files. The writing charter is synchronized before the record is published, and a failed publication restores the charter files it created or rewrote.',
+        description: 'Create or adopt one directory and publish exactly one ProjectRecord associated with its DSH workspace. A directory without a project record is initialized: missing project artifacts are created, the writing charter is synchronized before the record is published, and a failed publication restores the charter files it created or rewrote. A directory that already holds a recorded project must still be a directory and is adopted without touching its files: the record keeps its identity, name, creation time, and template decision, and only a stale Workspace association or root spelling is rewritten.',
         parameters: [{ name: 'input', description: 'Selected directory and optional first-use display name.' }],
-        returns: 'the durable record, context-file outcome, and Git readiness.',
+        returns: 'the durable record, plus the context-file, charter, and Git outcomes of an initialization.',
       },
       {
         signature: 'get(id: ProjectId): ProjectRecord | undefined',
@@ -1649,12 +1649,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Record the template set a project writes against. `null` records the explicit choice to write without a template; either way the project counts as decided, so the first-open prompt does not return.',
         parameters: [{ name: 'id', description: 'PaperAI project id.' }, { name: 'packId', description: 'template set id, or `null` for no template.' }],
         returns: 'the updated record.',
-      },
-      {
-        signature: 'adopt(workspace: Workspace): Promise<ProjectRecord | undefined>',
-        description: 'Reuse the project already recorded for a Workspace\'s directory without touching its files: no layout, context, charter, or Git work runs. A record still naming an earlier registration of the directory is pointed at this Workspace, keeping its identity. The call shares the initialization queue.',
-        parameters: [{ name: 'workspace', description: 'registered Workspace whose existing directory may hold a project.' }],
-        returns: 'the associated record, or `undefined` when no project records the directory.',
       },
       {
         signature: 'async findByPath(rootPath: string): Promise<ProjectRecord | undefined>',
@@ -4180,7 +4174,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreatePaperProjectResult',
-    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile: \'created\' | \'preserved\';\n    readonly charter: WritingCharterSyncResult;\n    readonly git: ProjectGitStatus;\n}',
+    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile?: \'created\' | \'preserved\';\n    readonly charter?: WritingCharterSyncResult;\n    readonly git?: ProjectGitStatus;\n}',
   },
   {
     name: 'CreateSessionOptions',

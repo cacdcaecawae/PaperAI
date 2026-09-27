@@ -105,7 +105,7 @@ describe('project-service real Loader composition', () => {
 
     expect(result.project).toEqual(projects[0])
     expect(result.project.workspaceId).toBe('loader-workspace')
-    expect(result.git.status).toBe('degraded')
+    expect(result.git?.status).toBe('degraded')
     expect(await readFile(join(projectRoot, PAPERAI_CONTEXT_FILE), 'utf8')).toContain('## 当前目标')
     expect(ctx.workspaceRegistry.get(WorkspaceId(result.project.workspaceId))?.path).toBe(result.project.rootPath)
   })

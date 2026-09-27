@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`ctx.paperProjects` 负责 PaperAI 唯一的“创建或接管目录”操作。用户选择或给出一个目录后，服务会幂等初始化目录，把规范路径关联到 DSH Workspace Registry，并通过 `ctx.paperRepository` 写入唯一的 `ProjectRecord`。产品中不存在独立的“打开项目”操作。
+`ctx.paperProjects` 负责 PaperAI 唯一的“创建或接管目录”操作。用户选择或给出一个目录后，服务会初始化目录或接管已为它记录的项目，把规范路径关联到 DSH Workspace Registry，并通过 `ctx.paperRepository` 写入唯一的 `ProjectRecord`。产品中不存在独立的“打开项目”操作。
 
 ## 项目结构
 
@@ -48,15 +48,15 @@ interface CreatePaperProjectInput {
 interface CreatePaperProjectResult {
   project: ProjectRecord
   projectCreated: boolean
-  contextFile: 'created' | 'preserved'
-  charter: WritingCharterSyncResult
-  git: ProjectGitStatus
+  contextFile?: 'created' | 'preserved'
+  charter?: WritingCharterSyncResult
+  git?: ProjectGitStatus
 }
 ```
 
-`create(input)` 串行执行初始化。同一规范路径重复调用时，会保留项目 id、名称、创建时间、上下文文件和全部用户文件。路径已有 DSH Workspace 时直接复用；项目记录关联的 Workspace 被重建时，只修复关联，不改变项目身份。项目目录不存在时会被创建；但传入 `existingRoot: true` 时要求它已是现有目录，否则直接失败而不创建。创建项目子目录的过程从不重新创建中途消失的根目录。
+`create(input)` 串行执行初始化。尚无项目记录的目录会被初始化。项目目录不存在时会被创建；但传入 `existingRoot: true` 时要求它已是现有目录，否则直接失败而不创建。创建项目子目录的过程从不重新创建中途消失的根目录。路径已有 DSH Workspace 时直接复用。
 
-`adopt(workspace)` 复用某个 Workspace 现有目录已记录的项目，且不触碰其中文件：不执行目录布局、上下文文件、写作章程或 Git 初始化。记录若仍指向该目录之前的登记，会改为指向这个 Workspace，项目身份、名称和模板决定保持不变。目录没有项目记录时返回 `undefined`，目录不存在时直接失败；该调用与初始化共用同一队列。
+已有项目记录的目录则被接管，且不触碰其中文件：不执行目录布局、上下文文件、写作章程或 Git 初始化，结果只包含 `project` 和 `projectCreated: false`。记录保留项目 id、名称、创建时间和模板决定。记录指向已被重建的 Workspace 登记或根路径的另一种写法时，只改写这一关联。被接管的目录必须仍是目录：目录不存在时以 `ENOENT` 失败而不重新创建，被普通文件取代时在发布任何记录之前失败。
 
 `setTemplateChoice(id, packId)` 记录项目写作所依据的模板——某个模板 id，或以 `null` 明确选择不用模板。两种写法都会写入 `templateDecidedAt`，因此浏览器首次打开时的模板询问不会再次出现；`templatePackId` 相应写入或移除，`ProjectRecord` 的其他字段保持不变。该调用与初始化共用同一串行队列，项目不存在时失败。
 

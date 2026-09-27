@@ -1162,13 +1162,12 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
 
   /**
    * Only explicit template selection or document creation may initialize a
-   * project. A project recorded for the directory under an earlier Workspace
-   * registration is adopted, which rewrites only its association, never its files.
+   * project. `create()` adopts a project recorded for the directory under an
+   * earlier Workspace registration, which rewrites only its association, never its files.
    */
   private async projectForWorkspace(workspaceId: WorkspaceId): Promise<{ workspace: Workspace; project: ProjectRecord }> {
     const workspace = await this.workspaceDirectory(workspaceId)
     const project = this.recordedProject(workspace)
-      ?? await this.ctx.paperProjects.adopt(workspace)
       ?? (await this.ctx.paperProjects.create({ rootPath: workspace.path, name: workspace.title, existingRoot: true })).project
     if (project.workspaceId !== String(workspace.id)) {
       throw new Error(`paperai-workbench: project '${project.id}' is associated with another Workspace`)
