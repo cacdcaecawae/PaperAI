@@ -780,7 +780,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const id = DocumentId(String(request.documentId))
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
-    const project = this.requireProject(before.document.projectId)
+    const project = await this.requireProject(before.document.projectId)
     const { set, format } = this.requireProjectFormat(project, request.documentType)
     const contract = await this.installFormat(project, set, format, signal)
     if (before.document.templateId === contract.id && before.document.role === request.documentType) {
@@ -920,7 +920,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const id = DocumentId(String(request.documentId))
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
-    const project = this.requireProject(before.document.projectId)
+    const project = await this.requireProject(before.document.projectId)
     const directory = join(
       project.rootPath,
       'exports',
@@ -1130,7 +1130,11 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   private async findProject(workspace: Workspace): Promise<ProjectRecord | undefined> {
     const recorded = this.recordedProject(workspace)
     if (recorded !== undefined) return recorded
-    const adopted = await this.ctx.paperProjects.findByPath(workspace.path)
+    // A vanished root holds no project to adopt; the read then reports it as not initialized.
+    const adopted = await this.ctx.paperProjects.findByPath(workspace.path).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+      throw error
+    })
     return adopted === undefined ? undefined : { ...adopted, workspaceId: String(workspace.id) }
   }
 
@@ -1306,7 +1310,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   ): Promise<PaperAIDocumentCommitResult> {
     const after = this.requireDocument(id)
     this.fenceGateMutation(after.document, baseRevision)
-    const project = this.requireProject(after.document.projectId)
+    const project = await this.requireProject(after.document.projectId)
     const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal, 'skip')
     return { ...opened, createdCommitId: commit.id }
   }
@@ -1372,10 +1376,17 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     return snapshot
   }
 
-  private requireProject(projectId: ProjectRecord['id']): ProjectRecord {
+  /**
+   * A record still naming a deleted Workspace is read as the current
+   * registration of its root, exactly as `findProject` adopts it for `open`,
+   * so every projection of the document carries one Workspace id.
+   */
+  private async requireProject(projectId: ProjectRecord['id']): Promise<ProjectRecord> {
     const project = this.ctx.paperProjects.get(projectId)
     if (project === undefined) throw new Error(`paperai-workbench: project '${projectId}' does not exist`)
-    return project
+    if (this.ctx.workspaceRegistry.get(WorkspaceId(project.workspaceId)) !== undefined) return project
+    const workspace = await this.ctx.workspaceRegistry.resolveByPath(project.rootPath)
+    return workspace === undefined ? project : { ...project, workspaceId: String(workspace.id) }
   }
 
   private contractOf(document: DocumentRecord): TemplateContract | undefined {
