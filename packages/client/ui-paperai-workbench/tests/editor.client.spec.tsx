@@ -358,6 +358,10 @@ describe('Document editing commands', () => {
     expect(runsOf(blocks()[0]!)[1]).toMatchObject({ text: ' background', bold: true, font: 'Times New Roman' })
     expect(blocks().every(block => block.getAttribute('contenteditable') === 'false')).toBe(true)
     expect(shadow.querySelectorAll('[data-paperai-conflict]')).toHaveLength(2)
+    // The formatting really did change, so both bands say so, and quote the document in its new 16pt.
+    expect([...shadow.querySelectorAll('.paperai-conflict-legend')].map(legend => legend.textContent))
+      .toEqual([zh['editor.conflictFormat'], zh['editor.conflictFormat']])
+    expect(shadow.querySelector<HTMLElement>('.paperai-conflict-text span')?.style.fontSize).toBe('16pt')
     await act(async () => { expect((await controller.commitEdit(SESSION_ID)).ok).toBe(false) })
     expect(commit).not.toHaveBeenCalled()
     for (const button of shadow.querySelectorAll<HTMLElement>(`[data-paperai-resolve="${choice}"]`)) fireEvent.click(button)
@@ -876,7 +880,7 @@ describe('Conflict resolution in the page', () => {
     // A press that destroys a draft must be recoverable, which is why it routes through history.
     fireEvent.click(screen.getByRole('button', { name: zh['editor.undo'] }))
     expect(editor.blocks()[0]!.textContent).toBe('文档保留原样的这一段')
-    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', expect.objectContaining({ text: '文档保留原样的这一段' }))
+    expect(editor.onDraft).toHaveBeenLastCalledWith('node-0', expect.objectContaining({ text: '文档保留原样的这一段', conflicted: true }))
   })
 
   it('clears the gutter rule on a paragraph whose band had to stand before its table', () => {
@@ -921,6 +925,8 @@ describe('Conflict resolution in the page', () => {
     expect(editor.blocks()[0]!.textContent).toBe('文档改写后的这一段')
     expect(screen.getByRole('button', { name: zh['block.discard'] }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: zh['block.save'] }).hasAttribute('disabled')).toBe(true)
+    // Nor a count that walks to bands the comparison has taken off the page.
+    expect(screen.queryByRole('button', { name: t('block.conflicts', { count: 1 }) })).toBeNull()
   })
 
   it('says the document is busy, not that a side is waiting, when a band is pressed mid-save', () => {
@@ -971,13 +977,14 @@ describe('Conflict resolution in the page', () => {
     expect(editor.band()).toBeNull()
   })
 
-  it('says the document changed only formatting when its words are the ones the draft started from', () => {
-    // The harness's edit started from 'stale base', and the page still reads exactly that.
+  it('says the document took its change back when its words and formatting read as the draft found them', () => {
+    // The harness's edit started from 'stale base', the page reads exactly that again, and the draft carries no
+    // formatting reading that differs: a conflict flag outlives the revision that raised it.
     const editor = conflicted('<p data-path="/body/p[1]">stale base</p>', ['stale base'], 'stale base, then my words')
     const band = editor.band()!
     expect(band.querySelectorAll('del, ins')).toHaveLength(0)
     expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('stale base')
-    expect(band.querySelector('.paperai-conflict-legend')!.textContent).toBe(zh['editor.conflictFormat'])
+    expect(band.querySelector('.paperai-conflict-legend')!.textContent).toBe(zh['editor.conflictReverted'])
     expect(editor.act('mine')).not.toBeNull()
     expect(editor.act('theirs')).not.toBeNull()
   })
@@ -995,6 +1002,37 @@ describe('Conflict resolution in the page', () => {
     // One band: the next press wraps around to it again.
     fireEvent.click(chip)
     expect(scroll).toHaveBeenCalledTimes(2)
+  })
+
+  it('walks on to the next band when the one it brought into view is settled', () => {
+    const three = ['甲段落', '乙段落', '丙段落']
+    const onDraft = vi.fn()
+    const nodes = three.map((text, index) => ({
+      nodeId: `node-${index}` as PaperAIDocumentNodeId, text, label: text, kind: 'paragraph' as const, depth: 0, editable: true,
+    }))
+    function Harness() {
+      const [edits, setEdits] = useState<PaperAIBlockEdit[]>(nodes.map(node => ({
+        nodeId: node.nodeId, baseText: 'stale base', draft: `${node.text}的草稿`, conflicted: true,
+      })))
+      return <DocumentPreview html={three.map((text, index) => `<p data-path="/body/p[${index + 1}]">${text}</p>`).join('')}
+        revision={REVISION_1} nodes={nodes} title="Document" edits={edits} saving={false} t={t} onSave={vi.fn()}
+        paragraphStyles={[]} onCancel={vi.fn()} onDraft={(nodeId, next) => {
+          onDraft(nodeId, next)
+          if (next === null) setEdits(current => current.filter(edit => edit.nodeId !== nodeId))
+        }} />
+    }
+    const view = render(<Harness />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const visited: string[] = []
+    for (const band of shadow.querySelectorAll<HTMLElement>('[data-paperai-conflict]')) {
+      band.scrollIntoView = () => { visited.push(band.dataset.paperaiConflict!) }
+    }
+    fireEvent.click(screen.getByRole('button', { name: t('block.conflicts', { count: 3 }) }))
+    expect(visited).toEqual(['node-0'])
+    // Settle the band just visited: the walk goes on to the one after it, not past it.
+    fireEvent.click(shadow.querySelector('[data-paperai-conflict="node-0"] [data-paperai-resolve="theirs"]')!)
+    fireEvent.click(screen.getByRole('button', { name: t('block.conflicts', { count: 2 }) }))
+    expect(visited).toEqual(['node-0', 'node-1'])
   })
 
   it('names the cell a band speaks for, since every cell band stands before the table', () => {

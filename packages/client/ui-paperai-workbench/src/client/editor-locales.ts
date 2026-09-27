@@ -49,6 +49,7 @@ export const editorZh = {
   'editor.conflictCell': '表格第 {row} 行第 {column} 列',
   'editor.conflictFormat': '文档只改了这段的格式，文字和你动笔时一样',
   'editor.conflictPlace': '文档里有几段文字相同，先确认这是你写的那一段',
+  'editor.conflictReverted': '文档改过这段，现在文字又和你动笔时一样',
   'editor.structureProtected': '此处不能拆分段落。请在普通正文段落中换段，或在 Word 中编辑。',
   'editor.saved': '已写入文档',
 } as const
@@ -104,6 +105,7 @@ export const editorEn: Record<keyof typeof editorZh, string> = {
   'editor.conflictCell': 'Table row {row}, column {column}',
   'editor.conflictFormat': 'The document changed only this paragraph’s formatting; its words are as you found them',
   'editor.conflictPlace': 'Several paragraphs read the same; check this is the one you wrote in',
+  'editor.conflictReverted': 'The document changed this paragraph, and its words are back as you found them',
   'editor.structureProtected': 'This paragraph cannot be split here. Use an ordinary body paragraph or edit it in Word.',
   'editor.saved': 'Written to document',
 }

@@ -44,12 +44,14 @@ export interface DocumentPreviewProps {
  * @param t - the workbench translator.
  * @param seat - the element the draft's paragraph renders as, or undefined when the document no longer contains it.
  * @param unchanged - why a band whose document words are the draft's starting words conflicts at all: the
- *   document changed only formatting, or those words recur and the paragraph's place needs confirming.
+ *   document changed only formatting, those words recur and the paragraph's place needs confirming, or the
+ *   document's change has since been taken back.
  * @param quoted - the text the band quotes.
  * @returns the resolved strings and the buttons this form can carry.
  */
 function bandCopy(
-  form: ConflictBandSide['form'], t: PaperAIDocumentWorkbenchProps['t'], seat: HTMLElement | undefined, unchanged: 'format' | 'place' | undefined,
+  form: ConflictBandSide['form'], t: PaperAIDocumentWorkbenchProps['t'], seat: HTMLElement | undefined,
+  unchanged: 'format' | 'place' | 'reverted' | undefined,
   quoted: string,
 ): ConflictBandSide['copy'] {
   const side = t(form === 'draft' ? 'editor.conflictMine' : 'editor.conflictTheirs')
@@ -66,7 +68,8 @@ function bandCopy(
     who,
     legend: t(seat === undefined ? 'editor.conflictGone'
       : form === 'draft' ? 'editor.conflictUnmergeable'
-        : unchanged === 'place' ? 'editor.conflictPlace' : unchanged === 'format' ? 'editor.conflictFormat' : 'editor.conflictLegend'),
+        : unchanged === 'place' ? 'editor.conflictPlace' : unchanged === 'format' ? 'editor.conflictFormat'
+          : unchanged === 'reverted' ? 'editor.conflictReverted' : 'editor.conflictLegend'),
     rewritten: t('editor.conflictRewritten'),
     empty: t('editor.conflictEmpty'),
     // No 用我的 on a draft band: no caret can enter that paragraph, so the button would promise a
@@ -246,7 +249,12 @@ interface BlockImage {
   readonly parent: Node | null
   readonly next: Node | null
 }
-interface HistoryEntry { readonly before: readonly BlockImage[]; readonly after: readonly BlockImage[] }
+interface HistoryEntry {
+  readonly before: readonly BlockImage[]
+  readonly after: readonly BlockImage[]
+  /** Pushed by 用文档的: undoing it hands the draft back as the conflict it was, not as a fresh draft. */
+  readonly settled?: boolean
+}
 function imageOf(block: HTMLElement): BlockImage {
   return { block, html: block.innerHTML, style: block.getAttribute('style'), format: block.dataset.paperaiFormat,
     parent: block.parentNode, next: block.nextSibling }
@@ -304,8 +312,8 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   const blockedComposition = useRef<(() => void) | null>(null)
   const target = useRef<{ range: Range; blocks: HTMLElement[] } | null>(null)
   const findCursor = useRef<{ query: string; block: HTMLElement; offset: number } | null>(null)
-  /** The band the pill's conflict count last brought into view; the next press walks on from it. */
-  const conflictAt = useRef(-1)
+  /** The node whose band the pill's conflict count last brought into view; the next press walks on from it. */
+  const conflictAt = useRef<string | undefined>(undefined)
   /** The half-pressed 放弃这段草稿, if one is waiting for its second press. */
   const armed = useRef<HTMLElement | null>(null)
   const callbacks = useRef({ onDraft, onSave })
@@ -502,11 +510,17 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       // A paragraph out of `mapping` takes no keystrokes, so its band quotes the draft for saving by
       // hand instead of offering a merge; the paragraph itself is already showing the document.
       const form = mapped === undefined ? 'draft' : 'document'
-      const theirs = nodes.find(node => node.nodeId === edit.nodeId)?.text ?? edit.baseText
-      // The document still has the very words the draft started from, so the conflict is its formatting, or,
-      // where those words recur, whether this is still the paragraph the draft was typed into.
+      const own = nodes.find(node => node.nodeId === edit.nodeId)
+      const theirs = own?.text ?? edit.baseText
+      // The document has the very words the draft started from. Where those words recur in paragraphs of the same
+      // kind, the Host may have moved this id between them, so the place needs confirming; otherwise the conflict is
+      // a reformat, or, when the formatting reads as it did too, a change the document has since taken back.
       const sameWords = form === 'document' && theirs === edit.baseText
-      const unchanged = !sameWords ? undefined : nodes.filter(node => node.text === theirs).length > 1 ? 'place' : 'format'
+      const original = mapped === undefined ? undefined : originals.current.get(mapped)
+      const reformatted = edit.formatting !== undefined && original !== undefined && !sameRuns(edit.formatting.before, original.effective)
+      const unchanged = !sameWords ? undefined
+        : nodes.filter(node => node.kind === own?.kind && node.text === theirs).length > 1 ? 'place'
+          : reformatted ? 'format' : 'reverted'
       const band = conflictBand(document, {
         nodeId: edit.nodeId,
         form,
@@ -514,7 +528,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         mine: edit.draft,
         base: edit.baseText,
         unmarked: sameWords,
-        ...(sameWords && mapped !== undefined ? { runs: originals.current.get(mapped)?.effective ?? [] } : {}),
+        ...(sameWords && original !== undefined ? { runs: original.effective } : {}),
         copy: bandCopy(form, t, seat, unchanged, form === 'draft' ? edit.draft : theirs),
       })
       if (seat !== undefined) seat.dataset.paperaiConflictSeat = form === 'draft' ? 'theirs' : 'mine'
@@ -584,7 +598,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     return () =>{  observer.disconnect() }
   }, [html, zoom])
 
-  const report = (blocks: readonly HTMLElement[]): void => {
+  const report = (blocks: readonly HTMLElement[], conflict = false): void => {
     const drafts = blocks.flatMap<{ block: HTMLElement; nodeId: PaperAIDocumentNodeId; draft: PaperAIBlockDraft | null }>((block) => {
       const nodeId = mapping.current.get(block)
       if (nodeId === undefined) return []
@@ -598,6 +612,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       const formatted = stated(runs) || (original !== undefined && stated(original.runs))
       const stating = original === undefined ? runs : restateCleared(runs, original.runs, block)
       return [{ block, nodeId, draft: unchanged ? null : { text,
+        ...(conflict ? { conflicted: true } : {}),
         ...(structured ? { paragraphs: parts.map((part, index) => ({ ...part,
           runs: part.text === '' ? effectiveRunsOf(paragraphsOf(block)[index] as HTMLElement)
             : original === undefined ? part.runs ?? [] : restateCleared(part.runs ?? [], original.runs, block),
@@ -622,10 +637,12 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       }
     } finally { publishing.current = false }
   }
-  const finish = (blocks: readonly HTMLElement[], before = blocks.map(block => latest.current.get(block) ?? imageOf(block))): void => {
+  const finish = (
+    blocks: readonly HTMLElement[], before = blocks.map(block => latest.current.get(block) ?? imageOf(block)), settled = false,
+  ): void => {
     const after = blocks.map(imageOf)
     if (after.some((image, index) => !sameImage(image, before[index] ?? image))) {
-      history.current.past.push({ before, after }); history.current.future = []; updateHistory()
+      history.current.past.push({ before, after, ...(settled ? { settled } : {}) }); history.current.future = []; updateHistory()
     }
     report(blocks)
     capture()
@@ -707,7 +724,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       // The document's text as this reload delivered it. `report` then finds the block unchanged and
       // publishes `draft: null`, so the edit drops itself and takes its conflict with it.
       restoreImage(original.image)
-      finish([block])
+      finish([block], undefined, true)
     }
     // Either way the band leaves on the next render and takes the focused button with it, so the caret
     // moves into the paragraph now, which is given the editability that render would give it.
@@ -721,7 +738,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
     if (entry === undefined) return
     const images = redo ? entry.after : entry.before
     for (const image of images) restoreImage(image)
-    report(images.map(image => image.block))
+    // Undoing 用文档的 says so, and only that: the controller then hands back the conflict it set aside, while
+    // a formatting edit that happens to leave the same words stays the fresh draft it is.
+    report(images.map(image => image.block), !redo && entry.settled === true)
     const destination = redo ? history.current.past : history.current.future
     destination.push(entry); updateHistory()
     const block = images.at(-1)?.block
@@ -959,8 +978,11 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
    */
   const goToConflict = (): void => {
     const bands = [...host.current?.shadowRoot?.querySelectorAll<HTMLElement>('[data-paperai-conflict]') ?? []]
-    conflictAt.current = bands.length === 0 ? -1 : (conflictAt.current + 1) % bands.length
-    const band = bands[conflictAt.current]
+    // By identity, not index: settling the band last visited shifts every index after it, and the walk would
+    // skip the next one. A band that is gone restarts the walk at the first.
+    const last = bands.findIndex(candidate => candidate.dataset.paperaiConflict === conflictAt.current)
+    const band = bands[last === -1 ? 0 : (last + 1) % bands.length]
+    conflictAt.current = band?.dataset.paperaiConflict
     band?.scrollIntoView({ block: 'center' })
     band?.querySelector<HTMLElement>('[data-paperai-resolve]')?.focus({ preventScroll: true })
   }
@@ -1029,7 +1051,7 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
         {active && edits.length > 0 && <div className={clsx(css.floating, css.pending)} role="group" aria-label={t('block.pending', { count: edits.length })} data-paperai-pending>
           <span>{t('block.pending', { count: edits.length })}</span>
           <span className={css.pendingNote}>{t('status.memory')}</span>
-          {conflicts.size > 0 && <span className={css.conflicts} role="alert">
+          {conflicts.size > 0 && !comparing && <span className={css.conflicts} role="alert">
             <button className={css.chip} type="button" data-kind="conflict" title={t('block.nextConflict')} onClick={goToConflict}>
               {t('block.conflicts', { count: conflicts.size })}
             </button>

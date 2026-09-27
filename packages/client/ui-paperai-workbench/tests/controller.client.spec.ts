@@ -784,6 +784,22 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     controller.dispose()
   })
 
+  it('lets words that recur only in a node of another kind leave the draft writable', async () => {
+    // The Host hashes a node's kind with its text, so a table cell reading the same cannot take a paragraph's id.
+    const nodes = [...documentOpenResult().document.nodes,
+      { nodeId: 'node-cell' as never, kind: 'table-cell' as const, label: '', depth: 0, editable: true, text: '' }]
+    const remote = successfulRemote()
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_1, { nodes }) })
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, 'node-empty' as never, { text: '第一章的正文' })
+    remote.open = vi.fn<typeof remote.open>()
+      .mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, { headCommitId: COMMIT_2, nodes }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-27T00:00:00.000Z' })
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: 'node-empty', conflicted: false }])
+    controller.dispose()
+  })
+
   it('marks only the drafts a failed save carried', async () => {
     const { controller, remote, store } = await withConflict()
     controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
@@ -820,12 +836,12 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     controller.dispose()
   })
 
-  it('brings a set-aside draft back still in conflict when the very same text returns', async () => {
+  it('brings a set-aside draft back still in conflict when the page undoes 用文档的', async () => {
     const { controller, store } = await withConflict()
-    // 用文档的 publishes no draft for the block; its undo hands the page back exactly this text.
+    // 用文档的 publishes no draft for the block; its undo hands the page back exactly this text, marked conflicted.
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
     expect(store.getSnapshot().edits).toEqual([])
-    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
     // Not rebased onto the Agent's text: saved as it stands it would replace that paragraph unasked.
     expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
     controller.dispose()
@@ -839,8 +855,19 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     expect(store.getSnapshot().edits).toMatchObject([{ baseText: 'Rewritten by the agent' }])
     expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
-    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
     expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('takes a formatting edit with the same words as a new draft, not as the undo of 用文档的', async () => {
+    // A reformat-only conflict leaves the draft's words equal to the document's, so after 用文档的 a bolded word
+    // reports the very same text: without the page's undo mark it must not revive the conflict and lose the bold.
+    const { controller, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', runs: [{ text: 'Local ' }, { text: 'draft', bold: true }] })
+    expect(store.getSnapshot().edits).toMatchObject([{ baseText: 'Rewritten by the agent', runs: [{ text: 'Local ' }, { text: 'draft', bold: true }] }])
+    expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
     controller.dispose()
   })
 
@@ -860,7 +887,7 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
     // A retained preview keeps its undo stack, so coming back can still undo into the set-aside text.
     await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
-    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
     expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
     controller.dispose()
   })

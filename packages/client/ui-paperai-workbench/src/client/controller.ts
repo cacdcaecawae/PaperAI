@@ -100,8 +100,9 @@ function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAI
     // Across a newer revision, words that recur elsewhere cannot vouch for the paragraph: the Host carries an
     // id to the nearest paragraph with the same text (document-service `buildDocumentIndex`), so an insertion
     // above two empty paragraphs swaps their ids, and the draft would be painted and saved into the other one.
-    const recurring = edit.baseRevision !== document.revision
-      && document.nodes.filter(candidate => candidate.text === edit.baseText).length > 1
+    // Only paragraphs of the draft's own kind can take its id: the Host hashes a node's kind with its text.
+    const recurring = node !== undefined && edit.baseRevision !== document.revision
+      && document.nodes.filter(candidate => candidate.kind === node.kind && candidate.text === edit.baseText).length > 1
     return {
       ...edit,
       conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText || recurring,
@@ -569,7 +570,9 @@ export class PaperAIWorkbenchController {
     }
     const back = kept.get(nodeId)
     const node = open.nodes.find(candidate => candidate.nodeId === nodeId)
-    if (current !== undefined || back === undefined || node === undefined || !node.editable
+    // Only the page's undo of 用文档的 marks its report conflicted; a formatting edit that leaves the same words
+    // is a new draft, not the one set aside.
+    if (draft.conflicted !== true || current !== undefined || back === undefined || node === undefined || !node.editable
       || back.documentId !== open.documentId || back.revision !== open.revision || back.edit.draft !== draft.text) return false
     kept.delete(nodeId)
     store.update((state) => {
