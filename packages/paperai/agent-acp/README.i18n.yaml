@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/paperai/agent-acp/README.md
-README.md: 145981c064bbc779ebe1ca71f92e1e857de821de
-README.zh.md: 9090ebe142c7f1980a64d61b70c26aee93e47f4f
+README.md: a70772b096057d75da5b407d21dc6ee8bbfd6b9b
+README.zh.md: 5321a2bb2353c3e90a98fba3f3d3a0db9c9ebcfc
