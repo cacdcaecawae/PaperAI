@@ -1,6 +1,6 @@
 import { access, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -82,6 +82,31 @@ afterEach(async () => {
 })
 
 describe('project filesystem fault containment', () => {
+  it('rejects an unavailable volume and lets the next queued project initialize', async () => {
+    const { projectHarness } = await import('./helpers.ts')
+    const projectRoot = await root('unavailable-volume')
+    const volume = parse(projectRoot).root
+    const unavailable = join(volume, 'paperai-unavailable-volume', 'project')
+    const missingVolume = systemError('volume is unavailable', 'ENOENT')
+    faultState.faults.push(
+      { method: 'mkdir', pathIncludes: unavailable, error: missingVolume },
+      { method: 'mkdir', pathIncludes: join(volume, 'paperai-unavailable-volume'), error: missingVolume },
+      { method: 'mkdir', pathIncludes: volume, error: missingVolume },
+      { method: 'mkdir', pathIncludes: volume, error: systemError('retried the volume root', 'EACCES') },
+    )
+    const harness = await projectHarness()
+    const { service, fiber } = await harness.load()
+    try {
+      await expect(service.create({ rootPath: unavailable })).rejects.toBe(missingVolume)
+      expect(faultState.faults).toHaveLength(1)
+      faultState.faults.length = 0
+      await expect(service.create({ rootPath: projectRoot })).resolves.toMatchObject({ projectCreated: true })
+      expect(harness.projects).toHaveLength(1)
+    } finally {
+      await fiber.dispose()
+    }
+  })
+
   it('propagates unexpected directory and context-file creation failures after cleanup', async () => {
     const { prepareProjectLayout } = await import('../src/layout.ts')
     const directoryRoot = await root('mkdir')
