@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import { existsSync, rmSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -348,6 +349,11 @@ async function createHarness(rootPath?: string): Promise<Harness> {
     }),
     get: (id: typeof PROJECT_ID) => id === PROJECT_ID ? structuredClone(harness.project) : undefined,
     findByPath: async (path: string) => ctx.paperRepository.listProjects().find(project => project.rootPath === path),
+    adopt: async (workspace: { id: string; path: string }) => {
+      if (!ctx.paperRepository.listProjects().some(project => project.rootPath === workspace.path)) return undefined
+      harness.project = { ...harness.project, workspaceId: workspace.id }
+      return structuredClone(harness.project)
+    },
     setTemplateChoice: async (id: typeof PROJECT_ID, packId: string | null) => {
       expect(id).toBe(PROJECT_ID)
       const { templatePackId: _dropped, ...rest } = harness.project
@@ -564,6 +570,87 @@ describe('PaperAiWorkbenchService', () => {
     expect(committed.document.workspaceId).toBe(WORKSPACE_ID)
     expect(create).not.toHaveBeenCalled()
     expect(setTemplateChoice).not.toHaveBeenCalled()
+  })
+
+  it('adopts a project re-registered under a new Workspace for an explicit action instead of initializing it again', async () => {
+    const h = await createHarness()
+    h.project = { ...h.project, workspaceId: 'workspace-deleted' }
+    const create = vi.spyOn(h.ctx.paperProjects, 'create')
+    const adopt = vi.spyOn(h.ctx.paperProjects, 'adopt')
+    expect(await h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })).toMatchObject({
+      workspaceId: WORKSPACE_ID, templateDecided: true, documents: [{ documentId: DOCUMENT_ID }],
+    })
+    expect(adopt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: WORKSPACE_ID, path: h.project.rootPath }))
+    expect(h.project.workspaceId).toBe(WORKSPACE_ID)
+    expect(create).not.toHaveBeenCalled()
+    expect(await readdir(h.project.rootPath)).toEqual([])
+
+    h.project = { ...h.project, workspaceId: 'workspace-deleted' }
+    adopt.mockResolvedValueOnce(undefined)
+    await expect(h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null }))
+      .rejects.toThrow('associated with another Workspace')
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a Workspace root removed after its directory check absent instead of recreating it for a write', async () => {
+    const h = await createHarness()
+    const root = h.project.rootPath
+    const opened = await openDocument(h)
+    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockImplementation(() => {
+      rmSync(root, { recursive: true, force: true })
+      return [structuredClone(h.project)]
+    })
+    await expect(h.service.importDocument({
+      workspaceId: WORKSPACE_ID, sessionId: SESSION_ID, fileName: 'paper.docx', contentBase64: Buffer.from('word-upload').toString('base64'),
+    })).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(existsSync(root)).toBe(false)
+    await expect(h.service.exportDocument({
+      sessionId: SESSION_ID, documentId: DOCUMENT_ID, baseRevision: opened.document.revision, baseCommitId: null, mode: 'draft-export',
+    })).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(existsSync(root)).toBe(false)
+    expect(h.importDocument).not.toHaveBeenCalled()
+    expect(h.exportDocument).not.toHaveBeenCalled()
+  })
+
+  it('resolves a re-registered Workspace before a commit lands, so a failing root lookup afterwards cannot fail it', async () => {
+    const h = await createHarness()
+    h.project = { ...h.project, workspaceId: 'workspace-deleted' }
+    let landed = false
+    vi.spyOn(h.ctx.workspaceRegistry, 'resolveByPath').mockImplementation(async (path: string) => {
+      if (landed) throw Object.assign(new Error('root moved away'), { code: 'ENOENT' })
+      return { id: WORKSPACE_ID, path, title: h.project.name } as never
+    })
+    const submit = h.submit.getMockImplementation()!
+    h.submit.mockImplementationOnce(async (request) => {
+      const commit = await submit(request)
+      landed = true
+      return commit
+    })
+    const opened = await openDocument(h)
+    const committed = await h.service.commit({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: opened.document.revision,
+      baseCommitId: null,
+      mutations: [{ type: 'replace-text', nodeId: NODE_ID, baseText: '原始段落', nextText: '修改' }],
+    })
+    expect(committed).toMatchObject({ createdCommitId: 'commit-1', document: { workspaceId: WORKSPACE_ID, headCommitId: 'commit-1' } })
+
+    landed = false
+    const revert = h.revert.getMockImplementation()!
+    h.revert.mockImplementationOnce(async (request) => {
+      const commit = await revert(request)
+      landed = true
+      return commit
+    })
+    const restored = await h.service.restore({
+      sessionId: SESSION_ID,
+      documentId: DOCUMENT_ID,
+      baseRevision: committed.document.revision,
+      baseCommitId: committed.createdCommitId,
+      targetCommitId: 'historical' as PaperAIDocumentCommitId,
+    })
+    expect(restored).toMatchObject({ createdCommitId: 'commit-2', document: { workspaceId: WORKSPACE_ID, headCommitId: 'commit-2' } })
   })
 
   it('does not create a project for an invalid template or a missing or non-directory Workspace root', async () => {

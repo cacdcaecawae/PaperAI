@@ -112,6 +112,23 @@ function isSafeFileName(name: string): boolean {
   }
   return true
 }
+
+/**
+ * Create `root/...segments` one level at a time. `root` itself is never
+ * created, so a project root removed after any earlier check stays absent
+ * and the write fails instead.
+ */
+async function directoryBelow(root: string, ...segments: string[]): Promise<string> {
+  let path = root
+  for (const segment of segments) {
+    path = join(path, segment)
+    await mkdir(path).catch((error: unknown) => {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+    })
+  }
+  return path
+}
+
 /** Paragraphs inspected when guessing a document type from its opening text. */
 const TYPE_GUESS_PARAGRAPHS = 12
 /** Title or opening-text keywords that name a document type, most specific first. */
@@ -802,7 +819,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       mutations,
       ...(signal === undefined ? {} : { signal }),
     })
-    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+    return await this.commitResult(project, id, request.baseRevision, request.sessionId, commit, signal)
   }
 
   /**
@@ -824,6 +841,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     if (before.document.templateId === undefined) {
       throw new Error(`paperai-workbench: document '${id}' has no bound format`)
     }
+    const project = await this.requireProject(before.document.projectId)
     const commit = await this.ctx.paperCommits.submit({
       documentId: id,
       ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
@@ -834,7 +852,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       mutations: [{ type: 'unbind-template' }],
       ...(signal === undefined ? {} : { signal }),
     })
-    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+    return await this.commitResult(project, id, request.baseRevision, request.sessionId, commit, signal)
   }
 
   /**
@@ -921,12 +939,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
     const project = await this.requireProject(before.document.projectId)
-    const directory = join(
-      project.rootPath,
-      'exports',
-      request.mode === 'draft-export' ? 'drafts' : 'delivery',
-    )
-    await mkdir(directory, { recursive: true })
+    const directory = await directoryBelow(project.rootPath, 'exports', request.mode === 'draft-export' ? 'drafts' : 'delivery')
     const fileName = this.exportFileName(
       request.fileName
         ?? `${before.document.name}${request.mode === 'draft-export' ? '-草稿' : ''}.docx`,
@@ -1023,6 +1036,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const order = new Map(before.nodes.map((node, index) => [String(node.id), index]))
     const mutations = [...request.mutations].sort((left, right) =>
       (order.get(String(right.nodeId)) ?? -1) - (order.get(String(left.nodeId)) ?? -1))
+    const project = await this.requireProject(before.document.projectId)
     const commit = await this.ctx.paperCommits.submit({
       documentId: id,
       ...(request.baseCommitId === null ? {} : { baseCommitId: DocumentCommitId(String(request.baseCommitId)) }),
@@ -1043,7 +1057,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       })),
       ...(signal === undefined ? {} : { signal }),
     })
-    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+    return await this.commitResult(project, id, request.baseRevision, request.sessionId, commit, signal)
   }
 
   /**
@@ -1089,6 +1103,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const id = DocumentId(String(request.documentId))
     const before = this.requireDocument(id)
     this.assertProjection(before.document, request.baseRevision, request.baseCommitId)
+    const project = await this.requireProject(before.document.projectId)
     const commit = await this.ctx.paperCommits.revert({
       documentId: id,
       baseCommitId: DocumentCommitId(String(request.baseCommitId)),
@@ -1102,7 +1117,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
       },
       ...(signal === undefined ? {} : { signal }),
     })
-    return await this.commitResult(id, request.baseRevision, request.sessionId, commit, signal)
+    return await this.commitResult(project, id, request.baseRevision, request.sessionId, commit, signal)
   }
 
   /** Reads must not initialize a missing project or repair its context files. */
@@ -1145,16 +1160,20 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     return workspace
   }
 
-  /** Only explicit template selection or document creation may initialize a project. */
+  /**
+   * Only explicit template selection or document creation may initialize a
+   * project. A project recorded for the directory under an earlier Workspace
+   * registration is adopted, which rewrites only its association, never its files.
+   */
   private async projectForWorkspace(workspaceId: WorkspaceId): Promise<{ workspace: Workspace; project: ProjectRecord }> {
     const workspace = await this.workspaceDirectory(workspaceId)
     const project = this.recordedProject(workspace)
-    if (project !== undefined) return { workspace, project }
-    const initialized = await this.ctx.paperProjects.create({ rootPath: workspace.path, name: workspace.title, existingRoot: true })
-    if (initialized.project.workspaceId !== String(workspace.id)) {
-      throw new Error(`paperai-workbench: project '${initialized.project.id}' is associated with another Workspace`)
+      ?? await this.ctx.paperProjects.adopt(workspace)
+      ?? (await this.ctx.paperProjects.create({ rootPath: workspace.path, name: workspace.title, existingRoot: true })).project
+    if (project.workspaceId !== String(workspace.id)) {
+      throw new Error(`paperai-workbench: project '${project.id}' is associated with another Workspace`)
     }
-    return { workspace, project: initialized.project }
+    return { workspace, project }
   }
 
   private projectOverview(workspaceId: WorkspaceId, project: ProjectRecord): PaperAIProjectOverview {
@@ -1300,8 +1319,14 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     }
   }
 
-  /** Project the document after a commit, fencing stale gate claims from the pre-commit revision. */
+  /**
+   * Project the document after a commit, fencing stale gate claims from the
+   * pre-commit revision. The project, with its Workspace association, was
+   * resolved before the durable write: once the head has advanced, no
+   * fallible lookup may report the committed operation as failed.
+   */
   private async commitResult(
+    project: ProjectRecord,
     id: DocumentId,
     baseRevision: PaperAIDocumentRevision,
     sessionId: SessionId,
@@ -1310,7 +1335,6 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   ): Promise<PaperAIDocumentCommitResult> {
     const after = this.requireDocument(id)
     this.fenceGateMutation(after.document, baseRevision)
-    const project = await this.requireProject(after.document.projectId)
     const opened = await this.projectOpen(project, after.document, after.nodes, sessionId, signal, 'skip')
     return { ...opened, createdCommitId: commit.id }
   }
@@ -1323,8 +1347,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   ): Promise<T> {
     const normalizedName = this.uploadFileName(fileName)
     const bytes = this.decodeUpload(contentBase64)
-    const stagingParent = join(project.rootPath, '.paperai', 'uploads', 'v1')
-    await mkdir(stagingParent, { recursive: true })
+    const stagingParent = await directoryBelow(project.rootPath, '.paperai', 'uploads', 'v1')
     const requestRoot = await mkdtemp(join(stagingParent, 'request-'))
     const sourcePath = join(requestRoot, normalizedName)
     try {

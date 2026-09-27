@@ -45,6 +45,15 @@ describe('document file publication', () => {
       .rejects.toThrow('cancelled')
   })
 
+  it('never recreates a project root that disappeared before staging', async () => {
+    const parent = await root()
+    const input = join(parent, 'input.docx')
+    await writeFile(input, 'source')
+    const removed = join(parent, 'removed-project')
+    await expect(stageSourceFile(removed, input, '.docx')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(parent)).toEqual(['input.docx'])
+  })
+
   it('resolves source and Working-path collisions without replacing either file', async () => {
     const project = await root()
     const input = join(project, 'input.docx')

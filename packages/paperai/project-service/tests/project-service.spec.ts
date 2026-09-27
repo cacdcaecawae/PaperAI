@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -192,6 +192,45 @@ describe('PaperProjectService', () => {
     })
     expect(result.project.updatedAt).not.toBe(prior.updatedAt)
     expect(harness.putProject).toHaveBeenCalledTimes(1)
+  })
+
+  it('adopts a re-registered directory by repairing only its association, without touching project files', async () => {
+    const parent = await temporaryRoot('adopt')
+    const root = join(parent, 'canonical')
+    const alias = join(parent, 'alias')
+    await mkdir(root)
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    await writeFile(join(root, 'AGENTS.md'), '# 用户说明\n')
+    const prior: ProjectRecord = {
+      id: ProjectId('project-stable'),
+      workspaceId: 'workspace-gone',
+      name: '已有名称',
+      rootPath: alias,
+      templatePackId: 'hit-master-thesis',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    const harness = await projectHarness({ projects: [prior] })
+    const { service } = await harness.load()
+    const workspace = await harness.createWorkspace(root, '重新注册')
+
+    const adopted = await service.adopt(workspace)
+
+    expect(adopted).toEqual({ ...prior, workspaceId: workspace.id, rootPath: await realpath(root), updatedAt: adopted?.updatedAt })
+    expect(adopted?.updatedAt).not.toBe(prior.updatedAt)
+    expect(harness.projects).toEqual([adopted])
+    expect((await readdir(root)).sort()).toEqual(['AGENTS.md'])
+    expect(await readFile(join(root, 'AGENTS.md'), 'utf8')).toBe('# 用户说明\n')
+    await expect(service.adopt(workspace)).resolves.toEqual(adopted)
+    harness.projects[0] = { ...adopted!, rootPath: alias }
+    await expect(service.adopt(workspace)).resolves.toMatchObject({ rootPath: await realpath(root) })
+    expect(harness.putProject).toHaveBeenCalledTimes(2)
+
+    const unrelated = await temporaryRoot('adopt-none')
+    await expect(service.adopt(await harness.createWorkspace(unrelated))).resolves.toBeUndefined()
+    expect(await readdir(unrelated)).toEqual([])
+    await expect(service.adopt({ ...workspace, path: join(parent, 'removed') })).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(harness.putProject).toHaveBeenCalledTimes(2)
   })
 
   it('refuses to create or recreate a required existing root that is missing or not a directory', async () => {

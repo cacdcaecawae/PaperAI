@@ -881,6 +881,17 @@ list(): ProjectRecord[]
 setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord>
 
 /**
+ * Reuse the project already recorded for a Workspace's directory without
+ * touching its files: no layout, context, charter, or Git work runs. A
+ * record still naming an earlier registration of the directory is pointed
+ * at this Workspace, keeping its identity. The call shares the
+ * initialization queue.
+ * @param workspace - registered Workspace whose existing directory may hold a project.
+ * @returns the associated record, or `undefined` when no project records the directory.
+ */
+adopt(workspace: Workspace): Promise<ProjectRecord | undefined>
+
+/**
  * Resolve a project by an existing directory spelling.
  * @param rootPath - Existing directory path.
  * @returns the unique record for its canonical path, or `undefined`.

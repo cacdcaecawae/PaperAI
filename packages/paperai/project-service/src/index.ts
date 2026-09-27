@@ -236,6 +236,32 @@ export class PaperProjectService extends Service {
   }
 
   /**
+   * Reuse the project already recorded for a Workspace's directory without
+   * touching its files: no layout, context, charter, or Git work runs. A
+   * record still naming an earlier registration of the directory is pointed
+   * at this Workspace, keeping its identity. The call shares the
+   * initialization queue.
+   * @param workspace - registered Workspace whose existing directory may hold a project.
+   * @returns the associated record, or `undefined` when no project records the directory.
+   */
+  adopt(workspace: Workspace): Promise<ProjectRecord | undefined> {
+    return this.enqueue(async () => {
+      const rootPath = await realpath(resolve(workspace.path))
+      const existing = await this.uniqueProject(rootPath)
+      if (existing === undefined) return undefined
+      if (existing.workspaceId === String(workspace.id) && existing.rootPath === rootPath) return existing
+      const project: ProjectRecord = {
+        ...existing,
+        workspaceId: String(workspace.id),
+        rootPath,
+        updatedAt: new Date().toISOString(),
+      }
+      await this.ctx.paperRepository.putProject(project)
+      return structuredClone(project)
+    })
+  }
+
+  /**
    * Resolve a project by an existing directory spelling.
    * @param rootPath - Existing directory path.
    * @returns the unique record for its canonical path, or `undefined`.

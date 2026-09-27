@@ -56,6 +56,8 @@ interface CreatePaperProjectResult {
 
 `create(input)` 串行执行初始化。同一规范路径重复调用时，会保留项目 id、名称、创建时间、上下文文件和全部用户文件。路径已有 DSH Workspace 时直接复用；项目记录关联的 Workspace 被重建时，只修复关联，不改变项目身份。项目目录不存在时会被创建；但传入 `existingRoot: true` 时要求它已是现有目录，否则直接失败而不创建。创建项目子目录的过程从不重新创建中途消失的根目录。
 
+`adopt(workspace)` 复用某个 Workspace 现有目录已记录的项目，且不触碰其中文件：不执行目录布局、上下文文件、写作章程或 Git 初始化。记录若仍指向该目录之前的登记，会改为指向这个 Workspace，项目身份、名称和模板决定保持不变。目录没有项目记录时返回 `undefined`，目录不存在时直接失败；该调用与初始化共用同一队列。
+
 `setTemplateChoice(id, packId)` 记录项目写作所依据的模板——某个模板 id，或以 `null` 明确选择不用模板。两种写法都会写入 `templateDecidedAt`，因此浏览器首次打开时的模板询问不会再次出现；`templatePackId` 相应写入或移除，`ProjectRecord` 的其他字段保持不变。该调用与初始化共用同一串行队列，项目不存在时失败。
 
 文件系统、Workspace 或 Repository 的致命失败只会删除本次创建且内容未变的文件和空目录。Repository 发布失败时，本次新注册的 Workspace 也会删除。服务从不递归删除已有内容；回滚本身失败时，会同时报告初始错误和清理错误。
