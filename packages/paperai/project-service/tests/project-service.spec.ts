@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rmdir, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -231,11 +231,17 @@ describe('PaperProjectService', () => {
     harness.projects.push({ ...prior, id: ProjectId('project-moved'), rootPath: moved })
     await expect(service.create({ rootPath: moved })).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(access(moved)).rejects.toMatchObject({ code: 'ENOENT' })
+    // Registered while it was still a directory, so the registry hands the file
+    // its workspace and only adoption's own check can refuse it.
+    await mkdir(moved)
+    await harness.createWorkspace(moved, 'moved')
+    await rmdir(moved)
     await writeFile(moved, 'ordinary file')
-    await expect(service.create({ rootPath: moved, existingRoot: true })).rejects.toThrow('not a directory')
+    await expect(service.create({ rootPath: moved, existingRoot: true })).rejects.toThrow('exists but is not a directory')
     expect(await readFile(moved, 'utf8')).toBe('ordinary file')
     expect(harness.putProject).toHaveBeenCalledTimes(2)
-    expect(harness.createWorkspace).toHaveBeenCalledOnce()
+    expect(harness.projects.find(project => project.id === ProjectId('project-moved'))?.workspaceId).toBe('workspace-gone')
+    expect(harness.createWorkspace).toHaveBeenCalledTimes(2)
   })
 
   it('refuses to create or recreate a required existing root that is missing or not a directory', async () => {
@@ -253,6 +259,29 @@ describe('PaperProjectService', () => {
     expect(await readFile(file, 'utf8')).toBe('ordinary file')
     expect(harness.createWorkspace).not.toHaveBeenCalled()
     expect(harness.putProject).not.toHaveBeenCalled()
+  })
+
+  it('refuses to recreate a recorded directory reached through an alias of its parent', async () => {
+    const parent = await temporaryRoot('alias-missing')
+    const real = join(parent, 'real')
+    const link = join(parent, 'link')
+    await mkdir(real)
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : 'dir')
+    const recorded = join(real, 'proj')
+    const harness = await projectHarness({ projects: [{
+      id: ProjectId('project-removed'),
+      workspaceId: 'workspace-gone',
+      name: 'Removed',
+      rootPath: recorded,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }] })
+    const { service } = await harness.load()
+
+    await expect(service.create({ rootPath: join(link, 'proj') })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(recorded)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(harness.putProject).not.toHaveBeenCalled()
+    expect(harness.createWorkspace).not.toHaveBeenCalled()
   })
 
   it('fails loud on ambiguous records, blank intent, and invalid deployment limits', async () => {

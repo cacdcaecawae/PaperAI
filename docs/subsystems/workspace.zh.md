@@ -895,7 +895,8 @@ async findByPath(rootPath: string): Promise<ProjectRecord | undefined>
  * Resolve the project whose root owns a path: the session workspace root
  * itself or any directory inside it. Agent routes use this to scope document
  * tools to the calling session's project. A path that no project root
- * contains resolves to `undefined`; a missing path is compared lexically.
+ * contains resolves to `undefined`; a missing path resolves through its
+ * nearest existing directory.
  * @param path - workspace root or a path inside one.
  * @returns the deepest owning project, or `undefined`.
  */

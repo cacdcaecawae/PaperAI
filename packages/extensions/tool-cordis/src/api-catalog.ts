@@ -1658,7 +1658,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async resolveForPath(path: string): Promise<ProjectRecord | undefined>',
-        description: 'Resolve the project whose root owns a path: the session workspace root itself or any directory inside it. Agent routes use this to scope document tools to the calling session\'s project. A path that no project root contains resolves to `undefined`; a missing path is compared lexically.',
+        description: 'Resolve the project whose root owns a path: the session workspace root itself or any directory inside it. Agent routes use this to scope document tools to the calling session\'s project. A path that no project root contains resolves to `undefined`; a missing path resolves through its nearest existing directory.',
         parameters: [{ name: 'path', description: 'workspace root or a path inside one.' }],
         returns: 'the deepest owning project, or `undefined`.',
       },

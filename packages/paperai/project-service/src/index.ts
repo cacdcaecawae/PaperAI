@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { basename, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { realpath, stat } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -85,7 +85,7 @@ export interface CreatePaperProjectInput {
   readonly rootPath: string
   /** Display name used only when no project record exists for the directory. */
   readonly name?: string
-  /** Require the directory to exist already; initialization then never creates or recreates it. */
+  /** Require the directory to exist already, so initialization never creates it. A recorded directory is never recreated either way. */
   readonly existingRoot?: boolean
 }
 
@@ -130,12 +130,20 @@ function lexicalPathKey(path: string): string {
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
 }
 
+/**
+ * Compare paths by where they lead. A missing path is canonicalized through its
+ * nearest existing ancestor, so an alias spelling of a deleted directory still
+ * matches the record that names it.
+ */
 async function canonicalPathKey(path: string): Promise<string> {
+  const absolute = resolve(path)
   try {
-    return lexicalPathKey(await realpath(resolve(path)))
+    return lexicalPathKey(await realpath(absolute))
   } catch (error) {
-    if (isMissing(error)) return lexicalPathKey(path)
-    throw error
+    if (!isMissing(error)) throw error
+    const parent = dirname(absolute)
+    if (parent === absolute) return lexicalPathKey(absolute)
+    return lexicalPathKey(join(await canonicalPathKey(parent), basename(absolute)))
   }
 }
 
@@ -253,7 +261,8 @@ export class PaperProjectService extends Service {
    * Resolve the project whose root owns a path: the session workspace root
    * itself or any directory inside it. Agent routes use this to scope document
    * tools to the calling session's project. A path that no project root
-   * contains resolves to `undefined`; a missing path is compared lexically.
+   * contains resolves to `undefined`; a missing path resolves through its
+   * nearest existing directory.
    * @param path - workspace root or a path inside one.
    * @returns the deepest owning project, or `undefined`.
    */
@@ -283,41 +292,33 @@ export class PaperProjectService extends Service {
     let createdWorkspace: Workspace | undefined
     let charter: WritingCharterSync | undefined
     try {
-      const existing = await this.uniqueProject(layout.rootPath)
-      const name = existing?.name ?? this.resolveName(input.name, layout.rootPath)
+      // adoptNow owns every recorded root, so a record here is a spelling the two
+      // lookups canonicalized differently. Re-initializing it would recreate a
+      // recorded directory; refusing rolls the layout back instead.
+      if (await this.uniqueProject(layout.rootPath) !== undefined) {
+        throw new Error(`PaperAI project path '${layout.rootPath}' is already recorded under another spelling`)
+      }
+      const name = this.resolveName(input.name, layout.rootPath)
       const priorWorkspace = await this.ctx.workspaceRegistry.resolveByPath(layout.rootPath)
       const workspace = priorWorkspace ?? await this.ctx.workspaceRegistry.create(layout.rootPath, name)
       createdWorkspace = priorWorkspace === undefined ? workspace : undefined
 
-      const projectCreated = existing === undefined
-      const needsWrite = projectCreated
-        || existing.workspaceId !== String(workspace.id)
-        || existing.rootPath !== layout.rootPath
       const now = new Date().toISOString()
-      const project: ProjectRecord = existing === undefined
-        ? {
-          id: ProjectId(randomUUID()),
-          workspaceId: String(workspace.id),
-          name,
-          rootPath: layout.rootPath,
-          createdAt: now,
-          updatedAt: now,
-        }
-        : needsWrite
-          ? {
-            ...existing,
-            workspaceId: String(workspace.id),
-            rootPath: layout.rootPath,
-            updatedAt: now,
-          }
-          : existing
+      const project: ProjectRecord = {
+        id: ProjectId(randomUUID()),
+        workspaceId: String(workspace.id),
+        name,
+        rootPath: layout.rootPath,
+        createdAt: now,
+        updatedAt: now,
+      }
       charter = await this.syncCharter(project)
-      if (needsWrite) await this.ctx.paperRepository.putProject(project)
+      await this.ctx.paperRepository.putProject(project)
 
       const git = await ensureGitRepository(this.ctx, layout.rootPath, this.config)
       return {
         project,
-        projectCreated,
+        projectCreated: true,
         contextFile: layout.contextFile,
         charter: { agents: charter.agents, claude: charter.claude },
         git,
