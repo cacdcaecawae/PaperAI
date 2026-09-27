@@ -88,7 +88,7 @@ function modes() {
 function makeAgent(connection) {
   return {
     async initialize(params) {
-      log('initialize', { cwd: process.cwd(),
+      log('initialize', { cwd: process.cwd(), pid: process.pid,
         capabilities: params.clientCapabilities,
         environment: {
           openAiApiKey: process.env.OPENAI_API_KEY ?? null,

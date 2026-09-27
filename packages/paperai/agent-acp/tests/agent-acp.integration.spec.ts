@@ -42,6 +42,7 @@ import type {
 } from '@paperai/mcp'
 import PaperAiAcpAgents, {
   ACP_AGENT_SETTINGS_NAMESPACE,
+  type AcpAgent,
   type AcpProviderDefinition,
 } from '../src/index.ts'
 import { AcpSelectionError } from '../src/runtime.ts'
@@ -2321,7 +2322,11 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     await runTurn(handle, 'Crash this process once')
     expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(false)
     connectionStates.length = 0
-    if (operation === 'models') await handle.agent.modelController?.listModels()
+    if (operation === 'models') {
+      await handle.agent.modelController?.listModels()
+      // Observers learn about the recovered connection from the recovery itself, not the next turn.
+      expect(connectionStates).toContain(true)
+    }
     await runTurn(handle, 'Continue the same conversation')
     expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
     expect(connectionStates).toContain(true)
@@ -2344,6 +2349,30 @@ describe('ACP Agent settings and secret handling', { concurrent: false }, () => 
     await runTurn(handle, 'Retry after provider recovery')
     expect(harness.ctx.paperAiAcpAgents.sessionDetails(handle.agent.session.id)?.connected).toBe(true)
     expect((await readLog(harness.logPath)).filter(entry => entry.event === 'new-session')).toHaveLength(1)
+  })
+
+  it('fails startup instead of replacing a provider that exits before the conversation is published', async () => {
+    const harness = await mountHarness()
+    const create = (setup?: (agentCtx: Context) => Promise<void>): Promise<AgentHandle> => harness.ctx.agents.create({
+      sessionId: SessionId('pre-publication-crash'),
+      factoryRoute: 'codex',
+      meta: { cwd: harness.root },
+      agentOptions: { model: 'fake-beta' },
+      ...setup === undefined ? {} : { setup },
+    })
+    await expect(create(async (agentCtx) => {
+      const agent = agentCtx.agent as AcpAgent
+      process.kill(Number((await readLog(harness.logPath)).find(entry => entry.event === 'initialize')?.['pid']))
+      await vi.waitFor(() => {
+        expect(agent.connected).toBe(false)
+      })
+      await agent.modelController.listModels()
+    }).then(() => 'published')).rejects.toThrow('runtime failed before the conversation was published')
+    expect((await readLog(harness.logPath)).filter(entry => entry.event === 'initialize')).toHaveLength(1)
+    const handle = await create()
+    expect(handle.agent.session.events.filter(event => event.type === 'paperai/acp/session')).toHaveLength(1)
+    expect(handle.agent.session.events.findLast(event => event.type === 'paperai/acp/config')?.data)
+      .toMatchObject({ model: 'fake-beta' })
   })
 
   it('clears connected status after the provider process exits unexpectedly', async () => {

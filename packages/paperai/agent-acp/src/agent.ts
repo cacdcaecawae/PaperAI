@@ -1524,6 +1524,10 @@ export class AcpAgent implements Agent {
 
   private async runtimeForSandboxMode(mode: SandboxMode, signal: AbortSignal): Promise<AcpRuntime> {
     if (!this.needsRuntimeRestart()) return this.requireRuntime()
+    // Until commitSessionLink(), the provider link and selection exist only as
+    // pending state that a replacement cannot resume; startup fails and is retried instead.
+    if (!this.sessionLive)
+      throw new Error(`${this.provider.name} ACP runtime failed before the conversation was published`)
     const lifecycleSignal = this.lifecycleSignal
     if (lifecycleSignal === undefined) throw new Error(`${this.provider.name} ACP lifecycle is unavailable`)
     const previousExternalSessionId = this.previousExternalSessionId()
