@@ -108,6 +108,8 @@ export interface PaperAIBlockDraft {
   readonly paragraphs?: readonly PaperAIDocumentParagraph[]
   /** Local rendered readings used to omit unchanged formatting from the Word mutation. */
   readonly formatting?: PaperAIFormatComparison
+  /** The preview detected an external formatting change; saving requires a conflict choice. */
+  readonly conflicted?: boolean
 }
 
 /** Effective browser formatting before and after an edit; empty paragraphs retain a zero-text reading. */
@@ -120,7 +122,7 @@ export interface PaperAIFormatComparison {
 export interface PaperAIBlockEdit {
   readonly nodeId: PaperAIDocumentNodeId
   readonly baseText: string
-  /** The original revision is retained until save or discard, including after an external reload. */
+  /** The revision accepted when drafting or resolving a conflict; retained across external reloads. */
   readonly baseRevision?: PaperAIDocumentRevision
   readonly draft: string
   /** Local character runs for draft repaint; may include unchanged rendered properties. */
