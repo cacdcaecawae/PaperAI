@@ -365,7 +365,8 @@ export type DiffRun = readonly [kind: 'same' | 'del' | 'ins', text: string]
 
 /**
  * Word-level diff of two paragraphs by longest common subsequence.
- * ponytail: an O(n·m) table; paragraph pairs beyond the cap fall back to one deletion and one insertion.
+ * TODO: an O(n·m) table over the part between the shared ends; beyond the cap that part falls back to one
+ *   deletion and one insertion.
  * @param before - the paragraph in the parent version.
  * @param after - the paragraph in the compared version.
  * @param cap - table cells to spend before giving up. `TOKEN` counts each Han character as one token, so two
@@ -374,39 +375,56 @@ export type DiffRun = readonly [kind: 'same' | 'del' | 'ins', text: string]
  * @returns runs in reading order, adjacent runs of one kind merged.
  */
 export function wordDiff(before: string, after: string, cap = 250_000): DiffRun[] {
-  const a = before.match(TOKEN) ?? []
-  const b = after.match(TOKEN) ?? []
-  if (a.length * b.length > cap) return [['del', before], ['ins', after]]
-  const width = b.length + 1
-  const table = new Uint32Array((a.length + 1) * width)
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i * width + j] = a[i] === b[j]
-        ? (table[(i + 1) * width + j + 1] ?? 0) + 1
-        : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0)
-    }
-  }
+  const left = before.match(TOKEN) ?? []
+  const right = after.match(TOKEN) ?? []
+  // What both ends share is common to every longest common subsequence, so only the middle needs the table:
+  // one character changed in a thousand costs one cell, not a refusal past the cap.
+  let head = 0
+  while (head < left.length && head < right.length && left[head] === right[head]) head += 1
+  let tail = 0
+  while (tail < left.length - head && tail < right.length - head
+    && left[left.length - 1 - tail] === right[right.length - 1 - tail]) tail += 1
+  const a = left.slice(head, left.length - tail)
+  const b = right.slice(head, right.length - tail)
   const runs: [DiffRun[0], string][] = []
   const push = (kind: DiffRun[0], text: string): void => {
     const last = runs.at(-1)
+    if (text === '') return
     if (last?.[0] === kind) last[1] += text
     else runs.push([kind, text])
   }
-  let i = 0
-  let j = 0
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      push('same', a[i] ?? '')
-      i += 1
-      j += 1
-    } else if (i < a.length && (j === b.length || (table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0))) {
-      push('del', a[i] ?? '')
-      i += 1
-    } else {
-      push('ins', b[j] ?? '')
-      j += 1
+  push('same', left.slice(0, head).join(''))
+  if (a.length * b.length > cap) {
+    push('del', a.join(''))
+    push('ins', b.join(''))
+  }
+  else {
+    const width = b.length + 1
+    const table = new Uint32Array((a.length + 1) * width)
+    for (let i = a.length - 1; i >= 0; i -= 1) {
+      for (let j = b.length - 1; j >= 0; j -= 1) {
+        table[i * width + j] = a[i] === b[j]
+          ? (table[(i + 1) * width + j + 1] ?? 0) + 1
+          : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0)
+      }
+    }
+    let i = 0
+    let j = 0
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) {
+        push('same', a[i] ?? '')
+        i += 1
+        j += 1
+      } else if (i < a.length && (j === b.length || (table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0))) {
+        push('del', a[i] ?? '')
+        i += 1
+      } else {
+        push('ins', b[j] ?? '')
+        j += 1
+      }
     }
   }
+  push('same', left.slice(left.length - tail).join(''))
   return runs
 }
 
@@ -438,8 +456,23 @@ export interface ConflictBandSide {
   readonly theirs: string
   /** The writer's draft. */
   readonly mine: string
+  /**
+   * The text the draft started from. The band marks what the document changed since then, so the writer's
+   * own edits, which the paragraph below already shows, are never presented as the document's.
+   */
+  readonly base: string
+  /**
+   * Quote the document's text as it stands, unmarked. Set when those words are the very ones the draft
+   * started from: what changed on the document's side is then formatting, which a word diff cannot show,
+   * and marking the writer's own edits against it would present them as the document's.
+   */
+  readonly unmarked?: boolean
+  /** The document's rendered runs for an unmarked quotation, so a change no word diff can show appears in it. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
   /** Resolved strings: no locale key reaches this module. */
   readonly copy: {
+    /** Names the band for assistive technology, which cannot see which paragraph a band stands above. */
+    readonly label: string
     readonly who: string
     /** Names both marks in words, so neither depends on hue. Empty when nothing is marked. */
     readonly legend: string
@@ -474,6 +507,9 @@ export function conflictBand(owner: Document, side: ConflictBandSide): HTMLEleme
   band.dataset.paperaiConflict = side.nodeId
   band.dataset.paperaiConflictForm = side.form
   band.setAttribute('contenteditable', 'false')
+  // Several bands carry buttons with the same names, and only position ties a band to its paragraph.
+  band.setAttribute('role', 'group')
+  band.setAttribute('aria-label', side.copy.label)
   const body = owner.createElement('div')
   body.className = 'paperai-conflict-body'
   const head = owner.createElement('div')
@@ -487,24 +523,32 @@ export function conflictBand(owner: Document, side: ConflictBandSide): HTMLEleme
   text.className = 'paperai-conflict-text'
 
   const quoted = side.form === 'draft' ? side.mine : side.theirs
+  // A soft break reads as `\v` and a split draft joins its paragraphs with `\n`; the quotation shows both as
+  // line breaks, so a draft copied off a band keeps the structure it was typed with.
+  const lines = (part: string): string => part.replaceAll('\v', '\n')
   if (quoted === '') {
     text.className = 'paperai-conflict-text paperai-conflict-empty'
-    text.textContent = side.copy.empty
-    legend.textContent = ''
+    // An empty paragraph's only difference may be its formatting, so the placeholder wears the document's.
+    const [first] = side.form === 'document' && side.unmarked === true ? side.runs ?? [] : []
+    if (first === undefined) text.textContent = side.copy.empty
+    else applyRuns(text, [{ ...first, text: side.copy.empty }])
+    // Nothing is marked, but a draft band's legend, and an unmarked band's, is its only reason.
+    legend.textContent = side.form === 'draft' || side.unmarked === true ? side.copy.legend : ''
   }
-  else if (side.form === 'draft') {
-    text.textContent = quoted
+  else if (side.form === 'draft' || side.unmarked === true) {
+    if (side.form === 'document' && side.runs !== undefined && side.runs.length > 0) applyRuns(text, side.runs)
+    else text.textContent = lines(quoted)
     legend.textContent = side.copy.legend
   }
   else {
-    const runs = wordDiff(side.mine, side.theirs, BAND_CAP)
+    const runs = wordDiff(side.base, side.theirs, BAND_CAP)
     const kept = runs.reduce((total, [kind, part]) => (kind === 'same' ? total + part.length : total), 0)
     if (kept / quoted.length >= MARKED_SHARE) {
-      text.append(...runs.map(([kind, part]) => (kind === 'same' ? owner.createTextNode(part) : run(owner, kind, part))))
+      text.append(...runs.map(([kind, part]) => (kind === 'same' ? owner.createTextNode(lines(part)) : run(owner, kind, lines(part)))))
       legend.textContent = side.copy.legend
     }
     else {
-      text.textContent = quoted
+      text.textContent = lines(quoted)
       legend.textContent = side.copy.rewritten
     }
   }

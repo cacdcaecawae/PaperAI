@@ -18,16 +18,24 @@ type Translate = PaperAIDocumentWorkbenchProps['t']
 
 const EXPORT_MODES: readonly PaperAIExportMode[] = ['draft-export', 'delivery-export']
 
-/** Actionable controller failures have specific guidance; other failures offer a retry. */
-function actionErrorKey(error: string): PaperAIWorkbenchKey {
+/**
+ * Actionable controller failures have specific guidance; other failures offer a retry.
+ * @param error - the published action error.
+ * @param drafting - drafts are on the page, which only a save leaves behind when it fails.
+ * @returns the key for the guidance to show.
+ */
+function actionErrorKey(error: string, drafting = false): PaperAIWorkbenchKey {
   if (error.includes('UNSUPPORTED_DOCUMENT_CONTENT:')) return 'workbench.unsupportedContent'
   if (error.includes('Working DOCX differs from head')) return 'workbench.workingChanged'
   if (error.startsWith('delivery blocked')) return 'export.blocked'
   if (error.startsWith('block changed externally')) return 'block.conflicted'
-  // Both real conflict failures, which until now landed on the generic retry: one from the commit
-  // service when a block's base text went stale, one from the workbench when the whole document did.
-  // Pressing 保存 again cannot clear either; reloading is what produces the bands that can.
-  if (error.includes('NODE_TEXT_CONFLICT') || error.includes('changed; reload before applying')) return 'workbench.reloadFirst'
+  // The document moved under the action, in the words the Host sends: the gateway forwards a commit-service
+  // failure as `internal: <message>`, so its NODE_TEXT_CONFLICT or HEAD_CONFLICT code never arrives. Pressing
+  // the action again cannot clear it; reloading can. Only a failed save leaves drafts, so only a save is
+  // promised the bands; an export, check, restore or template change runs with none.
+  if (error.includes('text changed since the') || error.includes('head changed:') || error.includes('changed; reload before applying')) {
+    return drafting ? 'workbench.reloadFirst' : 'workbench.reloadAction'
+  }
   if (error === 'save or cancel the current block first') return 'block.busy'
   return 'workbench.actionError'
 }
@@ -239,7 +247,7 @@ export function DocumentWorkbench({
           </div>
         </div>
       )}
-      {state.actionError !== null && actionErrorKey(state.actionError) === 'workbench.workingChanged' && (
+      {state.actionError !== null && actionErrorKey(state.actionError, state.edits.length > 0) === 'workbench.workingChanged' && (
         <div className={css.notice} role="alert">
           <div>
             <strong>{t('workbench.workingChanged')}</strong>
@@ -250,8 +258,8 @@ export function DocumentWorkbench({
           </Button>
         </div>
       )}
-      {state.actionError !== null && actionErrorKey(state.actionError) !== 'workbench.workingChanged' && (
-        <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError))}</p>
+      {state.actionError !== null && actionErrorKey(state.actionError, state.edits.length > 0) !== 'workbench.workingChanged' && (
+        <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError, state.edits.length > 0))}</p>
       )}
       {ready && compare !== null && viewing !== null && (
         <div className={css.notice} role="status">
