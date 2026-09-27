@@ -41,12 +41,18 @@ describe('wordDiff', () => {
     expect(wordDiff('gone', '')).toEqual([['del', 'gone']])
   })
 
-  it('gives up on a pair past the default cap and marks the same pair once a caller raises it', () => {
-    // 501 Han characters a side, because TOKEN counts each one: 251_001 cells, just past the default.
-    const before = `${'本'.repeat(500)}甲`
-    const after = `${'本'.repeat(500)}乙`
+  it('marks one character changed in a long paragraph, however long, because the shared ends need no table', () => {
+    // 501 Han characters a side, because TOKEN counts each one: 251_001 cells for the whole pair, past the default.
+    expect(wordDiff(`${'本'.repeat(500)}甲`, `${'本'.repeat(500)}乙`)).toEqual([['same', '本'.repeat(500)], ['del', '甲'], ['ins', '乙']])
+    expect(wordDiff(`甲${'本'.repeat(1000)}`, `乙${'本'.repeat(1000)}`)).toEqual([['del', '甲'], ['ins', '乙'], ['same', '本'.repeat(1000)]])
+  })
+
+  it('gives up on a middle past the default cap and marks the same pair once a caller raises it', () => {
+    // Different at both ends, so the whole 501×501 middle needs the table.
+    const before = `甲${'本'.repeat(500)}`
+    const after = `乙${'本'.repeat(499)}丙`
     expect(wordDiff(before, after)).toEqual([['del', before], ['ins', after]])
-    expect(wordDiff(before, after, 1_000_000)).toEqual([['same', '本'.repeat(500)], ['del', '甲'], ['ins', '乙']])
+    expect(wordDiff(before, after, 1_000_000).find(([kind]) => kind === 'same')?.[1]).toBe('本'.repeat(499))
   })
 })
 
@@ -360,14 +366,15 @@ describe('clearing a run', () => {
 })
 
 /** One band's input. The copy is marker text, so an assertion names the string the band picked rather than matching prose. */
-function side(form: ConflictBandSide['form'], mine: string, theirs: string): ConflictBandSide {
+function side(form: ConflictBandSide['form'], mine: string, theirs: string, base = mine): ConflictBandSide {
   return {
     nodeId: NODE_PARAGRAPH,
     form,
     theirs,
     mine,
+    base,
     copy: {
-      who: 'who', legend: 'legend', rewritten: 'rewritten', empty: 'empty',
+      label: 'label', who: 'who', legend: 'legend', rewritten: 'rewritten', empty: 'empty',
       actions: form === 'draft'
         ? [{ resolve: 'copy', label: 'copy' }, { resolve: 'drop', label: 'drop' }]
         : [{ resolve: 'mine', label: 'mine' }, { resolve: 'theirs', label: 'theirs' }],
@@ -398,6 +405,43 @@ describe('conflictBand', () => {
       .toEqual([['button', 'mine', 'mine'], ['button', 'theirs', 'theirs']])
   })
 
+  it('quotes the document plainly, keeping both sides, when its words are the ones the draft started from', () => {
+    // The writer's own edit would otherwise be marked as if the document had made it.
+    const theirs = '本课题旨在构建一个面向中文学位论文的写作工作台。'
+    const band = conflictBand(document, { ...side('document', '本课题旨在构建一个面向中文学位论文的批改工作台。', theirs), unmarked: true })
+    const text = band.querySelector('.paperai-conflict-text')!
+    expect(text.querySelectorAll('del, ins')).toHaveLength(0)
+    expect(text.textContent).toBe(theirs)
+    expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('legend')
+    expect([...band.querySelectorAll<HTMLElement>('.paperai-conflict-act')].map(button => button.dataset.paperaiResolve))
+      .toEqual(['mine', 'theirs'])
+  })
+
+  it('marks a long paragraph whose middle only a raised cap can afford', () => {
+    // 501×501 cells between the shared ends: past the default, within the band's cap.
+    const mine = `甲${'本'.repeat(500)}`
+    const theirs = `乙${'本'.repeat(499)}丙`
+    const band = conflictBand(document, side('document', mine, theirs))
+    expect(band.querySelectorAll('del, ins').length).toBeGreaterThan(0)
+    expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('legend')
+  })
+
+  it('marks what the document changed since the draft began, not what the writer added', () => {
+    const base = '本课题旨在构建一个面向中文学位论文的写作工作台。'
+    const band = conflictBand(document, side('document', `${base}并支持多人协作。`, base.replace('写作', '批改'), base))
+    expect([...band.querySelectorAll('del, ins')].map(mark => [mark.tagName, mark.textContent])).toEqual([['DEL', '写作'], ['INS', '批改']])
+    expect(band.textContent).not.toContain('多人协作')
+  })
+
+  it('shows the document’s own formatting in an unmarked quotation', () => {
+    // A reformat is the change here, so the quotation carries it instead of a word diff that cannot.
+    const band = conflictBand(document, { ...side('document', 'Normal bold, and mine', 'Normal bold'), unmarked: true, runs: [
+      { text: 'Normal ', size: '16pt' }, { text: 'bold', size: '16pt', bold: true },
+    ] })
+    const spans = [...band.querySelectorAll<HTMLElement>('.paperai-conflict-text span')]
+    expect(spans.map(span => [span.textContent, span.style.fontSize, span.style.fontWeight])).toEqual([['Normal ', '16pt', ''], ['bold', '16pt', 'bold']])
+  })
+
   it('drops the marking and says so when the document kept too little of the draft to mark', () => {
     const theirs = '近年来大模型在文本生成方面取得显著进展，为教育领域带来新机遇。'
     const band = conflictBand(document, side('document', '本课题旨在构建一个面向中文学位论文的写作工作台。', theirs))
@@ -419,12 +463,27 @@ describe('conflictBand', () => {
       .toEqual(['copy', 'drop'])
   })
 
-  it.each([['document', '草稿还在这里', ''], ['draft', '', '文档现在的写法']] as const)(
-    'stands a placeholder in for the side a %s band would otherwise quote as a blank line', (form, mine, theirs) => {
+  it.each([['document', '草稿还在这里', '', ''], ['draft', '', '文档现在的写法', 'legend']] as const)(
+    'stands a placeholder in for the side a %s band would otherwise quote as a blank line', (form, mine, theirs, legend) => {
       const band = conflictBand(document, side(form, mine, theirs))
       const text = band.querySelector('.paperai-conflict-text')!
       expect(text.textContent).toBe('empty')
       expect(text.classList.contains('paperai-conflict-empty')).toBe(true)
-      expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('')
+      // Nothing is marked, so a document band drops its legend; a draft band's legend is its only reason.
+      expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe(legend)
     })
+
+  it('keeps an unmarked band’s reason when the side it quotes is empty', () => {
+    // Two empty paragraphs are exactly where recurring words ask for the place to be confirmed.
+    const band = conflictBand(document, { ...side('document', '第一章的正文', ''), unmarked: true })
+    expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('empty')
+    expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('legend')
+  })
+
+  it('shows soft breaks and split paragraphs as line breaks, and names itself for assistive technology', () => {
+    const band = conflictBand(document, side('draft', '第一段草稿\v软换行\n第二段草稿', '文档'))
+    expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('第一段草稿\n软换行\n第二段草稿')
+    expect(band.getAttribute('role')).toBe('group')
+    expect(band.getAttribute('aria-label')).toBe('label')
+  })
 })

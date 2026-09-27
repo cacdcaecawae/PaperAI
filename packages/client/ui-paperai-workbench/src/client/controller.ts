@@ -83,12 +83,29 @@ function hasUnsavedEdit(state: PaperAIWorkbenchState): boolean {
   return state.edits.length > 0
 }
 
+/** A conflicted draft set aside with 用文档的, and the document and revision of the page that took it. */
+interface SetAsideDraft {
+  readonly documentId: PaperAIDocumentSnapshot['documentId']
+  readonly revision: PaperAIDocumentSnapshot['revision']
+  readonly edit: PaperAIBlockEdit
+}
+
 /** Preserve evicted or externally changed drafts without applying them to different blocks. */
 function restoreEdits(document: PaperAIDocumentSnapshot, edits: readonly PaperAIBlockEdit[]): PaperAIBlockEdit[] {
-  return edits.map((edit) => {
+  return edits.map(({ saveFailed: _verdict, ...edit }) => {
     const node = document.nodes.find(candidate => candidate.nodeId === edit.nodeId)
     // The preview also reports formatting conflicts from its rendered readings; they survive later reloads.
-    return { ...edit, conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText }
+    // A failed save's verdict does not: the document arrives with no action error, and a verdict without its
+    // reason would report a failure the reload has already answered.
+    // Across a newer revision, words that recur elsewhere cannot vouch for the paragraph: the Host carries an
+    // id to the nearest paragraph with the same text (document-service `buildDocumentIndex`), so an insertion
+    // above two empty paragraphs swaps their ids, and the draft would be painted and saved into the other one.
+    const recurring = edit.baseRevision !== document.revision
+      && document.nodes.filter(candidate => candidate.text === edit.baseText).length > 1
+    return {
+      ...edit,
+      conflicted: edit.conflicted === true || node === undefined || !node.editable || node.text !== edit.baseText || recurring,
+    }
   })
 }
 
@@ -130,6 +147,13 @@ export class PaperAIWorkbenchController {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
   }>()
+  /**
+   * Conflicted drafts the writer set aside with 用文档的, each with the document and revision of the page
+   * that took it. That page's undo stack can still hand the very same text back, and it is still in
+   * conflict; it survives switching documents, because a retained preview keeps its undo stack, while any
+   * other revision means a rebuilt page whose undo stack no longer reaches it.
+   */
+  private readonly abandoned = new Map<SessionId, Map<PaperAIDocumentNodeId, SetAsideDraft>>()
   /** The one page-wide unload guard; preventDefault is the whole of the modern contract. */
   private readonly confirmUnload = (event: BeforeUnloadEvent): void => { event.preventDefault() }
   private disposed = false
@@ -490,6 +514,7 @@ export class PaperAIWorkbenchController {
    */
   updateDraft(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null): void {
     this.assertLive()
+    if (this.setAside(sessionId, nodeId, draft)) return
     this.workbenchEntry(sessionId).store.update((state) => {
       const node = state.document?.nodes.find(candidate => candidate.nodeId === nodeId)
       if (state.phase !== 'ready' || state.action !== null || state.document === null) return
@@ -519,6 +544,42 @@ export class PaperAIWorkbenchController {
   }
 
   /**
+   * Remember a conflicted draft as its block drops it, and hand it back as the same conflict when that
+   * text returns. An undo of 用文档的 returns exactly the text set aside; as a fresh draft it would rebase
+   * onto the document's text unasked and, on 保存, replace the Agent's paragraph without the writer ever
+   * having chosen 用我的.
+   * @param sessionId - Session owning the open workbench.
+   * @param nodeId - block the draft belongs to.
+   * @param draft - what `updateDraft` was handed.
+   * @returns true when the draft was a set-aside conflict coming back and has been restored as one.
+   */
+  private setAside(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null): boolean {
+    const { store } = this.workbenchEntry(sessionId)
+    const snapshot = store.getSnapshot()
+    const open = snapshot.document
+    // updateDraft's own guard: where it does nothing, neither does this.
+    if (snapshot.phase !== 'ready' || snapshot.action !== null || open === null) return false
+    const current = snapshot.edits.find(edit => edit.nodeId === nodeId)
+    const kept = this.abandoned.get(sessionId) ?? new Map<PaperAIDocumentNodeId, SetAsideDraft>()
+    this.abandoned.set(sessionId, kept)
+    if (draft === null) {
+      // The drop itself still happens in updateDraft; this only remembers what it takes.
+      if (current?.conflicted === true) kept.set(nodeId, { documentId: open.documentId, revision: open.revision, edit: current })
+      return false
+    }
+    const back = kept.get(nodeId)
+    const node = open.nodes.find(candidate => candidate.nodeId === nodeId)
+    if (current !== undefined || back === undefined || node === undefined || !node.editable
+      || back.documentId !== open.documentId || back.revision !== open.revision || back.edit.draft !== draft.text) return false
+    kept.delete(nodeId)
+    store.update((state) => {
+      state.edits = [...state.edits, back.edit]
+      if (!state.edits.some(edit => edit.saveFailed === true)) state.actionError = null
+    })
+    return true
+  }
+
+  /**
    * Start from the local draft on one conflicted block: rebase it onto the text the document now has
    * and unfreeze the block, so the merge is typed in the page with the editor the writer already has.
    * The commit service refuses a mutation whose `baseText` is stale, so the rebase is the substance of
@@ -544,6 +605,7 @@ export class PaperAIWorkbenchController {
    */
   cancelEdit(sessionId: SessionId): void {
     this.assertLive()
+    this.abandoned.delete(sessionId)
     this.workbenchEntry(sessionId).store.update((state) => {
       if (state.action !== null) return
       state.edits = []
@@ -567,7 +629,8 @@ export class PaperAIWorkbenchController {
     // A conflicted draft cannot commit, but it must not hold the clean ones back: they commit and it stays.
     const edits = state.edits.filter(edit => edit.conflicted !== true)
     const retained = state.edits.filter(edit => edit.conflicted === true)
-    if (edits.length === 0) return { ok: false, error: 'block changed externally; local draft retained' }
+    // Published, so Ctrl+S says why nothing was saved: the button is disabled here, but the shortcut is not.
+    if (edits.length === 0) return this.fail(entry.store, 'block changed externally; local draft retained')
     const request = this.begin(entry)
     entry.store.update((draft) => {
       draft.action = 'committing'
@@ -1018,6 +1081,7 @@ export class PaperAIWorkbenchController {
     this.targets.clear()
     this.drafts.clear()
     this.positions.clear()
+    this.abandoned.clear()
     // Last: nothing is left to lose, so the guard goes with the controller.
     this.syncUnloadGuard()
   }
@@ -1275,8 +1339,11 @@ export class PaperAIWorkbenchController {
   /** Settle a failed action on either store kind: clear the action, keep the reason for the view. */
   private fail(store: PaperAIProjectStore | PaperAIWorkbenchStore, error: string): PaperAIActionResult {
     store.update((state: PaperAIProjectState | PaperAIWorkbenchState) => {
-      // A save is the one action the writer types over, so its verdict is kept on the drafts that are still only in the page.
-      if (state.action === 'committing') state.edits = state.edits.map(edit => ({ ...edit, saveFailed: true }))
+      // A save is the one action the writer types over, so its verdict is kept on the drafts it carried, which are
+      // still only in the page. A conflicted draft was held back from the commit, so no save of it failed.
+      if (state.action === 'committing') {
+        state.edits = state.edits.map(edit => (edit.conflicted === true ? edit : { ...edit, saveFailed: true }))
+      }
       state.action = null
       state.actionError = error
     })
