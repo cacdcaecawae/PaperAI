@@ -68,7 +68,11 @@ async function readAcpLog(path: string): Promise<AcpLogEntry[]> {
 }
 
 /** Small valid OOXML document sent through the real browser import path. */
-function fixtureDocxBase64(withFigureAndTable = false, paragraphs = ['Initial browser paragraph', 'Second paragraph']): string {
+function fixtureDocxBase64(
+  withFigureAndTable = false,
+  paragraphs = ['Initial browser paragraph', 'Second paragraph'],
+  sectionProperties = '<w:sectPr/>',
+): string {
   return Buffer.from(zipSync({
     '[Content_Types].xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8"?>'
@@ -112,7 +116,7 @@ function fixtureDocxBase64(withFigureAndTable = false, paragraphs = ['Initial br
       + (withFigureAndTable
         ? '<w:sectPr xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
           + '<w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/></w:sectPr>'
-        : '<w:sectPr/>')
+        : sectionProperties)
       + '</w:body></w:document>',
     ),
     ...(withFigureAndTable ? {
@@ -1605,6 +1609,48 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
   }, 120_000)
 
+  it('delivers a standalone thesis under the HIT format without the sample research', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-hit-delivery'))
+    const projectRoot = join(scaffold.workspaceCwd, 'hit-thesis')
+    await mkdir(projectRoot)
+    const hit = await scaffold.ctx.workspaceRegistry.create(projectRoot, 'HIT thesis')
+    await scaffold.ctx.paperaiWorkbench.overview({ workspaceId: hit.id })
+    await scaffold.ctx.paperaiWorkbench.setProjectTemplate({ workspaceId: hit.id, packId: 'hit-master-thesis' })
+    // Own research on the HIT page setup, sharing none of the sample's chapters, cover or declarations.
+    const created = await scaffold.ctx.paperaiWorkbench.createFromTemplate({
+      workspaceId: hit.id, sessionId: SessionId('hit-thesis-import'), documentType: 'manuscript', name: 'Standalone thesis',
+      upload: {
+        fileName: 'standalone-thesis.docx',
+        contentBase64: fixtureDocxBase64(false, [
+          '面向论文写作的交互系统', '摘  要', '本文研究文档协作。', 'Abstract', 'This thesis studies document collaboration.',
+          '目  录', '第1章 文档协作研究', '用户通过版本对照保持文稿完整。', '结  论', '系统支持协同写作。', '参考文献', '［1］独立研究文献。',
+        ], '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+          + '<w:pgMar w:top="2155" w:right="1701" w:bottom="1701" w:left="1701" w:header="1701" w:footer="1304" w:gutter="0"/>'
+          + '<w:cols w:space="720"/></w:sectPr>'),
+      },
+    }).catch(reportDocumentSetupFailure)
+    if (created.status !== 'imported') throw new Error(`HIT thesis import unavailable: ${created.capability}: ${created.detail}`)
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId: hit.id })).documents[0]!
+    await page.getByRole('button', { name: '返回项目列表', exact: true }).click()
+    await page.getByRole('treeitem', { name: /HIT thesis/ }).click()
+    await page.getByRole('button', { name: '在“HIT thesis”中新建会话', exact: true }).click()
+    await sidebarDocument(row.fileName).click()
+    await page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+      .getByText('第1章 文档协作研究', { exact: true }).waitFor({ timeout: 30_000 })
+    await page.locator('[data-paperai-toolbar] button[data-kind="export"]').click()
+    await page.getByRole('menuitem', { name: '导出正式版', exact: true }).click()
+    const receipt = page.getByRole('status').filter({ hasText: '正式版已完成交付检查并导出' })
+    await receipt.waitFor({ timeout: 60_000 })
+    const outputPath = await receipt.locator('span').textContent()
+    expect(outputPath).toBe(join(projectRoot, 'exports', 'delivery', 'Standalone thesis.docx'))
+    expect((await scaffold.ctx.documentEngine.readTextNodes(outputPath!)).map(node => node.text)).toContain('第1章 文档协作研究')
+    await page.locator('[data-paperai-toolbar] button[data-kind="gate"]').click()
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'hit-delivery.expected.md'), [
+      await receipt.locator('strong').ariaSnapshot(),
+      await page.getByRole('complementary', { name: '格式检查', exact: true }).ariaSnapshot(),
+    ].join('\n'), MODE)
+  }, 180_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -1626,6 +1672,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       'formatting-comparison.expected.md',
       'format-intent.expected.md',
       'header-footer.expected.md',
+      'hit-delivery.expected.md',
       'import-draft.expected.md',
       'model-failure.expected.md',
       'model-menu.expected.md',
