@@ -480,6 +480,13 @@ describe('conflictBand', () => {
     expect(band.querySelector('.paperai-conflict-legend')?.textContent).toBe('legend')
   })
 
+  it('dresses an empty paragraph\u2019s placeholder in the document\u2019s formatting', () => {
+    // Its formatting may be the only difference the writer is asked to settle.
+    const band = conflictBand(document, { ...side('document', '', ''), unmarked: true, runs: [{ text: '', size: '16pt', bold: true }] })
+    const span = band.querySelector<HTMLElement>('.paperai-conflict-text span')!
+    expect([span.textContent, span.style.fontSize, span.style.fontWeight]).toEqual(['empty', '16pt', 'bold'])
+  })
+
   it('shows soft breaks and split paragraphs as line breaks, and names itself for assistive technology', () => {
     const band = conflictBand(document, side('draft', '第一段草稿\v软换行\n第二段草稿', '文档'))
     expect(band.querySelector('.paperai-conflict-text')!.textContent).toBe('第一段草稿\n软换行\n第二段草稿')

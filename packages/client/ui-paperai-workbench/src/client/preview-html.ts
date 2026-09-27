@@ -528,7 +528,10 @@ export function conflictBand(owner: Document, side: ConflictBandSide): HTMLEleme
   const lines = (part: string): string => part.replaceAll('\v', '\n')
   if (quoted === '') {
     text.className = 'paperai-conflict-text paperai-conflict-empty'
-    text.textContent = side.copy.empty
+    // An empty paragraph's only difference may be its formatting, so the placeholder wears the document's.
+    const [first] = side.form === 'document' && side.unmarked === true ? side.runs ?? [] : []
+    if (first === undefined) text.textContent = side.copy.empty
+    else applyRuns(text, [{ ...first, text: side.copy.empty }])
     // Nothing is marked, but a draft band's legend, and an unmarked band's, is its only reason.
     legend.textContent = side.form === 'draft' || side.unmarked === true ? side.copy.legend : ''
   }

@@ -1184,6 +1184,20 @@ describe('Conflict on a paragraph the browser cannot merge', () => {
     expect(editor.onDraft).toHaveBeenCalledWith('node-0', null)
   })
 
+  it('lets no walk to another band stand in for the second press of a discard', () => {
+    const editor = conflicted(PAGE, ['文档改写后的这一段[1]'], '文档保留原样的这一段')
+    const drop = editor.act('drop')!
+    drop.scrollIntoView = vi.fn()
+    editor.band()!.scrollIntoView = vi.fn()
+    fireEvent.click(drop, { detail: 1 })
+    expect(drop.textContent).toBe(zh['editor.conflictDropConfirm'])
+    // The count's click lands outside the page, where nothing else would disarm the half-pressed discard.
+    fireEvent.click(screen.getByRole('button', { name: t('block.conflicts', { count: 1 }) }))
+    expect(drop.textContent).toBe(zh['editor.conflictDrop'])
+    fireEvent.click(drop, { detail: 1 })
+    expect(editor.onDraft).not.toHaveBeenCalledWith('node-0', null)
+  })
+
   it('quotes the draft for saving by hand instead of promising a merge it cannot deliver', () => {
     const editor = conflicted(PAGE, ['文档改写后的这一段[1]'], '文档保留原样的这一段')
     const band = editor.band()!

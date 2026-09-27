@@ -1002,6 +1002,9 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
    * keyboard can settle it. A band may be far from the caret: one whose paragraph is gone opens the page.
    */
   const goToConflict = (): void => {
+    // Its click lands outside the page, where nothing else disarms: walking away and back must not leave the old
+    // 放弃这段草稿 one press from deleting a draft.
+    disarm()
     const bands = [...host.current?.shadowRoot?.querySelectorAll<HTMLElement>('[data-paperai-conflict]') ?? []]
     // By identity, not index: settling the band last visited shifts every index after it, and the walk would
     // skip the next one. A band that is gone restarts the walk at the first.

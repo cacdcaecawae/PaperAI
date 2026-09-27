@@ -910,6 +910,23 @@ describe('PaperAIWorkbenchController conflict resolution', () => {
     controller.dispose()
   })
 
+  it('keeps set-aside drafts when a discard is refused mid-save', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
+    let release: (result: RemoteResult<PaperAIDocumentCommitResult>) => void = () => {}
+    remote.commit = vi.fn<typeof remote.commit>(() => new Promise((resolve) => { release = resolve }))
+    const saving = controller.commitEdit(SESSION_ID)
+    // Refused while the save holds the document, so it must leave everything as it was.
+    controller.cancelEdit(SESSION_ID)
+    release(REMOTE_FAILURE)
+    await expect(saving).resolves.toMatchObject({ ok: false })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
   it('forgets a set-aside draft once the page moves to another revision', async () => {
     const { controller, remote, store } = await withConflict()
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)

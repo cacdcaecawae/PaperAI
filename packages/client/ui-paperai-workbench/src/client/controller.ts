@@ -615,10 +615,12 @@ export class PaperAIWorkbenchController {
    */
   cancelEdit(sessionId: SessionId): void {
     this.assertLive()
-    // Only this document's: a retained preview of another keeps its undo stack, and with it what 用文档的 set aside.
-    const discarding = this.workbenchEntry(sessionId).store.getSnapshot().document?.documentId
+    const snapshot = this.workbenchEntry(sessionId).store.getSnapshot()
+    // A discard refused mid-action changes nothing, set-aside drafts included: a failed save leaves the page able
+    // to undo 用文档的. Otherwise only this document's go, since a retained preview of another keeps its undo stack.
+    if (snapshot.action !== null) return
     for (const [key, kept] of this.abandoned.get(sessionId) ?? []) {
-      if (kept.documentId === discarding) this.abandoned.get(sessionId)?.delete(key)
+      if (kept.documentId === snapshot.document?.documentId) this.abandoned.get(sessionId)?.delete(key)
     }
     this.workbenchEntry(sessionId).store.update((state) => {
       if (state.action !== null) return
