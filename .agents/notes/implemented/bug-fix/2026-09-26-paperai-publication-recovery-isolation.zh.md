@@ -24,4 +24,4 @@ Status: implemented
 
 ## Consequences
 
-针对性恢复测试保留一条无法恢复的日志，同时恢复并提交另一文档，验证导入回滚与索引重建保留待发布数据，验证桶目录已存在时仍同步快照祖先，并覆盖快照修复及发布刷新顺序。链接祖先测试使用目录 junction，因此在 Windows 上无需符号链接权限即可运行。Loader 组合测试从仅供测试的 `cordis.yml` 按发布顺序只启动提交服务依赖的 PaperAI 行：省略 `paperai-template-pack-hit` 及提交服务之后的所有行，替换文档引擎和 Host 会话历史，并让所有存储域都使用 SQLite，而非发布配置中的 `paperai: sqlite` 路由。它在 Working DOCX 已被外部编辑的保留日志上重启，并在受影响文档保持阻塞时提交另一文档。Windows 会刷新文件字节，但 Node 不支持该平台的目录 fsync。未知发布状态仍须修复，该文档才能接受新操作。
+针对性恢复测试保留一条无法恢复的日志，同时恢复并提交另一文档，验证导入回滚与索引重建保留待发布数据，验证桶目录已存在时仍同步快照祖先，并覆盖快照修复及发布刷新顺序。链接祖先测试使用目录 junction，因此在 Windows 上无需符号链接权限即可运行。Loader 组合测试从仅供测试的 `cordis.yml` 只启动提交服务依赖的行（DSH 基础设施与 PaperAI 服务）：省略 `paperai-template-pack-hit` 及提交服务之后的所有行，替换文档引擎和 Host 会话历史，并让所有存储域都使用 SQLite，而非发布配置中的 `paperai: sqlite` 路由。它在 Working DOCX 已被外部编辑的保留日志上重启，并在受影响文档保持阻塞时提交另一文档。Windows 会刷新文件字节，但 Node 不支持该平台的目录 fsync。未知发布状态仍须修复，该文档才能接受新操作。
