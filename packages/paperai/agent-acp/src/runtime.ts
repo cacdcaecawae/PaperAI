@@ -24,7 +24,7 @@ import { manageAcp } from './management.ts'
 import type { AcpManagementRequest, AcpManagementResult } from './diagnostic-types.ts'
 import { environmentSecrets, redactAcpText } from './redaction.ts'
 import { negotiateMcp } from './mcp.ts'
-import { sshLaunch, forwardedPort, type AcpSshConfig } from './ssh.ts'
+import { sshLaunch, forwardedPort, isolateSshMcp, type AcpSshConfig } from './ssh.ts'
 import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import { isAcpPermissionOption, modelStateFromConfigOptions, type AcpEffortState, type AcpModelState, type AcpSwitchState } from './catalog.ts'
 
@@ -287,6 +287,7 @@ export class AcpRuntime {
   private initialized: InitializeResponse | undefined
   /** Depth of running `selectModel` transactions; provider notifications stay internal while positive. */
   private selectionDepth = 0
+  private starting = false
   private modeState: SessionModeState | undefined
   private replaying = false
   private steeringSupported = false
@@ -297,6 +298,7 @@ export class AcpRuntime {
   private readonly earlyMetadata = new Map<string, { sessionId: string; update: SessionUpdate }>()
   private readonly sshStderr = new TextRetainer({ kind: 'tail', maxBytes: 65_536 })
   private forwardedServers: readonly McpServer[] | undefined
+  private sshMcp: Awaited<ReturnType<typeof isolateSshMcp>> | undefined
   private importing: SessionUpdate[] | undefined
 
   constructor(
@@ -334,6 +336,7 @@ export class AcpRuntime {
       ...(this.optionsState.some(
         option =>
           option.type === 'select' &&
+          !isAcpPermissionOption(option) &&
           option.id !== this.modelState.configId &&
           option.id !== this.modelState.effort?.configId,
       )
@@ -343,6 +346,7 @@ export class AcpRuntime {
               .filter(
                 option =>
                   option.type === 'select' &&
+                    !isAcpPermissionOption(option) &&
                     option.id !== this.modelState.configId &&
                     option.id !== this.modelState.effort?.configId,
               )
@@ -391,6 +395,7 @@ export class AcpRuntime {
    * @param replaceFailedLoad Whether a rejected load may create a replacement provider session.
    * Callers may enable it only when no provider conversation history exists.
    * @param lifetimeSignal Closes the provider process when this runtime generation is retired.
+   * @param selection Last confirmed conversation settings to restore before publishing this generation.
    * @returns Initialization metadata and the model selector advertised by the active session.
    * @throws When initialization, a non-replaceable load, session creation, or native-mode synchronization fails.
    */
@@ -400,7 +405,9 @@ export class AcpRuntime {
     signal: AbortSignal,
     replaceFailedLoad = false,
     lifetimeSignal: AbortSignal = signal,
+    selection?: AcpSelection,
   ): Promise<AcpSessionStart> {
+    this.starting = true
     try {
       const initialized = await this.connect(sandboxMode, signal, lifetimeSignal)
       const connection = this.requireConnection()
@@ -455,6 +462,7 @@ export class AcpRuntime {
         }
         if (this.externalSessionId !== undefined) {
           await this.selectSandboxMode(sandboxMode, signal)
+          await this.restoreConfiguration(selection, signal)
           return {
             externalSessionId: previousExternalSessionId,
             resumed: true,
@@ -482,6 +490,7 @@ export class AcpRuntime {
       }
       this.earlyMetadata.clear()
       await this.selectSandboxMode(sandboxMode, signal)
+      await this.restoreConfiguration(selection, signal)
       return {
         externalSessionId: created.sessionId,
         resumed: false,
@@ -498,7 +507,30 @@ export class AcpRuntime {
         ),
         { cause: error },
       )
+    } finally {
+      this.starting = false
     }
+  }
+
+  private async restoreConfiguration(selection: AcpSelection | undefined, signal: AbortSignal): Promise<void> {
+    if (selection === undefined) return
+    const apply = async (id: string | undefined, value: string | boolean): Promise<void> => {
+      signal.throwIfAborted()
+      if (this.optionsState.some(option => option.id === id && option.currentValue === value)) return
+      try {
+        if (id === undefined) throw new AcpOptionUnavailableError('The saved selector is unavailable')
+        await raceAbort(this.selectConfigOption(id, value), signal)
+      } catch (error: unknown) {
+        signal.throwIfAborted()
+        if (!this.connected
+          || !(error instanceof AcpOptionUnavailableError || (error instanceof AcpSelectionError && error.restored))) throw error
+        this.ctx.logger.warn('%s ACP saved option %s is unavailable; keeping the provider selection', this.provider.id, id ?? 'model or reasoning effort')
+      }
+    }
+    await apply(this.modelState.configId, selection.model)
+    if (selection.reasoningEffort !== undefined) await apply(this.modelState.effort?.configId, selection.reasoningEffort)
+    for (const [id, value] of Object.entries(selection.switches ?? {})) await apply(id, value)
+    for (const [id, value] of Object.entries(selection.configOptions ?? {})) await apply(id, value)
   }
 
   /**
@@ -583,7 +615,13 @@ export class AcpRuntime {
     signal.throwIfAborted()
     this.options.startupStage?.('spawn')
     const sshConfig = this.provider.ssh
-    const ssh = sshConfig === undefined ? undefined : sshLaunch(sshConfig, this.options.mcpServers ?? [])
+    if (sshConfig !== undefined) this.sshMcp = await isolateSshMcp(this.options.mcpServers ?? [])
+    if (this.closed) {
+      await this.sshMcp?.close()
+      throw new Error('ACP runtime is closed')
+    }
+    signal.throwIfAborted()
+    const ssh = sshConfig === undefined ? undefined : sshLaunch(sshConfig, this.sshMcp?.servers ?? [])
     const argv = ssh?.argv ?? resolveLaunch(this.provider)
     const env = {
       ...this.provider.env,
@@ -1025,7 +1063,7 @@ export class AcpRuntime {
   }
 
   private publishSelection(): void {
-    this.callbacks.modelChanged(this.currentModel)
+    if (!this.starting) this.callbacks.modelChanged(this.currentModel)
   }
 
   private assertEffortAdvertised(effortId: string): AcpEffortState {
@@ -1168,7 +1206,7 @@ export class AcpRuntime {
       process?.stdin?.end()
       process?.terminate()
       try {
-        await this.callbacks.terminals?.close()
+        await Promise.all([this.callbacks.terminals?.close(), this.sshMcp?.close()])
       } finally {
         if (process !== undefined) await process.waitForExit()
         this.connection = undefined

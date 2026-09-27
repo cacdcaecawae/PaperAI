@@ -42,6 +42,7 @@
     "tests/settings-chrome.e2e.ts",
     "tests/paperai-dsh-preset.e2e.ts",
     "tests/paperai-acp-tool-failure.e2e.ts",
+    "tests/paperai-acp-recovery.e2e.ts",
     "tests/paperai-permissions.e2e.ts",
     "tests/paperai-workspace-navigation.e2e.ts",
     "tests/models-settings.e2e.ts",
