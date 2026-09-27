@@ -1,4 +1,4 @@
-/** Startup recovery isolation through a Loader composition of the shipped PaperAI rows. */
+/** Startup recovery isolation through a Loader composition of the PaperAI rows commit-service depends on. */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -92,7 +92,11 @@ afterEach(async () => {
   root = undefined
 })
 
-/** Boot the PaperAI rows of the shipped `cordis.patch.yml`, in its order, from a test-only `cordis.yml`. */
+/**
+ * Boot, in shipped `cordis.patch.yml` order, only the PaperAI rows commit-service depends on from a test-only
+ * `cordis.yml`. `paperai-template-pack-hit` and every row after commit-service are omitted, and storage-domain
+ * sends every domain to SQLite instead of the shipped `backend: json` with a `paperai: sqlite` route.
+ */
 async function boot(directory: string): Promise<Context> {
   const configPath = join(directory, 'cordis.yml')
   await writeFile(configPath, [

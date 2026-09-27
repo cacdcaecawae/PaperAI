@@ -881,7 +881,7 @@ export class PaperCommitService extends Service {
     try {
       await this.ensurePublicationCommit(publication)
       await this.dependencies.documentEngine.release(request.paths.workingPath)
-      await replaceRegularFile(request.paths.workingPath, candidate.bytes, request.original.mode)
+      await replaceRegularFile(request.paths, candidate.bytes, request.original.mode)
       await this.replaceIndex(currentNodes, nextNodes)
       await repository.updateDocument(request.document.id, (current) => {
         if (!isDeepStrictEqual(current, documentBefore)) {
@@ -976,7 +976,7 @@ export class PaperCommitService extends Service {
         if (working.sha256 !== original.sha256
           || (working.mode & 0o777) !== (publication.before.working.mode & 0o777)) {
           await this.dependencies.documentEngine.release(paths.workingPath)
-          await replaceRegularFile(paths.workingPath, original.bytes, publication.before.working.mode)
+          await replaceRegularFile(paths, original.bytes, publication.before.working.mode)
         }
       } catch (error) {
         failures.push(error)

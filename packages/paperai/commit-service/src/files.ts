@@ -281,16 +281,19 @@ export async function readSnapshot(
 }
 
 /**
- * Atomically replace a non-symlink regular file with complete binary content.
- * @param filePath - exact existing destination path.
+ * Atomically replace the Working DOCX, a non-symlink regular file, with complete binary content.
+ * @param paths - validated commit-owned paths; the Working DOCX and its ancestors must stay inside the project.
  * @param bytes - complete replacement bytes.
  * @param mode - permission bits for the fresh replacement inode.
  */
 export async function replaceRegularFile(
-  filePath: string,
+  paths: CommitFilePaths,
   bytes: Uint8Array,
   mode: number,
 ): Promise<void> {
+  const filePath = paths.workingPath
+  // A linked ancestor would redirect both the temporary write and the rename outside the project.
+  await verifyProjectPath(paths.projectRoot, filePath)
   const before = await lstat(filePath)
   if (!before.isFile() || before.isSymbolicLink()) {
     throw new PaperCommitError(

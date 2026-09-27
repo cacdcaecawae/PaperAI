@@ -44,7 +44,7 @@ describe('commit-service file operations', () => {
     const fixture = await fileFixture()
     const bytes = Buffer.from('durable')
     await storeSnapshot(fixture.paths, bytes, sha256Bytes(bytes))
-    await replaceRegularFile(fixture.workingPath, bytes, 0o600)
+    await replaceRegularFile(fixture.paths, bytes, 0o600)
     const calls = vi.mocked(writeFile).mock.calls
     expect(calls[1]?.[2]).toMatchObject({ flag: 'wx', flush: true })
     expect(calls[2]?.[2]).toMatchObject({ flag: 'wx', flush: true })
@@ -82,7 +82,7 @@ describe('commit-service file operations', () => {
     vi.mocked(writeFile).mockRejectedValueOnce(new Error('flush failed'))
     const pending = target === 'snapshot'
       ? storeSnapshot(fixture.paths, bytes, sha256Bytes(bytes))
-      : replaceRegularFile(fixture.workingPath, bytes, 0o600)
+      : replaceRegularFile(fixture.paths, bytes, 0o600)
     await expect(pending).rejects.toThrow('flush failed')
     expect(link).not.toHaveBeenCalled()
     expect(rename).not.toHaveBeenCalled()
@@ -191,6 +191,34 @@ describe('commit-service file operations', () => {
     expect(await readdir(dirname(victim))).toEqual([`${digest}.docx`])
   })
 
+  it.each(['.paperai', 'objects/docx', 'digest bucket'] as const)('does not create a snapshot through a linked %s pointing at an empty outside directory', async (ancestor) => {
+    const fixture = await fileFixture()
+    const outside = await mkdtemp(join(tmpdir(), 'paperai-commit-outside-'))
+    roots.push(outside)
+    const bytes = Buffer.from('snapshot')
+    const digest = sha256Bytes(bytes)
+    const linked = ancestor === '.paperai'
+      ? join(fixture.root, '.paperai')
+      : ancestor === 'objects/docx' ? fixture.paths.objectRoot : join(fixture.paths.objectRoot, digest.slice(0, 2))
+    await mkdir(dirname(linked), { recursive: true })
+    await symlink(outside, linked, 'junction')
+    // Nothing exists behind the link, so only the create path can refuse it.
+    await expect(storeSnapshot(fixture.paths, bytes, digest)).rejects.toThrow(/symbolic link|outside the project/)
+    expect(await readdir(outside)).toEqual([])
+  })
+
+  it('does not replace a Working DOCX through a linked ancestor outside the project', async () => {
+    const fixture = await fileFixture()
+    const outside = await mkdtemp(join(tmpdir(), 'paperai-commit-outside-'))
+    roots.push(outside)
+    await writeFile(join(outside, 'working.docx'), 'outside', 'utf8')
+    await symlink(outside, join(fixture.root, 'chapters'), 'junction')
+    const paths = resolveCommitFilePaths(fixture.root, join(fixture.root, 'chapters', 'working.docx'))
+    await expect(replaceRegularFile(paths, Buffer.from('beta'), 0o600)).rejects.toThrow(/symbolic link|outside the project/)
+    expect(await readFile(join(outside, 'working.docx'), 'utf8')).toBe('outside')
+    expect(await readdir(outside)).toEqual(['working.docx'])
+  })
+
   it('does not stage a candidate through a linked metadata directory outside the project', async () => {
     const fixture = await fileFixture()
     const outside = await mkdtemp(join(tmpdir(), 'paperai-commit-outside-'))
@@ -203,11 +231,11 @@ describe('commit-service file operations', () => {
   it('atomically replaces regular files and refuses a directory target', async () => {
     const fixture = await fileFixture()
     const image = await readFileImage(fixture.workingPath, 'WORKING_COPY_CHANGED', 'Working DOCX')
-    await replaceRegularFile(fixture.workingPath, Buffer.from('beta'), image.mode)
+    await replaceRegularFile(fixture.paths, Buffer.from('beta'), image.mode)
     expect(await readFile(fixture.workingPath, 'utf8')).toBe('beta')
     const directory = join(fixture.root, 'directory')
     await mkdir(directory)
-    await expect(replaceRegularFile(directory, Buffer.from('nope'), image.mode))
+    await expect(replaceRegularFile(resolveCommitFilePaths(fixture.root, directory), Buffer.from('nope'), image.mode))
       .rejects.toMatchObject({ code: 'WORKING_COPY_CHANGED' })
   })
 })
