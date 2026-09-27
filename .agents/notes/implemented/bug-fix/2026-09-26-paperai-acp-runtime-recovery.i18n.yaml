@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-26-paperai-acp-runtime-recovery.md
+2026-09-26-paperai-acp-runtime-recovery.md: 9c937ff3642f8b4be185fde07a2ef69877ed6aed
+2026-09-26-paperai-acp-runtime-recovery.zh.md: a5e07752fcc0c98484bdb1ad628281c5a805b0cd
