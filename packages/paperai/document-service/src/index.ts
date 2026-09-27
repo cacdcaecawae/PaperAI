@@ -265,10 +265,13 @@ export class PaperDocumentService extends Service {
    * document record last so a failed attempt can be retried with the same identity.
    * @param documentId - identity returned by a successful {@link importDocument} call.
    * @returns after the record, semantic nodes, immutable copy, and Working copy are absent.
-   * @throws PaperDocumentError when the record is not a Working import or has acquired a head commit.
+   * @throws PaperDocumentError when a publication journal remains, even without a record,
+   * or the record is not a Working import or has a head.
    */
   async rollbackImport(documentId: DocumentId): Promise<void> {
     await this.withDocumentLease(documentId, async () => {
+      // A journal can outlive its record; only an absent journal makes a missing record idempotent.
+      this.requireNoPendingPublication(documentId)
       const current = this.ctx.paperRepository.getDocument(documentId)
       if (current === undefined) return
       if (current.documentKind !== 'working' || current.headCommitId !== undefined) {
@@ -410,15 +413,21 @@ export class PaperDocumentService extends Service {
    * @param documentId - document identity.
    * @param signal - optional engine cancellation.
    * @returns updated repository snapshot.
-   * @throws PaperDocumentError when the document is missing or engine nodes are invalid.
+   * @throws PaperDocumentError when the document is missing, retains a publication journal, or engine nodes are invalid.
    */
   rebuildIndex(documentId: DocumentId, signal?: AbortSignal): Promise<PaperDocumentSnapshot> {
     return this.withDocumentLease(documentId, async () => {
       const document = this.requireDocument(documentId)
+      this.requireNoPendingPublication(documentId)
       const previous = this.ctx.paperRepository.listNodes(documentId)
       const updatedAt = new Date().toISOString()
       const engineNodes = await this.ctx.documentEngine.readTextNodes(document.workingPath, signal)
       const nodes = this.buildIndex(documentId, engineNodes, previous, updatedAt)
+      // A commit may have written its journal during the engine read; refuse before any write.
+      // TODO: this lease does not exclude the commit-service FIFO, so a commit that finishes
+      // during the read, or starts during the writes below, is still overwritten. Fix by sharing
+      // one per-document lease between commit-service and document-service for all writes.
+      this.requireNoPendingPublication(documentId)
       const updatedDocument = await this.persistRebuiltIndex(document, previous, nodes, updatedAt)
       return { document: updatedDocument, nodes }
     })
@@ -466,6 +475,16 @@ export class PaperDocumentService extends Service {
       throw new PaperDocumentError(`PaperAI document '${String(documentId)}' does not exist`, 'DOCUMENT_NOT_FOUND')
     }
     return document
+  }
+
+  /** Recovery compares the retained journal with exact files and nodes, so no writer may change them first. */
+  private requireNoPendingPublication(documentId: DocumentId): void {
+    if (this.ctx.paperRepository.getCommitPublication(documentId) !== undefined) {
+      throw new PaperDocumentError(
+        `PaperAI document '${String(documentId)}' has a publication awaiting recovery`,
+        'PUBLICATION_PENDING',
+      )
+    }
   }
 
   private buildIndex(
