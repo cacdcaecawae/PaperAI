@@ -38,6 +38,7 @@ export interface EngineTextRun {
 /**
  * Ordered mutations identify original nodes; insertion indices address the current body.
  * baseText must match the target (or insertion anchor) before that step; an index or append insertion has no anchor.
+ * Node addresses are spelled exactly as readTextNodes reports them; a provider may reject another spelling of the same node.
  */
 export type EngineMutation =
   | { type: 'replace-text'; officePath: string; baseText: string; text: string; runs?: readonly EngineTextRun[]; paragraphs?: readonly DocumentParagraph[] }

@@ -3,11 +3,41 @@
 import type { Document as XmlDocument, Element as XmlElement, Node as XmlNode } from '@xmldom/xmldom'
 import type { EngineMutation, EngineTextNode } from '@paperai/document-engine'
 import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
-import { paragraphText } from './paragraph-xml.ts'
+import { child, paragraphText } from './paragraph-xml.ts'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const WORD_ID_NS = 'http://schemas.microsoft.com/office/word/2010/wordml'
 const XML_NS = 'http://www.w3.org/XML/1998/namespace'
+
+// Direct children only: properties under w:pPrChange are tracked-change history, not the current state.
+const property = (node: XmlElement | undefined, ...names: string[]): XmlElement | undefined =>
+  names.reduce<XmlElement | undefined>((parent, name) => parent && child(parent, name), node)
+const numId = (properties: XmlElement | undefined): string | null | undefined => property(properties, 'numPr', 'numId')?.getAttributeNS(WORD_NS, 'val')
+
+/**
+ * Read a paragraph's own style ID.
+ * @param paragraph - Word paragraph, or any other element, which has none.
+ * @returns the `w:pStyle` value of its direct paragraph properties.
+ */
+export function paragraphStyle(paragraph: XmlElement): string | undefined {
+  return property(paragraph, 'pPr', 'pStyle')?.getAttributeNS(WORD_NS, 'val') || undefined
+}
+
+// Word numbers a paragraph by its own numId, else the nearest numId on its style's basedOn chain; numId 0 removes it.
+function numbered(paragraph: XmlElement, styles: XmlElement | undefined): boolean {
+  let id = numId(property(paragraph, 'pPr'))
+  let style = paragraphStyle(paragraph)
+  const definitions = new Map(Array.from(styles?.getElementsByTagNameNS(WORD_NS, 'style') ?? [],
+    node => [node.getAttributeNS(WORD_NS, 'styleId'), node]))
+  const seen = new Set<string>()
+  while (id === undefined && style !== undefined && !seen.has(style)) {
+    seen.add(style)
+    const definition = definitions.get(style)
+    id = numId(property(definition, 'pPr'))
+    style = property(definition, 'basedOn')?.getAttributeNS(WORD_NS, 'val') || undefined
+  }
+  return Boolean(id) && Number(id) !== 0
+}
 
 function insertedParagraph(body: XmlElement, text: string, style: string | undefined): XmlElement {
   const document = body.ownerDocument as XmlDocument
@@ -38,11 +68,13 @@ function insertedParagraph(body: XmlElement, text: string, style: string | undef
  * @param root - independently parsed candidate Word document element.
  * @param mutations - original-address mutations; insertion indices refer to the current body.
  * @param indexed - the engine's text index of the unmodified document; a removal or insertion anchor that no
- * earlier step rewrote must match its entry.
+ * earlier step rewrote must match its entry, found under the address as the index spells it.
  * @param replaceParagraph - synchronous editor that replaces a paragraph group's joined text, preserves the first
  * paragraph object, and returns the resulting group including any split siblings.
  * @param resolveStyle - resolve an explicit paragraph style name or ID to an existing Word style ID.
- * @throws when a referenced node was removed earlier, a position is invalid, or paragraph editing fails.
+ * @param styles - the styles part, needed when a removal or anchor target has a paragraph style that may number it.
+ * @throws when a referenced node was removed earlier, a removal or anchor address is not in the index, a position is
+ * invalid, or paragraph editing fails.
  */
 export function applyDocumentMutations(
   root: XmlElement,
@@ -53,6 +85,7 @@ export function applyDocumentMutations(
     mutation: Extract<EngineMutation, { type: 'replace-text' }>,
   ) => readonly [XmlElement, ...XmlElement[]],
   resolveStyle: (style: string) => string,
+  styles?: XmlElement,
 ): void {
   const body = resolveOfficePath(root, '/body')
   const targets = bindMutationTargets(root, mutations)
@@ -88,25 +121,25 @@ export function applyDocumentMutations(
   const identified = (path: string): string | undefined => {
     const target = targets.get(path) as XmlElement
     if (groups.has(target)) return projected(target)
+    const reading = indexedReading(path, target)
+    // Another spelling of the same node (an omitted or zero-padded index) cannot be fixed by refreshing.
+    if (reading === undefined) {
+      throw new Error(`INVALID_OFFICE_PATH: '${path}' is not an address in OfficeCLI's text index; use the officePath readTextNodes reports`)
+    }
     let text: string | undefined
-    let numbered = false
     if (target.localName === 'tbl') {
-      text = `[Table: ${Array.from(target.childNodes).filter(child => child.nodeType === child.ELEMENT_NODE
-        && (child as XmlElement).namespaceURI === WORD_NS && (child as XmlElement).localName === 'tr').length} rows]`
+      text = `[Table: ${Array.from(target.childNodes).filter(row => row.nodeType === row.ELEMENT_NODE
+        && (row as XmlElement).namespaceURI === WORD_NS && (row as XmlElement).localName === 'tr').length} rows]`
     } else if (target.localName === 'p') {
       try {
         text = paragraphText(target)
       } catch {
         // Content the editor cannot project, such as an equation, leaves the index as the only reading.
       }
-      // Numbering set directly or by a paragraph style prefixes the engine's reading with its generated marker.
-      const properties = Array.from(target.childNodes).find(child => (child as XmlElement).localName === 'pPr') as XmlElement | undefined
-      numbered = properties !== undefined && (properties.getElementsByTagNameNS(WORD_NS, 'numPr').length > 0
-        || properties.getElementsByTagNameNS(WORD_NS, 'pStyle').length > 0)
     }
-    const reading = indexedReading(path, target)
+    // A numbered paragraph's reading starts with the engine's generated marker.
     return text === undefined || text === reading
-      || (numbered && reading !== undefined && reading.length > text.length && reading.endsWith(text)) ? reading : undefined
+      || (reading.length > text.length && reading.endsWith(text) && numbered(target, styles)) ? reading : undefined
   }
   for (const mutation of mutations) {
     switch (mutation.type) {

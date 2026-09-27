@@ -185,6 +185,20 @@ describe('OfficeCliDocumentEngine', () => {
     expect(test.calls.find(call => call.argv.includes('batch'))?.argv).toContain('--input')
   })
 
+  it('reads the styles part once to recognize a removal target numbered by its paragraph style', async () => {
+    const body = '<w:p><w:pPr><w:pStyle w:val="Chapter"/></w:pPr><w:r><w:t>chapter</w:t></w:r></w:p>' + paragraphXml('tail')
+    const test = fixture(spec => spec.argv.includes('/document') ? { stdout: JSON.stringify({ data: documentXml(body) }) }
+      : spec.argv.includes('/styles') ? { stdout: JSON.stringify({ data: '<w:styles xmlns:w="' + W + '"><w:style w:type="paragraph" '
+        + 'w:styleId="Chapter"><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style></w:styles>' }) }
+        : spec.argv.includes('text')
+          ? { stdout: JSON.stringify({ data: { elements: [{ path: '/body/p[1]', text: '1. chapter' }, { path: '/body/p[2]', text: 'tail' }] } }) }
+          : {})
+    await test.engine.applyMutations('paper.docx', [{ type: 'remove', officePath: '/body/p[1]', baseText: '1. chapter' }])
+    expect(childElements(writtenBody(test)).map(node => node.textContent)).toEqual(['tail'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'view', 'raw', 'batch', 'save'])
+    expect(test.calls.filter(call => call.argv.includes('/styles'))).toHaveLength(1)
+  })
+
   it('edits, inserts, and removes the indexed paragraphs after a content control', async () => {
     const test = xmlFixture(paragraphXml('First') + '<w:sdt><w:sdtContent>' + paragraphXml('InSdt')
       + '</w:sdtContent></w:sdt>' + paragraphXml('Third') + paragraphXml('Fourth') + paragraphXml('Fifth'))

@@ -30,7 +30,12 @@ const bodyIndex = (root: XmlElement) => Array.from(root.getElementsByTagNameNS(W
     }
   })
 const applyDocumentMutations = (root: XmlElement, mutations: readonly EngineMutation[], edit: typeof replace,
-  indexed = bodyIndex(root)) => { applyBatch(root, mutations, indexed, edit, style => style) }
+  indexed = bodyIndex(root), styles?: XmlElement) => { applyBatch(root, mutations, indexed, edit, style => style, styles) }
+const numberingStyles = new DOMParser().parseFromString(`<w:styles xmlns:w="${WORD_NS}">`
+  + '<w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>'
+  + '<w:style w:type="paragraph" w:styleId="Heading2"><w:basedOn w:val="Heading1"/></w:style>'
+  + '<w:style w:type="paragraph" w:styleId="a9"><w:pPr><w:ind w:firstLine="480"/></w:pPr></w:style></w:styles>', 'application/xml',
+).documentElement!
 
 describe('ordered candidate document mutations', () => {
   it('keeps later original targets stable when an earlier original paragraph splits', () => {
@@ -87,7 +92,7 @@ describe('ordered candidate document mutations', () => {
     for (const stale of ['eq ', 'eq x=2']) {
       expect(() => { applyDocumentMutations(document(equation), [mutation(stale)], replace, indexed) }).toThrow('NODE_TEXT_CONFLICT')
     }
-    expect(() => { applyDocumentMutations(document(equation), [mutation('eq x=1')], replace, []) }).toThrow('NODE_TEXT_CONFLICT')
+    expect(() => { applyDocumentMutations(document(equation), [mutation('eq x=1')], replace, []) }).toThrow('INVALID_OFFICE_PATH')
     expect(() => {
       applyDocumentMutations(document(equation), [{ baseText: 'eq x=1', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }], replace, indexed)
     }).toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
@@ -107,6 +112,8 @@ describe('ordered candidate document mutations', () => {
   it.each<[string, string]>([
     ['direct numbering', '<w:numPr><w:numId w:val="1"/></w:numPr>'],
     ['a numbered paragraph style', '<w:pStyle w:val="Heading1"/>'],
+    ['a style based on a numbered style', '<w:pStyle w:val="Heading2"/>'],
+    ['a numbered style and a direct level only', '<w:pStyle w:val="Heading1"/><w:numPr><w:ilvl w:val="1"/></w:numPr>'],
   ])('identifies a paragraph with %s by the engine reading that carries its generated marker', (_label, properties) => {
     const numbered = `<w:p><w:pPr>${properties}</w:pPr><w:r><w:t>item one</w:t></w:r></w:p>`
     const indexed = [{ officePath: '/body/p[1]', text: '1. item one' }, { officePath: '/body/p[2]', text: 'beta' }]
@@ -114,16 +121,41 @@ describe('ordered candidate document mutations', () => {
     applyDocumentMutations(root, [
       { baseText: '1. item one', type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' },
       { baseText: '1. item one', type: 'remove', officePath: '/body/p[1]' },
-    ], replace, indexed)
+    ], replace, indexed, numberingStyles)
     expect(texts(root)).toEqual(['inserted', 'beta'])
     expect(() => {
-      applyDocumentMutations(document(numbered), [{ baseText: 'item one', type: 'remove', officePath: '/body/p[1]' }], replace, indexed)
+      applyDocumentMutations(document(numbered), [{ baseText: 'item one', type: 'remove', officePath: '/body/p[1]' }], replace, indexed, numberingStyles)
     }).toThrow('NODE_TEXT_CONFLICT')
     // Without numbering, a longer engine reading is a different paragraph, not a marker.
     expect(() => {
       applyDocumentMutations(document(paragraph('item one')), [{ baseText: '1. item one', type: 'remove', officePath: '/body/p[1]' }], replace, indexed)
     }).toThrow('NODE_TEXT_CONFLICT')
   })
+
+  it.each<[string, string]>([
+    ['an unnumbered paragraph style', '<w:pPr><w:pStyle w:val="a9"/></w:pPr><w:r><w:t>item one</w:t></w:r>'],
+    ['an unnumbered paragraph style and no text', '<w:pPr><w:pStyle w:val="a9"/></w:pPr>'],
+    ['style numbering removed by numId 0', '<w:pPr><w:pStyle w:val="Heading1"/><w:numPr><w:numId w:val="0"/></w:numPr></w:pPr><w:r><w:t>item one</w:t></w:r>'],
+    ['numbering only in tracked-change history', '<w:pPr><w:pPrChange w:id="1"><w:pPr><w:pStyle w:val="Heading1"/>'
+      + '<w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:pPrChange></w:pPr><w:r><w:t>item one</w:t></w:r>'],
+  ])('keeps the exact agreement check for a paragraph with %s', (_label, content) => {
+    const root = document(`<w:p>${content}</w:p>`)
+    expect(() => {
+      applyDocumentMutations(root, [{ baseText: '1. item one', type: 'remove', officePath: '/body/p[1]' }], replace,
+        [{ officePath: '/body/p[1]', text: '1. item one' }], numberingStyles)
+    }).toThrow('NODE_TEXT_CONFLICT')
+    expect(root.getElementsByTagNameNS(WORD_NS, 'p')).toHaveLength(1)
+  })
+
+  it.each<[string, string]>([['/body/p[01]', 'alpha'], ['/body/tbl', '[Table: 1 rows]']])(
+    'names %s as an address spelling OfficeCLI does not index instead of a stale-text conflict', (officePath, baseText) => {
+      const root = document(paragraph('alpha') + `<w:tbl><w:tr><w:tc>${paragraph('cell')}</w:tc></w:tr></w:tbl>`)
+      const indexed = [{ officePath: '/body/p[1]', text: 'alpha' }, { officePath: '/body/tbl[1]', text: '[Table: 1 rows]' }]
+      expect(() => { applyDocumentMutations(root, [{ baseText, type: 'remove', officePath }], replace, indexed) })
+        .toThrow(`INVALID_OFFICE_PATH: '${officePath}' is not an address in OfficeCLI's text index; use the officePath readTextNodes reports`)
+      expect(texts(root)).toEqual(['alpha'])
+    },
+  )
 
   it('finds the engine reading of an ordinal target under the paraId address the engine indexed it by', () => {
     const root = document('<w:p xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" w14:paraId="0A1B2C3D">'
@@ -272,7 +304,7 @@ describe('ordered candidate document mutations', () => {
       applyDocumentMutations(root, [
         { type: 'remove', officePath: '/body/tbl[1]/tr[1]', baseText: 'cell' },
       ], replace)
-    }).toThrow('NODE_TEXT_CONFLICT')
+    }).toThrow('INVALID_OFFICE_PATH')
     expect(root.getElementsByTagNameNS(WORD_NS, 'tr')).toHaveLength(1)
   })
 

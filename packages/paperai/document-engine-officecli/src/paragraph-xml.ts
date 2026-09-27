@@ -18,7 +18,13 @@ function children(node: XmlElement): XmlElement[] {
   return Array.from(node.childNodes).filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)
 }
 
-function child(node: XmlElement, name: string): XmlElement | undefined {
+/**
+ * Find a direct WordprocessingML child; nested history such as `w:pPrChange` is not searched.
+ * @param node - parent element.
+ * @param name - local name in the main Word namespace.
+ * @returns the first matching child, if any.
+ */
+export function child(node: XmlElement, name: string): XmlElement | undefined {
   return children(node).find(item => item.namespaceURI === W && item.localName === name)
 }
 

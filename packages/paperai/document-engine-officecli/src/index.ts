@@ -15,8 +15,8 @@ import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subpr
 import { DocumentEngine } from '@paperai/document-engine'
 import type { EngineMutation, EngineParagraphStyle, EngineTextNode, EngineValidation } from '@paperai/document-engine'
 import type { CapabilityHealth } from '@paperai/domain'
-import { applyDocumentMutations } from './document-mutations.ts'
-import { resolveOfficePath } from './office-path.ts'
+import { applyDocumentMutations, paragraphStyle } from './document-mutations.ts'
+import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
 import { replaceParagraphXml } from './paragraph-xml.ts'
 import {
   convertLegacyDocument,
@@ -127,6 +127,17 @@ function packagedCommand(): { command: string; prefix: string[] } {
   const manifest = JSON.parse(readFileSync(packagePath, 'utf8')) as OfficePackageJson
   const bin = officeCliBin(manifest)
   return { command: process.execPath, prefix: [join(dirname(packagePath), bin)] }
+}
+
+/** Defined paragraph styles with an ID; a missing display name falls back to the ID. */
+function paragraphStyles(styles: XmlElement | undefined): EngineParagraphStyle[] {
+  return Array.from(styles?.getElementsByTagNameNS(WORD_NS, 'style') ?? []).flatMap((style) => {
+    if (style.getAttributeNS(WORD_NS, 'type') !== 'paragraph') return []
+    const id = style.getAttributeNS(WORD_NS, 'styleId')
+    if (id === null || id === '') return []
+    const name = style.getElementsByTagNameNS(WORD_NS, 'name')[0]?.getAttributeNS(WORD_NS, 'val')
+    return [{ id, name: name || id }]
+  })
 }
 
 /** OfficeCLI-backed `ctx.documentEngine`: every operation runs through the pinned launcher under one per-file lease. */
@@ -246,21 +257,13 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
   }
 
   override readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
-    return this.withLease(filePath, () => this.paragraphStyles(filePath, signal))
+    return this.withLease(filePath, async () => paragraphStyles(await this.stylesPart(filePath, signal)))
   }
 
-  private async paragraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+  private async stylesPart(filePath: string, signal?: AbortSignal): Promise<XmlElement | undefined> {
     const result = await this.run(['raw', filePath, '/styles', '--json'], signal)
     const data = this.parseEnvelope(result.stdout).data
-    if (data === '(no styles)') return []
-    const root = parseWordXml(data, 'styles')
-    return Array.from(root.getElementsByTagNameNS(WORD_NS, 'style')).flatMap((style) => {
-      if (style.getAttributeNS(WORD_NS, 'type') !== 'paragraph') return []
-      const id = style.getAttributeNS(WORD_NS, 'styleId')
-      if (id === null || id === '') return []
-      const name = style.getElementsByTagNameNS(WORD_NS, 'name')[0]?.getAttributeNS(WORD_NS, 'val')
-      return [{ id, name: name || id }]
-    })
+    return data === '(no styles)' ? undefined : parseWordXml(data, 'styles')
   }
 
   override inspect(filePath: string, officePath: string, depth = 2, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -279,10 +282,14 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       const identifies = mutations.some(mutation => mutation.type === 'remove' || (mutation.type === 'insert-paragraph'
         && (mutation.after !== undefined || mutation.before !== undefined)))
       const indexed = identifies ? await this.textNodes(filePath, signal) : []
-      const stylesNeeded = mutations.some(mutation => mutation.type === 'insert-paragraph'
+      // A paragraph style may number a removal or anchor target, whose index reading then carries a list marker.
+      const styled = identifies && Array.from(bindMutationTargets(root, mutations.filter(mutation => mutation.type !== 'replace-text'))
+        .values()).some(target => paragraphStyle(target) !== undefined)
+      const stylesNeeded = styled || mutations.some(mutation => mutation.type === 'insert-paragraph'
         ? mutation.style !== undefined
         : mutation.type === 'replace-text' && mutation.paragraphs?.some(paragraph => paragraph.format?.style !== undefined))
-      const styles = stylesNeeded ? await this.paragraphStyles(filePath, signal) : []
+      const stylesXml = stylesNeeded ? await this.stylesPart(filePath, signal) : undefined
+      const styles = paragraphStyles(stylesXml)
       const resolveStyle = (name: string): string => {
         const style = styles.find(style => style.id === name)
           ?? styles.find(style => style.id.toLowerCase() === name.toLowerCase())
@@ -291,7 +298,7 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
         return style.id
       }
       applyDocumentMutations(root, mutations, indexed,
-        (group, mutation) => replaceParagraphXml(group, mutation, resolveStyle), resolveStyle)
+        (group, mutation) => replaceParagraphXml(group, mutation, resolveStyle), resolveStyle, stylesXml)
       const body = resolveOfficePath(root, '/body')
       // The package part preserves legacy attributes; the /document alias reparses typed OpenXML and renames them.
       const commands = [{ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace',

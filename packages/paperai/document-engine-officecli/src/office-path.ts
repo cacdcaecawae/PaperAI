@@ -9,7 +9,9 @@ const WORD_ID_NS = 'http://schemas.microsoft.com/office/word/2010/wordml'
 /**
  * Resolve one OfficeCLI body address against the unmodified document XML.
  * @param root - Word document element whose descendants are addressed.
- * @param officePath - numeric or paraId address, optionally prefixed by /document.
+ * @param officePath - numeric or paraId address, optionally prefixed by /document. Spellings OfficeCLI never prints,
+ * such as an omitted index on a unique segment or a zero-padded ordinal, resolve here but have no text-index entry,
+ * so removals and anchors must use the address readTextNodes reports.
  * @returns the uniquely addressed original element.
  * @throws when the address is unsupported, missing, or ambiguous.
  */
