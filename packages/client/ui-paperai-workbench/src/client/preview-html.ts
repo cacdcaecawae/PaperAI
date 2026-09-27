@@ -365,45 +365,66 @@ export type DiffRun = readonly [kind: 'same' | 'del' | 'ins', text: string]
 
 /**
  * Word-level diff of two paragraphs by longest common subsequence.
- * ponytail: an O(n·m) table; paragraph pairs beyond 250k cells fall back to one deletion and one insertion.
+ * TODO: an O(n·m) table over the part between the shared ends; beyond the cap that part falls back to one
+ *   deletion and one insertion.
  * @param before - the paragraph in the parent version.
  * @param after - the paragraph in the compared version.
+ * @param cap - table cells to spend before giving up. `TOKEN` counts each Han character as one token, so two
+ *   600-字 paragraphs are 360k cells: a comparison marking a whole version keeps the low default because it runs
+ *   once per changed paragraph, while a conflict band raises it because it runs once, for one paragraph, on demand.
  * @returns runs in reading order, adjacent runs of one kind merged.
  */
-export function wordDiff(before: string, after: string): DiffRun[] {
-  const a = before.match(TOKEN) ?? []
-  const b = after.match(TOKEN) ?? []
-  if (a.length * b.length > 250_000) return [['del', before], ['ins', after]]
-  const width = b.length + 1
-  const table = new Uint32Array((a.length + 1) * width)
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i * width + j] = a[i] === b[j]
-        ? (table[(i + 1) * width + j + 1] ?? 0) + 1
-        : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0)
-    }
-  }
+export function wordDiff(before: string, after: string, cap = 250_000): DiffRun[] {
+  const left = before.match(TOKEN) ?? []
+  const right = after.match(TOKEN) ?? []
+  // What both ends share is common to every longest common subsequence, so only the middle needs the table:
+  // one character changed in a thousand costs one cell, not a refusal past the cap.
+  let head = 0
+  while (head < left.length && head < right.length && left[head] === right[head]) head += 1
+  let tail = 0
+  while (tail < left.length - head && tail < right.length - head
+    && left[left.length - 1 - tail] === right[right.length - 1 - tail]) tail += 1
+  const a = left.slice(head, left.length - tail)
+  const b = right.slice(head, right.length - tail)
   const runs: [DiffRun[0], string][] = []
   const push = (kind: DiffRun[0], text: string): void => {
     const last = runs.at(-1)
+    if (text === '') return
     if (last?.[0] === kind) last[1] += text
     else runs.push([kind, text])
   }
-  let i = 0
-  let j = 0
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      push('same', a[i] ?? '')
-      i += 1
-      j += 1
-    } else if (i < a.length && (j === b.length || (table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0))) {
-      push('del', a[i] ?? '')
-      i += 1
-    } else {
-      push('ins', b[j] ?? '')
-      j += 1
+  push('same', left.slice(0, head).join(''))
+  if (a.length * b.length > cap) {
+    push('del', a.join(''))
+    push('ins', b.join(''))
+  }
+  else {
+    const width = b.length + 1
+    const table = new Uint32Array((a.length + 1) * width)
+    for (let i = a.length - 1; i >= 0; i -= 1) {
+      for (let j = b.length - 1; j >= 0; j -= 1) {
+        table[i * width + j] = a[i] === b[j]
+          ? (table[(i + 1) * width + j + 1] ?? 0) + 1
+          : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0)
+      }
+    }
+    let i = 0
+    let j = 0
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) {
+        push('same', a[i] ?? '')
+        i += 1
+        j += 1
+      } else if (i < a.length && (j === b.length || (table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0))) {
+        push('del', a[i] ?? '')
+        i += 1
+      } else {
+        push('ins', b[j] ?? '')
+        j += 1
+      }
     }
   }
+  push('same', left.slice(left.length - tail).join(''))
   return runs
 }
 
@@ -411,6 +432,141 @@ function run(document: Document, kind: 'del' | 'ins', text: string): HTMLElement
   const element = document.createElement(kind)
   element.textContent = text
   return element
+}
+
+/** Cells one conflict band may spend: one paragraph, once, on demand — a 1000×1000 `Uint32Array` at worst. */
+const BAND_CAP = 1_000_000
+/**
+ * Share of the document's text a diff must still recognise for inline marking to read as marking.
+ * Below it `TOKEN`'s per-character Han runs scatter one-character `same` islands (的 在 一 和 本) through a
+ * genuine rewrite, and the marks stipple exactly where they are needed most.
+ */
+const MARKED_SHARE = 0.35
+
+/** The band that stands above one conflicted paragraph, and the copy printed on it. */
+export interface ConflictBandSide {
+  readonly nodeId: string
+  /**
+   * `document` quotes the document's text against the draft and offers both sides.
+   * `draft` quotes a draft no keystroke can reach — the document's rewrite added a formula, a field or a
+   * citation mark — so it offers copying and discarding instead of a merge it cannot deliver.
+   */
+  readonly form: 'document' | 'draft'
+  /** The document's text now. */
+  readonly theirs: string
+  /** The writer's draft. */
+  readonly mine: string
+  /**
+   * The text the draft started from. The band marks what the document changed since then, so the writer's
+   * own edits, which the paragraph below already shows, are never presented as the document's.
+   */
+  readonly base: string
+  /**
+   * Quote the document's text as it stands, unmarked. Set when those words are the very ones the draft
+   * started from: what changed on the document's side is then formatting, which a word diff cannot show,
+   * and marking the writer's own edits against it would present them as the document's.
+   */
+  readonly unmarked?: boolean
+  /** The document's rendered runs for an unmarked quotation, so a change no word diff can show appears in it. */
+  readonly runs?: readonly PaperAIDocumentTextRun[]
+  /** Resolved strings: no locale key reaches this module. */
+  readonly copy: {
+    /** Names the band for assistive technology, which cannot see which paragraph a band stands above. */
+    readonly label: string
+    readonly who: string
+    /** Names both marks in words, so neither depends on hue. Empty when nothing is marked. */
+    readonly legend: string
+    /** Replaces the legend when the document rewrote the paragraph outright and marking is dropped. */
+    readonly rewritten: string
+    /** Stands in for a side the other one emptied, which would otherwise be a blank line. */
+    readonly empty: string
+    readonly actions: readonly { readonly resolve: 'mine' | 'theirs' | 'copy' | 'drop'; readonly label: string }[]
+  }
+}
+
+/**
+ * The other side of one conflicted paragraph, built to stand above it in the page.
+ *
+ * Inert by construction, which is what keeps it out of the thesis: it carries no `data-path`, so `mapBlocks`
+ * never identifies it, `report` can never read a draft out of it and `find` never lands in it; it carries no
+ * `data-paperai-change`, so the change navigator never steps onto it; and it is `contenteditable="false"`
+ * inside an editable page, which `beforeInput` backs up by refusing any input whose range is not wholly
+ * inside a mapped block.
+ *
+ * What is NOT a property of the band: the quotation is a `p`, so that it inherits the document's own face and
+ * leading and can be read straight down against the paragraph below it — which means `blocksOf` would return
+ * it. Nothing runs `blocksOf` over a seated band today, because the only caller rebuilds the container from
+ * the Host's html first and bands are seated after that, in a later effect. Moving a `blocksOf` call onto the
+ * live shadow root would break that, and this paragraph is the warning.
+ * @param owner - document that will own the element.
+ * @param side - which paragraph, which form, both texts, and the resolved copy.
+ * @returns the band, unseated.
+ */
+export function conflictBand(owner: Document, side: ConflictBandSide): HTMLElement {
+  const band = owner.createElement('div')
+  band.dataset.paperaiConflict = side.nodeId
+  band.dataset.paperaiConflictForm = side.form
+  band.setAttribute('contenteditable', 'false')
+  // Several bands carry buttons with the same names, and only position ties a band to its paragraph.
+  band.setAttribute('role', 'group')
+  band.setAttribute('aria-label', side.copy.label)
+  const body = owner.createElement('div')
+  body.className = 'paperai-conflict-body'
+  const head = owner.createElement('div')
+  head.className = 'paperai-conflict-head'
+  const who = owner.createElement('span')
+  who.className = 'paperai-conflict-who'
+  who.textContent = side.copy.who
+  const legend = owner.createElement('span')
+  legend.className = 'paperai-conflict-legend'
+  const text = owner.createElement('p')
+  text.className = 'paperai-conflict-text'
+
+  const quoted = side.form === 'draft' ? side.mine : side.theirs
+  // A soft break reads as `\v` and a split draft joins its paragraphs with `\n`; the quotation shows both as
+  // line breaks, so a draft copied off a band keeps the structure it was typed with.
+  const lines = (part: string): string => part.replaceAll('\v', '\n')
+  if (quoted === '') {
+    text.className = 'paperai-conflict-text paperai-conflict-empty'
+    // An empty paragraph's only difference may be its formatting, so the placeholder wears the document's.
+    const [first] = side.form === 'document' && side.unmarked === true ? side.runs ?? [] : []
+    if (first === undefined) text.textContent = side.copy.empty
+    else applyRuns(text, [{ ...first, text: side.copy.empty }])
+    // Nothing is marked, but a draft band's legend, and an unmarked band's, is its only reason.
+    legend.textContent = side.form === 'draft' || side.unmarked === true ? side.copy.legend : ''
+  }
+  else if (side.form === 'draft' || side.unmarked === true) {
+    if (side.form === 'document' && side.runs !== undefined && side.runs.length > 0) applyRuns(text, side.runs)
+    else text.textContent = lines(quoted)
+    legend.textContent = side.copy.legend
+  }
+  else {
+    const runs = wordDiff(side.base, side.theirs, BAND_CAP)
+    const kept = runs.reduce((total, [kind, part]) => (kind === 'same' ? total + part.length : total), 0)
+    if (kept / quoted.length >= MARKED_SHARE) {
+      text.append(...runs.map(([kind, part]) => (kind === 'same' ? owner.createTextNode(lines(part)) : run(owner, kind, lines(part)))))
+      legend.textContent = side.copy.legend
+    }
+    else {
+      text.textContent = lines(quoted)
+      legend.textContent = side.copy.rewritten
+    }
+  }
+
+  head.append(who, legend)
+  const acts = owner.createElement('div')
+  acts.className = 'paperai-conflict-acts'
+  for (const action of side.copy.actions) {
+    const button = owner.createElement('button')
+    button.type = 'button'
+    button.className = 'paperai-conflict-act'
+    button.dataset.paperaiResolve = action.resolve
+    button.textContent = action.label
+    acts.append(button)
+  }
+  body.append(head, text, acts)
+  band.append(body)
+  return band
 }
 
 /** A version's page with its changes marked in place. */

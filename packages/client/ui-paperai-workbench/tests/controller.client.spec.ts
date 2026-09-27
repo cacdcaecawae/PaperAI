@@ -686,3 +686,346 @@ describe('PaperAIWorkbenchController deferred previews', () => {
   })
 
 })
+
+describe('PaperAIWorkbenchController conflict resolution', () => {
+  /** A draft on NODE_PARAGRAPH that an external version has since contested. */
+  async function withConflict() {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
+      nodes: documentOpenResult().document.nodes.map(node =>
+        (node.nodeId === NODE_PARAGRAPH ? { ...node, text: 'Rewritten by the agent' } : node)),
+    }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', conflicted: true }])
+    return { controller, remote, store }
+  }
+
+  it('rebases the kept draft onto the document and unfreezes its block', async () => {
+    const { controller, store } = await withConflict()
+    controller.resolveConflict(SESSION_ID, NODE_PARAGRAPH)
+    // The draft is untouched; what changes is the base it will be committed against, which is the
+    // whole substance of keeping it: the commit service refuses a mutation whose baseText is stale.
+    expect(store.getSnapshot().edits).toMatchObject([
+      { nodeId: NODE_PARAGRAPH, draft: 'Local draft', baseText: 'Rewritten by the agent', baseRevision: REVISION_2, conflicted: false },
+    ])
+    // And now the block takes a draft again, which it refused while conflicted.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft, merged by hand' })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft, merged by hand' }])
+    controller.dispose()
+  })
+
+  it('leaves every other conflicted draft alone', async () => {
+    const { controller, store } = await withConflict()
+    controller.resolveConflict(SESSION_ID, NODE_HEADING)
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_PARAGRAPH, conflicted: true }])
+    controller.dispose()
+  })
+
+  it('refuses a node that is missing or that the document does not let anyone edit', async () => {
+    const { controller, store } = await withConflict()
+    controller.resolveConflict(SESSION_ID, 'node-never' as never)
+    controller.resolveConflict(SESSION_ID, NODE_TABLE)
+    expect(store.getSnapshot().edits).toMatchObject([{ conflicted: true }])
+    controller.dispose()
+  })
+
+  it('saves the clean drafts of a mixed batch and keeps the conflicted one, conflict and all', async () => {
+    const { controller, remote, store } = await withConflict()
+    const commit = vi.spyOn(remote, 'commit')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    // Only the clean paragraph travels; the conflicted one never reaches the Host.
+    expect(commit.mock.calls[0]?.[0].mutations).toEqual([expect.objectContaining({ nodeId: NODE_HEADING })])
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_PARAGRAPH, draft: 'Local draft', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('saves the clean drafts beside a draft whose paragraph the document deleted, and keeps that one', async () => {
+    const remote = successfulRemote()
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
+      headCommitId: COMMIT_2, nodes: documentOpenResult().document.nodes.filter(node => node.nodeId !== NODE_PARAGRAPH),
+    }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-27T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    const commit = vi.spyOn(remote, 'commit')
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(commit.mock.calls[0]?.[0].mutations).toEqual([expect.objectContaining({ nodeId: NODE_HEADING })])
+    // The orphan keeps its band after the save: its text exists nowhere else.
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: NODE_PARAGRAPH, draft: 'Local draft', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('conflicts a draft whose starting words recur once the document moves on', async () => {
+    // Two empty paragraphs: the Host carries an id to the nearest paragraph with the same text, so an
+    // insertion above them swaps their ids, and only a conflict keeps the draft from landing in the other one.
+    const nodes = [...documentOpenResult().document.nodes,
+      { nodeId: 'node-empty-2' as never, kind: 'paragraph' as const, label: '空段落', depth: 0, editable: true, text: '' }]
+    const remote = successfulRemote()
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_1, { nodes }) })
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, 'node-empty' as never, { text: '第一章的正文' })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Retitled' })
+    remote.open = vi.fn<typeof remote.open>()
+      .mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, { headCommitId: COMMIT_2, nodes }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-27T00:00:00.000Z' })
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    const edits = store.getSnapshot().edits
+    expect(edits.find(edit => edit.nodeId === 'node-empty')?.conflicted).toBe(true)
+    // Words found once still vouch for their paragraph, so the same commit leaves that draft writable.
+    expect(edits.find(edit => edit.nodeId === NODE_HEADING)?.conflicted).toBe(false)
+    controller.dispose()
+  })
+
+  it('lets words that recur only in a node of another kind leave the draft writable', async () => {
+    // The Host hashes a node's kind with its text, so a table cell reading the same cannot take a paragraph's id.
+    const nodes = [...documentOpenResult().document.nodes,
+      { nodeId: 'node-cell' as never, kind: 'table-cell' as const, label: '', depth: 0, editable: true, text: '' }]
+    const remote = successfulRemote()
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_1, { nodes }) })
+    const { controller, store } = await openedController(remote)
+    controller.updateDraft(SESSION_ID, 'node-empty' as never, { text: '第一章的正文' })
+    remote.open = vi.fn<typeof remote.open>()
+      .mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, { headCommitId: COMMIT_2, nodes }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-27T00:00:00.000Z' })
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ nodeId: 'node-empty', conflicted: false }])
+    controller.dispose()
+  })
+
+  it('marks only the drafts a failed save carried', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
+    vi.spyOn(remote, 'commit').mockResolvedValueOnce(REMOTE_FAILURE)
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toMatchObject({ ok: false })
+    const edits = store.getSnapshot().edits
+    expect(edits.find(edit => edit.nodeId === NODE_HEADING)?.saveFailed).toBe(true)
+    // The conflicted paragraph was held back from the commit, so no save of it failed.
+    expect(edits.find(edit => edit.nodeId === NODE_PARAGRAPH)?.saveFailed).toBeUndefined()
+    controller.dispose()
+  })
+
+  it('lets a reload answer a failed save, so its verdict leaves with its reason', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
+    vi.spyOn(remote, 'commit').mockResolvedValueOnce(REMOTE_FAILURE)
+    await controller.commitEdit(SESSION_ID)
+    expect(store.getSnapshot().edits.find(edit => edit.nodeId === NODE_HEADING)?.saveFailed).toBe(true)
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: 'commit-3' as never, updatedAt: '2026-09-27T00:00:00.000Z' })
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toEqual({ ok: true })
+    // The reload publishes no action error; a verdict left behind would say 保存失败 with no reason beside it.
+    expect(store.getSnapshot().actionError).toBeNull()
+    expect(store.getSnapshot().edits.map(edit => edit.saveFailed)).toEqual([undefined, undefined])
+    controller.dispose()
+  })
+
+  it('says why a save found nothing to commit when every draft is in conflict', async () => {
+    const { controller, store } = await withConflict()
+    // The pill's 保存 is disabled here, but Ctrl+S is not; a silent refusal would read as a dead key.
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: false, error: 'block changed externally; local draft retained' })
+    expect(store.getSnapshot()).toMatchObject({ action: null, actionError: 'block changed externally; local draft retained' })
+    // Nothing was attempted, so no failed-save verdict lands on the draft.
+    expect(store.getSnapshot().edits[0]?.saveFailed).toBeUndefined()
+    controller.dispose()
+  })
+
+  it('brings a set-aside draft back still in conflict when the page undoes 用文档的', async () => {
+    const { controller, store } = await withConflict()
+    // 用文档的 publishes no draft for the block; its undo hands the page back exactly this text, marked conflicted.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(store.getSnapshot().edits).toEqual([])
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    // Not rebased onto the Agent's text: saved as it stands it would replace that paragraph unasked.
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('still brings it back when other text was typed and undone in between', async () => {
+    const { controller, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    // Typed on the document's text, then undone twice: back through the document's text to the draft.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Rewritten by the agent, then by hand' })
+    expect(store.getSnapshot().edits).toMatchObject([{ baseText: 'Rewritten by the agent' }])
+    expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('takes a formatting edit with the same words as a new draft, not as the undo of 用文档的', async () => {
+    // A reformat-only conflict leaves the draft's words equal to the document's, so after 用文档的 a bolded word
+    // reports the very same text: without the page's undo mark it must not revive the conflict and lose the bold.
+    const { controller, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', runs: [{ text: 'Local ' }, { text: 'draft', bold: true }] })
+    expect(store.getSnapshot().edits).toMatchObject([{ baseText: 'Rewritten by the agent', runs: [{ text: 'Local ' }, { text: 'draft', bold: true }] }])
+    expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
+    controller.dispose()
+  })
+
+  it('keeps a set-aside draft across a switch to another document and back', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    const reopen = remote.open
+    const second = 'document:second' as typeof RESOURCE_ID
+    // The other document sits at the same revision string and has the same node id, so only its identity
+    // tells the two apart.
+    remote.open = vi.fn<typeof remote.open>(async request => (request.resourceId === second
+      ? { ok: true as const, value: documentOpenResult(REVISION_2, { resourceId: second, documentId: 'second' as never }) }
+      : reopen(request)))
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, second)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background' }])
+    expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
+    // A retained preview keeps its undo stack, so coming back can still undo into the set-aside text.
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('keeps a retained document\u2019s set-aside draft when another document\u2019s drafts are discarded', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    const reopen = remote.open
+    const second = 'document:second' as typeof RESOURCE_ID
+    remote.open = vi.fn<typeof remote.open>(async request => (request.resourceId === second
+      ? { ok: true as const, value: documentOpenResult(REVISION_2, { resourceId: second, documentId: 'second' as never }) }
+      : reopen(request)))
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, second)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A draft in the second document' })
+    // Discarding here clears this document's drafts; the first document's retained preview still has its undo stack.
+    controller.cancelEdit(SESSION_ID)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('keeps set-aside drafts when a discard is refused mid-save', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'A clean heading' })
+    let release: (result: RemoteResult<PaperAIDocumentCommitResult>) => void = () => {}
+    remote.commit = vi.fn<typeof remote.commit>(() => new Promise((resolve) => { release = resolve }))
+    const saving = controller.commitEdit(SESSION_ID)
+    // Refused while the save holds the document, so it must leave everything as it was.
+    controller.cancelEdit(SESSION_ID)
+    release(REMOTE_FAILURE)
+    await expect(saving).resolves.toMatchObject({ ok: false })
+    controller.updateDraft(SESSION_ID, NODE_HEADING, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft', conflicted: true })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Research background', conflicted: true }])
+    controller.dispose()
+  })
+
+  it('forgets a set-aside draft once the page moves to another revision', async () => {
+    const { controller, remote, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    // A rebuilt page starts a new undo stack, so nothing can hand the old text back from there.
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult('revision-3' as never, {
+      headCommitId: 'commit-3' as never,
+      nodes: documentOpenResult().document.nodes.map(node =>
+        (node.nodeId === NODE_PARAGRAPH ? { ...node, text: 'Rewritten by the agent' } : node)),
+    }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: 'commit-3' as never, updatedAt: '2026-09-27T00:00:00.000Z' })
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.revision).toBe('revision-3') })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft', baseText: 'Rewritten by the agent' }])
+    expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
+    controller.dispose()
+  })
+
+  it('forgets set-aside drafts when every draft is discarded', async () => {
+    const { controller, store } = await withConflict()
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.cancelEdit(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    expect(store.getSnapshot().edits).toMatchObject([{ baseText: 'Rewritten by the agent' }])
+    expect(store.getSnapshot().edits[0]?.conflicted).not.toBe(true)
+    controller.dispose()
+  })
+
+  it('refuses while an action holds the document', async () => {
+    const { controller, remote, store } = await withConflict()
+    // A clean draft keeps the commit in flight; the conflicted one is filtered out of it and waits.
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Clean draft' })
+    const original = remote.commit.bind(remote)
+    let release: (() => void) | undefined
+    vi.spyOn(remote, 'commit').mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => { release = resolve })
+      return original(...args)
+    })
+    const pending = controller.commitEdit(SESSION_ID)
+    await vi.waitFor(() => { expect(store.getSnapshot().action).toBe('committing') })
+    // The snapshot a commit already holds must not move under it.
+    controller.resolveConflict(SESSION_ID, NODE_PARAGRAPH)
+    expect(store.getSnapshot().edits.find(edit => edit.nodeId === NODE_PARAGRAPH)).toMatchObject({ conflicted: true })
+    release?.()
+    await pending
+    controller.dispose()
+  })
+})
+
+describe('PaperAIWorkbenchController draft disposal', () => {
+  it('drops a draft whose block the document no longer lets anyone edit', async () => {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    // The agent's rewrite turned that paragraph into something the editor cannot own — a formula, a
+    // field, a citation. Writing to it is refused, but the draft must still be abandonable, or its
+    // text is trapped in the store with no gesture left to clear it.
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
+      nodes: documentOpenResult().document.nodes.map(node =>
+        (node.nodeId === NODE_PARAGRAPH ? { ...node, editable: false } : node)),
+    }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Refused' })
+    expect(store.getSnapshot().edits).toMatchObject([{ draft: 'Local draft' }])
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(store.getSnapshot().edits).toEqual([])
+    controller.dispose()
+  })
+
+  it('drops a draft whose block left the document entirely', async () => {
+    const remote = successfulRemote()
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, {
+      nodes: documentOpenResult().document.nodes.filter(node => node.nodeId !== NODE_PARAGRAPH),
+    }) })
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-21T00:00:00.000Z' })
+    await controller.reloadExternal(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(store.getSnapshot().edits).toEqual([])
+    controller.dispose()
+  })
+
+  it('still clears a stale failure when the last draft goes', async () => {
+    const remote = successfulRemote()
+    const message = 'internal: something went wrong'
+    vi.spyOn(remote, 'commit').mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'something went wrong', details: {} } })
+    const controller = new PaperAIWorkbenchController(remote)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Local draft' })
+    await controller.commitEdit(SESSION_ID)
+    expect(store.getSnapshot().actionError).toBe(message)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(store.getSnapshot()).toMatchObject({ edits: [], actionError: null })
+    controller.dispose()
+  })
+})

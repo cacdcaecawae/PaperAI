@@ -18,12 +18,24 @@ type Translate = PaperAIDocumentWorkbenchProps['t']
 
 const EXPORT_MODES: readonly PaperAIExportMode[] = ['draft-export', 'delivery-export']
 
-/** Actionable controller failures have specific guidance; other failures offer a retry. */
-function actionErrorKey(error: string): PaperAIWorkbenchKey {
+/**
+ * Actionable controller failures have specific guidance; other failures offer a retry.
+ * @param error - the published action error.
+ * @param drafting - drafts are on the page, which only a save leaves behind when it fails.
+ * @returns the key for the guidance to show.
+ */
+function actionErrorKey(error: string, drafting = false): PaperAIWorkbenchKey {
   if (error.includes('UNSUPPORTED_DOCUMENT_CONTENT:')) return 'workbench.unsupportedContent'
   if (error.includes('Working DOCX differs from head')) return 'workbench.workingChanged'
   if (error.startsWith('delivery blocked')) return 'export.blocked'
   if (error.startsWith('block changed externally')) return 'block.conflicted'
+  // The document moved under the action, in the words the Host sends: the gateway forwards a commit-service
+  // failure as `internal: <message>`, so its NODE_TEXT_CONFLICT or HEAD_CONFLICT code never arrives. Pressing
+  // the action again cannot clear it; reloading can. Only a failed save leaves drafts, so only a save is
+  // promised the bands; an export, check, restore or template change runs with none.
+  if (error.includes('text changed since the') || error.includes('head changed:') || error.includes('changed; reload before applying')) {
+    return drafting ? 'workbench.reloadFirst' : 'workbench.reloadAction'
+  }
   if (error === 'save or cancel the current block first') return 'block.busy'
   return 'workbench.actionError'
 }
@@ -147,7 +159,7 @@ function Actions({ state, exportDocument, focusActive, toggleFocus, t }: {
 /** Render the PaperAI full-column details contribution. */
 export function DocumentWorkbench({
   closeDetails, prepareAgentFix, useWorkbench, useProjects, useLibrary, quoteSelection, setScroll,
-  retryOpen, showPanel, updateDraft, cancelEdit, commitEdit, validate, suggestType,
+  retryOpen, showPanel, updateDraft, resolveConflict, cancelEdit, commitEdit, validate, suggestType,
   applyTemplate, detachTemplate, setProjectTemplate, showDiff, restore, exportDocument, reloadExternal, captureExternal,
   setDetailsFocus, showConversation, loadLibrary, createTemplateSet, deleteTemplateSet, addTemplateFormat, removeTemplateFormat, t,
   useStore, actions,
@@ -235,7 +247,7 @@ export function DocumentWorkbench({
           </div>
         </div>
       )}
-      {state.actionError !== null && actionErrorKey(state.actionError) === 'workbench.workingChanged' && (
+      {state.actionError !== null && actionErrorKey(state.actionError, state.edits.length > 0) === 'workbench.workingChanged' && (
         <div className={css.notice} role="alert">
           <div>
             <strong>{t('workbench.workingChanged')}</strong>
@@ -246,8 +258,8 @@ export function DocumentWorkbench({
           </Button>
         </div>
       )}
-      {state.actionError !== null && actionErrorKey(state.actionError) !== 'workbench.workingChanged' && (
-        <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError))}</p>
+      {state.actionError !== null && actionErrorKey(state.actionError, state.edits.length > 0) !== 'workbench.workingChanged' && (
+        <p className={css.actionError} role="alert">{t(actionErrorKey(state.actionError, state.edits.length > 0))}</p>
       )}
       {ready && compare !== null && viewing !== null && (
         <div className={css.notice} role="status">
@@ -291,6 +303,7 @@ export function DocumentWorkbench({
                 zoom={zoom}
                 onZoom={actions.setZoom}
                 onDraft={updateDraft}
+                onResolveConflict={resolveConflict}
                 onSave={() => { void commitEdit() }}
                 onCancel={cancelEdit}
                 t={t}

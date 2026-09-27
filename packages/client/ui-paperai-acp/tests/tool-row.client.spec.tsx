@@ -49,6 +49,17 @@ it('names the running call in words with a state dot and no provider title, and 
   expect(screen.queryByText('输出')).toBeNull()
 })
 
+// What PaperAI's own MCP server writes when a call fails (`failure` in @paperai/mcp): a code and a message
+// nested under `error`, where the flat fixture above has a string.
+it.each([
+  ['DOCUMENT_NOT_FOUND', "document 'public-synthetic-document' was not found", '未找到该文档'],
+  ['PAPERAI_OPERATION_FAILED', 'OfficeCLI exited with code 3', 'OfficeCLI exited with code 3'],
+])('reads the code-and-message envelope PaperAI nests under error: %s', (code, message, line) => {
+  const nested = JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ error: { code, message } }) }], isError: true })
+  render(<AcpToolRow {...props({ ...failed, content: [{ type: 'text', text: nested }] })} />)
+  expect(screen.getByRole('button', { name: /提交修改/ }).textContent).toBe(`提交修改${line}`)
+})
+
 it('remembers a failed call by its detail line and shows the full output and inspect action once opened', () => {
   const inspect = vi.fn()
   const view = render(<AcpToolRow {...props(failed, inspect)} />)
