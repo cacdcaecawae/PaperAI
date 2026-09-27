@@ -1596,7 +1596,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'exportDocument(request: ExportDocumentRequest): Promise<ExportDocumentResult & PaperMcpExportResult>',
-        description: 'Check template requirements, record an optimistic milestone, and publish its immutable snapshot. Draft findings are returned without blocking; delivery errors reject before any commit or output is created. Cancellation is observed before milestone publication. Once the commit completes, file publication reaches success or cleanup before settlement.',
+        description: 'Check template requirements, record an optimistic milestone, and publish its immutable snapshot inside the owning project\'s exports directory. Draft findings are returned without blocking; delivery errors reject before any commit or output is created. Cancellation is observed before milestone publication. Once the commit completes, file publication reaches success or cleanup before settlement.',
         parameters: [{ name: 'request', description: 'observed document, destination, mode, and provenance.' }],
         returns: 'canonical output path, fresh report, and recoverable commit.',
       },

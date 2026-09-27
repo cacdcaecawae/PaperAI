@@ -2,6 +2,7 @@
 
 import type { McpServer } from '@agentclientprotocol/sdk'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
+import { createServer, request as requestHttp } from 'node:http'
 
 /** Remote execution settings; credentials remain in OpenSSH's existing key/agent configuration. */
 export interface AcpSshConfig {
@@ -101,6 +102,72 @@ export function sshLaunch(
       `${quote(config.node ?? 'node')} -e ${quote(bootstrap)}`,
     ],
     ...(localPort === undefined ? {} : { localPort }),
+  }
+}
+
+/**
+ * Bind a session-owned proxy that exposes only its authenticated MCP endpoint.
+ * @param servers - the single local PaperAI HTTP descriptor, or no descriptors.
+ * @returns isolated descriptors and an awaited listener disposer.
+ */
+export async function isolateSshMcp(servers: readonly McpServer[]): Promise<{
+  servers: readonly McpServer[]
+  close(): Promise<void>
+}> {
+  const descriptor = servers[0]
+  if (descriptor === undefined) return { servers, close: async () => {} }
+  if (servers.length !== 1 || !('type' in descriptor) || descriptor.type !== 'http')
+    throw new Error('SSH requires one PaperAI HTTP MCP descriptor')
+  const url = new URL(descriptor.url)
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password)
+    throw new Error('SSH MCP forwarding requires a local loopback endpoint')
+  const authorization = descriptor.headers.find(header => header.name.toLowerCase() === 'authorization')?.value
+  if (authorization === undefined || !/^Bearer [A-Za-z0-9_-]+$/u.test(authorization))
+    throw new Error('SSH MCP forwarding requires a bearer credential')
+  const listener = createServer((request, response) => {
+    if (request.url !== `${url.pathname}${url.search}`) {
+      response.writeHead(404).end()
+      return
+    }
+    if (request.headers.authorization !== authorization) {
+      response.writeHead(401, { 'www-authenticate': 'Bearer', 'cache-control': 'no-store' }).end()
+      return
+    }
+    const upstream = requestHttp(url, {
+      method: request.method,
+      headers: { ...request.headers, host: url.host },
+      agent: false,
+    }, (incoming) => {
+      response.writeHead(incoming.statusCode ?? 502, incoming.headers)
+      incoming.pipe(response)
+      incoming.on('error', () => response.destroy())
+    })
+    upstream.on('error', () => {
+      if (response.headersSent) response.destroy()
+      else response.writeHead(502).end()
+    })
+    response.once('close', () => upstream.destroy())
+    request.once('error', () => upstream.destroy())
+    request.pipe(upstream)
+  })
+  await new Promise<void>((resolve, reject) => {
+    listener.once('error', reject)
+    listener.listen(0, '127.0.0.1', () => {
+      listener.off('error', reject)
+      resolve()
+    })
+  })
+  const address = listener.address()
+  if (address === null || typeof address === 'string') throw new Error('SSH MCP listener did not bind TCP')
+  const isolated = new URL(url)
+  isolated.port = String(address.port)
+  let closing: Promise<void> | undefined
+  return {
+    servers: [{ ...descriptor, url: isolated.href }],
+    close: () => closing ??= new Promise<void>((resolve) => {
+      listener.close(() => { resolve() })
+      listener.closeAllConnections()
+    }),
   }
 }
 

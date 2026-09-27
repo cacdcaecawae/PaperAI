@@ -59,6 +59,7 @@ export function report(
 export interface ExportHarness {
   readonly ctx: Context
   readonly root: string
+  readonly outputRoot: string
   readonly sourcePath: string
   readonly workingPath: string
   readonly snapshotPath: string
@@ -80,10 +81,11 @@ export async function exportHarness(options: {
   readonly submit?: (request: Record<string, unknown>) => Promise<DocumentCommit>
 } = {}): Promise<ExportHarness> {
   const root = await mkdtemp(join(tmpdir(), 'paperai-export-'))
+  const outputRoot = join(root, 'exports')
   const sourceDir = join(root, 'source')
   const workingDir = join(root, 'working')
   const historyDir = join(root, 'history')
-  await Promise.all([mkdir(sourceDir), mkdir(workingDir), mkdir(historyDir)])
+  await Promise.all([mkdir(sourceDir), mkdir(workingDir), mkdir(historyDir), mkdir(outputRoot)])
   const sourcePath = join(sourceDir, 'proposal.docx')
   const workingPath = join(workingDir, 'proposal.docx')
   const snapshotPath = options.snapshotPath ?? join(historyDir, 'commit-next.docx')
@@ -138,6 +140,7 @@ export async function exportHarness(options: {
   ctx.provide('paperTemplates', { check } as never)
   ctx.provide('paperCommits', { submit } as never)
   ctx.provide('paperMcp', { registerExportAdapter } as never)
+  ctx.provide('paperProjects', { get: () => ({ id: document.projectId, rootPath: root }) } as never)
   try {
     await ctx.plugin(PaperExportService, options.config ?? {})
   } catch (error) {
@@ -148,6 +151,7 @@ export async function exportHarness(options: {
   const base: ExportHarness = {
     ctx,
     root,
+    outputRoot,
     sourcePath,
     workingPath,
     snapshotPath,
