@@ -330,7 +330,10 @@ describe('PaperTemplateService', () => {
     await writeFile(sourcePath, 'source-doc')
     await writeFile(normalizedPath, 'normalized-docx')
     const manifest = packManifest(sourcePath, normalizedPath, 'format-reference', ['manuscript'])
-    service.registerPack({ ...manifest, members: [{ ...manifest.members[0]!, requiredSections: ['致谢'] }] })
+    const sections = ['致谢']
+    service.registerPack({ ...manifest, members: [{ ...manifest.members[0]!, requiredSections: sections }] })
+    // A pack that reuses its array afterwards must not change the rules it registered.
+    sections[0] = '摘要'
 
     await expect(service.installPack({ projectId: ProjectId('project-1'), packId: manifest.id }))
       .rejects.toThrow('required section not found in formatting reference: 致谢')
@@ -524,6 +527,10 @@ describe('PaperTemplateService', () => {
       ...base,
       members: [{ ...base.members[0]!, appliesToRoles: [] }],
     })).toThrow('appliesToRoles')
+    expect(() => service.registerPack({
+      ...base,
+      members: [{ ...base.members[0]!, requiredSections: ['致谢'] }],
+    })).toThrow('requiredSections applies only to a format-reference member')
 
     const construct = (config: ConstructorParameters<typeof PaperTemplateService>[1]) => {
       const isolated = new Context()

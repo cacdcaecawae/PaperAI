@@ -502,9 +502,16 @@ function retainManifest(manifest: TemplatePackManifest): TemplatePackManifest {
     memberIds.add(member.id)
     validateName(member.name)
     const roles = validateRoles(member.appliesToRoles)
+    const { requiredSections } = member
+    // Only a formatting reference compiles declared sections, so anywhere else they would be dropped silently.
+    if (requiredSections !== undefined && member.usage !== 'format-reference') {
+      throw new Error(`template-service: requiredSections applies only to a format-reference member: ${member.id}`)
+    }
     return Object.freeze({
       ...member,
       appliesToRoles: Object.freeze(roles),
+      // Copied, because freezing the member is shallow and a pack may reuse the array it registered.
+      ...(requiredSections === undefined ? {} : { requiredSections: Object.freeze([...requiredSections]) }),
       source: Object.freeze({ ...member.source }),
       normalized: Object.freeze({ ...member.normalized }),
     })
