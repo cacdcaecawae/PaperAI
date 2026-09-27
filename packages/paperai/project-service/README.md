@@ -59,6 +59,8 @@ interface CreatePaperProjectResult {
 
 Fatal filesystem, workspace, and repository failures remove only unchanged files and empty directories created by the current call. A newly registered workspace is also removed when repository publication fails. Existing content is never recursively deleted. If rollback itself fails, the service reports the initiating and cleanup failures together.
 
+An unavailable filesystem root, including a disconnected Windows drive or network share, rejects initialization with the original filesystem error. The serialized queue remains available for subsequent project operations.
+
 After project publication, the service uses optional `ctx.subprocess` to run exact Git argv without a shell. An enclosing repository is reused; otherwise `git init --initial-branch <name>` runs at the project root. Missing subprocess support, missing Git, timeout, oversized output, or a non-zero initialization exit returns `git.status: 'degraded'` without discarding the usable project.
 
 ## Configuration
