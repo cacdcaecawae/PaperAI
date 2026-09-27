@@ -19,7 +19,7 @@ The template library holds the user's custom sets, one format per document type.
 
 `upload()` accepts `.docx` and `.doc`. It copies the selected file before inspection; legacy `.doc` uses a read-only Word COM open and writes a separate DOCX. The compiler reads complete text nodes and one `/body` inspection to derive a draft `TemplateContract` with source evidence, fields, slots, fixed text, required sections, fonts, sizes, paragraph spacing, page settings, and supported quantitative rules. The contract becomes `confirmed` only through `confirm()`.
 
-Legacy conversion binds only its Word instance to a Windows job before opening the source, so timeout or cancellation also releases Word and its file locks. Documents requiring an open password fail without an interactive prompt; document-close failures still attempt Word shutdown.
+Legacy conversion binds only its Word instance to a Windows job before opening the source. Once the job is assigned, timeout or cancellation also releases Word and its file locks; Word startup and blank-document creation precede the assignment, so a hang or termination in that phase can leave the new Word instance running. Documents requiring an open password fail without an interactive prompt; document-close failures still attempt Word shutdown.
 
 `validateAssociation()` rejects draft, cross-project, template-source, and incompatible `DocumentRole` bindings; its optional `role` names the document type the same commit switches to, so a type change and a binding travel together. The actual `bind-template` publication belongs to `paperCommits`, so every association receives a recoverable version and actor provenance. A `format-reference` binding never copies the reference body.
 

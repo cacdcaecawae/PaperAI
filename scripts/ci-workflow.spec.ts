@@ -160,6 +160,7 @@ describe('CI workflow', () => {
     expect(paperaiCodeScript).not.toContain('packages/shell/tool-pwsh-persistent/tests')
     for (const selection of [
       'packages/paperai/agent-acp/tests',
+      'packages/paperai/document-engine-officecli/tests/word-lifetime.windows.spec.ts',
       'packages/paperai/project-service/tests/project-service.spec.ts',
       'packages/shell/tool-pwsh-persistent/tests/loader-composition.spec.ts',
     ]) {
@@ -171,6 +172,7 @@ describe('CI workflow', () => {
       'packages/client/ui-paperai-workbench/tests/controller.client.spec.ts',
       'packages/client/ui-paperai-workbench/tests/components.client.spec.tsx',
       'packages/paperai/project-service/tests/project-service.spec.ts',
+      'packages/paperai/document-engine-officecli/tests/word-lifetime.windows.spec.ts',
     ]) {
       expect(existsSync(resolve(root, criticalTest)), criticalTest).toBe(true)
     }

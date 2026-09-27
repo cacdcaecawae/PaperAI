@@ -24,4 +24,4 @@ The two providers retain independently packaged PowerShell assets, with an equal
 
 ## Consequences
 
-Windows-native tests use unrelated, file-locking processes to verify cancellation, timeout, and Close-failure cleanup without requiring Office. They also verify that another process remains alive. Word startup and blank-document creation precede job assignment; the job protects source-file conversion once its Word window exists. The root-failure regression checks both the original error and successful subsequent project creation.
+Windows-native tests use unrelated, file-locking processes to verify cancellation, timeout, and Close-failure cleanup without requiring Office. They also verify that another process remains alive, and the Windows CI job runs them through `test:paperai:windows`. Word startup and blank-document creation precede job assignment; the job protects source-file conversion once its Word window exists, and both package READMEs limit the cleanup guarantee to that phase. The root-failure regression checks both the original error and successful subsequent project creation.
