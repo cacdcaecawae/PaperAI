@@ -159,7 +159,7 @@ describe('PaperExportService', () => {
     })
     expect(harness.submit).not.toHaveBeenCalled()
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect((await readdir(harness.root)).some(name => name.includes('.paperai-'))).toBe(false)
+    expect((await readdir(harness.outputRoot)).some(name => name.includes('.paperai-'))).toBe(false)
   })
 
   it('preserves complete Agent provenance and supports an unborn document head', async () => {
@@ -436,7 +436,7 @@ describe('PaperExportService', () => {
       mode: 'draft-export',
       actor: humanActor,
     })).rejects.toMatchObject({ code: 'SNAPSHOT_CORRUPT' })
-    const names = await readdir(harness.root)
+    const names = await readdir(harness.outputRoot)
     expect(names).not.toContain('corrupt.docx')
     expect(names.some(name => name.includes('.paperai-'))).toBe(false)
   })
