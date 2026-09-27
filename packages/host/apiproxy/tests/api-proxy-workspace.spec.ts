@@ -379,6 +379,21 @@ describe('session creation and Workspace membership', () => {
     expect(existsSync(path)).toBe(kind === 'file')
   })
 
+  it('does not recreate a Workspace root removed while session creation is in flight', async () => {
+    const { api, ctx, root } = await harness()
+    const path = stageDir(root, 'removed-during-create')
+    const workspace = expectOk(await api.workspace.create(request({ path }))).workspace
+    vi.spyOn(ctx.get('sessionPersistence')!, 'list').mockImplementation(async () => {
+      rmSync(path, { recursive: true })
+      return []
+    })
+    const sessionId = SessionId('workspace-root-removed-in-flight')
+    const response = await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId }))
+    expect(response.result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    expect(existsSync(path)).toBe(false)
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace

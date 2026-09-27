@@ -42,6 +42,7 @@ import type { ProjectGitStatus, WritingCharterSyncResult } from '@paperai/projec
 interface CreatePaperProjectInput {
   rootPath: string
   name?: string
+  existingRoot?: boolean
 }
 
 interface CreatePaperProjectResult {
@@ -53,7 +54,7 @@ interface CreatePaperProjectResult {
 }
 ```
 
-`create(input)` serializes initialization calls. Repeating it for the same canonical path preserves the project id, name, creation time, context file, and all user files. If a DSH workspace exists for the path, the service reuses it. If the project record points at a workspace registration that was recreated, the service repairs the association without changing project identity.
+`create(input)` serializes initialization calls. Repeating it for the same canonical path preserves the project id, name, creation time, context file, and all user files. If a DSH workspace exists for the path, the service reuses it. If the project record points at a workspace registration that was recreated, the service repairs the association without changing project identity. A missing project directory is created, except with `existingRoot: true`, which requires it to be an existing directory and fails otherwise without creating it. Creating the project's subdirectories never recreates a root that disappears meanwhile.
 
 `setTemplateChoice(id, packId)` records the template set the project writes against — a template set id, or `null` for the explicit choice to write without one. Both spellings stamp `templateDecidedAt`, so the browser's first-open template prompt does not return; `templatePackId` is written or removed accordingly, and every other field of the `ProjectRecord` is preserved. The call shares the initialization queue and fails for an unknown project.
 

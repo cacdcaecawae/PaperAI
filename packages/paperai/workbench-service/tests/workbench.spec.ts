@@ -344,6 +344,7 @@ async function createHarness(rootPath?: string): Promise<Harness> {
       project: structuredClone(harness.project), projectCreated: false, contextFile: 'preserved', git: { status: 'ready' },
     }),
     get: (id: typeof PROJECT_ID) => id === PROJECT_ID ? structuredClone(harness.project) : undefined,
+    findByPath: async (path: string) => ctx.paperRepository.listProjects().find(project => project.rootPath === path),
     setTemplateChoice: async (id: typeof PROJECT_ID, packId: string | null) => {
       expect(id).toBe(PROJECT_ID)
       const { templatePackId: _dropped, ...rest } = harness.project
@@ -536,7 +537,21 @@ describe('PaperAiWorkbenchService', () => {
     expect(listDocuments).not.toHaveBeenCalled()
     expect(await readdir(h.project.rootPath)).toEqual([])
     await h.service.setProjectTemplate({ workspaceId: WORKSPACE_ID, packId: null })
-    expect(create).toHaveBeenCalledExactlyOnceWith({ rootPath: h.project.rootPath, name: '硕士论文' })
+    expect(create).toHaveBeenCalledExactlyOnceWith({ rootPath: h.project.rootPath, name: '硕士论文', existingRoot: true })
+  })
+
+  it('reads a project whose Workspace was deleted and re-registered for the same directory without rewriting it', async () => {
+    const h = await createHarness()
+    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValue([{ ...h.project, workspaceId: 'workspace-deleted' }])
+    const create = vi.spyOn(h.ctx.paperProjects, 'create')
+    const setTemplateChoice = vi.spyOn(h.ctx.paperProjects, 'setTemplateChoice')
+    expect(await h.service.overview({ workspaceId: WORKSPACE_ID })).toMatchObject({
+      workspaceId: WORKSPACE_ID, templateDecided: true, templatePackId: HIT_PACK_ID, documents: [{ documentId: DOCUMENT_ID }],
+    })
+    expect((await openDocument(h)).document.workspaceId).toBe(WORKSPACE_ID)
+    await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).resolves.toMatchObject({ documents: 1 })
+    expect(create).not.toHaveBeenCalled()
+    expect(setTemplateChoice).not.toHaveBeenCalled()
   })
 
   it('does not create a project for an invalid template or a missing or non-directory Workspace root', async () => {
@@ -575,8 +590,9 @@ describe('PaperAiWorkbenchService', () => {
     expect(create).not.toHaveBeenCalled()
     expect(recover).not.toHaveBeenCalled()
     await expect(h.service.inspectProject({ workspaceId: WorkspaceId('missing') })).rejects.toThrow(/does not exist/)
-    vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValueOnce([])
+    const listProjects = vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValue([])
     await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).rejects.toThrow(/not initialized/)
+    listProjects.mockRestore()
     const plan = { documentId: DOCUMENT_ID, headCommitId: DocumentCommitId('commit-1'), sha256: 'digest', workingPath: h.document.workingPath }
     h.document = { ...h.document, projectId: ProjectId('another') }
     await expect(h.service.recoverWorking({ workspaceId: WORKSPACE_ID, plan })).rejects.toThrow(/does not belong/)

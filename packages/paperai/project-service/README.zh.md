@@ -42,6 +42,7 @@ import type { ProjectGitStatus, WritingCharterSyncResult } from '@paperai/projec
 interface CreatePaperProjectInput {
   rootPath: string
   name?: string
+  existingRoot?: boolean
 }
 
 interface CreatePaperProjectResult {
@@ -53,7 +54,7 @@ interface CreatePaperProjectResult {
 }
 ```
 
-`create(input)` 串行执行初始化。同一规范路径重复调用时，会保留项目 id、名称、创建时间、上下文文件和全部用户文件。路径已有 DSH Workspace 时直接复用；项目记录关联的 Workspace 被重建时，只修复关联，不改变项目身份。
+`create(input)` 串行执行初始化。同一规范路径重复调用时，会保留项目 id、名称、创建时间、上下文文件和全部用户文件。路径已有 DSH Workspace 时直接复用；项目记录关联的 Workspace 被重建时，只修复关联，不改变项目身份。项目目录不存在时会被创建；但传入 `existingRoot: true` 时要求它已是现有目录，否则直接失败而不创建。创建项目子目录的过程从不重新创建中途消失的根目录。
 
 `setTemplateChoice(id, packId)` 记录项目写作所依据的模板——某个模板 id，或以 `null` 明确选择不用模板。两种写法都会写入 `templateDecidedAt`，因此浏览器首次打开时的模板询问不会再次出现；`templatePackId` 相应写入或移除，`ProjectRecord` 的其他字段保持不变。该调用与初始化共用同一串行队列，项目不存在时失败。
 

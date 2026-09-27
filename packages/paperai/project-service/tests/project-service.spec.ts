@@ -194,6 +194,23 @@ describe('PaperProjectService', () => {
     expect(harness.putProject).toHaveBeenCalledTimes(1)
   })
 
+  it('refuses to create or recreate a required existing root that is missing or not a directory', async () => {
+    const parent = await temporaryRoot('existing-root')
+    const missing = join(parent, 'removed')
+    const file = join(parent, 'file')
+    await writeFile(file, 'ordinary file')
+    const harness = await projectHarness()
+    const { service } = await harness.load()
+
+    await expect(service.create({ rootPath: missing, existingRoot: true })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(service.create({ rootPath: file, existingRoot: true })).rejects.toThrow('not a directory')
+
+    await expect(access(missing)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(file, 'utf8')).toBe('ordinary file')
+    expect(harness.createWorkspace).not.toHaveBeenCalled()
+    expect(harness.putProject).not.toHaveBeenCalled()
+  })
+
   it('fails loud on ambiguous records, blank intent, and invalid deployment limits', async () => {
     const parent = await temporaryRoot('invalid')
     const root = join(parent, 'canonical')

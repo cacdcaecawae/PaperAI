@@ -4170,7 +4170,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreatePaperProjectInput',
-    declaration: 'export interface CreatePaperProjectInput {\n    readonly rootPath: string;\n    readonly name?: string;\n}',
+    declaration: 'export interface CreatePaperProjectInput {\n    readonly rootPath: string;\n    readonly name?: string;\n    readonly existingRoot?: boolean;\n}',
   },
   {
     name: 'CreatePaperProjectResult',

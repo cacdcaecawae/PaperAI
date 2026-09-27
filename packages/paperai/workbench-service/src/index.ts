@@ -427,7 +427,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview> {
     signal?.throwIfAborted()
     const workspace = await this.workspaceDirectory(request.workspaceId)
-    const project = this.findProject(workspace)
+    const project = await this.findProject(workspace)
     return project === undefined ? {
       workspaceId: workspace.id,
       projectName: workspace.title,
@@ -551,7 +551,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   @Remote('inspectProject')
   async inspectProject(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
-    const project = this.existingProject(request.workspaceId)
+    const project = await this.existingProject(request.workspaceId)
     return this.ctx.paperCommits.inspectProject(project, signal)
   }
 
@@ -563,7 +563,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   @Remote('recoverWorking')
   async recoverWorking(request: PaperAIRecoverWorkingRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
-    const project = this.existingProject(request.workspaceId)
+    const project = await this.existingProject(request.workspaceId)
     const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.plan.documentId)))
     if (document?.projectId !== project.id) throw new Error('recovery document does not belong to this project')
     await this.ctx.paperCommits.recoverMissingWorking(request.plan, signal)
@@ -580,7 +580,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   @Remote('captureExternal')
   async captureExternal(request: PaperAICaptureExternalRequest, signal?: AbortSignal): Promise<PaperAIProjectIntegrityReport> {
-    const project = this.existingProject(request.workspaceId)
+    const project = await this.existingProject(request.workspaceId)
     const document = this.ctx.paperRepository.getDocument(DocumentId(String(request.documentId)))
     if (document?.projectId !== project.id) throw new Error('paperai-workbench: the document does not belong to this project')
     await this.ctx.paperCommits.captureExternal({
@@ -993,7 +993,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
    */
   @Remote('open')
   async open(request: PaperAIOpenDocumentRequest, signal?: AbortSignal): Promise<PaperAIDocumentOpenResult> {
-    const project = this.existingProject(request.workspaceId)
+    const project = await this.existingProject(request.workspaceId)
     const id = documentIdFromResource(request.resourceId)
     const snapshot = this.requireDocument(id)
     if (snapshot.document.projectId !== project.id) {
@@ -1106,20 +1106,32 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   }
 
   /** Reads must not initialize a missing project or repair its context files. */
-  private existingProject(workspaceId: WorkspaceId): ProjectRecord {
+  private async existingProject(workspaceId: WorkspaceId): Promise<ProjectRecord> {
     const workspace = this.ctx.workspaceRegistry.get(workspaceId)
     if (workspace === undefined) throw new Error(`paperai-workbench: Workspace '${workspaceId}' does not exist`)
-    const project = this.findProject(workspace)
+    const project = await this.findProject(workspace)
     if (project === undefined) throw new Error('paperai-workbench: project is not initialized')
     return project
   }
 
-  private findProject(workspace: Workspace): ProjectRecord | undefined {
+  private recordedProject(workspace: Workspace): ProjectRecord | undefined {
     const project = this.ctx.paperRepository.listProjects().find(candidate => candidate.workspaceId === workspace.id)
     if (project !== undefined && relative(workspace.path, project.rootPath) !== '') {
       throw new Error('paperai-workbench: project root does not match the Workspace')
     }
     return project
+  }
+
+  /**
+   * A project whose record still names an earlier registration of the same
+   * directory is found by its canonical root and read as the current
+   * Workspace's; only an explicit action rewrites the record.
+   */
+  private async findProject(workspace: Workspace): Promise<ProjectRecord | undefined> {
+    const recorded = this.recordedProject(workspace)
+    if (recorded !== undefined) return recorded
+    const adopted = await this.ctx.paperProjects.findByPath(workspace.path)
+    return adopted === undefined ? undefined : { ...adopted, workspaceId: String(workspace.id) }
   }
 
   private async workspaceDirectory(workspaceId: WorkspaceId): Promise<Workspace> {
@@ -1132,9 +1144,9 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   /** Only explicit template selection or document creation may initialize a project. */
   private async projectForWorkspace(workspaceId: WorkspaceId): Promise<{ workspace: Workspace; project: ProjectRecord }> {
     const workspace = await this.workspaceDirectory(workspaceId)
-    const project = this.findProject(workspace)
+    const project = this.recordedProject(workspace)
     if (project !== undefined) return { workspace, project }
-    const initialized = await this.ctx.paperProjects.create({ rootPath: workspace.path, name: workspace.title })
+    const initialized = await this.ctx.paperProjects.create({ rootPath: workspace.path, name: workspace.title, existingRoot: true })
     if (initialized.project.workspaceId !== String(workspace.id)) {
       throw new Error(`paperai-workbench: project '${initialized.project.id}' is associated with another Workspace`)
     }

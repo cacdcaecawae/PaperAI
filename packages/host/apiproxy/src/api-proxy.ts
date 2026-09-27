@@ -1043,6 +1043,10 @@ function changedWorkspaceView(workspaceId: string, value: unknown): WorkspaceVie
   }
 }
 
+async function requireDirectory(path: string): Promise<void> {
+  if (!(await stat(path)).isDirectory()) throw new Error(`workspace root "${path}" is not a directory`)
+}
+
 /**
  * Implement ApiProxy over a composed host context.
  * @param ctx - a context with the Host spine and Workspace registry mounted.
@@ -1601,12 +1605,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     }
   }
 
-  /** Resolve one requested identity to a live agent, creating or resuming it once. */
+  /**
+   * Resolve one requested identity to a live agent, creating or resuming it once.
+   * A plain cwd is created when missing; an `existingCwd` (a Workspace root) must
+   * already be a directory when the agent is resumed or created, and is never recreated.
+   */
   async function ensureSession(
     sessionId: SessionId,
     cwd: string,
     checkPersistedIdentity: boolean,
     presetId?: string,
+    existingCwd = false,
   ): Promise<Agent> {
     let creation = sessionCreations.get(sessionId)
     if (creation === undefined) {
@@ -1642,6 +1651,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
           const composition = await composeAgent(storedPreset)
+          if (existingCwd) await requireDirectory(cwd)
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
             ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
@@ -1650,12 +1660,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })).agent
         }
 
-        try {
-          await mkdir(cwd, { recursive: true })
-        } catch (error: unknown) {
-          throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
+        if (!existingCwd) {
+          try {
+            await mkdir(cwd, { recursive: true })
+          } catch (error: unknown) {
+            throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
+          }
         }
         const composition = await composeAgent(presetId)
+        if (existingCwd) await requireDirectory(cwd)
         return (await ctx.agents.create({
           sessionId,
           ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
@@ -2172,10 +2185,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
         try {
-          if (workspace !== undefined && !(await stat(workspace.path)).isDirectory()) {
-            throw new Error(`workspace root "${workspace.path}" is not a directory`)
-          }
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
+          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, workspace !== undefined)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
             return err(request, {

@@ -85,6 +85,8 @@ export interface CreatePaperProjectInput {
   readonly rootPath: string
   /** Display name used only when no project record exists for the directory. */
   readonly name?: string
+  /** Require the directory to exist already; initialization then never creates or recreates it. */
+  readonly existingRoot?: boolean
 }
 
 /** Result of one idempotent project initialization. */
@@ -271,7 +273,7 @@ export class PaperProjectService extends Service {
   }
 
   private async createNow(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult> {
-    const layout = await prepareProjectLayout(input.rootPath)
+    const layout = await prepareProjectLayout(input.rootPath, input.existingRoot)
     let createdWorkspace: Workspace | undefined
     let charter: WritingCharterSync | undefined
     try {
