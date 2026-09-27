@@ -99,6 +99,9 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   // which is 1.9:1 on white and unusable for a rule, an underline, or a label.
   '--paperai-page-accent': pair('#9a6a1a', '#9a6a1a'),
   '--paperai-page-loss': pair('#570c0c', '#570c0c'),
+  // Gold type on the page. The accent is a rule's colour: on a conflict band's own tint it reads 4.2:1,
+  // under AA for 13 px labels, where this holds 6.3:1 and still clears 4.5:1 on a pressed button's fill.
+  '--paperai-page-ink': pair('#765113', '#765113'),
 
   // Document-type accents the workbench badges and icons read.
   '--paperai-type-proposal': pair('#2563eb', '#7fb0ff'),

@@ -700,7 +700,7 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await banner.waitFor({ timeout: 10_000 })
     await banner.getByRole('button', { name: '刷新' }).click()
     await expect.poll(() => banner.count(), { timeout: 30_000 }).toBe(0)
-    await page.getByRole('alert').filter({ hasText: '草稿已保留' }).waitFor({ timeout: 30_000 })
+    await pending().getByRole('button', { name: '1 处冲突', exact: true }).waitFor({ timeout: 30_000 })
     expect(await changed.textContent()).toBe('浏览器中的本地草稿')
     expect(await changed.getAttribute('data-paperai-conflicted')).not.toBeNull()
     expect(await pending().getByRole('button', { name: '保存', exact: true }).isEnabled()).toBe(false)
@@ -1559,6 +1559,15 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await formatBand.getByRole('button', { name: '用文档的', exact: true }).click()
     await expect.poll(() => pending().count(), { timeout: 10_000 }).toBe(0)
     expect(await paragraph.textContent()).toBe(original)
+    // The band left with the button that had focus; focus stays in the page's editing host, so Ctrl+Z reaches it.
+    expect(await paragraph.evaluate(element =>
+      (element.getRootNode() as ShadowRoot).activeElement?.classList.contains('paperai-doc'))).toBe(true)
+    await page.keyboard.press('Control+Z')
+    // Undone, the draft comes back as the conflict it was, band and all; settle it the same way to carry on.
+    await expect.poll(() => paragraph.textContent(), { timeout: 10_000 }).toBe(`${original} local draft`)
+    await formatBand.waitFor({ timeout: 10_000 })
+    await formatBand.getByRole('button', { name: '用文档的', exact: true }).click()
+    await expect.poll(() => pending().count(), { timeout: 10_000 }).toBe(0)
     const rendered = await paragraph.locator('span').evaluateAll(elements => elements.map(element => ({
       text: element.textContent, size: getComputedStyle(element).fontSize, weight: getComputedStyle(element).fontWeight,
     })))
