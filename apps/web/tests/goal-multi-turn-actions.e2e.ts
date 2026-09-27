@@ -47,7 +47,7 @@ const WINDOWS_COMMAND_BY_DESCRIPTION: Readonly<Record<(typeof SHELL_DESCRIPTIONS
   'Randomly pick one package directory':
     `${PACKAGE_DIRECTORY_COMMAND}; for ($index = 0; $index -lt $packageDirs.Count; $index += 1) { `
     + "'{0}: {1}' -f ($index + 1), ([IO.Path]::GetRelativePath($PWD.Path, $packageDirs[$index].FullName).Replace([char]92, [char]47)) }; "
-    + "'---random pick---'; [Console]::Error.WriteLine('shuf is unavailable in this fixture'); exit 1",
+    + "'---random pick---'; [Console]::Error.WriteLine('shuf is unavailable in this fixture'); exit 127",
   'Randomly select one package with Python':
     `${PACKAGE_DIRECTORY_COMMAND}; [IO.Path]::GetRelativePath($PWD.Path, $packageDirs[1].FullName).Replace([char]92, [char]47)`,
   'List all files in session-reference package':
@@ -292,7 +292,7 @@ describe('web e2e: Goal keeps one assistant action row per completed turn', () =
     const shellResults = shellCalls.map(event => resultByCallId.get(event.data.callId))
     expect(shellResults.map(result => result?.isError)).toEqual(Array.from({ length: 8 }, () => false))
     expect(shellResults.map(result => result?.content
-      .filter(block => block.type === 'text').map(block => block.text).join('').includes('[exit code: 1]')))
+      .filter(block => block.type === 'text').map(block => block.text).join('').includes('[exit code: 127]')))
       .toEqual([false, false, true, false, false, false, false, false])
     expect(sessionEvents.flatMap(event =>
       event.type === 'goal/change' && event.data.operation === 'complete' ? [event.data.goal.phase] : []))
