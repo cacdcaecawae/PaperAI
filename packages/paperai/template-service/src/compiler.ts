@@ -225,6 +225,9 @@ function fieldFor(text: string): FieldDefinition | undefined {
   return FIELDS.find(field => field.pattern.test(text))
 }
 
+// Arabic or Chinese chapter numbers, 1.2 / 一、 / 1、 enumerations, Chapter N, and figure or table captions.
+const NUMBERED_HEADING = /^(?:第\s*[\d一二三四五六七八九十百零〇两]+\s*章|[\d一二三四五六七八九十百零〇两]+(?:\.\d+)*[\s、．.]|chapter\s+\d+|[图表]\s*\d)/iu
+
 function compileRequiredSections(
   nodes: readonly DocumentNode[],
   usage: TemplateUsage,
@@ -235,7 +238,7 @@ function compileRequiredSections(
     if (declared === undefined) {
       // Numbered chapters and sections, captions, and annotations belong to the sample's own content.
       return headings.filter(node => node.text.length <= 100 && !isInstruction(node.text)
-        && !/^(?:第\s*\d+\s*章|\d+(?:\.\d+)*[\s．.]|[图表]\s*\d)/u.test(node.text.trim()))
+        && !NUMBERED_HEADING.test(node.text.trim()))
     }
     return declared.map((title) => {
       const node = headings.find(heading => withoutWhitespace(heading.text) === withoutWhitespace(title))

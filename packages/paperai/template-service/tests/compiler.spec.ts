@@ -90,6 +90,8 @@ describe('compileTemplateDraft', () => {
       ['摘  要', 'heading 1'], ['ABSTRACT', 'heading 1'],
       ['致  谢\t30', 'TOC 1'],
       ['第1章  绪论', 'heading 1'], ['1.1  研究背景', 'heading 2'], ['1.2.1 国内研究现状', 'heading 3'],
+      ['第一章  绪论', 'heading 1'], ['一、研究背景', 'heading 2'], ['1、国内研究现状', 'heading 3'],
+      ['Chapter 1 Introduction', 'heading 1'], ['第十二章 结论', 'heading 1'],
       ['图1-1  系统结构', 'heading 1'], ['（摘要应说明研究工作）', 'heading 1'],
       ['学位论文原创性声明', 'heading 1'], ['致  谢', 'heading 1'],
     ])
