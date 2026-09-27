@@ -423,11 +423,12 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
       : { current: current + 1, total: list.length }))
   }
 
-  // Forced projection or view changes retain the phrase against its original node index.
-  const interruptComposition = (): void => {
+  // Forced projection or view changes retain the phrase against its original node index;
+  // an unmount keeps it as an ordinary draft, since the document did not move.
+  const interruptComposition = (conflict = true): void => {
     if (!composing.current) return
     if (blockedComposition.current !== null) blockedComposition.current()
-    else if (compositionBlock.current !== null) report([compositionBlock.current], true)
+    else if (compositionBlock.current !== null) report([compositionBlock.current], conflict)
     composing.current = false
     compositionBlock.current = null
     blockedComposition.current = null
@@ -594,12 +595,8 @@ export function DocumentPreview({ html, revision, nodes, paragraphStyles, title,
   }, [active, comparing])
   // The pill leaves with the last draft while this component stays mounted: a half-pressed discard must not greet the next draft.
   useEffect(() => { if (edits.length === 0) setConfirmDiscard(false) }, [edits.length])
-  useEffect(() => () => {
-    if (composing.current) callbacks.current.onComposing?.(false)
-    composing.current = false
-    compositionBlock.current = null
-    blockedComposition.current = null
-  }, [])
+  // Removing the page need not fire compositionend. A layout cleanup still reads the attached blocks.
+  useLayoutEffect(() => () => { interruptComposition(false) }, [])
   // The bar stays inside the stage: clamped sideways, and flipped above the selection when the room below runs out.
   useLayoutEffect(() => {
     const element = barRef.current

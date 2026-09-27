@@ -604,6 +604,24 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     controller.dispose()
   })
 
+  it.each([false, true])('runs a reconnect read skipped during composition once it ends (draft published: %s)', async (drafted) => {
+    const { controller, remote, store } = await openedController()
+    const open = vi.spyOn(remote, 'open').mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.setComposing(SESSION_ID, true)
+    controller.refreshLoaded()
+    expect(open).not.toHaveBeenCalled()
+    expect(store.getSnapshot().actionError).toBeNull()
+    if (drafted) controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Composed phrase' })
+    controller.setComposing(SESSION_ID, false)
+    await vi.waitFor(() => { expect(open).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => {
+      expect(store.getSnapshot()).toMatchObject(drafted
+        ? { document: { headCommitId: COMMIT_1 }, externalUpdate: { headCommitId: COMMIT_2 }, edits: [{ draft: 'Composed phrase' }] }
+        : { document: { headCommitId: COMMIT_2 }, edits: [] })
+    })
+    controller.dispose()
+  })
+
   it('paints a commit into the current preview and swaps in the rendered one', async () => {
     const remote = successfulRemote()
     remote.commit = vi.fn<typeof remote.commit>(async request => ({
@@ -686,6 +704,30 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     expect(store.getSnapshot().document?.previewHtml).toBe(drafting ? patched : '<p>Document A</p>')
     expect(store.getSnapshot().document?.paragraphStyles).toEqual([{ id: 'StyleA', name: 'Style in A' }])
     expect(store.getSnapshot().edits).toMatchObject(drafting ? [{ draft: 'New draft in A' }] : [])
+  })
+
+  it('swaps a retained document’s rendered preview while another document is composing', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '', paragraphStyles: [] }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed in A' })
+    await controller.commitEdit(SESSION_ID)
+    const secondResource = 'document:second' as typeof RESOURCE_ID
+    vi.mocked(remote.open).mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_2, {
+      documentId: 'second' as typeof DOCUMENT_ID, resourceId: secondResource, previewHtml: '<p>Document B</p>',
+    }) })
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, secondResource)
+    controller.setComposing(SESSION_ID, true)
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Document A</p>' }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.setComposing(SESSION_ID, false)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    expect(store.getSnapshot().document?.previewHtml).toBe('<p>Document A</p>')
+    controller.dispose()
   })
 
   it('records an outside working edit as a version and reopens the document with the draft kept', async () => {

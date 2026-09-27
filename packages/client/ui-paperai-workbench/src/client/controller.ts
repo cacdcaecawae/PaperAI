@@ -151,6 +151,8 @@ export class PaperAIWorkbenchController {
   private readonly drafts = new Map<SessionId, Map<PaperAIResourceId, readonly PaperAIBlockEdit[]>>()
   private readonly positions = new Map<SessionId, Map<PaperAIResourceId, number>>()
   private readonly composing = new Map<SessionId, PaperAIDocumentSnapshot>()
+  /** Sessions whose reconnect read arrived during composition. */
+  private readonly reconnectReads = new Set<SessionId>()
   private readonly targets = new Map<SessionId, {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
@@ -469,7 +471,8 @@ export class PaperAIWorkbenchController {
     if (active && state.document !== null) this.composing.set(sessionId, state.document)
     else this.composing.delete(sessionId)
     this.syncUnloadGuard()
-    if (!active && state.externalUpdate !== null && state.action === null && !hasUnsavedEdit(state)) {
+    if (!active && this.reconnectReads.delete(sessionId)) this.refreshSession(sessionId)
+    else if (!active && state.externalUpdate !== null && state.action === null && !hasUnsavedEdit(state)) {
       void this.reloadExternal(sessionId)
     }
   }
@@ -537,7 +540,8 @@ export class PaperAIWorkbenchController {
    * @param draft - the block's text and runs, or `null` to drop its draft.
    */
   updateDraft(sessionId: SessionId, nodeId: PaperAIDocumentNodeId, draft: PaperAIBlockDraft | null): void {
-    this.assertLive()
+    // An unmounting preview flushes its IME phrase here, possibly after plugin disposal.
+    if (this.disposed) return
     if (this.setAside(sessionId, nodeId, draft)) return
     this.workbenchEntry(sessionId).store.update((state) => {
       const composition = this.composing.get(sessionId)
@@ -1024,9 +1028,16 @@ export class PaperAIWorkbenchController {
     for (const [sessionId, entry] of this.workbenches) {
       entry.store.update((state) => { state.retained = [] })
       if (!this.targets.has(sessionId)) continue
-      if (hasUnsavedEdit(entry.store.getSnapshot())) void this.refreshEditedDocument(sessionId)
-      else void this.retryOpen(sessionId)
+      // A read would replace the page under the IME phrase; `setComposing(false)` runs it instead.
+      if (this.composing.has(sessionId)) this.reconnectReads.add(sessionId)
+      else this.refreshSession(sessionId)
     }
+  }
+
+  /** Re-read one Session's document after reconnect, keeping an unsaved draft on the page. */
+  private refreshSession(sessionId: SessionId): void {
+    if (hasUnsavedEdit(this.workbenchEntry(sessionId).store.getSnapshot())) void this.refreshEditedDocument(sessionId)
+    else void this.retryOpen(sessionId)
   }
 
   /** A reconnect may discover a missed head notification; a dirty draft still requires an explicit refresh. */
@@ -1106,6 +1117,7 @@ export class PaperAIWorkbenchController {
     if (this.disposed) return
     this.disposed = true
     this.composing.clear()
+    this.reconnectReads.clear()
     for (const entry of this.projects.values()) entry.abort?.abort()
     this.library.abort?.abort()
     for (const entry of this.workbenches.values()) entry.abort?.abort()
@@ -1374,7 +1386,8 @@ export class PaperAIWorkbenchController {
         || fresh.workspaceId !== committed.workspaceId || fresh.sessionId !== committed.sessionId) return
       if (fresh.revision === committed.revision) {
         view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
-          ...(view.edits.length === 0 && !this.composing.has(committed.sessionId) ? { previewHtml: fresh.previewHtml } : {}) }
+          ...(view.edits.length === 0 && this.composing.get(committed.sessionId)?.documentId !== committed.documentId
+            ? { previewHtml: fresh.previewHtml } : {}) }
       } else if (fresh.headCommitId !== view.document.headCommitId) {
         view.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
       }

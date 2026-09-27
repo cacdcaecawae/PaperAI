@@ -153,6 +153,41 @@ describe('Document editing commands', () => {
     controller.dispose()
   })
 
+  it.each([false, true])('keeps an IME phrase as a draft when the preview unmounts before composition ends (plugin disposed first: %s)', async (disposed) => {
+    const controller = new PaperAIWorkbenchController(successfulRemote())
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    const store = controller.workbenchStore(SESSION_ID)
+    const opened = store.getSnapshot().document!
+    const view = render(<DocumentPreview html={opened.previewHtml} revision={opened.revision} nodes={opened.nodes}
+      paragraphStyles={opened.paragraphStyles} title="Document" edits={[]} saving={false} t={t} onSave={() => {}} onCancel={() => {}}
+      onComposing={(active) => { controller.setComposing(SESSION_ID, active) }}
+      onDraft={(id, draft) => { controller.updateDraft(SESSION_ID, id, draft) }} />)
+    const shadow = view.container.querySelector('[role="document"]')!.shadowRoot!
+    const block = shadow.querySelector<HTMLElement>('p[data-paperai-node]')!
+    const range = document.createRange()
+    range.selectNodeContents(block); range.collapse(false)
+    Object.defineProperty(shadow, 'getSelection', { value: () => ({ rangeCount: 1, getRangeAt: () => range,
+      removeAllRanges: () => {}, addRange: () => {},
+    }) })
+    act(() => { block.focus() })
+    fireEvent.compositionStart(block)
+    block.textContent = 'Research background unfinished phrase'
+    fireEvent.input(block, { isComposing: true, inputType: 'insertCompositionText' })
+    if (disposed) {
+      controller.dispose()
+      expect(() => { view.unmount() }).not.toThrow()
+      return
+    }
+    view.unmount()
+    expect(store.getSnapshot().edits).toEqual([expect.objectContaining({
+      nodeId: NODE_PARAGRAPH, draft: 'Research background unfinished phrase', baseRevision: REVISION_1,
+    })])
+    expect(store.getSnapshot().edits[0]?.conflicted).toBeUndefined()
+    // The released hold lets the recovered phrase save.
+    await expect(controller.commitEdit(SESSION_ID)).resolves.toEqual({ ok: true })
+    controller.dispose()
+  })
+
   it('keeps comparison text selectable without quoting it as the current document', () => {
     const onQuote = vi.fn()
     const html = '<p data-path="/body/p[1]">Unchanged</p><p data-path="/body/p[2]"><del>Old</del><ins>New</ins></p>'
