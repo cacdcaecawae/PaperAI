@@ -51,6 +51,7 @@
       "appliesToRoles": ["manuscript"],
       "usage": "format-reference",
       "sourceVersion": "provided-snapshot-2026-08-28-format-rules-v2",
+      "requiredSections": ["摘要", "Abstract", "目录", "结论", "参考文献"],
       "source": {
         "file": "final-source.doc",
         "originalFileName": "hit-结题模板.doc",

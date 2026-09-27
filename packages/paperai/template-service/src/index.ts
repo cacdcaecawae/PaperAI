@@ -265,6 +265,7 @@ export class PaperTemplateService extends Service {
           name: member.name,
           appliesToRoles: member.appliesToRoles,
           usage: member.usage,
+          ...(member.requiredSections === undefined ? {} : { requiredSections: member.requiredSections }),
           assets,
           origin,
         }, signal)

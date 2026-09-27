@@ -6118,7 +6118,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TemplatePackMember',
-    declaration: 'export interface TemplatePackMember {\n    readonly id: TemplatePackMemberId;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n    readonly sourceVersion: string;\n    readonly source: TemplatePackSourceAsset;\n    readonly normalized: TemplatePackNormalizedAsset;\n}',
+    declaration: 'export interface TemplatePackMember {\n    readonly id: TemplatePackMemberId;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n    readonly sourceVersion: string;\n    readonly requiredSections?: readonly string[];\n    readonly source: TemplatePackSourceAsset;\n    readonly normalized: TemplatePackNormalizedAsset;\n}',
   },
   {
     name: 'TemplatePackMemberSummary',

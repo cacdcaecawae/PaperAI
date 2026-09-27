@@ -46,6 +46,11 @@ export interface TemplatePackMember {
   readonly appliesToRoles: readonly DocumentRole[]
   readonly usage: TemplateUsage
   readonly sourceVersion: string
+  /**
+   * Headings a formatting reference requires, matched against the sample while
+   * ignoring whitespace. Omitted: every unnumbered heading of the sample is required.
+   */
+  readonly requiredSections?: readonly string[]
   readonly source: TemplatePackSourceAsset
   readonly normalized: TemplatePackNormalizedAsset
 }

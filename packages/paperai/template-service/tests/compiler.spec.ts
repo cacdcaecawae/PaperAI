@@ -60,8 +60,8 @@ describe('compileTemplateDraft', () => {
     expect(compiled.contract.styleMap).toHaveProperty('heading 1')
   })
 
-  it('requires generic sections without copying research headings, annotations, citations, or TOC entries', async () => {
-    const examples = [
+  it('requires only the sections a pack declares, without copying research headings, annotations, citations, or TOC entries', async () => {
+    const compiled = await compileFormatReference([
       ['摘  要', 'heading 1'], ['Abstract', 'heading 1'], ['目  录', 'Normal'],
       ['结  论', 'heading 1'], ['参考文献', 'heading 1'],
       ['第4章  基于FLUENT软件的轴承静态特性研究', 'heading 1'],
@@ -72,13 +72,8 @@ describe('compileTemplateDraft', () => {
       ['摘  要\tI', '目录 1'], ['Abstract\tII', 'TOC 1'],
       ['参考文献', 'TOC 1'], ['结论', '目录 1'],
       ['（摘要应说明研究工作）', 'heading 1'],
-    ] as const
-    const nodes = examples.map(([text], index) => ({ officePath: `/body/p[${index + 1}]`, text, kind: 'paragraph' as const }))
-    const compiled = await compileTemplateDraft({
-      readTextNodes: vi.fn(async () => nodes),
-      inspect: vi.fn(async () => ({ results: [{ type: 'body', children: nodes.map((node, index) =>
-        inspected(node.officePath, node.text, examples[index]![1])) }] })),
-    } as never, { ...input('format', 'source'), usage: 'format-reference' })
+      ['攻读博士学位期间取得创新性成果', 'heading 1'], ['致  谢', 'heading 1'],
+    ], ['摘要', 'Abstract', '目录', '结论', '参考文献'])
 
     expect(compiled.contract.fixedNodeIds).toEqual([])
     expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([
@@ -88,6 +83,28 @@ describe('compileTemplateDraft', () => {
       ['required-section', { text: '结  论' }],
       ['required-section', { text: '参考文献' }],
     ])
+  })
+
+  it('requires every unnumbered heading of a formatting reference that declares no sections', async () => {
+    const compiled = await compileFormatReference([
+      ['摘  要', 'heading 1'], ['ABSTRACT', 'heading 1'],
+      ['致  谢\t30', 'TOC 1'],
+      ['第1章  绪论', 'heading 1'], ['1.1  研究背景', 'heading 2'], ['1.2.1 国内研究现状', 'heading 3'],
+      ['图1-1  系统结构', 'heading 1'], ['（摘要应说明研究工作）', 'heading 1'],
+      ['学位论文原创性声明', 'heading 1'], ['致  谢', 'heading 1'],
+    ])
+
+    expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([
+      ['required-section', { text: '摘  要' }],
+      ['required-section', { text: 'ABSTRACT' }],
+      ['required-section', { text: '学位论文原创性声明' }],
+      ['required-section', { text: '致  谢' }],
+    ])
+  })
+
+  it('rejects a declared section the formatting reference does not contain', async () => {
+    await expect(compileFormatReference([['摘  要', 'heading 1']], ['摘要', '致谢']))
+      .rejects.toThrow('required section not found in formatting reference: 致谢')
   })
 
   it('detects text and date fields plus form tables', async () => {
@@ -197,6 +214,15 @@ function input(templateId: string, sourceDocumentId: string) {
     origin: { kind: 'upload' as const, label: '边界模板', originalFileName: 'source.docx' },
     now: '2026-08-28T00:00:00.000Z',
   }
+}
+
+async function compileFormatReference(examples: ReadonlyArray<readonly [string, string]>, requiredSections?: readonly string[]) {
+  const nodes = examples.map(([text], index) => ({ officePath: `/body/p[${index + 1}]`, text, kind: 'paragraph' as const }))
+  return await compileTemplateDraft({
+    readTextNodes: vi.fn(async () => nodes),
+    inspect: vi.fn(async () => ({ results: [{ type: 'body', children: nodes.map((node, index) =>
+      inspected(node.officePath, node.text, examples[index]![1])) }] })),
+  } as never, { ...input('format', 'source'), usage: 'format-reference', ...(requiredSections === undefined ? {} : { requiredSections }) })
 }
 
 function inspected(path: string, text: string, style: string): Record<string, unknown> {

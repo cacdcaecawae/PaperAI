@@ -10,9 +10,11 @@ The package MIT declaration covers the PaperAI code. The institutional Word file
 
 The plugin registers the pack through a Cordis effect and removes it when the plugin fiber disposes. Installation verifies every asset against `assets/manifest.json`; the directory from which the files were originally supplied is not a runtime dependency.
 
+The thesis example declares `requiredSections` in the manifest: 摘要, Abstract, 目录, 结论, and 参考文献. The sample's other headings, including its doctoral achievements list, 致谢, and 个人简历, remain example content rather than required sections.
+
 The `format-rules-v2` suffix identifies a compilation revision; all original and normalized asset bytes retain their 2026-08-28 snapshot hashes. Existing documents keep their confirmed contracts until the author reapplies the manuscript format. Reapplication installs the revised generic-section rules without changing the manuscript body.
 
-The opt-in `tests/hit-delivery.real.spec.ts` compiles the shipped thesis example and exports independent research to the project's `exports/` directory through the project, repository, template, document, commit, and export services. Run it with `DSH_PAPERAI_OFFICECLI_REAL=1` and, for an external OfficeCLI 1.0.145 binary, `DSH_PAPERAI_OFFICECLI_COMMAND`.
+`tests/hit-delivery.real.spec.ts` boots the PaperAI rows of the shipped `cordis.patch.yml`, in order, from a test-only `cordis.yml` through the Loader, and checks that the pack registers. Its opt-in case then compiles the shipped thesis example and exports independent research to the project's `exports/` directory through that composition. Run it with `DSH_PAPERAI_OFFICECLI_REAL=1` and, for an external OfficeCLI 1.0.145 binary, `DSH_PAPERAI_OFFICECLI_COMMAND`.
 
 ## Model Experience
 

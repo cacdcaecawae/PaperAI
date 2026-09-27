@@ -324,6 +324,19 @@ describe('PaperTemplateService', () => {
     expect(repository.documents.get(legacy.sourceDocumentId)?.documentKind).toBe('template-source')
   })
 
+  it('compiles a pack member against its declared required sections', async () => {
+    const sourcePath = join(root, 'source.doc')
+    const normalizedPath = join(root, 'normalized.docx')
+    await writeFile(sourcePath, 'source-doc')
+    await writeFile(normalizedPath, 'normalized-docx')
+    const manifest = packManifest(sourcePath, normalizedPath, 'format-reference', ['manuscript'])
+    service.registerPack({ ...manifest, members: [{ ...manifest.members[0]!, requiredSections: ['致谢'] }] })
+
+    await expect(service.installPack({ projectId: ProjectId('project-1'), packId: manifest.id }))
+      .rejects.toThrow('required section not found in formatting reference: 致谢')
+    expect(service.listContracts(ProjectId('project-1'))).toEqual([])
+  })
+
   it('validates confirmation and matching roles without bypassing the commit owner', async () => {
     const sourcePath = join(root, 'source.doc')
     const normalizedPath = join(root, 'normalized.docx')

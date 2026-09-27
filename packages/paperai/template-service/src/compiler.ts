@@ -39,6 +39,8 @@ export interface CompileTemplateDraftInput {
   readonly name: string
   readonly appliesToRoles: readonly DocumentRole[]
   readonly usage: TemplateUsage
+  /** Pack-declared headings a formatting reference requires, as in `TemplatePackMember.requiredSections`. */
+  readonly requiredSections?: readonly string[]
   readonly assets: StoredTemplateAssets
   readonly origin: TemplateOrigin
   readonly now: string
@@ -46,7 +48,8 @@ export interface CompileTemplateDraftInput {
 
 /**
  * Compile OfficeCLI evidence into durable nodes and a draft contract. Formatting
- * references contribute generic section titles, not fixed example research text.
+ * references contribute their declared or unnumbered section headings, not fixed
+ * example research text.
  * @param engine - configured PaperAI document engine.
  * @param input - service-owned identities, provenance, roles, and immutable paths.
  * @param signal - optional cancellation signal.
@@ -88,7 +91,7 @@ export async function compileTemplateDraft(
       templateText: node.text,
     }))
   }
-  for (const node of compileRequiredSections(nodes, input.usage)) {
+  for (const node of compileRequiredSections(nodes, input.usage, input.requiredSections)) {
     rules.push(makeRule(input.sourceDocumentId, node, 'required-section', `包含章节：${compactLabel(node.text)}`, 'error', {
       text: sectionLabel(node.text),
     }))
@@ -222,9 +225,23 @@ function fieldFor(text: string): FieldDefinition | undefined {
   return FIELDS.find(field => field.pattern.test(text))
 }
 
-function compileRequiredSections(nodes: readonly DocumentNode[], usage: TemplateUsage): DocumentNode[] {
+function compileRequiredSections(
+  nodes: readonly DocumentNode[],
+  usage: TemplateUsage,
+  declared: readonly string[] | undefined,
+): DocumentNode[] {
   if (usage === 'format-reference') {
-    return nodes.filter(node => node.kind === 'heading' && /^(?:摘要|Abstract|目录|参考文献|结论)$/u.test(node.text.replaceAll(/\s+/gu, '')))
+    const headings = nodes.filter(node => node.kind === 'heading' && node.text.trim().length > 0)
+    if (declared === undefined) {
+      // Numbered chapters and sections, captions, and annotations belong to the sample's own content.
+      return headings.filter(node => node.text.length <= 100 && !isInstruction(node.text)
+        && !/^(?:第\s*\d+\s*章|\d+(?:\.\d+)*[\s．.]|[图表]\s*\d)/u.test(node.text.trim()))
+    }
+    return declared.map((title) => {
+      const node = headings.find(heading => withoutWhitespace(heading.text) === withoutWhitespace(title))
+      if (node === undefined) throw new Error(`template-service: required section not found in formatting reference: ${title}`)
+      return node
+    })
   }
   const sections: DocumentNode[] = []
   let inOutline = false
@@ -349,10 +366,14 @@ function isInstruction(text: string): boolean {
 
 function isFixedText(text: string, usage: TemplateUsage): boolean {
   if (usage === 'format-reference') return false
-  const compact = text.replaceAll(/\s+/gu, '')
+  const compact = withoutWhitespace(text)
   if (/哈尔滨工业大学/u.test(compact)) return true
   if (/硕士学位(?:论文)?(?:开题|中期)报告/u.test(compact)) return true
   return false
+}
+
+function withoutWhitespace(text: string): string {
+  return text.replaceAll(/\s+/gu, '')
 }
 
 function isHeading(text: string, styleName: string | undefined): boolean {

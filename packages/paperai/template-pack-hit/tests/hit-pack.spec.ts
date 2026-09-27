@@ -23,6 +23,9 @@ describe('HIT template pack', () => {
       ['midterm', 'form-template', ['midterm']],
       ['thesis-format', 'format-reference', ['manuscript']],
     ])
+    expect(HIT_TEMPLATE_PACK.members.map(member => member.requiredSections)).toEqual([
+      undefined, undefined, ['摘要', 'Abstract', '目录', '结论', '参考文献'],
+    ])
     for (const member of HIT_TEMPLATE_PACK.members) {
       const source = await readFile(member.source.path)
       const normalized = await readFile(member.normalized.path)

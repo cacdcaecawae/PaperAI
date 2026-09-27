@@ -10,9 +10,11 @@
 
 插件通过 Cordis effect 注册模板包，并在插件 fiber 释放时移除。安装过程按照 `assets/manifest.json` 校验所有资产；最初提供这些文件的目录不是运行时依赖。
 
+论文范例在清单中声明 `requiredSections`：“摘要”、Abstract、“目录”、“结论”和“参考文献”。范例中的其他标题，包括其博士成果列表、“致谢”和“个人简历”，仍属于范例内容，不是必需章节。
+
 `format-rules-v2` 后缀标识编译规则修订；所有原始与规范化资产字节仍保留 2026-08-28 快照的哈希。已有文档保留其已确认约定，直到作者重新应用论文格式。重新应用会安装修订后的通用章节规则，不会更改论文正文。
 
-可选的 `tests/hit-delivery.real.spec.ts` 编译随包提供的论文范例，并通过项目、仓储、模板、文档、提交和导出服务，将独立研究导出到项目的 `exports/` 目录。运行时设置 `DSH_PAPERAI_OFFICECLI_REAL=1`；使用外部 OfficeCLI 1.0.145 可执行文件时，另设 `DSH_PAPERAI_OFFICECLI_COMMAND`。
+`tests/hit-delivery.real.spec.ts` 通过 Loader，从仅供测试的 `cordis.yml` 按顺序启动随产品提供的 `cordis.patch.yml` 中的 PaperAI 各行，并检查模板包已注册。其中的可选用例随后编译随包提供的论文范例，并通过这一组合将独立研究导出到项目的 `exports/` 目录。运行时设置 `DSH_PAPERAI_OFFICECLI_REAL=1`；使用外部 OfficeCLI 1.0.145 可执行文件时，另设 `DSH_PAPERAI_OFFICECLI_COMMAND`。
 
 ## 模型体验
 
