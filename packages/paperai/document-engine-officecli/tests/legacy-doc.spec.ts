@@ -106,10 +106,11 @@ afterEach(async () => {
 describe('legacy Word normalization', () => {
   it('pins read-only Word open and independent DOCX save semantics in the packaged program', async () => {
     const program = await readFile(LEGACY_DOC_CONVERTER_ASSET, 'utf8')
-    expect(program).toContain('$document = $word.Documents.Open($SourcePath, $false, $true, $false)')
+    expect(program).toContain('$document = $word.Documents.Open($SourcePath, $false, $true, $false, $password, $missing, $missing, $password)')
     expect(program).toContain('$document.SaveAs2($OutputPath, 16)')
     expect(program).toContain('PAPERAI_WORD_COM_UNAVAILABLE:')
     expect(program).not.toMatch(/\$document\.Save\(\)/u)
+    expect(await readFile(new URL('../../template-service/assets/convert-legacy-doc.ps1', import.meta.url), 'utf8')).toBe(program)
   })
 
   it('runs the packaged script directly and preserves the source', async () => {
