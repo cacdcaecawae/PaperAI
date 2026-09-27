@@ -3431,7 +3431,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/export-service/src/index.ts:69`](../packages/paperai/export-service/src/index.ts)
+来源：[`packages/paperai/export-service/src/index.ts:70`](../packages/paperai/export-service/src/index.ts)
 
 <a id="paperaimcp"></a>
 

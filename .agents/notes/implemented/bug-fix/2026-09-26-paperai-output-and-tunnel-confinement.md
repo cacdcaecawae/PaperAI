@@ -10,7 +10,7 @@ A project workspace contains immutable imports, Working DOCX files, templates, a
 
 ## Decision
 
-The export provider resolves the document's owning project and confines every caller to its `exports/` directory. The real parent must remain inside that directory before the milestone and before publication; the exports root itself cannot redirect elsewhere. This rule applies even to full-access sessions. The optional writable root remains an additional restriction.
+The export provider resolves the document's owning project and confines every caller to its `exports/` directory. The real parent must remain inside that directory before the milestone and before publication; the exports root itself cannot redirect elsewhere. This rule applies even to full-access sessions. The optional writable root remains an additional restriction. Publication keeps the handle of its exclusively created temporary file and, after the rename, confirms that the destination is that file under the unchanged real parent; a redirected publication fails and its output is emptied through the handle. Node offers no directory-handle rename, so a directory swap between the last check and the rename stays detectable rather than preventable; the export-service README records this under Known Limitations.
 
 SSH ACP runtimes own a dedicated loopback proxy. Only the descriptor's exact MCP URL path and bearer credential reach the local HTTP endpoint. The SSH tunnel forwards the proxy port; unrelated Host routes never reach the upstream server. Runtime teardown closes the proxy and its active connections. This implements the remote-session isolation promised by [ACP channels](../architecture/2026-09-08-paperai-acp-channels.md), whose session and provider decisions remain current.
 
@@ -22,4 +22,4 @@ SSH ACP runtimes own a dedicated loopback proxy. Only the descriptor's exact MCP
 
 ## Consequences
 
-Exports to arbitrary paths are refused; users can move a completed export afterward. Directory links within the export area remain usable when their real targets stay inside it. Each remote runtime owns one additional listener, and teardown awaits its closure. Provider and assembled application tests preserve sibling source, working, and snapshot bytes after rejected exports; HTTP tests verify route filtering, credential isolation, permitted MCP traffic, and listener disposal.
+Exports to arbitrary paths are refused; users can move a completed export afterward. Directory links within the export area remain usable when their real targets stay inside it. Each remote runtime owns one additional listener, and teardown awaits its closure. Provider and assembled application tests preserve sibling source, working, and snapshot bytes after rejected exports, and a provider race test swaps the destination directory for an escaping link just before the rename; HTTP tests verify route filtering, credential isolation, permitted MCP traffic, and listener disposal.
