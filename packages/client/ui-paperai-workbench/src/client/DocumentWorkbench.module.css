@@ -371,9 +371,10 @@
   white-space: nowrap;
 }
 
-/* The draft warning reads as caption text beside the count, quieter than the state it qualifies. */
+/* The draft warning reads as caption text beside the count, quieter than the state it qualifies but no
+   quieter than AA: tertiary was 3.7:1 in light and 3.4:1 in dark, on the one line that protects drafts. */
 .pendingNote {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .pending [role='alert'] {
@@ -389,6 +390,21 @@
 
 .pending > .chip[data-kind='save'] {
   padding: 0 12px;
+}
+
+.conflicts {
+  display: inline-flex;
+}
+
+/* A conflict is a choice waiting on the page, not a loss, so it wears the band's gold rather than the
+   alert red. Pressing it walks the bands. */
+.conflicts > .chip {
+  height: 28px;
+  border-radius: 14px;
+  padding: 0 10px;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .previewSeat[hidden] {

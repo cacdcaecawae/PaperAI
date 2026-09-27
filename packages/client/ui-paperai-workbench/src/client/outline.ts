@@ -3,7 +3,7 @@
 import type { PaperAIDocumentNodeId, PaperAIDocumentNodeSummary, PaperAIOutlineEntry } from './types.ts'
 import { blocksOf, normalize, textOf } from './preview-html.ts'
 
-// ponytail: these heuristics only read a document with no heading style at
+// TODO: these heuristics only read a document with no heading style at
 // all, where nothing but a chapter's own numbering can say where it starts.
 // A document that states its styles never reaches them, so the false chapters
 // they read out of a generated table of contents cannot reach a styled thesis.
