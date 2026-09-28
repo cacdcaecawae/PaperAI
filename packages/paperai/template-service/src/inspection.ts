@@ -4,6 +4,12 @@
 const TOC_STYLE = /^(?:toc|目录)\s*\d+$/iu
 
 /**
+ * An originality declaration's title: an optional institution and degree, the declaration, and an optional grant of
+ * use, as in 哈尔滨工业大学学位论文原创性声明和使用权限. A sentence that mentions a declaration is not a title.
+ */
+const DECLARATION_TITLE = /^(?:\S{0,20}?(?:大学|学院))?(?:(?:博士|硕士)?学位论文)?(?:原创性|独创性)声明(?:(?:和|及|与)?(?:版权)?使用(?:权限|授权(?:书|说明)?))?$/u
+
+/**
  * Whether a paragraph is a heading, for a template sample and a checked manuscript alike. A Word heading style
  * counts, a TOC entry style never does, and so does text only a heading carries: a numbered chapter or section,
  * or a common thesis section title set in body text, such as `致  谢`, `ABSTRACT`, or an originality declaration.
@@ -19,7 +25,7 @@ export function isHeadingParagraph(text: string, styleName: string | undefined):
   const compact = trimmed.replaceAll(/\s+/gu, '')
   return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+)/u.test(trimmed)
     || /^(?:摘要|abstract|目录|结论|参考文献|致谢|acknowledge?ments?)$/iu.test(compact)
-    || (compact.length <= 30 && /(?:原创性|独创性)声明/u.test(compact) && !/[。，；：]/u.test(compact))
+    || DECLARATION_TITLE.test(compact)
 }
 
 /** One body child with safe primitive format evidence. */
