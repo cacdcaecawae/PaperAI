@@ -441,6 +441,37 @@ describe('session creation and Workspace membership', () => {
     expect(existsSync(path)).toBe(false)
   })
 
+  it('lets a pending cwd-only creation make its own directory when a Workspace request of another cwd joins', async () => {
+    const { api, ctx, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'workspace-root') }))).workspace
+    const plainCwd = join(root, 'plain-created')
+    let release!: () => void
+    const released = new Promise<void>((resolve) => { release = resolve })
+    vi.spyOn(ctx.get('sessionPersistence')!, 'list').mockImplementation(async () => {
+      await released
+      return []
+    })
+    const sessionId = SessionId('cwd-only-joined-by-other-root')
+
+    const plain = api.sessions.create(request({ cwd: plainCwd, sessionId }))
+    let reads = 0
+    let resolveJoined!: () => void
+    const joinedCreation = new Promise<void>((resolve) => { resolveJoined = resolve })
+    const joined = api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      get sessionId() {
+        if (++reads === 2) resolveJoined()
+        return sessionId
+      },
+    }))
+    await joinedCreation
+    release()
+
+    expectOk(await plain)
+    expect(existsSync(plainCwd)).toBe(true)
+    expect((await joined).result).toMatchObject({ ok: false, error: { code: 'session-conflict' } })
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace

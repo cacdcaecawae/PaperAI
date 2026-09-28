@@ -11,6 +11,7 @@ import {
   mkdtemp,
   open,
   rmdir,
+  stat,
   unlink,
 } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
@@ -72,6 +73,8 @@ async function syncDirectory(path: string): Promise<void> {
 /**
  * Create `path` one level at a time below the project `root`, which is never
  * created: a root removed after the project check stays absent and staging fails.
+ * A component that already exists must be a directory, so a file in its place
+ * fails before its mode is touched.
  */
 async function ensurePrivateDirectory(root: string, path: string): Promise<void> {
   let current = root
@@ -81,6 +84,9 @@ async function ensurePrivateDirectory(root: string, path: string): Promise<void>
       await mkdir(current, { mode: 0o700 })
     } catch (error) {
       if (!isCode(error, 'EEXIST')) throw error
+      if (!(await stat(current)).isDirectory()) {
+        throw Object.assign(new Error(`paperai-document: '${current}' exists but is not a directory`), { code: 'ENOTDIR' })
+      }
     }
   }
   await chmod(path, 0o700)
