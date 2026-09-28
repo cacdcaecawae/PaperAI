@@ -227,8 +227,8 @@ function fieldFor(text: string): FieldDefinition | undefined {
 
 // Arabic or Chinese chapter and section numbers (第N章, 第N节), 1.2 / 一、 / 1、 / 1) enumerations, circled
 // numbers, Chapter N, and figure or table captions. Spelled-out or Roman chapter numbers are not recognized.
-/** A figure or table caption, which a sample may set in a heading style. */
-const CAPTION = /^[图表]\s*\d/u
+/** A figure or table caption, which a sample may set in a heading style: 图1-1, 表 2, 图一, Figure 1, Fig. 2, Table 3. */
+const CAPTION = /^(?:[图表]\s*[\d一二三四五六七八九十]|(?:fig(?:ure)?\.?|table)\s*\d)/iu
 
 function compileRequiredSections(
   nodes: readonly DocumentNode[],

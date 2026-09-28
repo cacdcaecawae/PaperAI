@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isHeadingParagraph, parseBodyInspection, sectionKey } from '../src/inspection.ts'
+import { isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from '../src/inspection.ts'
 
 describe('parseBodyInspection', () => {
   it('returns no nodes for absent or malformed body results', () => {
@@ -67,5 +67,12 @@ describe('isHeadingParagraph', () => {
     expect(sectionKey('研究背景（示例）')).toBe(sectionKey('研究背景'))
     expect(sectionKey('研究背景（示例')).toBe(sectionKey('研究背景'))
     expect(sectionKey('实验结果（含分析）与讨论')).not.toBe(sectionKey('实验结果'))
+    // Full-width numbers count as numbers, and circled ones stay numbers too.
+    expect(sectionKey('第１章 结论')).toBe(sectionKey('结论'))
+    expect(sectionKey('１．１\u3000研究背景')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('①研究内容')).toBe(sectionKey('研究内容'))
+    expect(isHeadingParagraph('１．１\u3000研究背景', 'Normal')).toBe(true)
+    // The label keeps the heading's own characters.
+    expect(sectionLabel('第１章　实验结果（含分析）与讨论')).toBe('实验结果（含分析）与讨论')
   })
 })

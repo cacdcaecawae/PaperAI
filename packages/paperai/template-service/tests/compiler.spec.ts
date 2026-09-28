@@ -101,6 +101,8 @@ describe('compileTemplateDraft', () => {
       ['字体识别研究', 'heading 1'], ['页眉检测方法', '标题 1'], ['正文 1.5倍行距', 'heading 2'],
       ['1.1研究背景', 'heading 2'], ['一 研究背景', 'heading 2'], ['一级标题（小二号黑体）', 'heading 1'],
       ['实验结果（含分析）与讨论', 'heading 1'], ['二号楼设计', 'heading 1'],
+      ['Figure 1 System overview', 'heading 1'], ['Table 2 Results', 'heading 1'], ['图一 系统结构', 'heading 1'],
+      ['第１章　绪论', 'heading 1'],
     ])
 
     // The annotation compiles its own format rules, but only real headings become sections.

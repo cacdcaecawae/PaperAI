@@ -32,6 +32,28 @@ const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chap
   + '|\\d+(?:\\.\\d+)+[．.]?|\\d+[．.\\s])\\s*', 'iu')
 
 /**
+ * Full-width ASCII forms and the ideographic space as their half-width forms, as East Asian Word and WPS files often
+ * type section numbers (第１章, １．１　). Unlike NFKC it leaves circled numbers such as ① for `SECTION_NUMBER`, and it
+ * maps one code unit to one, so a match's length also measures the original text.
+ * @param text - heading text.
+ * @returns the text with half-width letters, digits, punctuation, and spaces.
+ */
+function halfWidth(text: string): string {
+  return text.replaceAll(/[\uFF01-\uFF5E]/gu, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+    .replaceAll('\u3000', ' ')
+}
+
+/**
+ * The text after an opening section number, in its original characters; the number is found on the half-width form.
+ * @param text - trimmed heading text.
+ * @returns the rest of the text, or `undefined` when no section number opens it.
+ */
+function afterSectionNumber(text: string): string | undefined {
+  const number = SECTION_NUMBER.exec(halfWidth(text))
+  return number === null ? undefined : text.slice(number[0].length)
+}
+
+/**
  * A parenthesized note that ends a heading, closed or not, as in 研究背景（示例） or 研究背景（示例. A parenthetical that
  * title text follows, as in 实验结果（含分析）与讨论, is part of the title.
  */
@@ -43,9 +65,9 @@ const TRAILING_NOTE = /\s*[（(][^（()）]*[）)]?\s*$/u
  * such as 1、首先……，然后…… stays body text.
  */
 function isNumberedTitle(text: string): boolean {
-  const number = SECTION_NUMBER.exec(text)
-  if (number === null) return false
-  const title = text.slice(number[0].length).replace(TRAILING_NOTE, '').trim()
+  const rest = afterSectionNumber(text)
+  if (rest === undefined) return false
+  const title = rest.replace(TRAILING_NOTE, '').trim()
   return title.length <= 40 && !/[。，；：！？,;:!?]/u.test(title)
 }
 
@@ -57,11 +79,8 @@ function isNumberedTitle(text: string): boolean {
  * @returns the trimmed title.
  */
 export function sectionLabel(text: string): string {
-  return text
-    .trim()
-    .replace(SECTION_NUMBER, '')
-    .replace(TRAILING_NOTE, '')
-    .trim()
+  const trimmed = text.trim()
+  return (afterSectionNumber(trimmed) ?? trimmed).replace(TRAILING_NOTE, '').trim()
 }
 
 /**
@@ -70,7 +89,7 @@ export function sectionLabel(text: string): string {
  * @returns true when `SECTION_NUMBER` matches.
  */
 export function hasSectionNumber(text: string): boolean {
-  return SECTION_NUMBER.test(text.trim())
+  return SECTION_NUMBER.test(halfWidth(text).trim())
 }
 
 /**
