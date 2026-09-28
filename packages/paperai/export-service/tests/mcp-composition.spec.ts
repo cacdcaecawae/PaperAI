@@ -81,7 +81,7 @@ describe('PaperAI export composition', () => {
     try {
       const names = (await client.listTools()).tools.map(tool => tool.name)
       expect(names).toContain('paperai_export_document')
-      const outputPath = join(harness.root, 'mcp-export.docx')
+      const outputPath = join(harness.outputRoot, 'mcp-export.docx')
       const result = await client.callTool({
         name: 'paperai_export_document',
         arguments: {

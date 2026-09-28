@@ -7,13 +7,13 @@ PaperAI document service exposed as `ctx.paperDocuments`. It imports Word source
 ## Service API
 
 - `importDocument(request, signal?)` accepts `.docx` and `.doc`. A successful result contains the durable document record and complete node index. Capability failures return `{ status: 'degraded', capability, health, detail }` and publish no document record.
-- `rollbackImport(documentId)` removes a Working import that has not acquired a head commit. Cleanup cannot be cancelled, deletes the service-owned immutable and Working copies plus their index, and never deletes the original source supplied to `importDocument`.
+- `rollbackImport(documentId)` removes a Working import that has neither a head commit nor an unresolved publication journal. A retained journal rejects cleanup with `PUBLICATION_PENDING`, even when the document record is already absent, preserving the files and records needed for recovery; only an identity with neither record nor journal is an idempotent success. Cleanup cannot be cancelled, deletes the service-owned immutable and Working copies plus their index, and never deletes the original source supplied to `importDocument`.
 - `listDocuments(projectId, role?)` returns deterministic project records with an optional exact role filter.
 - `readDocument(documentId)` returns repository metadata and ordered nodes without reading Word bytes again.
 - `verifyImmutableSource(documentId, signal?)` verifies that the imported source remains a read-only regular file whose bytes match the recorded SHA-256. Consumers call it before reading or copying source bytes.
 - `previewHtml(documentId, signal?)` renders the current Working DOCX. HTML remains preview-only.
 - `readParagraphStyles(documentId, signal?)` reads the current Working DOCX's defined paragraph style IDs and display names through the document engine.
-- `rebuildIndex(documentId, signal?)` re-reads the Working DOCX and replaces its semantic index without creating a document commit.
+- `rebuildIndex(documentId, signal?)` re-reads the Working DOCX and replaces its semantic index without creating a document commit. A retained publication journal rejects the rebuild with `PUBLICATION_PENDING`, because recovery compares that journal with the exact stored nodes.
 
 ## File and index semantics
 
@@ -44,3 +44,4 @@ None directly. Repository or preview changes do not affect a model request until
 - Text-node reads do not provide complete style or parent metadata. Rebuilds retain known style data for matched nodes; new nodes start with an empty style record.
 - File publication and repository writes cannot share one filesystem/SQLite transaction. The service publishes files first, rolls back failed repository writes, and may leave unreferenced files only after a process crash between those durability points.
 - Legacy `.doc` support remains degraded until the configured document engine implements `LegacyDocumentNormalizer`.
+- `rebuildIndex` holds only the document-service lease, not the commit-service FIFO. It refuses a publication journal before and after its engine read, but a commit that completes entirely during that read, or starts while the rebuilt nodes are being written, is still overwritten. The fix is one per-document lease shared by commit-service and document-service for every write to the same document.

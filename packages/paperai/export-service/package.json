@@ -45,7 +45,8 @@
     "@paperai/commit-service": "workspace:*",
     "@paperai/domain": "workspace:*",
     "@paperai/mcp": "workspace:*",
-    "@paperai/template-service": "workspace:*"
+    "@paperai/template-service": "workspace:*",
+    "@paperai/project-service": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -54,6 +55,7 @@
     "@paperai/commit-service": "workspace:*",
     "@paperai/domain": "workspace:*",
     "@paperai/mcp": "workspace:*",
-    "@paperai/template-service": "workspace:*"
+    "@paperai/template-service": "workspace:*",
+    "@paperai/project-service": "workspace:*"
   }
 }
