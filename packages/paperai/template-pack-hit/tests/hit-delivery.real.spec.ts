@@ -1,4 +1,13 @@
-/** HIT pack composition through the Loader, and opt-in delivery through the native OfficeCLI and persisted PaperAI services. */
+/**
+ * HIT pack composition through the Loader, and opt-in delivery through the native OfficeCLI and persisted PaperAI services.
+ *
+ * The first case boots the PaperAI rows of the shipped `cordis.patch.yml`, in order, from a test-only `cordis.yml`
+ * through the Loader, and checks that the pack registers. The opt-in case compiles the shipped thesis example and
+ * exports independent research to the project's `exports/` directory through that composition. Run it with
+ * `DSH_PAPERAI_OFFICECLI_REAL=1` and, for an external OfficeCLI 1.0.145 binary, `DSH_PAPERAI_OFFICECLI_COMMAND`.
+ * Without the opt-in, the keyless browser snapshot `apps/web/tests/snapshots/paperai-workbench/hit-delivery.expected.md`
+ * pins the same outcome in the assembled app.
+ */
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'

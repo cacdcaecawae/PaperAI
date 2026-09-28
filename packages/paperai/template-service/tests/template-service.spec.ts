@@ -533,10 +533,11 @@ describe('PaperTemplateService', () => {
     })).toThrow('requiredSections applies only to a format-reference member')
     // An empty declaration would silently disable every section rule, and a blank title can never match.
     const reference = { ...base.members[0]!, usage: 'format-reference' as const }
-    expect(() => service.registerPack({ ...base, members: [{ ...reference, requiredSections: [] }] }))
-      .toThrow('requiredSections must list non-blank section titles')
-    expect(() => service.registerPack({ ...base, members: [{ ...reference, requiredSections: ['摘要', ' '] }] }))
-      .toThrow('requiredSections must list non-blank section titles')
+    // So would a title that normalizes to nothing or to another title's key.
+    for (const requiredSections of [[], ['摘要', ' '], ['第1章'], ['（说明）'], ['结论', '结  论']]) {
+      expect(() => service.registerPack({ ...base, members: [{ ...reference, requiredSections }] }), JSON.stringify(requiredSections))
+        .toThrow('requiredSections must list distinct section titles')
+    }
 
     const construct = (config: ConstructorParameters<typeof PaperTemplateService>[1]) => {
       const isolated = new Context()

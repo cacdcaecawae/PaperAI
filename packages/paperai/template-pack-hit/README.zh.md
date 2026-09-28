@@ -14,7 +14,7 @@
 
 `format-rules-v2` 后缀标识编译规则修订；所有原始与规范化资产字节仍保留 2026-08-28 快照的哈希。已有文档保留其已确认约定，直到作者重新应用论文格式。重新应用会安装修订后的通用章节规则，不会更改论文正文。
 
-`tests/hit-delivery.real.spec.ts` 通过 Loader，从仅供测试的 `cordis.yml` 按顺序启动随产品提供的 `cordis.patch.yml` 中的 PaperAI 各行，并检查模板包已注册。其中的可选用例随后编译随包提供的论文范例，并通过这一组合将独立研究导出到项目的 `exports/` 目录。运行时设置 `DSH_PAPERAI_OFFICECLI_REAL=1`；使用外部 OfficeCLI 1.0.145 可执行文件时，另设 `DSH_PAPERAI_OFFICECLI_COMMAND`。无需密钥或开关，免密钥浏览器快照 `apps/web/tests/snapshots/paperai-workbench/hit-delivery.expected.md` 在组装好的应用中固定同一结果：在本模板包下新建的独立论文通过正式导出检查，检查项恰为五个必需章节和页面设置。
+在本模板包下新建的独立论文，具备五个必需章节和模板包的页面设置时，即可通过正式导出检查。
 
 ## 模型体验
 

@@ -14,7 +14,7 @@ The thesis example declares `requiredSections` in the manifest: 摘要, Abstract
 
 The `format-rules-v2` suffix identifies a compilation revision; all original and normalized asset bytes retain their 2026-08-28 snapshot hashes. Existing documents keep their confirmed contracts until the author reapplies the manuscript format. Reapplication installs the revised generic-section rules without changing the manuscript body.
 
-`tests/hit-delivery.real.spec.ts` boots the PaperAI rows of the shipped `cordis.patch.yml`, in order, from a test-only `cordis.yml` through the Loader, and checks that the pack registers. Its opt-in case then compiles the shipped thesis example and exports independent research to the project's `exports/` directory through that composition. Run it with `DSH_PAPERAI_OFFICECLI_REAL=1` and, for an external OfficeCLI 1.0.145 binary, `DSH_PAPERAI_OFFICECLI_COMMAND`. Without a key or opt-in, the keyless browser snapshot `apps/web/tests/snapshots/paperai-workbench/hit-delivery.expected.md` pins the same outcome in the assembled app: a standalone thesis created under this pack passes the formal-export check with exactly the five required sections and the page setup.
+A standalone thesis created under this pack passes the formal-export check when it has the five required sections and the pack's page setup.
 
 ## Model Experience
 

@@ -24,9 +24,24 @@ export function headingLevel(styleName: string | undefined): number | undefined 
 
 /**
  * A section number opening a heading, in every form a sample numbers its sections: 第5章, 第一节, Chapter 1, ①,
- * 1、, 1), 一、, and 1.1 or 1．. Specific forms come first, so 1、 is not read as 1 followed by text.
+ * 1、, 1), 一、, 1.1, and 1． or 1 followed by a space. Specific forms come first, so 1、 is not read as 1 followed
+ * by text, and a bare number needs a separator, so 2019年 is not numbered.
  */
-const SECTION_NUMBER = /^(?:第\s*[\d一二三四五六七八九十百零〇两]+\s*[章节]|chapter\s+\d+|[①-⑳]|\d+[、)）]|[一二三四五六七八九十百零〇两]+[、．.)）]|\d+(?:\.\d+)*[．.]?)\s*/iu
+const NUMERALS = '一二三四五六七八九十百零〇两'
+const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chapter\\s+\\d+|[①-⑳]|\\d+[、)）]|[${NUMERALS}]+[、．.)）]`
+  + '|\\d+(?:\\.\\d+)+[．.]?|\\d+[．.\\s])\\s*', 'iu')
+
+/**
+ * A numbered paragraph set in body text counts as a heading only when what follows its number reads as a title:
+ * at most 40 characters and no sentence punctuation, a trailing parenthesized note aside. A numbered list item
+ * such as 1、首先……，然后…… stays body text.
+ */
+function isNumberedTitle(text: string): boolean {
+  const number = SECTION_NUMBER.exec(text)
+  if (number === null) return false
+  const title = text.slice(number[0].length).replace(/[（(].*$/u, '').trim()
+  return title.length <= 40 && !/[。，；：！？,;:!?]/u.test(title)
+}
 
 /**
  * A section heading's title without its section number or a trailing parenthesized note, as a sample's required
@@ -67,7 +82,7 @@ export function isHeadingParagraph(text: string, styleName: string | undefined):
   if (styleName?.toLowerCase().includes('heading') === true || LOCALIZED_HEADING_STYLE.test(styleName ?? '')) return true
   const trimmed = text.trim()
   const compact = trimmed.replaceAll(/\s+/gu, '')
-  return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+)/u.test(trimmed)
+  return isNumberedTitle(trimmed)
     || /^(?:摘要|abstract|目录|结论|参考文献|致谢|acknowledge?ments?)$/iu.test(compact)
     || DECLARATION_TITLE.test(compact)
 }

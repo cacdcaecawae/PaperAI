@@ -114,7 +114,8 @@ describe('compileTemplateDraft', () => {
   })
 
   it('finds a declared section under the number the formatting reference gives it', async () => {
-    const compiled = await compileFormatReference([['第5章  结  论', 'heading 1']], ['结论'])
+    // Set in body text, the numbered heading is still one.
+    const compiled = await compileFormatReference([['第五章  结  论', 'Normal']], ['结论'])
     expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([['required-section', { text: '结  论' }]])
   })
 

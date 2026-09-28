@@ -21,6 +21,7 @@ import type {
 } from '@paperai/domain'
 import type PaperRepository from '@paperai/repository'
 import { compileTemplateDraft } from './compiler.ts'
+import { sectionKey } from './inspection.ts'
 import type { CompiledTemplateDraft } from './compiler.ts'
 import { checkTemplateContract } from './gate.ts'
 import { TemplateLibrary } from './library.ts'
@@ -507,9 +508,11 @@ function retainManifest(manifest: TemplatePackManifest): TemplatePackManifest {
     if (requiredSections !== undefined && member.usage !== 'format-reference') {
       throw new Error(`template-service: requiredSections applies only to a format-reference member: ${member.id}`)
     }
-    // An empty declaration would compile no section rule at all and skip inferring them, disabling the check.
-    if (requiredSections !== undefined && (requiredSections.length === 0 || requiredSections.some(title => title.trim().length === 0))) {
-      throw new Error(`template-service: requiredSections must list non-blank section titles: ${member.id}`)
+    // An empty declaration would compile no section rule at all and skip inferring them, disabling the check; a
+    // title that normalizes to nothing, such as 第1章, or to another title's key would compile a rule that means nothing.
+    const keys = requiredSections?.map(sectionKey)
+    if (keys !== undefined && (keys.length === 0 || keys.some(key => key.length === 0) || new Set(keys).size !== keys.length)) {
+      throw new Error(`template-service: requiredSections must list distinct section titles: ${member.id}`)
     }
     return Object.freeze({
       ...member,
