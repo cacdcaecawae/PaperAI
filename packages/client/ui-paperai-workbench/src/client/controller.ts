@@ -89,6 +89,11 @@ function setAsideKey(documentId: PaperAIDocumentSnapshot['documentId'], nodeId: 
   return `${documentId}\u0000${nodeId}`
 }
 
+/** Where a held render is kept: one per Session and document, since a retained preview may hold one too. */
+function heldRenderKey(sessionId: SessionId, documentId: PaperAIDocumentSnapshot['documentId']): string {
+  return `${sessionId}\u0000${documentId}`
+}
+
 /** A conflicted draft set aside with 用文档的, and the document and revision of the page that took it. */
 interface SetAsideDraft {
   readonly documentId: PaperAIDocumentSnapshot['documentId']
@@ -153,8 +158,8 @@ export class PaperAIWorkbenchController {
   private readonly composing = new Map<SessionId, PaperAIDocumentSnapshot>()
   /** Sessions whose reconnect read arrived during composition. */
   private readonly reconnectReads = new Set<SessionId>()
-  /** Each Session's commit whose deferred render arrived while its document was composing, so was not shown. */
-  private readonly composedRenders = new Map<SessionId, PaperAIDocumentSnapshot>()
+  /** Commits whose deferred render arrived under a draft or a composing phrase, so was not shown; keyed by `heldRenderKey`. */
+  private readonly heldRenders = new Map<string, PaperAIDocumentSnapshot>()
   private readonly targets = new Map<SessionId, {
     readonly workspaceId: WorkspaceId
     readonly resourceId: PaperAIResourceId
@@ -473,7 +478,7 @@ export class PaperAIWorkbenchController {
     if (active && state.document !== null) this.composing.set(sessionId, state.document)
     else this.composing.delete(sessionId)
     this.syncUnloadGuard()
-    if (!active) this.retryComposedRender(sessionId)
+    if (!active) this.retryHeldRender(sessionId)
     if (!active && this.reconnectReads.delete(sessionId)) this.refreshSession(sessionId)
     else if (!active && state.externalUpdate !== null && state.action === null && !hasUnsavedEdit(state)) {
       void this.reloadExternal(sessionId)
@@ -575,6 +580,7 @@ export class PaperAIWorkbenchController {
       // A failed save keeps its reason while a draft still carries it; every other failure is stale once the writer types on.
       if (!state.edits.some(edit => edit.saveFailed === true)) state.actionError = null
     })
+    this.retryHeldRender(sessionId)
   }
 
   /**
@@ -657,6 +663,7 @@ export class PaperAIWorkbenchController {
       state.edits = []
       state.actionError = null
     })
+    this.retryHeldRender(sessionId)
   }
 
   /**
@@ -1123,7 +1130,7 @@ export class PaperAIWorkbenchController {
     this.disposed = true
     this.composing.clear()
     this.reconnectReads.clear()
-    this.composedRenders.clear()
+    this.heldRenders.clear()
     for (const entry of this.projects.values()) entry.abort?.abort()
     this.library.abort?.abort()
     for (const entry of this.workbenches.values()) entry.abort?.abort()
@@ -1175,7 +1182,8 @@ export class PaperAIWorkbenchController {
       return this.fail(project.store, 'paperaiWorkbench returned a document for another Workspace or Session')
     }
     const current = workbench.store.getSnapshot()
-    const show = workbench.generation === generation && !hasUnsavedEdit(current)
+    // A phrase still composing is unsaved input too: replacing its preview would drop it.
+    const show = workbench.generation === generation && !hasUnsavedEdit(current) && !this.composing.has(sessionId)
     project.store.update((state) => {
       if (show) state.selected = opened.document.resourceId
       state.action = null
@@ -1391,10 +1399,10 @@ export class PaperAIWorkbenchController {
       if (fresh.documentId !== committed.documentId || fresh.resourceId !== committed.resourceId
         || fresh.workspaceId !== committed.workspaceId || fresh.sessionId !== committed.sessionId) return
       if (fresh.revision === committed.revision) {
-        const composing = this.composing.get(committed.sessionId)?.documentId === committed.documentId
-        if (composing) this.composedRenders.set(committed.sessionId, committed)
+        const held = view.edits.length > 0 || this.composing.get(committed.sessionId)?.documentId === committed.documentId
+        if (held) this.heldRenders.set(heldRenderKey(committed.sessionId, committed.documentId), committed)
         view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
-          ...(view.edits.length === 0 && !composing ? { previewHtml: fresh.previewHtml } : {}) }
+          ...(held ? {} : { previewHtml: fresh.previewHtml }) }
       } else if (fresh.headCommitId !== view.document.headCommitId) {
         view.externalUpdate = { documentId: fresh.documentId, headCommitId: fresh.headCommitId }
       }
@@ -1402,24 +1410,21 @@ export class PaperAIWorkbenchController {
   }
 
   /**
-   * Fetch again the render `refreshPreview` held back from a composing document, once the phrase is done.
-   * A phrase that left a draft keeps the patched page until its own save renders; one that changed nothing
-   * would otherwise keep it until some later read.
+   * Fetch again the render `refreshPreview` held back from the open document, once it has neither a draft nor a
+   * composing phrase: the phrase ended without a change, or the last draft was discarded or undone. A save renders
+   * its own new revision, so a held render of an older one is dropped instead.
    */
-  private retryComposedRender(sessionId: SessionId): void {
-    const committed = this.composedRenders.get(sessionId)
-    if (committed === undefined) return
-    this.composedRenders.delete(sessionId)
+  private retryHeldRender(sessionId: SessionId): void {
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
-    const view = state.document?.documentId === committed.documentId ? state
-      : state.retained.find(retained => retained.document?.documentId === committed.documentId)
-    if (view?.document?.revision !== committed.revision || view.edits.length > 0) return
-    entry.store.update((draft) => {
-      const target = draft.document?.documentId === committed.documentId ? draft
-        : draft.retained.find(retained => retained.document?.documentId === committed.documentId)
-      if (target !== undefined) target.previewLoading = true
-    })
+    const document = state.document
+    if (document === null || state.edits.length > 0 || this.composing.has(sessionId)) return
+    const key = heldRenderKey(sessionId, document.documentId)
+    const committed = this.heldRenders.get(key)
+    if (committed === undefined) return
+    this.heldRenders.delete(key)
+    if (document.revision !== committed.revision) return
+    entry.store.update((draft) => { draft.previewLoading = true })
     void this.refreshPreview(entry, committed)
   }
 
