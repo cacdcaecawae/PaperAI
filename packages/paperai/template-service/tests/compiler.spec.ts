@@ -99,6 +99,8 @@ describe('compileTemplateDraft', () => {
       ['本人已阅读学位论文原创性声明', 'Normal'], ['本人已阅读学位论文原创性声明.', 'Normal'],
       ['条标题 4号字，建议段前0.5行，段后0.5行', 'heading 2'], ['政策建议', 'heading 1'],
       ['字体识别研究', 'heading 1'], ['页眉检测方法', '标题 1'], ['正文 1.5倍行距', 'heading 2'],
+      ['1.1研究背景', 'heading 2'], ['一 研究背景', 'heading 2'], ['一级标题（小二号黑体）', 'heading 1'],
+      ['实验结果（含分析）与讨论', 'heading 1'], ['二号楼设计', 'heading 1'],
     ])
 
     // The annotation compiles its own format rules, but only real headings become sections.
@@ -110,6 +112,8 @@ describe('compileTemplateDraft', () => {
       ['required-section', { text: '政策建议' }],
       ['required-section', { text: '字体识别研究' }],
       ['required-section', { text: '页眉检测方法' }],
+      ['required-section', { text: '实验结果（含分析）与讨论' }],
+      ['required-section', { text: '二号楼设计' }],
     ])
   })
 

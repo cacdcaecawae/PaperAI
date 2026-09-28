@@ -63,5 +63,9 @@ describe('isHeadingParagraph', () => {
     expect(sectionKey('第6章 结  论')).toBe(sectionKey('结论'))
     expect(sectionKey('Chapter 3 METHODS')).toBe(sectionKey('methods'))
     expect(sectionKey('第1章')).toBe('')
+    // Only a trailing note is dropped; a parenthetical that title text follows belongs to the title.
+    expect(sectionKey('研究背景（示例）')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('研究背景（示例')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('实验结果（含分析）与讨论')).not.toBe(sectionKey('实验结果'))
   })
 })

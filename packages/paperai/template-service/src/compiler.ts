@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from './inspection.ts'
+import { hasSectionNumber, isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -227,7 +227,8 @@ function fieldFor(text: string): FieldDefinition | undefined {
 
 // Arabic or Chinese chapter and section numbers (第N章, 第N节), 1.2 / 一、 / 1、 / 1) enumerations, circled
 // numbers, Chapter N, and figure or table captions. Spelled-out or Roman chapter numbers are not recognized.
-const NUMBERED_HEADING = /^(?:第\s*[\d一二三四五六七八九十百零〇两]+\s*[章节]|[\d一二三四五六七八九十百零〇两]+(?:\.\d+)*[\s、．.)）]|[①-⑳]|chapter\s+\d+|[图表]\s*\d)/iu
+/** A figure or table caption, which a sample may set in a heading style. */
+const CAPTION = /^[图表]\s*\d/u
 
 function compileRequiredSections(
   nodes: readonly DocumentNode[],
@@ -239,7 +240,7 @@ function compileRequiredSections(
     if (declared === undefined) {
       // Numbered chapters and sections, captions, and annotations belong to the sample's own content.
       return headings.filter(node => node.text.length <= 100 && !isFormatAnnotation(node.text)
-        && !NUMBERED_HEADING.test(node.text.trim()))
+        && !hasSectionNumber(node.text) && !CAPTION.test(node.text.trim()))
     }
     return declared.map((title) => {
       const node = headings.find(heading => sectionKey(heading.text) === sectionKey(title))
@@ -372,13 +373,14 @@ function isInstruction(text: string): boolean {
 
 /**
  * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行, instead of naming a section.
- * It is told by an annotation opening or a measurement (a size in 号, spacing in lines or points, a line-spacing
- * multiple), not by vocabulary: 政策建议, 字体识别研究, and 页眉检测方法 still name sections.
+ * It is told by an annotation opening or a measurement (a size in 号 followed by 字, a typeface, bold, or a closing
+ * parenthesis; spacing in lines or points; a line-spacing multiple), not by vocabulary: 政策建议, 字体识别研究, and
+ * 页眉检测方法 still name sections.
  */
 function isFormatAnnotation(text: string): boolean {
   const trimmed = text.trim()
   return ANNOTATION_START.test(trimmed)
-    || /(?:小?[初一二三四五六七八\d]+号字|段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
+    || /(?:小?[初一二三四五六七八\d]+号(?:字|[宋黑楷仿隶]|加粗|粗体|[）)])|段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
 }
 
 function isFixedText(text: string, usage: TemplateUsage): boolean {

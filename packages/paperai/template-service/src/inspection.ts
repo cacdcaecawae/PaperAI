@@ -24,12 +24,18 @@ export function headingLevel(styleName: string | undefined): number | undefined 
 
 /**
  * A section number opening a heading, in every form a sample numbers its sections: 第5章, 第一节, Chapter 1, ①,
- * 1、, 1), 一、, 1.1, and 1． or 1 followed by a space. Specific forms come first, so 1、 is not read as 1 followed
+ * 1、, 1), 一、 or 一 followed by a space, 1.1, and 1． or 1 followed by a space. Specific forms come first, so 1、 is not read as 1 followed
  * by text, and a bare number needs a separator, so 2019年 is not numbered.
  */
 const NUMERALS = '一二三四五六七八九十百零〇两'
-const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chapter\\s+\\d+|[①-⑳]|\\d+[、)）]|[${NUMERALS}]+[、．.)）]`
+const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chapter\\s+\\d+|[①-⑳]|\\d+[、)）]|[${NUMERALS}]+[、．.)）\\s]`
   + '|\\d+(?:\\.\\d+)+[．.]?|\\d+[．.\\s])\\s*', 'iu')
+
+/**
+ * A parenthesized note that ends a heading, closed or not, as in 研究背景（示例） or 研究背景（示例. A parenthetical that
+ * title text follows, as in 实验结果（含分析）与讨论, is part of the title.
+ */
+const TRAILING_NOTE = /\s*[（(][^（()）]*[）)]?\s*$/u
 
 /**
  * A numbered paragraph set in body text counts as a heading only when what follows its number reads as a title:
@@ -39,7 +45,7 @@ const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chap
 function isNumberedTitle(text: string): boolean {
   const number = SECTION_NUMBER.exec(text)
   if (number === null) return false
-  const title = text.slice(number[0].length).replace(/[（(].*$/u, '').trim()
+  const title = text.slice(number[0].length).replace(TRAILING_NOTE, '').trim()
   return title.length <= 40 && !/[。，；：！？,;:!?]/u.test(title)
 }
 
@@ -54,8 +60,17 @@ export function sectionLabel(text: string): string {
   return text
     .trim()
     .replace(SECTION_NUMBER, '')
-    .replace(/[（(].*$/u, '')
+    .replace(TRAILING_NOTE, '')
     .trim()
+}
+
+/**
+ * Whether a paragraph opens with a section number, as the sample's own numbered research headings do.
+ * @param text - paragraph text.
+ * @returns true when `SECTION_NUMBER` matches.
+ */
+export function hasSectionNumber(text: string): boolean {
+  return SECTION_NUMBER.test(text.trim())
 }
 
 /**
