@@ -9,9 +9,35 @@ const TOC_STYLE = /^(?:toc|目录)\s*\d+$/iu
  */
 const DECLARATION_TITLE = /^(?:\S{0,20}?(?:大学|学院))?(?:(?:博士|硕士)?学位论文)?(?:原创性|独创性)声明(?:(?:和|及|与)?(?:版权)?使用(?:权限|授权(?:书|说明)?))?$/u
 
+/** Word's built-in heading styles as a Chinese Word or WPS file names them, `标题 1` to `标题 9`; bare `标题` is the Title style. */
+const LOCALIZED_HEADING_STYLE = /^标题\s*([1-9])$/u
+
 /**
- * Whether a paragraph is a heading, for a template sample and a checked manuscript alike. A Word heading style
- * counts, a TOC entry style never does, and so does text only a heading carries: a numbered chapter or section,
+ * The level of a Word heading style, from `heading 2` or its localized `标题 2`.
+ * @param styleName - paragraph style name, when it has one.
+ * @returns the level, or `undefined` for any other style.
+ */
+export function headingLevel(styleName: string | undefined): number | undefined {
+  const level = /heading\s*([1-9])/iu.exec(styleName ?? '')?.[1] ?? LOCALIZED_HEADING_STYLE.exec(styleName ?? '')?.[1]
+  return level === undefined ? undefined : Number(level)
+}
+
+/**
+ * A section heading's title without its section number or a trailing parenthesized note, as a sample's required
+ * section is recorded and a manuscript's heading is compared: `1.1 研究背景（示例）` is `研究背景`.
+ * @param text - heading text.
+ * @returns the trimmed title.
+ */
+export function sectionLabel(text: string): string {
+  return text
+    .replace(/^\d+(?:\.\d+)*[．.]?\s*/u, '')
+    .replace(/[（(].*$/u, '')
+    .trim()
+}
+
+/**
+ * Whether a paragraph is a heading, for a template sample and a checked manuscript alike. A Word heading style,
+ * English or localized, counts, a TOC entry style never does, and so does text only a heading carries: a numbered chapter or section,
  * or a common thesis section title set in body text, such as `致  谢`, `ABSTRACT`, or an originality declaration.
  * OfficeCLI reports no outline level, so any other title set in body text is not recognized.
  * @param text - paragraph text.
@@ -20,7 +46,7 @@ const DECLARATION_TITLE = /^(?:\S{0,20}?(?:大学|学院))?(?:(?:博士|硕士)?
  */
 export function isHeadingParagraph(text: string, styleName: string | undefined): boolean {
   if (TOC_STYLE.test(styleName ?? '')) return false
-  if (styleName?.toLowerCase().includes('heading') === true) return true
+  if (styleName?.toLowerCase().includes('heading') === true || LOCALIZED_HEADING_STYLE.test(styleName ?? '')) return true
   const trimmed = text.trim()
   const compact = trimmed.replaceAll(/\s+/gu, '')
   return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+)/u.test(trimmed)

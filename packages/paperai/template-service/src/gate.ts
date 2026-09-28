@@ -11,7 +11,7 @@ import type {
   TemplateContract,
   TemplateRule,
 } from '@paperai/domain'
-import { isHeadingParagraph, parseBodyInspection } from './inspection.ts'
+import { headingLevel, isHeadingParagraph, parseBodyInspection, sectionLabel } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'message'>
@@ -100,10 +100,11 @@ function checkRule(
     case 'fixed-text':
     case 'required-section': {
       const expected = expectedString(rule.expected, 'text')
-      // A formatting reference's section must be a heading; a TOC entry or a sentence naming it does not count.
-      // A form template's outline items are ordinary paragraphs once filled in, so its text stays searched whole.
+      // A formatting reference's section must be a heading with that whole title, section number aside; a TOC
+      // entry, a sentence naming it, or a longer title such as 参考文献综述 does not count. A form template's outline
+      // items are ordinary paragraphs once filled in, so its text stays searched whole.
       const present = expected === undefined || (rule.kind === 'required-section' && usage === 'format-reference'
-        ? inspected.some(node => isHeading(node) && canonical(node.text).includes(canonical(expected)))
+        ? inspected.some(node => isHeading(node) && sectionKey(node.text) === sectionKey(expected))
         : canonical(joinedText).includes(canonical(expected)))
       if (!present) {
         findings.push(ruleFinding(rule, `${rule.kind.replace('-', '_')}_missing`, `缺少${rule.kind === 'fixed-text' ? '固定文字' : '必需章节'}：${expected}`, { expected }))
@@ -298,7 +299,7 @@ function styleCandidates(inspected: readonly InspectedWordNode[], target: string
   if (target === 'heading') return textBearing.filter(isHeading)
   const level = /heading-(\d)/u.exec(target)?.[1]
   if (level === undefined) return textBearing
-  return textBearing.filter(node => node.styleName?.toLowerCase().includes(`heading ${level}`) === true)
+  return textBearing.filter(node => headingLevel(node.styleName) === Number(level))
 }
 
 function isHeading(node: InspectedWordNode | undefined): boolean {
@@ -391,6 +392,10 @@ function expectedRecords(value: unknown, key: string): Record<string, unknown>[]
   const selected = expectedRecord(value)?.[key]
   if (!Array.isArray(selected)) return []
   return selected.filter(item => item !== null && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown>[]
+}
+
+function sectionKey(value: string): string {
+  return canonical(sectionLabel(value)).toLowerCase()
 }
 
 function canonical(value: string): string {

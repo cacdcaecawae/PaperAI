@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { isHeadingParagraph, parseBodyInspection } from './inspection.ts'
+import { isHeadingParagraph, parseBodyInspection, sectionLabel } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -371,12 +371,14 @@ function isInstruction(text: string): boolean {
 }
 
 /**
- * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行,
- * instead of naming a section. Unlike `isInstruction`, a heading like 政策建议 still names one.
+ * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行, instead of naming a section.
+ * It is told by an annotation opening or a measurement (a size in 号, spacing in lines or points, a line-spacing
+ * multiple), not by vocabulary: 政策建议, 字体识别研究, and 页眉检测方法 still name sections.
  */
 function isFormatAnnotation(text: string): boolean {
   const trimmed = text.trim()
-  return ANNOTATION_START.test(trimmed) || /(?:号字|段[前后]|行距|字体|字号|页眉|示范)/u.test(trimmed)
+  return ANNOTATION_START.test(trimmed)
+    || /(?:小?[初一二三四五六七八\d]+号字|段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
 }
 
 function isFixedText(text: string, usage: TemplateUsage): boolean {
@@ -389,13 +391,6 @@ function isFixedText(text: string, usage: TemplateUsage): boolean {
 
 function withoutWhitespace(text: string): string {
   return text.replaceAll(/\s+/gu, '')
-}
-
-function sectionLabel(text: string): string {
-  return text
-    .replace(/^\d+(?:\.\d+)*[．.]?\s*/u, '')
-    .replace(/[（(].*$/u, '')
-    .trim()
 }
 
 function compactLabel(text: string): string {

@@ -140,27 +140,49 @@ describe('checkTemplateContract', () => {
   })
 
   it('finds a formatting reference’s required section only in a heading, not a TOC entry or a sentence', async () => {
-    const rules = [rule('required-section', { text: '结  论' }), rule('required-section', { text: '致  谢' })]
+    const rules = [
+      rule('required-section', { text: '结  论' }), rule('required-section', { text: '致  谢' }),
+      rule('required-section', { text: '参考文献' }), rule('required-section', { text: '研究背景' }),
+      rule('required-section', { text: '政策建议' }),
+    ]
     const input = {
       text: [
         { officePath: '/body/p[1]', text: '结论', kind: 'paragraph' as const },
         { officePath: '/body/p[2]', text: '本文结论如下。', kind: 'paragraph' as const },
         { officePath: '/body/p[3]', text: '致  谢', kind: 'paragraph' as const },
+        { officePath: '/body/p[4]', text: '参考文献综述', kind: 'paragraph' as const },
+        { officePath: '/body/p[5]', text: '1.1  研究背景', kind: 'paragraph' as const },
+        { officePath: '/body/p[6]', text: '政策建议', kind: 'paragraph' as const },
       ],
       children: [
         { path: '/body/p[1]', type: 'paragraph', text: '结论', style: 'toc 1', format: {} },
         { path: '/body/p[2]', type: 'paragraph', text: '本文结论如下。', style: 'Normal', format: {} },
         { path: '/body/p[3]', type: 'paragraph', text: '致  谢', style: 'Normal', format: {} },
+        { path: '/body/p[4]', type: 'paragraph', text: '参考文献综述', style: 'heading 1', format: {} },
+        { path: '/body/p[5]', type: 'paragraph', text: '1.1  研究背景', style: 'heading 2', format: {} },
+        { path: '/body/p[6]', type: 'paragraph', text: '政策建议', style: '标题 1', format: {} },
       ],
       valid: true,
     }
 
     const reference = await checkTemplateContract(engine(input), document, contract(rules, { usage: 'format-reference' }), 'delivery-export')
-    expect(reference.findings.map(item => [item.code, item.expected])).toEqual([['required_section_missing', '结  论']])
+    expect(reference.findings.map(item => [item.code, item.expected])).toEqual([
+      ['required_section_missing', '结  论'],
+      ['required_section_missing', '参考文献'],
+    ])
 
     // A form template's filled-in outline items are plain paragraphs, so its sections stay found in any text.
     const form = await checkTemplateContract(engine(input), document, contract(rules), 'delivery-export')
     expect(form.findings).toEqual([])
+  })
+
+  it('reads a heading level from a localized Word heading style', async () => {
+    const report = await checkTemplateContract(engine({
+      text: [{ officePath: '/body/p[1]', text: '1.1 研究背景', kind: 'paragraph' }],
+      children: [{ path: '/body/p[1]', type: 'paragraph', text: '1.1 研究背景', style: '标题 2', format: { 'effective.size': '14pt' } }],
+      valid: true,
+    }), document, contract([rule('font-size', { target: 'heading-2', points: 14 })]), 'delivery-export')
+    expect(report.findings).toEqual([])
   })
 
   it('turns an inspection rejection into one blocking finding', async () => {
