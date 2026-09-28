@@ -1075,6 +1075,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const sessionAdmissionChains = new Map<SessionId, Promise<void>>()
   /** Client-chosen identity creation/resume, deduplicated across concurrent retries. */
   const sessionCreations = new Map<SessionId, Promise<Agent>>()
+  /** Sessions whose in-flight creation a Workspace-backed request joined, so their root must already exist. */
+  const existingRootCreations = new Set<SessionId>()
   /** Serializes path ownership and explicit title checks with Workspace mutations. */
   let workspaceCreationChain = Promise.resolve()
   const pendingQuestions = new Map<RpcId, PendingQuestion>()
@@ -1609,6 +1611,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
    * Resolve one requested identity to a live agent, creating or resuming it once.
    * A plain cwd is created when missing; an `existingCwd` (a Workspace root) must
    * already be a directory when the agent is resumed or created, and is never recreated.
+   * The constraint belongs to the shared creation, so it binds a creation that a
+   * plain-cwd request started and a Workspace-backed request joined.
    */
   async function ensureSession(
     sessionId: SessionId,
@@ -1617,6 +1621,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     presetId?: string,
     existingCwd = false,
   ): Promise<Agent> {
+    if (existingCwd) existingRootCreations.add(sessionId)
     let creation = sessionCreations.get(sessionId)
     if (creation === undefined) {
       creation = (async () => {
@@ -1651,7 +1656,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
           const composition = await composeAgent(storedPreset)
-          if (existingCwd) await requireDirectory(cwd)
+          if (existingRootCreations.has(sessionId)) await requireDirectory(cwd)
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
             ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
@@ -1660,7 +1665,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })).agent
         }
 
-        if (!existingCwd) {
+        if (!existingRootCreations.has(sessionId)) {
           try {
             await mkdir(cwd, { recursive: true })
           } catch (error: unknown) {
@@ -1668,7 +1673,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
         }
         const composition = await composeAgent(presetId)
-        if (existingCwd) await requireDirectory(cwd)
+        if (existingRootCreations.has(sessionId)) await requireDirectory(cwd)
         return (await ctx.agents.create({
           sessionId,
           ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
@@ -1694,6 +1699,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         throw error
       }).finally(() => {
         sessionCreations.delete(sessionId)
+        existingRootCreations.delete(sessionId)
       })
       sessionCreations.set(sessionId, creation)
     }

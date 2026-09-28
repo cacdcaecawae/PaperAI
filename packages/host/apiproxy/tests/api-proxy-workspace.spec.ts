@@ -406,6 +406,41 @@ describe('session creation and Workspace membership', () => {
     expect(existsSync(path)).toBe(false)
   })
 
+  it('keeps a Workspace request’s must-exist root when it joins a pending cwd-only creation', async () => {
+    const { api, ctx, root } = await harness()
+    const path = stageDir(root, 'removed-while-joined')
+    const workspace = expectOk(await api.workspace.create(request({ path }))).workspace
+    let release!: () => void
+    const released = new Promise<void>((resolve) => { release = resolve })
+    vi.spyOn(ctx.get('sessionPersistence')!, 'list').mockImplementation(async () => {
+      await released
+      return []
+    })
+    const sessionId = SessionId('workspace-root-joined-in-flight')
+
+    const plain = api.sessions.create(request({ cwd: workspace.path, sessionId }))
+    // create() reads sessionId a second time as it hands the request to the shared creation, which
+    // is after the Workspace request's own directory check; the root is removed only then.
+    let reads = 0
+    let resolveJoined!: () => void
+    const joinedCreation = new Promise<void>((resolve) => { resolveJoined = resolve })
+    const joined = api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      get sessionId() {
+        if (++reads === 2) resolveJoined()
+        return sessionId
+      },
+    }))
+    await joinedCreation
+    rmSync(path, { recursive: true })
+    release()
+
+    expect((await joined).result).toMatchObject({ ok: false })
+    expect((await plain).result).toMatchObject({ ok: false })
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    expect(existsSync(path)).toBe(false)
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace
