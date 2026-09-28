@@ -11,7 +11,7 @@ import type {
   TemplateContract,
   TemplateRule,
 } from '@paperai/domain'
-import { headingLevel, isHeadingParagraph, parseBodyInspection, sectionLabel } from './inspection.ts'
+import { headingLevel, isHeadingParagraph, parseBodyInspection, sectionKey } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'message'>
@@ -392,10 +392,6 @@ function expectedRecords(value: unknown, key: string): Record<string, unknown>[]
   const selected = expectedRecord(value)?.[key]
   if (!Array.isArray(selected)) return []
   return selected.filter(item => item !== null && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown>[]
-}
-
-function sectionKey(value: string): string {
-  return canonical(sectionLabel(value)).toLowerCase()
 }
 
 function canonical(value: string): string {

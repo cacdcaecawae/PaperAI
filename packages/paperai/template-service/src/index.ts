@@ -507,6 +507,10 @@ function retainManifest(manifest: TemplatePackManifest): TemplatePackManifest {
     if (requiredSections !== undefined && member.usage !== 'format-reference') {
       throw new Error(`template-service: requiredSections applies only to a format-reference member: ${member.id}`)
     }
+    // An empty declaration would compile no section rule at all and skip inferring them, disabling the check.
+    if (requiredSections !== undefined && (requiredSections.length === 0 || requiredSections.some(title => title.trim().length === 0))) {
+      throw new Error(`template-service: requiredSections must list non-blank section titles: ${member.id}`)
+    }
     return Object.freeze({
       ...member,
       appliesToRoles: Object.freeze(roles),

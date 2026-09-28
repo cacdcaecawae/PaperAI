@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { isHeadingParagraph, parseBodyInspection, sectionLabel } from './inspection.ts'
+import { isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -242,7 +242,7 @@ function compileRequiredSections(
         && !NUMBERED_HEADING.test(node.text.trim()))
     }
     return declared.map((title) => {
-      const node = headings.find(heading => withoutWhitespace(heading.text) === withoutWhitespace(title))
+      const node = headings.find(heading => sectionKey(heading.text) === sectionKey(title))
       if (node === undefined) throw new Error(`template-service: required section not found in formatting reference: ${title}`)
       return node
     })

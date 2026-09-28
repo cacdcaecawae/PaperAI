@@ -113,6 +113,11 @@ describe('compileTemplateDraft', () => {
     ])
   })
 
+  it('finds a declared section under the number the formatting reference gives it', async () => {
+    const compiled = await compileFormatReference([['第5章  结  论', 'heading 1']], ['结论'])
+    expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([['required-section', { text: '结  论' }]])
+  })
+
   it('rejects a declared section the formatting reference does not contain', async () => {
     await expect(compileFormatReference([['摘  要', 'heading 1']], ['摘要', '致谢']))
       .rejects.toThrow('required section not found in formatting reference: 致谢')

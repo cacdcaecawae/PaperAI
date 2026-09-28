@@ -23,16 +23,34 @@ export function headingLevel(styleName: string | undefined): number | undefined 
 }
 
 /**
+ * A section number opening a heading, in every form a sample numbers its sections: 第5章, 第一节, Chapter 1, ①,
+ * 1、, 1), 一、, and 1.1 or 1．. Specific forms come first, so 1、 is not read as 1 followed by text.
+ */
+const SECTION_NUMBER = /^(?:第\s*[\d一二三四五六七八九十百零〇两]+\s*[章节]|chapter\s+\d+|[①-⑳]|\d+[、)）]|[一二三四五六七八九十百零〇两]+[、．.)）]|\d+(?:\.\d+)*[．.]?)\s*/iu
+
+/**
  * A section heading's title without its section number or a trailing parenthesized note, as a sample's required
- * section is recorded and a manuscript's heading is compared: `1.1 研究背景（示例）` is `研究背景`.
+ * section is recorded and a manuscript's heading is compared: `1.1 研究背景（示例）` and `第5章 结论` read `研究背景`
+ * and `结论`.
  * @param text - heading text.
  * @returns the trimmed title.
  */
 export function sectionLabel(text: string): string {
   return text
-    .replace(/^\d+(?:\.\d+)*[．.]?\s*/u, '')
+    .trim()
+    .replace(SECTION_NUMBER, '')
     .replace(/[（(].*$/u, '')
     .trim()
+}
+
+/**
+ * The key two section titles are compared by, in a sample and in a manuscript: the `sectionLabel` without
+ * whitespace, Unicode-normalized and case-folded, so `第6章 结 论` and `结论` name the same section.
+ * @param text - heading text or a declared section title.
+ * @returns the comparison key.
+ */
+export function sectionKey(text: string): string {
+  return sectionLabel(text).normalize('NFKC').replaceAll(/\s+/gu, '').toLowerCase()
 }
 
 /**

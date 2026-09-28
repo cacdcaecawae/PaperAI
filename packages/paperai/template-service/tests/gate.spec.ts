@@ -176,6 +176,17 @@ describe('checkTemplateContract', () => {
     expect(form.findings).toEqual([])
   })
 
+  it('meets a numbered required section whatever the manuscript numbers it', async () => {
+    const rules = ['第5章 结论', 'Chapter 2 Methods', '一、研究背景', '①研究内容'].map(text => rule('required-section', { text }))
+    const headings = ['第6章 结  论', 'Chapter 3 Methods', '二、研究背景', '研究内容']
+    const report = await checkTemplateContract(engine({
+      text: headings.map((text, index) => ({ officePath: `/body/p[${String(index + 1)}]`, text, kind: 'paragraph' as const })),
+      children: headings.map((text, index) => ({ path: `/body/p[${String(index + 1)}]`, type: 'paragraph', text, style: 'heading 1', format: {} })),
+      valid: true,
+    }), document, contract(rules, { usage: 'format-reference' }), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
   it('reads a heading level from a localized Word heading style', async () => {
     const report = await checkTemplateContract(engine({
       text: [{ officePath: '/body/p[1]', text: '1.1 研究背景', kind: 'paragraph' }],
