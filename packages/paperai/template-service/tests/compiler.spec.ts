@@ -95,13 +95,16 @@ describe('compileTemplateDraft', () => {
       ['第一节  研究背景', 'heading 2'], ['第2节 研究现状', 'heading 2'], ['1) 研究方法', 'heading 3'], ['①研究内容', 'heading 3'],
       ['图1-1  系统结构', 'heading 1'], ['（摘要应说明研究工作）', 'heading 1'],
       ['学位论文原创性声明', 'heading 1'], ['致  谢', 'heading 1'],
+      ['条标题 4号字，建议段前0.5行，段后0.5行', 'heading 2'], ['政策建议', 'heading 1'],
     ])
 
-    expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([
+    // The annotation compiles its own format rules, but only real headings become sections.
+    expect(compiled.contract.rules.filter(rule => rule.kind === 'required-section').map(rule => [rule.kind, rule.expected])).toEqual([
       ['required-section', { text: '摘  要' }],
       ['required-section', { text: 'ABSTRACT' }],
       ['required-section', { text: '学位论文原创性声明' }],
       ['required-section', { text: '致  谢' }],
+      ['required-section', { text: '政策建议' }],
     ])
   })
 

@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { parseBodyInspection } from './inspection.ts'
+import { parseBodyInspection, TOC_STYLE } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -238,7 +238,7 @@ function compileRequiredSections(
     const headings = nodes.filter(node => node.kind === 'heading' && node.text.trim().length > 0)
     if (declared === undefined) {
       // Numbered chapters and sections, captions, and annotations belong to the sample's own content.
-      return headings.filter(node => node.text.length <= 100 && !isInstruction(node.text)
+      return headings.filter(node => node.text.length <= 100 && !isFormatAnnotation(node.text)
         && !NUMBERED_HEADING.test(node.text.trim()))
     }
     return declared.map((title) => {
@@ -362,10 +362,21 @@ function isStyleRule(kind: TemplateRuleKind): boolean {
   return kind === 'font' || kind === 'font-size' || kind === 'paragraph-spacing'
 }
 
+const ANNOTATION_START = /^(?:说\s*明|填写说明|注意|要求|↑|（|\()/u
+
 function isInstruction(text: string): boolean {
   const trimmed = text.trim()
-  return /^(?:说\s*明|填写说明|注意|要求|↑|（|\()/u.test(trimmed)
+  return ANNOTATION_START.test(trimmed)
     || /(?:建议|字体、字号|不要设置页眉|只作为.*示范)/u.test(trimmed)
+}
+
+/**
+ * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行,
+ * instead of naming a section. Unlike `isInstruction`, a heading like 政策建议 still names one.
+ */
+function isFormatAnnotation(text: string): boolean {
+  const trimmed = text.trim()
+  return ANNOTATION_START.test(trimmed) || /(?:号字|段[前后]|行距|字体|字号|页眉|示范)/u.test(trimmed)
 }
 
 function isFixedText(text: string, usage: TemplateUsage): boolean {
@@ -381,7 +392,7 @@ function withoutWhitespace(text: string): string {
 }
 
 function isHeading(text: string, styleName: string | undefined): boolean {
-  if (/^(?:toc|目录)\s*\d+$/iu.test(styleName ?? '')) return false
+  if (TOC_STYLE.test(styleName ?? '')) return false
   if (styleName?.toLowerCase().includes('heading') === true) return true
   const trimmed = text.trim()
   return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+|摘\s*要$|Abstract$|目\s*录$|参考文献$|结\s*论$)/u.test(trimmed)

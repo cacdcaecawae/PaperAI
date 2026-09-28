@@ -11,7 +11,7 @@ import type {
   TemplateContract,
   TemplateRule,
 } from '@paperai/domain'
-import { parseBodyInspection } from './inspection.ts'
+import { parseBodyInspection, TOC_STYLE } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'message'>
@@ -81,13 +81,14 @@ export async function checkTemplateContract(
   const joinedText = textNodes.map(node => node.text).join('\n')
   for (const rule of template.rules) {
     if (!rule.enabled) continue
-    checkRule(rule, textNodes, inspected, textByPath, inspectedByPath, joinedText, findings)
+    checkRule(rule, template.usage, textNodes, inspected, textByPath, inspectedByPath, joinedText, findings)
   }
   return report(document, template, mode, findings)
 }
 
 function checkRule(
   rule: TemplateRule,
+  usage: TemplateContract['usage'],
   textNodes: readonly EngineTextNode[],
   inspected: readonly InspectedWordNode[],
   textByPath: ReadonlyMap<string, string>,
@@ -99,7 +100,12 @@ function checkRule(
     case 'fixed-text':
     case 'required-section': {
       const expected = expectedString(rule.expected, 'text')
-      if (expected !== undefined && !canonical(joinedText).includes(canonical(expected))) {
+      // A formatting reference's section must be a heading; a TOC entry or a sentence naming it does not count.
+      // A form template's outline items are ordinary paragraphs once filled in, so its text stays searched whole.
+      const present = expected === undefined || (rule.kind === 'required-section' && usage === 'format-reference'
+        ? inspected.some(node => isHeading(node) && canonical(node.text).includes(canonical(expected)))
+        : canonical(joinedText).includes(canonical(expected)))
+      if (!present) {
         findings.push(ruleFinding(rule, `${rule.kind.replace('-', '_')}_missing`, `缺少${rule.kind === 'fixed-text' ? '固定文字' : '必需章节'}：${expected}`, { expected }))
       }
       return
@@ -296,7 +302,7 @@ function styleCandidates(inspected: readonly InspectedWordNode[], target: string
 }
 
 function isHeading(node: InspectedWordNode | undefined): boolean {
-  if (node === undefined) return false
+  if (node === undefined || TOC_STYLE.test(node.styleName ?? '')) return false
   return node.styleName?.toLowerCase().includes('heading') === true
     || /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+|摘\s*要$|Abstract$|目\s*录$|参考文献$|结\s*论$)/u.test(node.text.trim())
 }
