@@ -798,9 +798,28 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
     expect(store.getSnapshot().document?.previewHtml).toBe(patched)
 
-    vi.mocked(remote.open).mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
+    // A failed fetch keeps the render held, so the next moment without a draft tries again.
+    vi.mocked(remote.open).mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'render failed' } } as never)
     controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+
+    // A retry while the fetch is in flight does not fetch again.
+    const retried = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    vi.mocked(remote.open).mockReturnValueOnce(retried.promise)
+    const fetches = vi.mocked(remote.open).mock.calls.length
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Typed again' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'And again' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(vi.mocked(remote.open).mock.calls.length).toBe(fetches + 1)
+    retried.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
     await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe('<p>Fresh render</p>') })
+
+    // Once shown, the render is no longer held: another draft and undo fetch nothing.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Later draft' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(vi.mocked(remote.open).mock.calls.length).toBe(fetches + 1)
     controller.dispose()
   })
 

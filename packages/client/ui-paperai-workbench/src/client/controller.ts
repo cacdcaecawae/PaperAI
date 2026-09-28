@@ -1400,7 +1400,9 @@ export class PaperAIWorkbenchController {
         || fresh.workspaceId !== committed.workspaceId || fresh.sessionId !== committed.sessionId) return
       if (fresh.revision === committed.revision) {
         const held = view.edits.length > 0 || this.composing.get(committed.sessionId)?.documentId === committed.documentId
+        // Kept until a render of that revision is shown, so a failed fetch leaves it to the next retry.
         if (held) this.heldRenders.set(heldRenderKey(committed.sessionId, committed.documentId), committed)
+        else this.heldRenders.delete(heldRenderKey(committed.sessionId, committed.documentId))
         view.document = { ...view.document, paragraphStyles: fresh.paragraphStyles,
           ...(held ? {} : { previewHtml: fresh.previewHtml }) }
       } else if (fresh.headCommitId !== view.document.headCommitId) {
@@ -1412,18 +1414,21 @@ export class PaperAIWorkbenchController {
   /**
    * Fetch again the render `refreshPreview` held back from the open document, once it has neither a draft nor a
    * composing phrase: the phrase ended without a change, or the last draft was discarded or undone. A save renders
-   * its own new revision, so a held render of an older one is dropped instead.
+   * its own new revision, so a held render of an older one is dropped instead. The entry stays until `refreshPreview`
+   * shows the render, so a failed fetch is tried again at the next such moment, and one in flight is not repeated.
    */
   private retryHeldRender(sessionId: SessionId): void {
     const entry = this.workbenchEntry(sessionId)
     const state = entry.store.getSnapshot()
     const document = state.document
-    if (document === null || state.edits.length > 0 || this.composing.has(sessionId)) return
+    if (document === null || state.edits.length > 0 || state.previewLoading || this.composing.has(sessionId)) return
     const key = heldRenderKey(sessionId, document.documentId)
     const committed = this.heldRenders.get(key)
     if (committed === undefined) return
-    this.heldRenders.delete(key)
-    if (document.revision !== committed.revision) return
+    if (document.revision !== committed.revision) {
+      this.heldRenders.delete(key)
+      return
+    }
     entry.store.update((draft) => { draft.previewLoading = true })
     void this.refreshPreview(entry, committed)
   }
