@@ -1646,7 +1646,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord>',
-        description: 'Record the template set a project writes against. `null` records the explicit choice to write without a template; either way the project counts as decided, so the first-open prompt does not return.',
+        description: 'Record the template set a project writes against. `null` records the explicit choice to write without a template; either way the project counts as decided, so the first-open prompt does not return. The project root must still be a directory when the queued write runs, not only when it was requested, so a removed or replaced root records no choice.',
         parameters: [{ name: 'id', description: 'PaperAI project id.' }, { name: 'packId', description: 'template set id, or `null` for no template.' }],
         returns: 'the updated record.',
       },
@@ -5078,7 +5078,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIProjectOverview',
-    declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
+    declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly initialized: boolean;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
   },
   {
     name: 'PaperAIRecoverWorkingRequest',

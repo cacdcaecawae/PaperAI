@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, rmdir, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -98,6 +98,15 @@ describe('PaperProjectService', () => {
 
     await expect(service.setTemplateChoice(project.id, '  ')).rejects.toThrow('must not be blank')
     await expect(service.setTemplateChoice(ProjectId('missing'), null)).rejects.toThrow('not found')
+
+    // The queued write checks the root itself, so a root removed or replaced after the request records nothing.
+    const writes = harness.putProject.mock.calls.length
+    await rm(root, { recursive: true })
+    await expect(service.setTemplateChoice(project.id, 'hit-master-thesis')).rejects.toMatchObject({ code: 'ENOENT' })
+    await writeFile(root, 'ordinary file')
+    await expect(service.setTemplateChoice(project.id, 'hit-master-thesis')).rejects.toThrow('exists but is not a directory')
+    expect(harness.putProject.mock.calls.length).toBe(writes)
+    expect(service.get(project.id)?.templatePackId).toBeUndefined()
   })
 
   it('creates the complete layout, default name, context, and a safely initialized Git repository', async () => {

@@ -538,7 +538,7 @@ describe('PaperAiWorkbenchService', () => {
     const create = vi.spyOn(h.ctx.paperProjects, 'create')
     const listDocuments = vi.spyOn(h.ctx.paperDocuments, 'listDocuments')
     expect(await h.service.overview({ workspaceId: WORKSPACE_ID })).toEqual({
-      workspaceId: WORKSPACE_ID, projectName: '硕士论文', templateDecided: false,
+      workspaceId: WORKSPACE_ID, initialized: false, projectName: '硕士论文', templateDecided: false,
       templatePackId: null, template: null, documents: [],
     })
     await expect(openDocument(h)).rejects.toThrow('project is not initialized')
@@ -713,6 +713,7 @@ describe('PaperAiWorkbenchService', () => {
     const overview = await harness.service.overview({ workspaceId: WORKSPACE_ID })
     expect(overview).toMatchObject({
       workspaceId: WORKSPACE_ID,
+      initialized: true,
       projectName: '硕士论文',
       templateDecided: true,
       template: { packId: HIT_PACK_ID, kind: 'built-in', name: 'HIT 硕士毕设' },

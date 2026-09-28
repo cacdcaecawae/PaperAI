@@ -878,7 +878,9 @@ list(): ProjectRecord[]
 /**
  * Record the template set a project writes against. `null` records the
  * explicit choice to write without a template; either way the project counts
- * as decided, so the first-open prompt does not return.
+ * as decided, so the first-open prompt does not return. The project root
+ * must still be a directory when the queued write runs, not only when it
+ * was requested, so a removed or replaced root records no choice.
  * @param id - PaperAI project id.
  * @param packId - template set id, or `null` for no template.
  * @returns the updated record.

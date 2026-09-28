@@ -104,6 +104,8 @@ export interface PaperAIDocumentRow {
 /** Read-only Workspace summary; without a PaperAI project, its template is undecided and documents are empty. */
 export interface PaperAIProjectOverview {
   readonly workspaceId: WorkspaceId
+  /** Whether a PaperAI project exists for the Workspace; `false` until an explicit action creates one. */
+  readonly initialized: boolean
   readonly projectName: string
   /** Whether the user has decided the project's template set (including "none"). */
   readonly templateDecided: boolean

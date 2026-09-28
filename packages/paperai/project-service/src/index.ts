@@ -228,7 +228,9 @@ export class PaperProjectService extends Service {
   /**
    * Record the template set a project writes against. `null` records the
    * explicit choice to write without a template; either way the project counts
-   * as decided, so the first-open prompt does not return.
+   * as decided, so the first-open prompt does not return. The project root
+   * must still be a directory when the queued write runs, not only when it
+   * was requested, so a removed or replaced root records no choice.
    * @param id - PaperAI project id.
    * @param packId - template set id, or `null` for no template.
    * @returns the updated record.
@@ -237,6 +239,9 @@ export class PaperProjectService extends Service {
     return this.enqueue(async () => {
       const project = this.ctx.paperRepository.getProject(id)
       if (project === undefined) throw new Error(`PaperAI project not found: ${id}`)
+      if (!(await stat(project.rootPath)).isDirectory()) {
+        throw new Error(`PaperAI project path '${project.rootPath}' exists but is not a directory`)
+      }
       const now = new Date().toISOString()
       const next: ProjectRecord = { ...project, templateDecidedAt: now, updatedAt: now }
       if (packId === null) delete next.templatePackId

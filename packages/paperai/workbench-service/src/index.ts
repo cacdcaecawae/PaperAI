@@ -447,6 +447,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
     const project = await this.findProject(workspace)
     return project === undefined ? {
       workspaceId: workspace.id,
+      initialized: false,
       projectName: workspace.title,
       templateDecided: false,
       templatePackId: null,
@@ -1189,6 +1190,7 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
         updatedAt: document.updatedAt,
       }))
     return {
+      initialized: true,
       workspaceId,
       projectName: project.name,
       templateDecided: project.templateDecidedAt !== undefined,
