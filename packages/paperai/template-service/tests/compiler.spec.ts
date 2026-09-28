@@ -87,14 +87,15 @@ describe('compileTemplateDraft', () => {
 
   it('requires every unnumbered heading of a formatting reference that declares no sections', async () => {
     const compiled = await compileFormatReference([
-      ['摘  要', 'heading 1'], ['ABSTRACT', 'heading 1'],
+      // Section titles a sample sets in body text still count; only a heading style marks any other title.
+      ['摘  要', 'heading 1'], ['ABSTRACT', 'Normal'],
       ['致  谢\t30', 'TOC 1'],
       ['第1章  绪论', 'heading 1'], ['1.1  研究背景', 'heading 2'], ['1.2.1 国内研究现状', 'heading 3'],
       ['第一章  绪论', 'heading 1'], ['一、研究背景', 'heading 2'], ['1、国内研究现状', 'heading 3'],
       ['Chapter 1 Introduction', 'heading 1'], ['第十二章 结论', 'heading 1'],
       ['第一节  研究背景', 'heading 2'], ['第2节 研究现状', 'heading 2'], ['1) 研究方法', 'heading 3'], ['①研究内容', 'heading 3'],
       ['图1-1  系统结构', 'heading 1'], ['（摘要应说明研究工作）', 'heading 1'],
-      ['学位论文原创性声明', 'heading 1'], ['致  谢', 'heading 1'],
+      ['学位论文原创性声明', 'Normal'], ['致  谢', 'Normal'], ['本文遵守学位论文原创性声明。', 'Normal'],
       ['条标题 4号字，建议段前0.5行，段后0.5行', 'heading 2'], ['政策建议', 'heading 1'],
     ])
 

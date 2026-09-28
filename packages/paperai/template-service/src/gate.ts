@@ -11,7 +11,7 @@ import type {
   TemplateContract,
   TemplateRule,
 } from '@paperai/domain'
-import { parseBodyInspection, TOC_STYLE } from './inspection.ts'
+import { isHeadingParagraph, parseBodyInspection } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'message'>
@@ -302,9 +302,7 @@ function styleCandidates(inspected: readonly InspectedWordNode[], target: string
 }
 
 function isHeading(node: InspectedWordNode | undefined): boolean {
-  if (node === undefined || TOC_STYLE.test(node.styleName ?? '')) return false
-  return node.styleName?.toLowerCase().includes('heading') === true
-    || /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+|摘\s*要$|Abstract$|目\s*录$|参考文献$|结\s*论$)/u.test(node.text.trim())
+  return node !== undefined && isHeadingParagraph(node.text, node.styleName)
 }
 
 function fieldHasValue(actual: string, templateText: string | undefined): boolean {

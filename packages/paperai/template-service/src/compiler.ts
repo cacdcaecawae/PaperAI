@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { parseBodyInspection, TOC_STYLE } from './inspection.ts'
+import { isHeadingParagraph, parseBodyInspection } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -155,7 +155,7 @@ function compileNode(
   const style = inspected?.format ?? {}
   const kind = textNode.kind === 'table'
     ? 'table'
-    : isHeading(textNode.text, inspected?.styleName) ? 'heading' : textNode.kind
+    : isHeadingParagraph(textNode.text, inspected?.styleName) ? 'heading' : textNode.kind
   return {
     id: DocumentNodeId(`node-${digest(`${documentId}\0${textNode.officePath}`).slice(0, 24)}`),
     documentId,
@@ -389,13 +389,6 @@ function isFixedText(text: string, usage: TemplateUsage): boolean {
 
 function withoutWhitespace(text: string): string {
   return text.replaceAll(/\s+/gu, '')
-}
-
-function isHeading(text: string, styleName: string | undefined): boolean {
-  if (TOC_STYLE.test(styleName ?? '')) return false
-  if (styleName?.toLowerCase().includes('heading') === true) return true
-  const trimmed = text.trim()
-  return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+|摘\s*要$|Abstract$|目\s*录$|参考文献$|结\s*论$)/u.test(trimmed)
 }
 
 function sectionLabel(text: string): string {

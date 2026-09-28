@@ -1,7 +1,26 @@
 /** Validation of OfficeCLI inspection values used by template compilation and checks. */
 
 /** Word's table-of-contents entry styles, such as `toc 1`, `TOC1`, or `目录 1`; their text repeats a heading. */
-export const TOC_STYLE = /^(?:toc|目录)\s*\d+$/iu
+const TOC_STYLE = /^(?:toc|目录)\s*\d+$/iu
+
+/**
+ * Whether a paragraph is a heading, for a template sample and a checked manuscript alike. A Word heading style
+ * counts, a TOC entry style never does, and so does text only a heading carries: a numbered chapter or section,
+ * or a common thesis section title set in body text, such as `致  谢`, `ABSTRACT`, or an originality declaration.
+ * OfficeCLI reports no outline level, so any other title set in body text is not recognized.
+ * @param text - paragraph text.
+ * @param styleName - paragraph style name, when it has one.
+ * @returns true for a heading.
+ */
+export function isHeadingParagraph(text: string, styleName: string | undefined): boolean {
+  if (TOC_STYLE.test(styleName ?? '')) return false
+  if (styleName?.toLowerCase().includes('heading') === true) return true
+  const trimmed = text.trim()
+  const compact = trimmed.replaceAll(/\s+/gu, '')
+  return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+)/u.test(trimmed)
+    || /^(?:摘要|abstract|目录|结论|参考文献|致谢|acknowledge?ments?)$/iu.test(compact)
+    || (compact.length <= 30 && /(?:原创性|独创性)声明/u.test(compact) && !/[。，；：]/u.test(compact))
+}
 
 /** One body child with safe primitive format evidence. */
 export interface InspectedWordNode {

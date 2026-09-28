@@ -150,7 +150,7 @@ describe('checkTemplateContract', () => {
       children: [
         { path: '/body/p[1]', type: 'paragraph', text: '结论', style: 'toc 1', format: {} },
         { path: '/body/p[2]', type: 'paragraph', text: '本文结论如下。', style: 'Normal', format: {} },
-        { path: '/body/p[3]', type: 'paragraph', text: '致  谢', style: 'heading 1', format: {} },
+        { path: '/body/p[3]', type: 'paragraph', text: '致  谢', style: 'Normal', format: {} },
       ],
       valid: true,
     }
