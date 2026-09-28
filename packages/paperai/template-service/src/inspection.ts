@@ -1,9 +1,9 @@
 /** Validation of OfficeCLI inspection values used by template compilation and checks. */
 
-/** One body child with safe primitive format evidence. */
 /** Word's table-of-contents entry styles, such as `toc 1`, `TOC1`, or `目录 1`; their text repeats a heading. */
 export const TOC_STYLE = /^(?:toc|目录)\s*\d+$/iu
 
+/** One body child with safe primitive format evidence. */
 export interface InspectedWordNode {
   readonly path: string
   readonly type: string
