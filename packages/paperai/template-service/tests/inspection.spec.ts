@@ -61,10 +61,11 @@ describe('isHeadingParagraph', () => {
   })
 
   it('reads a common section title in body text through a trailing note, as sectionKey() compares it', () => {
-    for (const text of ['结论（本章总结）', '致  谢(可选)', '学位论文原创性声明（须签字）']) {
+    for (const text of ['结论（本章总结）', '致  谢(可选)', '学位论文原创性声明（须签字）', '（英文）摘要', '（硕士）学位论文原创性声明']) {
       expect(isHeadingParagraph(text, 'Normal'), text).toBe(true)
     }
     expect(isHeadingParagraph('（本章总结）', 'Normal')).toBe(false)
+    expect(isHeadingParagraph('（英文）摘要应简明扼要', 'Normal')).toBe(false)
   })
 
   it('compares section titles without their number, whitespace, or case', () => {
