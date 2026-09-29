@@ -20,7 +20,7 @@ import type {
   TemplateOrigin,
 } from '@paperai/domain'
 import type PaperRepository from '@paperai/repository'
-import { compileTemplateDraft } from './compiler.ts'
+import { COMPILER_REVISION, compileTemplateDraft } from './compiler.ts'
 import { sectionKey } from './inspection.ts'
 import type { CompiledTemplateDraft } from './compiler.ts'
 import { checkTemplateContract } from './gate.ts'
@@ -231,8 +231,8 @@ export class PaperTemplateService extends Service {
 
   /**
    * Install selected members, verifying package bytes before OfficeCLI inspection.
-   * Repeating the same project, pack version, member, and source digest returns
-   * the existing draft or confirmed contract without another compilation.
+   * Repeating the same project, pack version, member, and source digest under the same
+   * compiler revision returns the existing draft or confirmed contract without another compilation.
    * @param input - project, pack, and optional member selection.
    * @param signal - optional cancellation signal.
    * @returns contracts in manifest order.
@@ -244,7 +244,7 @@ export class PaperTemplateService extends Service {
     const members = selectedMembers(pack, input.memberIds)
     const contracts: TemplateContract[] = []
     for (const member of members) {
-      const seed = `built-in\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
+      const seed = `built-in\0${COMPILER_REVISION}\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
       const templateId = deterministicTemplateId(seed)
       contracts.push(await this.withLease(templateId, async () => {
         const existing = this.ctx.paperRepository.getTemplate(templateId)
@@ -287,7 +287,7 @@ export class PaperTemplateService extends Service {
     validateName(input.name)
     const roles = validateRoles(input.appliesToRoles)
     const assets = await this.assets.importUpload(input.sourcePath, signal)
-    const seed = `upload\0${input.projectId}\0${assets.sourceSha256}\0${roles.join(',')}\0${input.usage}`
+    const seed = `upload\0${COMPILER_REVISION}\0${input.projectId}\0${assets.sourceSha256}\0${roles.join(',')}\0${input.usage}`
     const templateId = deterministicTemplateId(seed)
     return await this.withLease(templateId, async () => {
       const existing = this.ctx.paperRepository.getTemplate(templateId)

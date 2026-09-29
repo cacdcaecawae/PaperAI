@@ -31,6 +31,12 @@ export interface CompiledTemplateDraft {
   readonly contract: TemplateContract
 }
 
+/**
+ * Part of every compiled contract's identity. Bump it whenever a change alters what an existing sample compiles to,
+ * so repeating an install or upload compiles the sample again instead of returning the contract compiled before.
+ */
+export const COMPILER_REVISION = 1
+
 /** Inputs whose identities and immutable assets are owned by the template service. */
 export interface CompileTemplateDraftInput {
   readonly projectId: ProjectId
@@ -368,7 +374,8 @@ function isStyleRule(kind: TemplateRuleKind): boolean {
   return kind === 'font' || kind === 'font-size' || kind === 'paragraph-spacing'
 }
 
-const ANNOTATION_START = /^(?:说\s*明|填写说明|注意|要求|↑|（|\()/u
+// A keyword opens an annotation only as a whole marker (说明：, 说  明), not as the start of a title such as 注意力机制研究.
+const ANNOTATION_START = /^(?:(?:说\s*明|填写说明|注意|要求)(?=$|[\s:：,，、;；.。(（])|↑|（|\()/u
 
 function isInstruction(text: string): boolean {
   const trimmed = text.trim()
