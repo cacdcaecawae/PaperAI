@@ -253,6 +253,34 @@ describe('PaperProjectService', () => {
     expect(harness.createWorkspace).toHaveBeenCalledTimes(2)
   })
 
+  it('does not adopt a recorded root that vanishes while its Workspace is registered', async () => {
+    const root = join(await temporaryRoot('adopt-race'), 'thesis')
+    await mkdir(root)
+    const prior: ProjectRecord = {
+      id: ProjectId('project-raced'),
+      workspaceId: 'workspace-gone',
+      name: '已有名称',
+      rootPath: await realpath(root),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    const harness = await projectHarness({ projects: [prior] })
+    const { service } = await harness.load()
+    const register = harness.createWorkspace.getMockImplementation()!
+    harness.createWorkspace.mockImplementationOnce(async (path, title) => {
+      const workspace = await register(path, title)
+      await rmdir(root)
+      return workspace
+    })
+
+    await expect(service.create({ rootPath: root, existingRoot: true })).rejects.toMatchObject({ code: 'ENOENT' })
+
+    expect(harness.putProject).not.toHaveBeenCalled()
+    expect(harness.projects).toEqual([prior])
+    expect(harness.deleteWorkspace).toHaveBeenCalledOnce()
+    expect(harness.workspaces.size).toBe(0)
+  })
+
   it('refuses to create or recreate a required existing root that is missing or not a directory', async () => {
     const parent = await temporaryRoot('existing-root')
     const missing = join(parent, 'removed')

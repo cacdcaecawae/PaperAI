@@ -1146,11 +1146,8 @@ export class PaperAiWorkbenchService extends TypertRemoteService {
   private async findProject(workspace: Workspace): Promise<ProjectRecord | undefined> {
     const recorded = this.recordedProject(workspace)
     if (recorded !== undefined) return recorded
-    // A vanished root holds no project to adopt; the read then reports it as not initialized.
-    const adopted = await this.ctx.paperProjects.findByPath(workspace.path).catch((error: unknown) => {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
-      throw error
-    })
+    // A root that vanishes during the lookup rejects the read, as a missing root does before it.
+    const adopted = await this.ctx.paperProjects.findByPath(workspace.path)
     return adopted === undefined ? undefined : { ...adopted, workspaceId: String(workspace.id) }
   }
 

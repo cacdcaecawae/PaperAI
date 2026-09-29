@@ -147,6 +147,11 @@ async function canonicalPathKey(path: string): Promise<string> {
   }
 }
 
+/** A recorded project root must still be a directory; a missing one rejects with ENOENT. */
+async function requireDirectory(path: string): Promise<void> {
+  if (!(await stat(path)).isDirectory()) throw new Error(`PaperAI project path '${path}' exists but is not a directory`)
+}
+
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
@@ -239,9 +244,7 @@ export class PaperProjectService extends Service {
     return this.enqueue(async () => {
       const project = this.ctx.paperRepository.getProject(id)
       if (project === undefined) throw new Error(`PaperAI project not found: ${id}`)
-      if (!(await stat(project.rootPath)).isDirectory()) {
-        throw new Error(`PaperAI project path '${project.rootPath}' exists but is not a directory`)
-      }
+      await requireDirectory(project.rootPath)
       const now = new Date().toISOString()
       const next: ProjectRecord = { ...project, templateDecidedAt: now, updatedAt: now }
       if (packId === null) delete next.templatePackId
@@ -342,9 +345,7 @@ export class PaperProjectService extends Service {
     const existing = await this.uniqueProject(path)
     if (existing === undefined) return undefined
     const rootPath = await realpath(resolve(path))
-    if (!(await stat(rootPath)).isDirectory()) {
-      throw new Error(`PaperAI project path '${rootPath}' exists but is not a directory`)
-    }
+    await requireDirectory(rootPath)
     const priorWorkspace = await this.ctx.workspaceRegistry.resolveByPath(rootPath)
     const workspace = priorWorkspace ?? await this.ctx.workspaceRegistry.create(rootPath, existing.name)
     if (existing.workspaceId === String(workspace.id) && existing.rootPath === rootPath) {
@@ -357,6 +358,8 @@ export class PaperProjectService extends Service {
       updatedAt: new Date().toISOString(),
     }
     try {
+      // The root may vanish while the registry resolves it; check it again where the association is published.
+      await requireDirectory(rootPath)
       await this.ctx.paperRepository.putProject(project)
     } catch (error) {
       return await this.rollback(error, undefined, priorWorkspace === undefined ? workspace : undefined, undefined)

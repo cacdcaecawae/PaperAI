@@ -688,8 +688,11 @@ describe('PaperAiWorkbenchService', () => {
     await expect(h.service.inspectProject({ workspaceId: WorkspaceId('missing') })).rejects.toThrow(/does not exist/)
     const listProjects = vi.spyOn(h.ctx.paperRepository, 'listProjects').mockReturnValue([])
     await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).rejects.toThrow(/not initialized/)
-    vi.spyOn(h.ctx.paperProjects, 'findByPath').mockRejectedValueOnce(Object.assign(new Error('root removed'), { code: 'ENOENT' }))
-    await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).rejects.toThrow(/not initialized/)
+    // A root removed during the lookup is unavailable, not an uninitialized project that offers creation.
+    const removed = () => Object.assign(new Error('root removed'), { code: 'ENOENT' })
+    vi.spyOn(h.ctx.paperProjects, 'findByPath').mockRejectedValueOnce(removed()).mockRejectedValueOnce(removed())
+    await expect(h.service.inspectProject({ workspaceId: WORKSPACE_ID })).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(h.service.overview({ workspaceId: WORKSPACE_ID })).rejects.toMatchObject({ code: 'ENOENT' })
     listProjects.mockRestore()
     const plan = { documentId: DOCUMENT_ID, headCommitId: DocumentCommitId('commit-1'), sha256: 'digest', workingPath: h.document.workingPath }
     h.document = { ...h.document, projectId: ProjectId('another') }
