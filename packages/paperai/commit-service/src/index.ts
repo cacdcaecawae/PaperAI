@@ -597,6 +597,7 @@ export class PaperCommitService extends Service {
           engineMutations.push({
             type: 'replace-text',
             officePath: node.officePath,
+            baseText: node.text,
             text: mutation.nextText,
             ...(mutation.runs === undefined ? {} : { runs: mutation.runs }),
             ...(mutation.paragraphs === undefined ? {} : { paragraphs: mutation.paragraphs }),
@@ -621,8 +622,8 @@ export class PaperCommitService extends Service {
             type: 'insert-paragraph',
             text: mutation.text,
             ...(mutation.style === undefined ? {} : { style: mutation.style }),
-            ...(after === undefined ? {} : { after: after.officePath }),
-            ...(before === undefined ? {} : { before: before.officePath }),
+            ...(after !== undefined ? { after: after.officePath, baseText: after.text }
+              : before !== undefined ? { before: before.officePath, baseText: before.text } : {}),
           })
           operations.push({
             type: mutation.type,
@@ -639,7 +640,7 @@ export class PaperCommitService extends Service {
               `node '${node.id}' text changed since the deletion was prepared`,
             )
           }
-          engineMutations.push({ type: 'remove', officePath: node.officePath })
+          engineMutations.push({ type: 'remove', officePath: node.officePath, baseText: node.text })
           operations.push({
             type: mutation.type,
             nodeId: node.id,

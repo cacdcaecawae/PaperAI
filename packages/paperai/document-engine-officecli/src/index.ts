@@ -15,8 +15,8 @@ import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subpr
 import { DocumentEngine } from '@paperai/document-engine'
 import type { EngineMutation, EngineParagraphStyle, EngineTextNode, EngineValidation } from '@paperai/document-engine'
 import type { CapabilityHealth } from '@paperai/domain'
-import { applyDocumentMutations } from './document-mutations.ts'
-import { resolveOfficePath } from './office-path.ts'
+import { applyDocumentMutations, paragraphStyle } from './document-mutations.ts'
+import { bindMutationTargets, resolveOfficePath } from './office-path.ts'
 import { replaceParagraphXml } from './paragraph-xml.ts'
 import {
   convertLegacyDocument,
@@ -129,6 +129,17 @@ function packagedCommand(): { command: string; prefix: string[] } {
   return { command: process.execPath, prefix: [join(dirname(packagePath), bin)] }
 }
 
+/** Defined paragraph styles with an ID; a missing display name falls back to the ID. */
+function paragraphStyles(styles: XmlElement | undefined): EngineParagraphStyle[] {
+  return Array.from(styles?.getElementsByTagNameNS(WORD_NS, 'style') ?? []).flatMap((style) => {
+    if (style.getAttributeNS(WORD_NS, 'type') !== 'paragraph') return []
+    const id = style.getAttributeNS(WORD_NS, 'styleId')
+    if (id === null || id === '') return []
+    const name = style.getElementsByTagNameNS(WORD_NS, 'name')[0]?.getAttributeNS(WORD_NS, 'val')
+    return [{ id, name: name || id }]
+  })
+}
+
 /** OfficeCLI-backed `ctx.documentEngine`: every operation runs through the pinned launcher under one per-file lease. */
 export class OfficeCliDocumentEngine extends DocumentEngine {
   static inject = ['subprocess']
@@ -216,19 +227,28 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
   }
 
   override readTextNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
-    return this.withLease(filePath, async () => {
-      const result = await this.run(['view', filePath, 'text', '--max-lines', '100000'], signal)
-      return result.stdout.split(/\r?\n/u).flatMap((line): EngineTextNode[] => {
-        const parsed = this.parseTextLine(line)
-        if (parsed === undefined) return []
-        return [{
-          officePath: parsed.officePath,
-          text: parsed.text,
-          kind: parsed.officePath.includes('/tbl[')
-            ? 'table'
-            : parsed.officePath.includes('/p[') ? 'paragraph' : 'unknown',
-        }]
-      })
+    return this.withLease(filePath, () => this.textNodes(filePath, signal))
+  }
+
+  private async textNodes(filePath: string, signal?: AbortSignal): Promise<EngineTextNode[]> {
+    const result = await this.run(['view', filePath, 'text', '--json'], signal)
+    const { elements } = this.parseEnvelope(result.stdout)
+    if (!Array.isArray(elements)) throw new OfficeCliError('OfficeCLI returned no text elements')
+    return elements.flatMap((element: unknown): EngineTextNode[] => {
+      if (element === null || typeof element !== 'object' || !('path' in element)
+        || typeof element.path !== 'string' || !element.path.startsWith('/')) {
+        throw new OfficeCliError('OfficeCLI returned an invalid text element')
+      }
+      // OfficeCLI omits text for structural records such as body bookmarks.
+      if (!('text' in element)) return []
+      if (typeof element.text !== 'string') throw new OfficeCliError('OfficeCLI returned invalid node text')
+      return [{
+        officePath: element.path,
+        text: element.text,
+        kind: element.path.includes('/tbl[')
+          ? 'table'
+          : element.path.includes('/p[') ? 'paragraph' : 'unknown',
+      }]
     })
   }
 
@@ -237,21 +257,13 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
   }
 
   override readParagraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
-    return this.withLease(filePath, () => this.paragraphStyles(filePath, signal))
+    return this.withLease(filePath, async () => paragraphStyles(await this.stylesPart(filePath, signal)))
   }
 
-  private async paragraphStyles(filePath: string, signal?: AbortSignal): Promise<EngineParagraphStyle[]> {
+  private async stylesPart(filePath: string, signal?: AbortSignal): Promise<XmlElement | undefined> {
     const result = await this.run(['raw', filePath, '/styles', '--json'], signal)
     const data = this.parseEnvelope(result.stdout).data
-    if (data === '(no styles)') return []
-    const root = parseWordXml(data, 'styles')
-    return Array.from(root.getElementsByTagNameNS(WORD_NS, 'style')).flatMap((style) => {
-      if (style.getAttributeNS(WORD_NS, 'type') !== 'paragraph') return []
-      const id = style.getAttributeNS(WORD_NS, 'styleId')
-      if (id === null || id === '') return []
-      const name = style.getElementsByTagNameNS(WORD_NS, 'name')[0]?.getAttributeNS(WORD_NS, 'val')
-      return [{ id, name: name || id }]
-    })
+    return data === '(no styles)' ? undefined : parseWordXml(data, 'styles')
   }
 
   override inspect(filePath: string, officePath: string, depth = 2, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -267,10 +279,17 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       const raw = await this.run(['raw', filePath, '/document', '--json'], signal)
       const data = this.parseEnvelope(raw.stdout).data
       const root = parseWordXml(data, 'document')
-      const stylesNeeded = mutations.some(mutation => mutation.type === 'insert-paragraph'
+      const identifies = mutations.some(mutation => mutation.type === 'remove' || (mutation.type === 'insert-paragraph'
+        && (mutation.after !== undefined || mutation.before !== undefined)))
+      const indexed = identifies ? await this.textNodes(filePath, signal) : []
+      // A paragraph style may number a removal or anchor target, whose index reading then carries a list marker.
+      const styled = identifies && Array.from(bindMutationTargets(root, mutations.filter(mutation => mutation.type !== 'replace-text'))
+        .values()).some(target => paragraphStyle(target) !== undefined)
+      const stylesNeeded = styled || mutations.some(mutation => mutation.type === 'insert-paragraph'
         ? mutation.style !== undefined
         : mutation.type === 'replace-text' && mutation.paragraphs?.some(paragraph => paragraph.format?.style !== undefined))
-      const styles = stylesNeeded ? await this.paragraphStyles(filePath, signal) : []
+      const stylesXml = stylesNeeded ? await this.stylesPart(filePath, signal) : undefined
+      const styles = paragraphStyles(stylesXml)
       const resolveStyle = (name: string): string => {
         const style = styles.find(style => style.id === name)
           ?? styles.find(style => style.id.toLowerCase() === name.toLowerCase())
@@ -278,8 +297,8 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
         if (style === undefined) throw new OfficeCliError(`UNKNOWN_PARAGRAPH_STYLE: '${name}' is not a paragraph style in this document`)
         return style.id
       }
-      applyDocumentMutations(root, mutations,
-        (paragraph, mutation) => { replaceParagraphXml(paragraph, mutation, resolveStyle) }, resolveStyle)
+      applyDocumentMutations(root, mutations, indexed,
+        (group, mutation) => replaceParagraphXml(group, mutation, resolveStyle), resolveStyle, stylesXml)
       const body = resolveOfficePath(root, '/body')
       // The package part preserves legacy attributes; the /document alias reparses typed OpenXML and renames them.
       const commands = [{ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace',
@@ -413,23 +432,6 @@ export class OfficeCliDocumentEngine extends DocumentEngine {
       timer.unref()
       this.idle.set(filePath, timer)
     })
-  }
-
-  private parseTextLine(line: string): { officePath: string; text: string } | undefined {
-    if (!line.startsWith('[')) return undefined
-    let nested = 0
-    for (let index = 1; index < line.length; index += 1) {
-      if (line[index] === '[') nested += 1
-      if (line[index] !== ']') continue
-      if (nested > 0) {
-        nested -= 1
-        continue
-      }
-      const officePath = line.slice(1, index)
-      if (!officePath.startsWith('/')) return undefined
-      return { officePath, text: line.slice(index + 1).trimStart() }
-    }
-    return undefined
   }
 
   private parseEnvelope(stdout: string): Record<string, unknown> {

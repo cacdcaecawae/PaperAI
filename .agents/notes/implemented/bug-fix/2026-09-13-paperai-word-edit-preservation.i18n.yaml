@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-13-paperai-word-edit-preservation.md
-2026-09-13-paperai-word-edit-preservation.md: ed9f62d5b3abbe5f8f47d1fae789386bcccfa4b2
-2026-09-13-paperai-word-edit-preservation.zh.md: 734a87371f19cbb42f9cc447fa9f0074519cd18a
+2026-09-13-paperai-word-edit-preservation.md: 58be2b6043d5c3d31f793b56891ffcd6613dbe0f
+2026-09-13-paperai-word-edit-preservation.zh.md: aa2125d429974921a466965bf37de5c82e64ce1b
