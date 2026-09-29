@@ -25,12 +25,12 @@ export function headingLevel(styleName: string | undefined): number | undefined 
 /**
  * A section number opening a heading, in every form a sample numbers its sections: 第5章, 第一节, Chapter 1 (each with
  * an optional colon, period, or 、 after it, as in 第1章：绪论), （一） or (1), ①, 1、, 1), 一、 or 一 followed by a space,
- * 1.1, and 1． or 1 followed by a space. Specific forms come first, so 1、 is not read as 1 followed by text, and a
- * bare number needs a separator, so 2019年 is not numbered.
+ * 1.1 (with the same optional delimiter, as in 1.1、研究背景), and 1． or 1 followed by a space. Specific forms come
+ * first, so 1、 is not read as 1 followed by text, and a bare number needs a separator, so 2019年 is not numbered.
  */
 const NUMERALS = '一二三四五六七八九十百零〇两'
 const SECTION_NUMBER = new RegExp(`^(?:(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chapter\\s+\\d+)(?:\\s*[:.、])?|\\([\\d${NUMERALS}]+\\)|[①-⑳]|\\d+[、)）]|[${NUMERALS}]+[、．.)）\\s]`
-  + '|\\d+(?:\\.\\d+)+[．.]?|\\d+[．.\\s])\\s*', 'iu')
+  + '|\\d+(?:\\.\\d+)+(?:\\s*[.:、])?|\\d+[．.\\s])\\s*', 'iu')
 
 /**
  * Full-width ASCII forms and the ideographic space as their half-width forms, as East Asian Word and WPS files often
@@ -91,6 +91,16 @@ export function sectionLabel(text: string): string {
  */
 export function hasSectionNumber(text: string): boolean {
   return SECTION_NUMBER.test(halfWidth(text).trim())
+}
+
+/**
+ * The form of a paragraph's opening section number with each number replaced by `N`, so sibling sections share it:
+ * `1. 研究内容` and `2. 研究方法` both read `N.`, while the list item `1、研究对象` reads `N、`.
+ * @param text - paragraph text.
+ * @returns the number form, or `undefined` when no section number opens the paragraph.
+ */
+export function sectionNumberForm(text: string): string | undefined {
+  return SECTION_NUMBER.exec(halfWidth(text).trim())?.[0].trim().replaceAll(new RegExp(`[\\d${NUMERALS}]+`, 'gu'), 'N')
 }
 
 /**

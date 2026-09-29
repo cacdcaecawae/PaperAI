@@ -11,7 +11,7 @@ import type {
   TemplateContract,
   TemplateRule,
 } from '@paperai/domain'
-import { headingLevel, isHeadingParagraph, parseBodyInspection, sectionKey } from './inspection.ts'
+import { hasSectionNumber, headingLevel, isHeadingParagraph, parseBodyInspection, sectionKey, sectionNumberForm } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'message'>
@@ -281,11 +281,13 @@ function sectionNodes(
   heading: string,
 ): readonly EngineTextNode[] {
   const start = nodes.findIndex(node => canonical(node.text).includes(canonical(heading)))
-  if (start < 0) return []
+  const opening = nodes[start]
+  if (opening === undefined) return []
+  const form = sectionNumberForm(opening.text)
   let end = nodes.length
   for (let index = start + 1; index < nodes.length; index += 1) {
     const candidate = nodes[index]
-    if (candidate !== undefined && isHeading(inspectedByPath.get(candidate.officePath))) {
+    if (candidate !== undefined && endsSection(inspectedByPath.get(candidate.officePath), form)) {
       end = index
       break
     }
@@ -300,6 +302,16 @@ function styleCandidates(inspected: readonly InspectedWordNode[], target: string
   const level = /heading-(\d)/u.exec(target)?.[1]
   if (level === undefined) return textBearing
   return textBearing.filter(node => headingLevel(node.styleName) === Number(level))
+}
+
+/**
+ * Whether a paragraph ends a section whose own number has the given form. A styled heading or a common section title
+ * does; a numbered paragraph set in body text does only with the section's own number form (2. after 1.), so a list
+ * item inside the section, such as 1、研究对象, stays part of its prose.
+ */
+function endsSection(node: InspectedWordNode | undefined, form: string | undefined): boolean {
+  if (node === undefined || !isHeadingParagraph(node.text, node.styleName)) return false
+  return headingLevel(node.styleName) !== undefined || !hasSectionNumber(node.text) || sectionNumberForm(node.text) === form
 }
 
 function isHeading(node: InspectedWordNode | undefined): boolean {

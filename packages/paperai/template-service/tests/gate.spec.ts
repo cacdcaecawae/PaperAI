@@ -213,6 +213,18 @@ describe('checkTemplateContract', () => {
     expect(errorReport.findings[0]?.message).toContain('engine error')
   })
 
+  it('counts a section through its numbered list items and ends it at the next number of its own form', async () => {
+    const text = ['1. 研究内容', '本节正文', '1、研究对象', '对象说明', '2. 研究方法', '方法正文'].map((value, index) => ({
+      officePath: `/body/p[${index + 1}]`, text: value, kind: 'paragraph' as const,
+    }))
+    const children = text.map(node => ({ path: node.officePath, type: 'paragraph', text: node.text, style: 'Normal', format: {} }))
+    const report = await checkTemplateContract(engine({ text, children, valid: true }), document, contract([
+      rule('minimum-characters', { minimum: 14, heading: '研究内容' }),
+      rule('minimum-characters', { minimum: 15, heading: '研究内容' }),
+    ]), 'delivery-export')
+    expect(report.findings.map(finding => [finding.code, finding.message])).toEqual([['minimum_characters', '字数不足：14/15']])
+  })
+
   it('passes satisfied defaults and keeps warning-only style evidence non-blocking', async () => {
     const rules: TemplateRule[] = [
       rule('font', { eastAsia: '宋体', latin: 'Times New Roman' }),

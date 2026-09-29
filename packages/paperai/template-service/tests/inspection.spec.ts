@@ -77,6 +77,8 @@ describe('isHeadingParagraph', () => {
     expect(sectionKey('第二节、研究方法')).toBe(sectionKey('研究方法'))
     expect(sectionKey('Chapter 1: Introduction')).toBe(sectionKey('introduction'))
     expect(sectionKey('Chapter 2. Methods')).toBe(sectionKey('methods'))
+    expect(sectionKey('1.1、研究背景')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('1.2.3：研究方法')).toBe(sectionKey('研究方法'))
     // Only a trailing note is dropped; a parenthetical that title text follows belongs to the title.
     expect(sectionKey('研究背景（示例）')).toBe(sectionKey('研究背景'))
     expect(sectionKey('研究背景（示例')).toBe(sectionKey('研究背景'))
