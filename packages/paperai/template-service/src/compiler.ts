@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { hasSectionNumber, isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from './inspection.ts'
+import { halfWidth, hasSectionNumber, isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -240,7 +240,7 @@ function compileRequiredSections(
     if (declared === undefined) {
       // Numbered chapters and sections, captions, and annotations belong to the sample's own content.
       return headings.filter(node => node.text.length <= 100 && !isFormatAnnotation(node.text)
-        && !hasSectionNumber(node.text) && !CAPTION.test(node.text.trim()))
+        && !hasSectionNumber(node.text) && !CAPTION.test(halfWidth(node.text).trim()))
     }
     return declared.map((title) => {
       const node = headings.find(heading => sectionKey(heading.text) === sectionKey(title))
@@ -378,7 +378,8 @@ function isInstruction(text: string): boolean {
  * 页眉检测方法 still name sections.
  */
 function isFormatAnnotation(text: string): boolean {
-  const trimmed = text.trim()
+  // Full-width digits and parentheses read as their ASCII forms, as for section numbers.
+  const trimmed = halfWidth(text).trim()
   return ANNOTATION_START.test(trimmed)
     || /(?:小?[初一二三四五六七八\d]+号(?:字|[宋黑楷仿隶]|加粗|粗体|[）)])|段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
 }

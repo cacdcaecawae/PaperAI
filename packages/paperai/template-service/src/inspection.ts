@@ -38,7 +38,7 @@ const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chap
  * @param text - heading text.
  * @returns the text with half-width letters, digits, punctuation, and spaces.
  */
-function halfWidth(text: string): string {
+export function halfWidth(text: string): string {
   return text.replaceAll(/[\uFF01-\uFF5E]/gu, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
     .replaceAll('\u3000', ' ')
 }
