@@ -103,6 +103,8 @@ describe('compileTemplateDraft', () => {
       ['实验结果（含分析）与讨论', 'heading 1'], ['二号楼设计', 'heading 1'],
       ['Figure 1 System overview', 'heading 1'], ['Table 2 Results', 'heading 1'], ['图一 系统结构', 'heading 1'],
       ['第１章　绪论', 'heading 1'], ['图１ 系统结构', 'heading 1'], ['一级标题（４号黑体）', 'heading 1'],
+      ['一级标题（小二号，黑体）', 'heading 1'], ['二级标题（三号、加粗）', 'heading 2'],
+      ['［12］作者．题名', 'heading 1'], ['[3] Smith J. Title', 'heading 1'], ['【4】作者．题名', 'heading 1'],
     ])
 
     // The annotation compiles its own format rules, but only real headings become sections.

@@ -229,6 +229,8 @@ function fieldFor(text: string): FieldDefinition | undefined {
 // numbers, Chapter N, and figure or table captions. Spelled-out or Roman chapter numbers are not recognized.
 /** A figure or table caption, which a sample may set in a heading style: 图1-1, 表 2, 图一, Figure 1, Fig. 2, Table 3. */
 const CAPTION = /^(?:[图表]\s*[\d一二三四五六七八九十]|(?:fig(?:ure)?\.?|table)\s*\d)/iu
+/** A numbered bibliography entry, which a sample may set in a heading style: [12] 作者．题名, ［3］, 【4】, 〔5〕. */
+const CITATION = /^[[【〔]\s*\d+\s*[\]】〕]/u
 
 function compileRequiredSections(
   nodes: readonly DocumentNode[],
@@ -238,9 +240,12 @@ function compileRequiredSections(
   if (usage === 'format-reference') {
     const headings = nodes.filter(node => node.kind === 'heading' && node.text.trim().length > 0)
     if (declared === undefined) {
-      // Numbered chapters and sections, captions, and annotations belong to the sample's own content.
-      return headings.filter(node => node.text.length <= 100 && !isFormatAnnotation(node.text)
-        && !hasSectionNumber(node.text) && !CAPTION.test(halfWidth(node.text).trim()))
+      // Numbered chapters and sections, captions, citations, and annotations belong to the sample's own content.
+      return headings.filter((node) => {
+        const text = halfWidth(node.text).trim()
+        return node.text.length <= 100 && !isFormatAnnotation(node.text)
+          && !hasSectionNumber(node.text) && !CAPTION.test(text) && !CITATION.test(text)
+      })
     }
     return declared.map((title) => {
       const node = headings.find(heading => sectionKey(heading.text) === sectionKey(title))
@@ -373,15 +378,16 @@ function isInstruction(text: string): boolean {
 
 /**
  * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行, instead of naming a section.
- * It is told by an annotation opening or a measurement (a size in 号 followed by 字, a typeface, bold, or a closing
- * parenthesis; spacing in lines or points; a line-spacing multiple), not by vocabulary: 政策建议, 字体识别研究, and
+ * It is told by an annotation opening or a measurement (a size in 号 followed, possibly after a separator such as ，
+ * or 、, by 字, a typeface, bold, or a closing parenthesis; spacing in lines or points; a line-spacing multiple), not
+ * by vocabulary: 政策建议, 字体识别研究, and
  * 页眉检测方法 still name sections.
  */
 function isFormatAnnotation(text: string): boolean {
   // Full-width digits and parentheses read as their ASCII forms, as for section numbers.
   const trimmed = halfWidth(text).trim()
   return ANNOTATION_START.test(trimmed)
-    || /(?:小?[初一二三四五六七八\d]+号(?:字|[宋黑楷仿隶]|加粗|粗体|[）)])|段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
+    || /(?:小?[初一二三四五六七八\d]+号\s*[,、;]?\s*(?:字|[宋黑楷仿隶]|加粗|粗体|[）)])|段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
 }
 
 function isFixedText(text: string, usage: TemplateUsage): boolean {
