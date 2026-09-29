@@ -11,14 +11,26 @@ const document = (body: string) => new DOMParser().parseFromString(
 const paragraph = (text: string, id = '') => `<w:p${id === '' ? '' : ` w14:paraId="${id}"`}><w:r><w:t>${text}</w:t></w:r></w:p>`
 
 describe('original OfficeCLI path bindings', () => {
+  it('counts content-control paragraphs and tables without binding an unqualified path to their contents', () => {
+    const table = '<w:tbl><w:tr><w:tc>' + paragraph('cell') + '</w:tc></w:tr></w:tbl>'
+    const root = document(paragraph('First') + '<w:sdt><w:sdtContent>'
+      + paragraph('InSdt') + table + '</w:sdtContent></w:sdt>' + paragraph('Third') + paragraph('Fourth') + table)
+    expect(resolveOfficePath(root, '/body/p[3]').textContent).toBe('Third')
+    expect(resolveOfficePath(root, '/body/p[4]').textContent).toBe('Fourth')
+    expect(resolveOfficePath(root, '/body/tbl[2]/tr[1]/tc[1]/p[1]').textContent).toBe('cell')
+    expect(() => resolveOfficePath(root, '/body/p[2]')).toThrow('INVALID_OFFICE_PATH')
+    expect(() => resolveOfficePath(root, '/body/tbl[1]')).toThrow('INVALID_OFFICE_PATH')
+    expect(resolveOfficePath(document('<w:sdt/>' + paragraph('First')), '/body/p[1]').textContent).toBe('First')
+  })
+
   it('retains original targets after earlier paragraphs are split, inserted, and removed', () => {
     const root = document(paragraph('alpha') + paragraph('beta') + paragraph('gamma'))
     const targets = bindMutationTargets(root, [
-      { type: 'replace-text', officePath: '/body/p[1]', text: 'first\ninserted', paragraphs: [{ text: 'first' }, { text: 'inserted' }] },
-      { type: 'insert-paragraph', after: '/body/p[1]', text: 'another' },
-      { type: 'insert-paragraph', before: '/body/p[2]', text: 'before beta' },
-      { type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
-      { type: 'remove', officePath: '/body/p[3]' },
+      { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'first\ninserted', paragraphs: [{ text: 'first' }, { text: 'inserted' }] },
+      { baseText: 'alpha', type: 'insert-paragraph', after: '/body/p[1]', text: 'another' },
+      { baseText: 'beta', type: 'insert-paragraph', before: '/body/p[2]', text: 'before beta' },
+      { baseText: 'beta', type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
+      { baseText: 'gamma', type: 'remove', officePath: '/body/p[3]' },
     ])
     const alpha = targets.get('/body/p[1]')!
     const beta = targets.get('/body/p[2]')!
@@ -40,8 +52,8 @@ describe('original OfficeCLI path bindings', () => {
     const table = `<w:tbl><w:tr><w:tc>${paragraph('same')}</w:tc></w:tr></w:tbl>`
     const root = document(paragraph('same') + table + table)
     const targets = bindMutationTargets(root, [
-      { type: 'remove', officePath: '/body/tbl[1]' },
-      { type: 'replace-text', officePath: '/document/body/tbl[2]/tr[1]/tc[1]/p[1]', text: 'edited' },
+      { baseText: '[Table: 1 rows]', type: 'remove', officePath: '/body/tbl[1]' },
+      { baseText: '[Table: 1 rows]', type: 'replace-text', officePath: '/document/body/tbl[2]/tr[1]/tc[1]/p[1]', text: 'edited' },
     ])
     const firstTable = targets.get('/body/tbl[1]')!
     const secondCell = targets.get('/document/body/tbl[2]/tr[1]/tc[1]/p[1]')!
