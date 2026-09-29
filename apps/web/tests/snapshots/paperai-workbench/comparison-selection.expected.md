@@ -1,0 +1,7 @@
+- document "文档预览":
+  - paragraph: Stable paragraph normalized
+  - paragraph:
+    - text: ✎
+    - deletion: Original
+    - insertion: Later
+    - text: second paragraph
