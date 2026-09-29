@@ -244,7 +244,7 @@ export class PaperTemplateService extends Service {
     const members = selectedMembers(pack, input.memberIds)
     const contracts: TemplateContract[] = []
     for (const member of members) {
-      const seed = `built-in\0${COMPILER_REVISION}\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
+      const seed = `built-in\0compiler-${COMPILER_REVISION}\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
       const templateId = deterministicTemplateId(seed)
       contracts.push(await this.withLease(templateId, async () => {
         const existing = this.ctx.paperRepository.getTemplate(templateId)
@@ -287,7 +287,7 @@ export class PaperTemplateService extends Service {
     validateName(input.name)
     const roles = validateRoles(input.appliesToRoles)
     const assets = await this.assets.importUpload(input.sourcePath, signal)
-    const seed = `upload\0${COMPILER_REVISION}\0${input.projectId}\0${assets.sourceSha256}\0${roles.join(',')}\0${input.usage}`
+    const seed = `upload\0compiler-${COMPILER_REVISION}\0${input.projectId}\0${assets.sourceSha256}\0${roles.join(',')}\0${input.usage}`
     const templateId = deterministicTemplateId(seed)
     return await this.withLease(templateId, async () => {
       const existing = this.ctx.paperRepository.getTemplate(templateId)

@@ -106,6 +106,7 @@ describe('compileTemplateDraft', () => {
       ['一级标题（小二号，黑体）', 'heading 1'], ['二级标题（三号、加粗）', 'heading 2'],
       ['［12］作者．题名', 'heading 1'], ['[3] Smith J. Title', 'heading 1'], ['【4】作者．题名', 'heading 1'],
       ['说  明', 'heading 1'], ['注意：示例', 'heading 1'], ['注意力机制研究', 'heading 1'], ['要求工程分析', 'heading 1'],
+      ['一级标题（小二号 Times New Roman）', 'heading 1'], ['英文标题（12号 Arial）', 'heading 1'], ['3号 Reactor 设计', 'heading 1'],
     ])
 
     // The annotation compiles its own format rules, but only real headings become sections.
@@ -121,6 +122,7 @@ describe('compileTemplateDraft', () => {
       ['required-section', { text: '二号楼设计' }],
       ['required-section', { text: '注意力机制研究' }],
       ['required-section', { text: '要求工程分析' }],
+      ['required-section', { text: '3号 Reactor 设计' }],
     ])
   })
 
