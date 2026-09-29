@@ -189,6 +189,29 @@ describe('PaperAIWorkbenchController projects', () => {
     expect(overview).toHaveBeenCalledOnce()
   })
 
+  it.each(['importDocument', 'createFromTemplate'] as const)('keeps the open preview when %s completes during a composition', async (method) => {
+    const { controller, remote, store } = await openedController()
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof remote.importDocument>>>()
+    vi.spyOn(remote, method).mockReturnValueOnce(pending.promise)
+    const starting = method === 'importDocument'
+      ? controller.importDocument(WORKSPACE_ID, SESSION_ID, { fileName: 'new.docx', contentBase64: 'd29yZA==' })
+      : controller.createFromTemplate(WORKSPACE_ID, SESSION_ID, { documentType: 'proposal' })
+    controller.setComposing(SESSION_ID, true)
+    pending.resolve({ ok: true, value: {
+      status: 'imported', createdCommitId: COMMIT_2,
+      opened: documentOpenResult(REVISION_2, { resourceId: 'document:imported' as never, documentId: 'imported' as never }),
+    } })
+    await expect(starting).resolves.toEqual({ ok: true })
+    expect(store.getSnapshot().document?.documentId).not.toBe('imported')
+    expect(controller.projectStore(WORKSPACE_ID).getSnapshot().selected).toBe(RESOURCE_ID)
+
+    // The phrase then lands on the document it was typed into.
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Composed phrase' })
+    controller.setComposing(SESSION_ID, false)
+    expect(store.getSnapshot().edits).toEqual([expect.objectContaining({ nodeId: NODE_HEADING, draft: 'Composed phrase' })])
+    controller.dispose()
+  })
+
   it('keeps a later document selection when an import completes', async () => {
     const { controller, remote, store } = await openedController()
     const pending = Promise.withResolvers<Awaited<ReturnType<typeof remote.importDocument>>>()
@@ -565,6 +588,63 @@ describe('PaperAIWorkbenchController documents', () => {
 })
 
 describe('PaperAIWorkbenchController deferred previews', () => {
+  it.each(['restore', 'applyTemplate', 'detachTemplate'] as const)('withholds the old page while %s renders and lets a failed render be retried', async (operation) => {
+    const remote = successfulRemote()
+    const committed = { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) }
+    remote.restore = vi.fn<typeof remote.restore>().mockResolvedValue({ ok: true, value: committed })
+    remote.applyTemplate = vi.fn<typeof remote.applyTemplate>().mockResolvedValue({ ok: true, value: committed })
+    remote.detachTemplate = vi.fn<typeof remote.detachTemplate>().mockResolvedValue({ ok: true, value: committed })
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    const result = operation === 'restore' ? await controller.restore(SESSION_ID, COMMIT_0)
+      : operation === 'applyTemplate' ? await controller.applyTemplate(SESSION_ID, 'manuscript')
+        : await controller.detachTemplate(SESSION_ID)
+    expect(result).toEqual({ ok: true })
+    expect(store.getSnapshot()).toMatchObject({
+      action: null, previewLoading: true, document: { headCommitId: COMMIT_2, previewHtml: '' },
+    })
+    rendered.resolve(REMOTE_FAILURE)
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot()).toMatchObject({ phase: 'ready', actionError: null, document: committed.document })
+    remote.open = vi.fn<typeof remote.open>().mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    await controller.retryOpen(SESSION_ID)
+    expect(store.getSnapshot().document).toEqual(documentOpenResult(REVISION_2).document)
+    controller.dispose()
+  })
+
+  it('waits for composition to finish before automatically loading an external head', async () => {
+    const { controller, remote, store } = await openedController()
+    const open = vi.spyOn(remote, 'open').mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.setComposing(SESSION_ID, true)
+    controller.handleDocumentChanged({ documentId: DOCUMENT_ID, headCommitId: COMMIT_2, updatedAt: '2026-09-26T00:00:00Z' })
+    expect(open).not.toHaveBeenCalled()
+    await expect(controller.reloadExternal(SESSION_ID)).resolves.toMatchObject({ ok: false })
+    await expect(controller.restore(SESSION_ID, COMMIT_0)).resolves.toMatchObject({ ok: false })
+    controller.setComposing(SESSION_ID, false)
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.headCommitId).toBe(COMMIT_2) })
+    expect(open).toHaveBeenCalledOnce()
+    controller.dispose()
+  })
+
+  it.each([false, true])('runs a reconnect read skipped during composition once it ends (draft published: %s)', async (drafted) => {
+    const { controller, remote, store } = await openedController()
+    const open = vi.spyOn(remote, 'open').mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2) })
+    controller.setComposing(SESSION_ID, true)
+    controller.refreshLoaded()
+    expect(open).not.toHaveBeenCalled()
+    expect(store.getSnapshot().actionError).toBeNull()
+    if (drafted) controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Composed phrase' })
+    controller.setComposing(SESSION_ID, false)
+    await vi.waitFor(() => { expect(open).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => {
+      expect(store.getSnapshot()).toMatchObject(drafted
+        ? { document: { headCommitId: COMMIT_1 }, externalUpdate: { headCommitId: COMMIT_2 }, edits: [{ draft: 'Composed phrase' }] }
+        : { document: { headCommitId: COMMIT_2 }, edits: [] })
+    })
+    controller.dispose()
+  })
+
   it('paints a commit into the current preview and swaps in the rendered one', async () => {
     const remote = successfulRemote()
     remote.commit = vi.fn<typeof remote.commit>(async request => ({
@@ -647,6 +727,100 @@ describe('PaperAIWorkbenchController deferred previews', () => {
     expect(store.getSnapshot().document?.previewHtml).toBe(drafting ? patched : '<p>Document A</p>')
     expect(store.getSnapshot().document?.paragraphStyles).toEqual([{ id: 'StyleA', name: 'Style in A' }])
     expect(store.getSnapshot().edits).toMatchObject(drafting ? [{ draft: 'New draft in A' }] : [])
+  })
+
+  it('swaps a retained document’s rendered preview while another document is composing', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '', paragraphStyles: [] }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed in A' })
+    await controller.commitEdit(SESSION_ID)
+    const secondResource = 'document:second' as typeof RESOURCE_ID
+    vi.mocked(remote.open).mockResolvedValueOnce({ ok: true, value: documentOpenResult(REVISION_2, {
+      documentId: 'second' as typeof DOCUMENT_ID, resourceId: secondResource, previewHtml: '<p>Document B</p>',
+    }) })
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, secondResource)
+    controller.setComposing(SESSION_ID, true)
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Document A</p>' }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.setComposing(SESSION_ID, false)
+    await controller.openDocument(WORKSPACE_ID, SESSION_ID, RESOURCE_ID)
+    expect(store.getSnapshot().document?.previewHtml).toBe('<p>Document A</p>')
+    controller.dispose()
+  })
+
+  it.each([false, true])('fetches a render held back by composition once it ends (draft published: %s)', async (drafted) => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed text' })
+    await controller.commitEdit(SESSION_ID)
+    const patched = store.getSnapshot().document?.previewHtml
+    controller.setComposing(SESSION_ID, true)
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Held back</p>' }) })
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+    vi.mocked(remote.open).mockResolvedValue({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
+    if (drafted) controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Composed phrase' })
+    controller.setComposing(SESSION_ID, false)
+    if (drafted) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(remote.open).toHaveBeenCalledOnce()
+      expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+      // Discarding the phrase's draft leaves nothing to protect, so the held render is fetched after all.
+      controller.cancelEdit(SESSION_ID)
+    }
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe('<p>Fresh render</p>') })
+    controller.dispose()
+  })
+
+  it('fetches a render held back by a draft once the last draft is undone', async () => {
+    const remote = successfulRemote()
+    remote.commit = vi.fn<typeof remote.commit>(async () => ({
+      ok: true, value: { createdCommitId: COMMIT_2, ...documentOpenResult(REVISION_2, { previewHtml: '' }) },
+    }))
+    const { controller, store } = await openedController(remote)
+    const rendered = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    remote.open = vi.fn<typeof remote.open>().mockReturnValueOnce(rendered.promise)
+    controller.updateDraft(SESSION_ID, NODE_HEADING, { text: 'Committed text' })
+    await controller.commitEdit(SESSION_ID)
+    const patched = store.getSnapshot().document?.previewHtml
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Typed before the render' })
+    rendered.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Held back</p>' }) })
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+
+    // A failed fetch keeps the render held, so the next moment without a draft tries again.
+    vi.mocked(remote.open).mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'render failed' } } as never)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    await vi.waitFor(() => { expect(store.getSnapshot().previewLoading).toBe(false) })
+    expect(store.getSnapshot().document?.previewHtml).toBe(patched)
+
+    // A retry while the fetch is in flight does not fetch again.
+    const retried = Promise.withResolvers<RemoteResult<PaperAIDocumentOpenResult>>()
+    vi.mocked(remote.open).mockReturnValueOnce(retried.promise)
+    const fetches = vi.mocked(remote.open).mock.calls.length
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Typed again' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'And again' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(vi.mocked(remote.open).mock.calls.length).toBe(fetches + 1)
+    retried.resolve({ ok: true, value: documentOpenResult(REVISION_2, { previewHtml: '<p>Fresh render</p>' }) })
+    await vi.waitFor(() => { expect(store.getSnapshot().document?.previewHtml).toBe('<p>Fresh render</p>') })
+
+    // Once shown, the render is no longer held: another draft and undo fetch nothing.
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, { text: 'Later draft' })
+    controller.updateDraft(SESSION_ID, NODE_PARAGRAPH, null)
+    expect(vi.mocked(remote.open).mock.calls.length).toBe(fetches + 1)
+    controller.dispose()
   })
 
   it('records an outside working edit as a version and reopens the document with the draft kept', async () => {

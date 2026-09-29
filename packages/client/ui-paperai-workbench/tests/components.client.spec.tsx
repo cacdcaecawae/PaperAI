@@ -55,7 +55,7 @@ function workbenchState(overrides: Partial<PaperAIWorkbenchState> = {}): PaperAI
   return {
     retained: [], scrollTop: 0, reveal: null,
     phase: 'idle', document: null, edits: [], action: null, panel: null, diff: null, typeSuggestion: null,
-    exportReceipt: null, externalUpdate: null, error: null, actionError: null, ...overrides,
+    exportReceipt: null, externalUpdate: null, previewLoading: false, error: null, actionError: null, ...overrides,
   }
 }
 
@@ -132,6 +132,7 @@ function workbenchProps(state: PaperAIWorkbenchState, project: PaperAIProjectSta
     retryOpen: vi.fn(async () => {}),
     showPanel: vi.fn(),
     updateDraft: vi.fn(),
+    setComposing: vi.fn(),
     resolveConflict: vi.fn(),
     cancelEdit: vi.fn(),
     commitEdit: vi.fn(async () => ok),
@@ -418,6 +419,23 @@ describe('TemplateLibraryView', () => {
 })
 
 describe('DocumentWorkbench', () => {
+  it('withholds editing during preview rendering and offers a read retry when rendering fails', () => {
+    const loading = workbenchProps(workbenchState({ phase: 'ready', previewLoading: true,
+      document: documentSnapshot(undefined, { previewHtml: '' }),
+    }))
+    const view = render(<DocumentWorkbench {...loading.props} />)
+    expect(screen.getByText('正在打开文档…').closest('[role="status"]')).not.toBeNull()
+    expect(screen.queryByRole('document')).toBeNull()
+    expect(screen.queryByRole('button', { name: '重新打开' })).toBeNull()
+    const failed = workbenchProps(workbenchState({ phase: 'ready', previewLoading: false,
+      document: documentSnapshot(undefined, { previewHtml: '' }),
+    }))
+    view.rerender(<DocumentWorkbench {...failed.props} />)
+    fireEvent.click(screen.getByRole('button', { name: '重新打开' }))
+    expect(failed.retryOpen).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('document')).toBeNull()
+  })
+
   it.each(['template', 'gate', 'versions'] as const)('returns to collaboration from the %s panel', (panel) => {
     const b = workbenchProps(workbenchState({ phase: 'ready', document: documentSnapshot(), panel }))
     b.props.actions.setWriting(false)
