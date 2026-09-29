@@ -23,12 +23,13 @@ export function headingLevel(styleName: string | undefined): number | undefined 
 }
 
 /**
- * A section number opening a heading, in every form a sample numbers its sections: 第5章, 第一节, Chapter 1, ①,
- * 1、, 1), 一、 or 一 followed by a space, 1.1, and 1． or 1 followed by a space. Specific forms come first, so 1、 is not read as 1 followed
- * by text, and a bare number needs a separator, so 2019年 is not numbered.
+ * A section number opening a heading, in every form a sample numbers its sections: 第5章, 第一节, Chapter 1 (each with
+ * an optional colon, period, or 、 after it, as in 第1章：绪论), ①, 1、, 1), 一、 or 一 followed by a space, 1.1, and 1．
+ * or 1 followed by a space. Specific forms come first, so 1、 is not read as 1 followed by text, and a bare number needs
+ * a separator, so 2019年 is not numbered.
  */
 const NUMERALS = '一二三四五六七八九十百零〇两'
-const SECTION_NUMBER = new RegExp(`^(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chapter\\s+\\d+|[①-⑳]|\\d+[、)）]|[${NUMERALS}]+[、．.)）\\s]`
+const SECTION_NUMBER = new RegExp(`^(?:(?:第\\s*[\\d${NUMERALS}]+\\s*[章节]|chapter\\s+\\d+)(?:\\s*[:.、])?|[①-⑳]|\\d+[、)）]|[${NUMERALS}]+[、．.)）\\s]`
   + '|\\d+(?:\\.\\d+)+[．.]?|\\d+[．.\\s])\\s*', 'iu')
 
 /**

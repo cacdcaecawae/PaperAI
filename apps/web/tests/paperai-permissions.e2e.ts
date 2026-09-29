@@ -1679,6 +1679,10 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
       await receipt.locator('strong').ariaSnapshot(),
       await page.getByRole('complementary', { name: '格式检查', exact: true }).ariaSnapshot(),
     ].join('\n'), MODE)
+    // The describe shares one page; later tests expect the original project in the sidebar.
+    await page.getByRole('button', { name: '返回项目列表', exact: true }).click()
+    await page.getByRole('treeitem', { name: /Paper project/ }).click()
+    await page.getByRole('button', { name: '在“Paper project”中新建会话', exact: true }).click()
   }, 180_000)
 
   it('keeps Word whitespace through an Agent edit and rejects a stale Agent edit', async () => {

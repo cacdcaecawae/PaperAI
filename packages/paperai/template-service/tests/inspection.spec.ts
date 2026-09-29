@@ -70,6 +70,11 @@ describe('isHeadingParagraph', () => {
     expect(sectionKey('第6章 结  论')).toBe(sectionKey('结论'))
     expect(sectionKey('Chapter 3 METHODS')).toBe(sectionKey('methods'))
     expect(sectionKey('第1章')).toBe('')
+    // A delimiter after a chapter number is part of the number.
+    expect(sectionKey('第1章：绪论')).toBe(sectionKey('绪论'))
+    expect(sectionKey('第二节、研究方法')).toBe(sectionKey('研究方法'))
+    expect(sectionKey('Chapter 1: Introduction')).toBe(sectionKey('introduction'))
+    expect(sectionKey('Chapter 2. Methods')).toBe(sectionKey('methods'))
     // Only a trailing note is dropped; a parenthetical that title text follows belongs to the title.
     expect(sectionKey('研究背景（示例）')).toBe(sectionKey('研究背景'))
     expect(sectionKey('研究背景（示例')).toBe(sectionKey('研究背景'))
