@@ -374,8 +374,9 @@ function isStyleRule(kind: TemplateRuleKind): boolean {
   return kind === 'font' || kind === 'font-size' || kind === 'paragraph-spacing'
 }
 
-// A keyword opens an annotation only as a whole marker (说明：, 说  明), not as the start of a title such as 注意力机制研究.
-const ANNOTATION_START = /^(?:(?:说\s*明|填写说明|注意|要求)(?=$|[\s:：,，、;；.。(（])|↑|（|\()/u
+// A keyword opens an annotation only as a whole marker (说明：, 说  明), not as the start of a title such as 注意力机制研究,
+// and a parenthesis only when it holds the whole paragraph, as in （摘要应说明研究工作）, not （英文）摘要.
+const ANNOTATION_START = /^(?:(?:说\s*明|填写说明|注意|要求)(?=$|[\s:：,，、;；.。(（])|↑|[（(][^）)]*[）)]?\s*$)/u
 
 function isInstruction(text: string): boolean {
   const trimmed = text.trim()

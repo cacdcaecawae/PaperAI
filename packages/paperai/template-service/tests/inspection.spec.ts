@@ -50,7 +50,8 @@ describe('parseBodyInspection', () => {
 describe('isHeadingParagraph', () => {
   it('reads every supported section number in body text as a heading, but not a numbered sentence', () => {
     for (const text of ['第五章 结论', '第一节  研究背景', '1、研究背景', '1) 研究方法', '①研究内容', '一、研究背景',
-      'Chapter 1 Introduction', '1.1 研究背景', '1.2.1 国内研究现状（示例，可删除）', '3 结论']) {
+      'Chapter 1 Introduction', '1.1 研究背景', '1.2.1 国内研究现状（示例，可删除）', '3 结论',
+      '（一）研究背景']) {
       expect(isHeadingParagraph(text, 'Normal'), text).toBe(true)
     }
     for (const text of ['1、首先分析数据，然后建立模型。', '2019年研究进展', '12 个样本表明，结果显著',
@@ -83,6 +84,9 @@ describe('isHeadingParagraph', () => {
     expect(sectionKey('第１章 结论')).toBe(sectionKey('结论'))
     expect(sectionKey('１．１\u3000研究背景')).toBe(sectionKey('研究背景'))
     expect(sectionKey('①研究内容')).toBe(sectionKey('研究内容'))
+    expect(sectionKey('（一）研究背景')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('(12) 研究方法')).toBe(sectionKey('研究方法'))
+    expect(sectionKey('（英文）摘要')).not.toBe(sectionKey('摘要'))
     expect(isHeadingParagraph('１．１\u3000研究背景', 'Normal')).toBe(true)
     // The label keeps the heading's own characters.
     expect(sectionLabel('第１章　实验结果（含分析）与讨论')).toBe('实验结果（含分析）与讨论')
