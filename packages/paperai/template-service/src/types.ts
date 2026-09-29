@@ -51,7 +51,8 @@ export interface TemplatePackMember {
    * parenthesized note, and whitespace are ignored, and the rest is compared NFKC-normalized and case-folded, so
    * `第1章 结论` and `结论` name the same section. Registration rejects an empty list and an entry that names no
    * section once normalized or the same section as another entry. Omitted: every unnumbered heading of the sample
-   * is required.
+   * is required except the example content the package README lists under inferred sections, such as captions,
+   * numbered bibliography entries, annotations wholly in parentheses, and headings that describe their own format.
    */
   readonly requiredSections?: readonly string[]
   readonly source: TemplatePackSourceAsset
