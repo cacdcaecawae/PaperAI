@@ -1635,11 +1635,73 @@ describe('web e2e: PaperAI permissions and document conflicts', { concurrent: fa
     await pending().getByRole('button', { name: '确认放弃草稿', exact: true }).click()
   }, 120_000)
 
+  it('keeps Word whitespace through an Agent edit and rejects a stale Agent edit', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-agent-whitespace'))
+    const fileName = 'Agent whitespace.docx'
+    // Full-width indentation and a double space: the indexed text must carry both, or an edit made from it drops them.
+    const original = '　　首行缩进的段落，中间保留  两个空格'
+    const edited = '　　首行缩进的段落，由 Agent 修改后  两个空格仍在'
+    await scaffold.ctx.paperaiWorkbench.importDocument({
+      workspaceId, sessionId: SessionId('agent-whitespace-import'), fileName,
+      contentBase64: fixtureDocxBase64(false, [original, 'Companion paragraph']), name: 'Agent whitespace',
+    })
+    const row = (await scaffold.ctx.paperaiWorkbench.overview({ workspaceId })).documents.find(item => item.fileName === fileName)!
+    const sessionId = SessionId('agent-whitespace-writer')
+    const actor = { kind: 'agent', name: 'Scripted Agent', client: 'browser-test', model: 'scripted', sessionId } as const
+    const read = () => scaffold.ctx.paperaiWorkbench.open({ workspaceId, sessionId, resourceId: row.id })
+    await sidebarDocument(fileName).click()
+    const preview = page.getByRole('document', { name: '文档预览', exact: true }).filter({ visible: true })
+    const paragraph = preview.locator('[data-paperai-block]').filter({ hasText: '首行缩进的段落' })
+    // The preview keeps a run of spaces visible as a space and a no-break space; Word stores both as spaces.
+    const pageText = async () => (await paragraph.textContent())?.replaceAll('\u00a0', ' ')
+    await paragraph.waitFor({ timeout: 30_000 })
+    expect(await pageText()).toBe(original)
+
+    const before = await read()
+    const target = before.document.nodes.find(node => node.text === original)
+    expect(target, 'the index keeps the paragraph whitespace').toBeDefined()
+    await scaffold.ctx.paperCommits.submit({
+      documentId: DocumentId(before.document.documentId),
+      baseCommitId: DocumentCommitId(before.document.headCommitId!),
+      actor, message: 'Agent rewrites the indented paragraph',
+      mutations: [{ type: 'replace-text', nodeId: DocumentNodeId(target!.nodeId), baseText: original, nextText: edited }],
+    })
+    // Without a local draft the page follows the Agent's version on its own.
+    await expect.poll(pageText, { timeout: 30_000 }).toBe(edited)
+    const afterEdit = await captureStableAria(page, '[data-paperai-block]:has-text("首行缩进的段落")', scaffold.workspaceCwd)
+
+    // Current head, but text read before the edit, or read without the indentation: both are stale and change nothing.
+    // The first save of the compact fixture gives the paragraph a new node id, so the Agent reads the node again.
+    const current = await read()
+    const node = current.document.nodes.find(candidate => candidate.text === edited)!
+    const path = join(scaffold.workspaceCwd, 'paper-project', current.document.path)
+    const bytes = await readFile(path)
+    const stale = (baseText: string) => scaffold.ctx.paperCommits.submit({
+      documentId: DocumentId(current.document.documentId),
+      baseCommitId: DocumentCommitId(current.document.headCommitId!),
+      actor, message: 'Agent edits from a stale reading',
+      mutations: [{ type: 'replace-text', nodeId: DocumentNodeId(node.nodeId), baseText, nextText: '　　过期的 Agent 修改' }],
+    }).then(() => 'applied', (error: unknown) => (error as { code?: string }).code ?? String(error))
+    const outcomes = [await stale(original), await stale(edited.trimStart())]
+    expect(outcomes).toEqual(['NODE_TEXT_CONFLICT', 'NODE_TEXT_CONFLICT'])
+    const after = await read()
+    expect(after.document.headCommitId).toBe(current.document.headCommitId)
+    expect(after.document.nodes.find(candidate => candidate.nodeId === node.nodeId)?.text).toBe(edited)
+    expect(await readFile(path)).toEqual(bytes)
+    expect(await pageText()).toBe(edited)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'agent-whitespace.expected.md'), [
+      afterEdit,
+      `- text: ${JSON.stringify(await pageText())}`,
+      `- stale Agent edits: ${outcomes.join(', ')}`,
+    ].join('\n'), MODE)
+  }, 90_000)
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'agent-presets.expected.md',
+      'agent-whitespace.expected.md',
       'model-agent-loading.expected.md',
       'agent-connecting.expected.md',
       'acp-connection-status.expected.md',
