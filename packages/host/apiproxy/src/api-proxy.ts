@@ -1043,6 +1043,16 @@ function changedWorkspaceView(workspaceId: string, value: unknown): WorkspaceVie
   }
 }
 
+/**
+ * The cwd of an in-flight session creation: whether a joined request requires it to exist already, and the pending or
+ * settled `mkdir` of a creation that began without that requirement, which resolves to the first directory it made.
+ */
+interface CreationRoot {
+  readonly cwd: string
+  existing: boolean
+  created?: Promise<string | undefined>
+}
+
 async function requireDirectory(path: string): Promise<void> {
   if (!(await stat(path)).isDirectory()) throw new Error(`workspace root "${path}" is not a directory`)
 }
@@ -1075,8 +1085,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const sessionAdmissionChains = new Map<SessionId, Promise<void>>()
   /** Client-chosen identity creation/resume, deduplicated across concurrent retries. */
   const sessionCreations = new Map<SessionId, Promise<Agent>>()
-  /** The cwd of each in-flight session creation, and whether a request joined that requires it to exist already. */
-  const creationRoots = new Map<SessionId, { readonly cwd: string; existing: boolean }>()
+  /** The cwd of each in-flight session creation, shared by the requests that join it. */
+  const creationRoots = new Map<SessionId, CreationRoot>()
   /** Serializes path ownership and explicit title checks with Workspace mutations. */
   let workspaceCreationChain = Promise.resolve()
   const pendingQuestions = new Map<RpcId, PendingQuestion>()
@@ -1612,7 +1622,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
    * A plain cwd is created when missing; an `existingCwd` (a Workspace root) must
    * already be a directory when the agent is resumed or created, and is never recreated.
    * The constraint belongs to the shared creation, so it binds a creation that a
-   * plain-cwd request started and a Workspace-backed request joined.
+   * plain-cwd request started and a Workspace-backed request joined; a request that
+   * joins once that creation is making its cwd fails instead if the mkdir made the root.
    */
   async function ensureSession(
     sessionId: SessionId,
@@ -1624,9 +1635,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     let creation = sessionCreations.get(sessionId)
     // A joining Workspace request binds only a creation of its own cwd; one of another cwd ends in a conflict below.
     const joined = creation === undefined ? undefined : creationRoots.get(sessionId)
-    if (existingCwd && joined?.cwd === cwd) joined.existing = true
+    if (existingCwd && joined?.cwd === cwd) {
+      // Joined after the creation chose to make its root, the request needs that mkdir to have found the root.
+      if (joined.created !== undefined && await joined.created !== undefined) {
+        throw new Error(`workspace root "${cwd}" was removed while its session was created`)
+      }
+      joined.existing = true
+    }
     if (creation === undefined) {
-      const root = { cwd, existing: existingCwd }
+      const root: CreationRoot = { cwd, existing: existingCwd }
       creationRoots.set(sessionId, root)
       creation = (async () => {
         const attached = ctx.sessions.get(sessionId)
@@ -1671,7 +1688,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
         if (!root.existing) {
           try {
-            await mkdir(cwd, { recursive: true })
+            root.created = mkdir(cwd, { recursive: true })
+            await root.created
           } catch (error: unknown) {
             throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
           }

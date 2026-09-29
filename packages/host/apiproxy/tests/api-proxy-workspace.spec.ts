@@ -19,6 +19,24 @@ import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
 import { MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 
+/** Holds the next `mkdir` of a path ending in `suffix` until `release` settles; every other call passes through. */
+const mkdirGate = vi.hoisted(() => ({
+  suffix: undefined as string | undefined,
+  entered: () => {},
+  release: Promise.resolve(),
+}))
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  const mkdir = async (...args: Parameters<typeof actual.mkdir>) => {
+    if (mkdirGate.suffix === undefined || !String(args[0]).endsWith(mkdirGate.suffix)) return await actual.mkdir(...args)
+    mkdirGate.suffix = undefined
+    mkdirGate.entered()
+    await mkdirGate.release
+    return await actual.mkdir(...args)
+  }
+  return { ...actual, mkdir: mkdir as typeof actual.mkdir }
+})
+
 let nextRpc = 1
 
 function request<P>(payload: P): RpcRequest<P> {
@@ -439,6 +457,56 @@ describe('session creation and Workspace membership', () => {
     expect((await plain).result).toMatchObject({ ok: false })
     expect(ctx.agents.get(sessionId)).toBeUndefined()
     expect(existsSync(path)).toBe(false)
+  })
+
+  it('refuses a Workspace request that joins while a cwd-only creation recreates its removed root', async () => {
+    const { api, root } = await harness()
+    const path = stageDir(root, 'recreated-by-mkdir')
+    const workspace = expectOk(await api.workspace.create(request({ path }))).workspace
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    Object.assign(mkdirGate, { suffix: 'recreated-by-mkdir', entered: entered.resolve, release: release.promise })
+    const sessionId = SessionId('workspace-root-recreated-by-mkdir')
+
+    // The cwd-only creation has chosen to make its root and waits inside mkdir.
+    const plain = api.sessions.create(request({ cwd: workspace.path, sessionId }))
+    await entered.promise
+    // The Workspace request passes its own directory check and joins; the root is removed only then.
+    let reads = 0
+    const joinedCreation = Promise.withResolvers<undefined>()
+    const joined = api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      get sessionId() {
+        if (++reads === 2) joinedCreation.resolve(undefined)
+        return sessionId
+      },
+    }))
+    await joinedCreation.promise
+    rmSync(path, { recursive: true })
+    release.resolve(undefined)
+
+    expect((await joined).result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    // The cwd-only request may make its own directory; only the Workspace request required the root to exist.
+    expectOk(await plain)
+    expect(existsSync(path)).toBe(true)
+  })
+
+  it('admits a Workspace request that joins while a cwd-only creation finds its root in place', async () => {
+    const { api, ctx, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'kept-during-mkdir') }))).workspace
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    Object.assign(mkdirGate, { suffix: 'kept-during-mkdir', entered: entered.resolve, release: release.promise })
+    const sessionId = SessionId('workspace-root-kept-during-mkdir')
+
+    const plain = api.sessions.create(request({ cwd: workspace.path, sessionId }))
+    await entered.promise
+    const joined = api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId }))
+    release.resolve(undefined)
+
+    expectOk(await joined)
+    expectOk(await plain)
+    expect(ctx.agents.get(sessionId)).toBeDefined()
   })
 
   it('lets a pending cwd-only creation make its own directory when a Workspace request of another cwd joins', async () => {
