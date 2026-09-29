@@ -353,12 +353,12 @@ Strict Remote that keeps the DSH client free of PaperAI Host dependencies.
 
 ```ts cordis-catalog
 /**
- * Lazily initialize the selected Workspace's project and describe it: the
- * template set it writes against and its tracked documents.
+ * Describe a Workspace without initializing a project or changing its files.
+ * An uninitialized Workspace has no template decision or tracked documents.
  * @param request - Workspace whose project should be described.
- * @param signal - optional cancellation signal for project initialization.
+ * @param signal - optional cancellation signal for the read.
  * @returns the project name, template decision, and document rows.
- * @throws when the Workspace or its PaperAI project cannot be resolved.
+ * @throws when the Workspace directory is unavailable or its registered project has a different root.
  */
 @Remote('overview') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>
 
@@ -848,14 +848,17 @@ Idempotent PaperAI project lifecycle with no separate open-project action.
 
 ```ts cordis-catalog
 /**
- * Create or adopt one directory, initialize missing project artifacts, and
- * publish exactly one ProjectRecord associated with its DSH workspace.
- * Repeating the operation for the same canonical path preserves the first
- * record identity, name, creation time, and all existing files. The writing
- * charter is synchronized before the record is published, and a failed
- * publication restores the charter files it created or rewrote.
+ * Create or adopt one directory and publish exactly one ProjectRecord
+ * associated with its DSH workspace. A directory without a project record
+ * is initialized: missing project artifacts are created, the writing charter
+ * is synchronized before the record is published, and a failed publication
+ * restores the charter files it created or rewrote. A directory that already
+ * holds a recorded project must still be a directory and is adopted without
+ * touching its files: the record keeps its identity, name, creation time,
+ * and template decision, and only a stale Workspace association or root
+ * spelling is rewritten.
  * @param input - Selected directory and optional first-use display name.
- * @returns the durable record, context-file outcome, and Git readiness.
+ * @returns the durable record, plus the context-file, charter, and Git outcomes of an initialization.
  */
 create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult>
 
@@ -875,7 +878,9 @@ list(): ProjectRecord[]
 /**
  * Record the template set a project writes against. `null` records the
  * explicit choice to write without a template; either way the project counts
- * as decided, so the first-open prompt does not return.
+ * as decided, so the first-open prompt does not return. The project root
+ * must still be a directory when the queued write runs, not only when it
+ * was requested, so a removed or replaced root records no choice.
  * @param id - PaperAI project id.
  * @param packId - template set id, or `null` for no template.
  * @returns the updated record.
@@ -893,7 +898,8 @@ async findByPath(rootPath: string): Promise<ProjectRecord | undefined>
  * Resolve the project whose root owns a path: the session workspace root
  * itself or any directory inside it. Agent routes use this to scope document
  * tools to the calling session's project. A path that no project root
- * contains resolves to `undefined`; a missing path is compared lexically.
+ * contains resolves to `undefined`; a missing path resolves through its
+ * nearest existing directory.
  * @param path - workspace root or a path inside one.
  * @returns the deepest owning project, or `undefined`.
  */

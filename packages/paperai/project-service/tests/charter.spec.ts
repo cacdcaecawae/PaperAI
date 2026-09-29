@@ -163,7 +163,7 @@ describe('PaperProjectService writing charter', () => {
     expect(agents).toContain('项目尚无 Working 文档')
 
     const second = await service.create({ rootPath: root })
-    expect(second.charter).toEqual({ agents: 'unchanged', claude: 'preserved' })
+    expect(second).toEqual({ project: first.project, projectCreated: false })
     expect(await readFile(join(root, PAPERAI_AGENTS_FILE), 'utf8')).toBe(agents)
   })
 
@@ -182,7 +182,7 @@ describe('PaperProjectService writing charter', () => {
     // User content stays byte-for-byte; only the import line is appended, once.
     expect(await readFile(join(root, PAPERAI_CLAUDE_FILE), 'utf8')).toBe('自定义 Claude 指令\n\n@AGENTS.md\n')
     const again = await service.create({ rootPath: root })
-    expect(again.charter).toEqual({ agents: 'unchanged', claude: 'preserved' })
+    expect(again).toEqual({ project: result.project, projectCreated: false })
     expect(await readFile(join(root, PAPERAI_CLAUDE_FILE), 'utf8')).toBe('自定义 Claude 指令\n\n@AGENTS.md\n')
   })
 

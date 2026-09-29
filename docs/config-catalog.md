@@ -3553,7 +3553,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/paperai/workbench-service/src/index.ts:291`](../packages/paperai/workbench-service/src/index.ts)
+Source: [`packages/paperai/workbench-service/src/index.ts:308`](../packages/paperai/workbench-service/src/index.ts)
 
 ## Loadable plugins with no config
 

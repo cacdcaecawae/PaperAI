@@ -85,7 +85,8 @@ function isErrno(error: unknown, code: string): boolean {
   return error instanceof Error && (error as NodeJS.ErrnoException).code === code
 }
 
-async function ensureDirectory(path: string, journal: FilesystemJournal): Promise<void> {
+/** Missing ancestors are created recursively, but never `floor` itself: a vanished project root stays absent. */
+async function ensureDirectory(path: string, journal: FilesystemJournal, floor?: string): Promise<void> {
   try {
     await mkdir(path, { mode: 0o755 })
     journal.directories.push(path)
@@ -93,9 +94,9 @@ async function ensureDirectory(path: string, journal: FilesystemJournal): Promis
   } catch (error) {
     if (isErrno(error, 'ENOENT')) {
       const parent = dirname(path)
-      if (parent === path) throw error
-      await ensureDirectory(parent, journal)
-      await ensureDirectory(path, journal)
+      if (parent === path || parent === floor) throw error
+      await ensureDirectory(parent, journal, floor)
+      await ensureDirectory(path, journal, floor)
       return
     }
     if (!isErrno(error, 'EEXIST')) throw error
@@ -204,9 +205,10 @@ async function rollbackJournal(journal: FilesystemJournal): Promise<void> {
  * Create missing project directories and an exclusive context file.
  * Existing directories and files are retained byte-for-byte.
  * @param inputPath - User-selected or supplied project directory.
+ * @param existingRoot - when true, the directory must already exist and is never created.
  * @returns canonical paths and a rollback operation for later publication failures.
  */
-export async function prepareProjectLayout(inputPath: string): Promise<PreparedProjectLayout> {
+export async function prepareProjectLayout(inputPath: string, existingRoot = false): Promise<PreparedProjectLayout> {
   if (inputPath.trim().length === 0) throw new Error('PaperAI project path must not be blank')
   const journal: FilesystemJournal = { directories: [], files: [] }
   try {
@@ -214,10 +216,13 @@ export async function prepareProjectLayout(inputPath: string): Promise<PreparedP
     if (dirname(requested) === requested) {
       throw new Error(`PaperAI project path '${requested}' must not be a filesystem root`)
     }
-    await ensureDirectory(requested, journal)
+    if (!existingRoot) await ensureDirectory(requested, journal)
+    else if (!(await stat(requested)).isDirectory()) {
+      throw new Error(`PaperAI project path '${requested}' exists but is not a directory`)
+    }
     const rootPath = await realpath(requested)
     for (const relative of PAPERAI_PROJECT_DIRECTORIES) {
-      await ensureDirectory(join(rootPath, ...relative.split('/')), journal)
+      await ensureDirectory(join(rootPath, ...relative.split('/')), journal, rootPath)
     }
     const contextFile = await ensureContextFile(rootPath, journal)
     return {

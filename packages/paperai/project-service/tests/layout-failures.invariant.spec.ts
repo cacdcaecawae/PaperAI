@@ -9,7 +9,9 @@ type FaultMethod = 'mkdir' | 'open' | 'lstat' | 'readFile' | 'unlink' | 'rmdir'
 interface Fault {
   readonly method: FaultMethod
   readonly pathIncludes: string
-  readonly error: unknown
+  readonly error?: unknown
+  /** Runs before the real operation instead of failing it. */
+  readonly before?: () => Promise<void>
 }
 
 const faultState = vi.hoisted(() => ({ faults: [] as Fault[] }))
@@ -17,14 +19,15 @@ const faultState = vi.hoisted(() => ({ faults: [] as Fault[] }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   const wrap = (method: FaultMethod, operation: (...args: unknown[]) => unknown) =>
-    (...args: unknown[]) => {
+    async (...args: unknown[]) => {
       const path = String(args[0])
       const at = faultState.faults.findIndex(fault => fault.method === method && path.includes(fault.pathIncludes))
       if (at >= 0) {
         const [fault] = faultState.faults.splice(at, 1)
-        throw fault?.error
+        if (fault?.before === undefined) throw fault?.error
+        await fault.before()
       }
-      return operation(...args)
+      return await operation(...args)
     }
   return {
     ...actual,
@@ -82,6 +85,19 @@ afterEach(async () => {
 })
 
 describe('project filesystem fault containment', () => {
+  it('never recreates a project root that disappears while its subdirectories are created', async () => {
+    const { prepareProjectLayout } = await import('../src/layout.ts')
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    const parent = await root('vanished')
+    const projectRoot = join(parent, 'project')
+    await actual.mkdir(projectRoot)
+    faultState.faults.push({ method: 'mkdir', pathIncludes: 'documents', before: () => actual.rm(projectRoot, { recursive: true }) })
+
+    await expect(prepareProjectLayout(projectRoot, true)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await expect(access(projectRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('rejects an unavailable volume and lets the next queued project initialize', async () => {
     const { projectHarness } = await import('./helpers.ts')
     const projectRoot = await root('unavailable-volume')

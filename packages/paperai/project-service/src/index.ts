@@ -5,8 +5,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { basename, resolve, sep } from 'node:path'
-import { realpath } from 'node:fs/promises'
+import { basename, dirname, join, resolve, sep } from 'node:path'
+import { realpath, stat } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
@@ -85,20 +85,22 @@ export interface CreatePaperProjectInput {
   readonly rootPath: string
   /** Display name used only when no project record exists for the directory. */
   readonly name?: string
+  /** Require the directory to exist already, so initialization never creates it. A recorded directory is never recreated either way. */
+  readonly existingRoot?: boolean
 }
 
-/** Result of one idempotent project initialization. */
+/** Result of one idempotent project initialization or adoption. */
 export interface CreatePaperProjectResult {
   /** Durable project record associated with the canonical DSH workspace. */
   readonly project: ProjectRecord
   /** Whether this call created the durable project record. */
   readonly projectCreated: boolean
-  /** Whether this call created or preserved `PAPERAI.md`. */
-  readonly contextFile: 'created' | 'preserved'
-  /** Writing-charter outcome for `AGENTS.md` and `CLAUDE.md`. */
-  readonly charter: WritingCharterSyncResult
-  /** Git readiness, including non-fatal degradation. */
-  readonly git: ProjectGitStatus
+  /** Whether this call created or preserved `PAPERAI.md`; absent when it adopted a recorded project. */
+  readonly contextFile?: 'created' | 'preserved'
+  /** Writing-charter outcome for `AGENTS.md` and `CLAUDE.md`; absent when it adopted a recorded project. */
+  readonly charter?: WritingCharterSyncResult
+  /** Git readiness, including non-fatal degradation; absent when it adopted a recorded project. */
+  readonly git?: ProjectGitStatus
 }
 
 const DEFAULT_GIT_TIMEOUT_MS = 15_000
@@ -128,13 +130,26 @@ function lexicalPathKey(path: string): string {
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
 }
 
+/**
+ * Compare paths by where they lead. A missing path is canonicalized through its
+ * nearest existing ancestor, so an alias spelling of a deleted directory still
+ * matches the record that names it.
+ */
 async function canonicalPathKey(path: string): Promise<string> {
+  const absolute = resolve(path)
   try {
-    return lexicalPathKey(await realpath(resolve(path)))
+    return lexicalPathKey(await realpath(absolute))
   } catch (error) {
-    if (isMissing(error)) return lexicalPathKey(path)
-    throw error
+    if (!isMissing(error)) throw error
+    const parent = dirname(absolute)
+    if (parent === absolute) return lexicalPathKey(absolute)
+    return lexicalPathKey(join(await canonicalPathKey(parent), basename(absolute)))
   }
+}
+
+/** A recorded project root must still be a directory; a missing one rejects with ENOENT. */
+async function requireDirectory(path: string): Promise<void> {
+  if (!(await stat(path)).isDirectory()) throw new Error(`PaperAI project path '${path}' exists but is not a directory`)
 }
 
 function asError(error: unknown): Error {
@@ -182,14 +197,17 @@ export class PaperProjectService extends Service {
   }
 
   /**
-   * Create or adopt one directory, initialize missing project artifacts, and
-   * publish exactly one ProjectRecord associated with its DSH workspace.
-   * Repeating the operation for the same canonical path preserves the first
-   * record identity, name, creation time, and all existing files. The writing
-   * charter is synchronized before the record is published, and a failed
-   * publication restores the charter files it created or rewrote.
+   * Create or adopt one directory and publish exactly one ProjectRecord
+   * associated with its DSH workspace. A directory without a project record
+   * is initialized: missing project artifacts are created, the writing charter
+   * is synchronized before the record is published, and a failed publication
+   * restores the charter files it created or rewrote. A directory that already
+   * holds a recorded project must still be a directory and is adopted without
+   * touching its files: the record keeps its identity, name, creation time,
+   * and template decision, and only a stale Workspace association or root
+   * spelling is rewritten.
    * @param input - Selected directory and optional first-use display name.
-   * @returns the durable record, context-file outcome, and Git readiness.
+   * @returns the durable record, plus the context-file, charter, and Git outcomes of an initialization.
    */
   create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult> {
     return this.enqueue(() => this.createNow(input))
@@ -215,7 +233,9 @@ export class PaperProjectService extends Service {
   /**
    * Record the template set a project writes against. `null` records the
    * explicit choice to write without a template; either way the project counts
-   * as decided, so the first-open prompt does not return.
+   * as decided, so the first-open prompt does not return. The project root
+   * must still be a directory when the queued write runs, not only when it
+   * was requested, so a removed or replaced root records no choice.
    * @param id - PaperAI project id.
    * @param packId - template set id, or `null` for no template.
    * @returns the updated record.
@@ -224,6 +244,7 @@ export class PaperProjectService extends Service {
     return this.enqueue(async () => {
       const project = this.ctx.paperRepository.getProject(id)
       if (project === undefined) throw new Error(`PaperAI project not found: ${id}`)
+      await requireDirectory(project.rootPath)
       const now = new Date().toISOString()
       const next: ProjectRecord = { ...project, templateDecidedAt: now, updatedAt: now }
       if (packId === null) delete next.templatePackId
@@ -248,7 +269,8 @@ export class PaperProjectService extends Service {
    * Resolve the project whose root owns a path: the session workspace root
    * itself or any directory inside it. Agent routes use this to scope document
    * tools to the calling session's project. A path that no project root
-   * contains resolves to `undefined`; a missing path is compared lexically.
+   * contains resolves to `undefined`; a missing path resolves through its
+   * nearest existing directory.
    * @param path - workspace root or a path inside one.
    * @returns the deepest owning project, or `undefined`.
    */
@@ -271,45 +293,40 @@ export class PaperProjectService extends Service {
   }
 
   private async createNow(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult> {
-    const layout = await prepareProjectLayout(input.rootPath)
+    if (input.rootPath.trim().length === 0) throw new Error('PaperAI project path must not be blank')
+    const adopted = await this.adoptNow(input.rootPath)
+    if (adopted !== undefined) return adopted
+    const layout = await prepareProjectLayout(input.rootPath, input.existingRoot)
     let createdWorkspace: Workspace | undefined
     let charter: WritingCharterSync | undefined
     try {
-      const existing = await this.uniqueProject(layout.rootPath)
-      const name = existing?.name ?? this.resolveName(input.name, layout.rootPath)
+      // adoptNow owns every recorded root, so a record here is a spelling the two
+      // lookups canonicalized differently. Re-initializing it would recreate a
+      // recorded directory; refusing rolls the layout back instead.
+      if (await this.uniqueProject(layout.rootPath) !== undefined) {
+        throw new Error(`PaperAI project path '${layout.rootPath}' is already recorded under another spelling`)
+      }
+      const name = this.resolveName(input.name, layout.rootPath)
       const priorWorkspace = await this.ctx.workspaceRegistry.resolveByPath(layout.rootPath)
       const workspace = priorWorkspace ?? await this.ctx.workspaceRegistry.create(layout.rootPath, name)
       createdWorkspace = priorWorkspace === undefined ? workspace : undefined
 
-      const projectCreated = existing === undefined
-      const needsWrite = projectCreated
-        || existing.workspaceId !== String(workspace.id)
-        || existing.rootPath !== layout.rootPath
       const now = new Date().toISOString()
-      const project: ProjectRecord = existing === undefined
-        ? {
-          id: ProjectId(randomUUID()),
-          workspaceId: String(workspace.id),
-          name,
-          rootPath: layout.rootPath,
-          createdAt: now,
-          updatedAt: now,
-        }
-        : needsWrite
-          ? {
-            ...existing,
-            workspaceId: String(workspace.id),
-            rootPath: layout.rootPath,
-            updatedAt: now,
-          }
-          : existing
+      const project: ProjectRecord = {
+        id: ProjectId(randomUUID()),
+        workspaceId: String(workspace.id),
+        name,
+        rootPath: layout.rootPath,
+        createdAt: now,
+        updatedAt: now,
+      }
       charter = await this.syncCharter(project)
-      if (needsWrite) await this.ctx.paperRepository.putProject(project)
+      await this.ctx.paperRepository.putProject(project)
 
       const git = await ensureGitRepository(this.ctx, layout.rootPath, this.config)
       return {
         project,
-        projectCreated,
+        projectCreated: true,
         contextFile: layout.contextFile,
         charter: { agents: charter.agents, claude: charter.claude },
         git,
@@ -317,6 +334,37 @@ export class PaperProjectService extends Service {
     } catch (error) {
       return await this.rollback(error, layout, createdWorkspace, charter)
     }
+  }
+
+  /**
+   * Adopt the project recorded for a directory without touching its files.
+   * A recorded directory is never created or recreated, so a missing one
+   * fails with ENOENT and a non-directory fails before anything is published.
+   */
+  private async adoptNow(path: string): Promise<CreatePaperProjectResult | undefined> {
+    const existing = await this.uniqueProject(path)
+    if (existing === undefined) return undefined
+    const rootPath = await realpath(resolve(path))
+    await requireDirectory(rootPath)
+    const priorWorkspace = await this.ctx.workspaceRegistry.resolveByPath(rootPath)
+    const workspace = priorWorkspace ?? await this.ctx.workspaceRegistry.create(rootPath, existing.name)
+    if (existing.workspaceId === String(workspace.id) && existing.rootPath === rootPath) {
+      return { project: existing, projectCreated: false }
+    }
+    const project: ProjectRecord = {
+      ...existing,
+      workspaceId: String(workspace.id),
+      rootPath,
+      updatedAt: new Date().toISOString(),
+    }
+    try {
+      // The root may vanish while the registry resolves it; check it again where the association is published.
+      await requireDirectory(rootPath)
+      await this.ctx.paperRepository.putProject(project)
+    } catch (error) {
+      return await this.rollback(error, undefined, priorWorkspace === undefined ? workspace : undefined, undefined)
+    }
+    return { project, projectCreated: false }
   }
 
   /**
@@ -365,7 +413,7 @@ export class PaperProjectService extends Service {
 
   private async rollback(
     error: unknown,
-    layout: PreparedProjectLayout,
+    layout: PreparedProjectLayout | undefined,
     createdWorkspace: Workspace | undefined,
     charter: WritingCharterSync | undefined,
   ): Promise<never> {
@@ -386,7 +434,7 @@ export class PaperProjectService extends Service {
       }
     }
     try {
-      await layout.rollback()
+      await layout?.rollback()
     } catch (rollbackError) {
       failures.push(asError(rollbackError))
     }
