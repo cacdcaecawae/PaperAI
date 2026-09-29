@@ -274,6 +274,8 @@ export interface SessionsApi {
    * session, while a different cwd fails with `session-conflict`. Workspace
    * creation attaches the session after publication; an attach failure
    * returns `workspace-attach-failed` with the published session id.
+   * A Workspace's registered root must still be an existing directory;
+   * missing or non-directory roots fail before any session is created.
    *
    * `agentPreset` names the composition the new session's agent is built
    * from; omitted, the effective default applies — the user's stored choice

@@ -1264,10 +1264,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: '@Remote(\'overview\') async overview(request: PaperAIOverviewRequest, signal?: AbortSignal): Promise<PaperAIProjectOverview>',
-        description: 'Lazily initialize the selected Workspace\'s project and describe it: the template set it writes against and its tracked documents.',
-        parameters: [{ name: 'request', description: 'Workspace whose project should be described.' }, { name: 'signal', description: 'optional cancellation signal for project initialization.' }],
+        description: 'Describe a Workspace without initializing a project or changing its files. An uninitialized Workspace has no template decision or tracked documents.',
+        parameters: [{ name: 'request', description: 'Workspace whose project should be described.' }, { name: 'signal', description: 'optional cancellation signal for the read.' }],
         returns: 'the project name, template decision, and document rows.',
-        throws: ['when the Workspace or its PaperAI project cannot be resolved.'],
+        throws: ['when the Workspace directory is unavailable or its registered project has a different root.'],
       },
       {
         signature: '@Remote(\'agentDiagnostics\') agentDiagnostics(): readonly PaperAIAgentDiagnostic[]',
@@ -1628,9 +1628,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'create(input: CreatePaperProjectInput): Promise<CreatePaperProjectResult>',
-        description: 'Create or adopt one directory, initialize missing project artifacts, and publish exactly one ProjectRecord associated with its DSH workspace. Repeating the operation for the same canonical path preserves the first record identity, name, creation time, and all existing files. The writing charter is synchronized before the record is published, and a failed publication restores the charter files it created or rewrote.',
+        description: 'Create or adopt one directory and publish exactly one ProjectRecord associated with its DSH workspace. A directory without a project record is initialized: missing project artifacts are created, the writing charter is synchronized before the record is published, and a failed publication restores the charter files it created or rewrote. A directory that already holds a recorded project must still be a directory and is adopted without touching its files: the record keeps its identity, name, creation time, and template decision, and only a stale Workspace association or root spelling is rewritten.',
         parameters: [{ name: 'input', description: 'Selected directory and optional first-use display name.' }],
-        returns: 'the durable record, context-file outcome, and Git readiness.',
+        returns: 'the durable record, plus the context-file, charter, and Git outcomes of an initialization.',
       },
       {
         signature: 'get(id: ProjectId): ProjectRecord | undefined',
@@ -1646,7 +1646,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'setTemplateChoice(id: ProjectId, packId: string | null): Promise<ProjectRecord>',
-        description: 'Record the template set a project writes against. `null` records the explicit choice to write without a template; either way the project counts as decided, so the first-open prompt does not return.',
+        description: 'Record the template set a project writes against. `null` records the explicit choice to write without a template; either way the project counts as decided, so the first-open prompt does not return. The project root must still be a directory when the queued write runs, not only when it was requested, so a removed or replaced root records no choice.',
         parameters: [{ name: 'id', description: 'PaperAI project id.' }, { name: 'packId', description: 'template set id, or `null` for no template.' }],
         returns: 'the updated record.',
       },
@@ -1658,7 +1658,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async resolveForPath(path: string): Promise<ProjectRecord | undefined>',
-        description: 'Resolve the project whose root owns a path: the session workspace root itself or any directory inside it. Agent routes use this to scope document tools to the calling session\'s project. A path that no project root contains resolves to `undefined`; a missing path is compared lexically.',
+        description: 'Resolve the project whose root owns a path: the session workspace root itself or any directory inside it. Agent routes use this to scope document tools to the calling session\'s project. A path that no project root contains resolves to `undefined`; a missing path resolves through its nearest existing directory.',
         parameters: [{ name: 'path', description: 'workspace root or a path inside one.' }],
         returns: 'the deepest owning project, or `undefined`.',
       },
@@ -4170,11 +4170,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreatePaperProjectInput',
-    declaration: 'export interface CreatePaperProjectInput {\n    readonly rootPath: string;\n    readonly name?: string;\n}',
+    declaration: 'export interface CreatePaperProjectInput {\n    readonly rootPath: string;\n    readonly name?: string;\n    readonly existingRoot?: boolean;\n}',
   },
   {
     name: 'CreatePaperProjectResult',
-    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile: \'created\' | \'preserved\';\n    readonly charter: WritingCharterSyncResult;\n    readonly git: ProjectGitStatus;\n}',
+    declaration: 'export interface CreatePaperProjectResult {\n    readonly project: ProjectRecord;\n    readonly projectCreated: boolean;\n    readonly contextFile?: \'created\' | \'preserved\';\n    readonly charter?: WritingCharterSyncResult;\n    readonly git?: ProjectGitStatus;\n}',
   },
   {
     name: 'CreateSessionOptions',
@@ -5078,7 +5078,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperAIProjectOverview',
-    declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
+    declaration: 'export interface PaperAIProjectOverview {\n    readonly workspaceId: WorkspaceId;\n    readonly initialized: boolean;\n    readonly projectName: string;\n    readonly templateDecided: boolean;\n    readonly templatePackId: string | null;\n    readonly template: PaperAITemplateSetChoice | null;\n    readonly documents: readonly PaperAIDocumentRow[];\n}',
   },
   {
     name: 'PaperAIRecoverWorkingRequest',

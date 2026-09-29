@@ -49,6 +49,7 @@ export const LIBRARY: PaperAITemplateLibrary = { sets: [HIT_SET, CUSTOM_SET] }
 
 export const OVERVIEW: PaperAIProjectOverview = {
   workspaceId: WORKSPACE_ID,
+  initialized: true,
   projectName: 'Paper',
   templateDecided: true,
   templatePackId: HIT_PACK_ID,

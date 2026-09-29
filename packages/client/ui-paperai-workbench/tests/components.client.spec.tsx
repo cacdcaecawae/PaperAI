@@ -213,6 +213,16 @@ describe('WorkspaceContent', () => {
     expect(b.captureExternal).toHaveBeenCalledWith(WORKSPACE_ID, 'doc-1')
   })
 
+  it('offers the project doctor only once the Workspace has a project', () => {
+    const uninitialized = workspaceProps(projectState({ overview: { ...OVERVIEW, initialized: false, documents: [] } }))
+    const view = render(<WorkspaceContent {...uninitialized.props} />)
+    expect(screen.queryByRole('button', { name: '项目体检' })).toBeNull()
+    view.unmount()
+
+    render(<WorkspaceContent {...workspaceProps(projectState()).props} />)
+    expect(screen.getByRole('button', { name: '项目体检' })).toBeTruthy()
+  })
+
   it('shows loading, an empty hint, and a retryable failure', () => {
     const cold = workspaceProps(projectState({ phase: 'cold', overview: null }))
     const view = render(<WorkspaceContent {...cold.props} />)

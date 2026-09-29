@@ -45,6 +45,31 @@ describe('document file publication', () => {
       .rejects.toThrow('cancelled')
   })
 
+  it('never recreates a project root that disappeared before staging', async () => {
+    const parent = await root()
+    const input = join(parent, 'input.docx')
+    await writeFile(input, 'source')
+    const removed = join(parent, 'removed-project')
+    await expect(stageSourceFile(removed, input, '.docx')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(parent)).toEqual(['input.docx'])
+  })
+
+  it('refuses a regular file in place of a staging directory without changing its mode', async () => {
+    const project = await root()
+    const input = join(project, 'input.docx')
+    await writeFile(input, 'source')
+    await mkdir(join(project, 'documents'))
+    const blocker = join(project, 'documents', 'source')
+    await writeFile(blocker, 'user file')
+    await chmod(blocker, 0o444)
+    const mode = (await lstat(blocker)).mode
+
+    await expect(stageSourceFile(project, input, '.docx')).rejects.toMatchObject({ code: 'ENOTDIR' })
+    expect((await lstat(blocker)).mode).toBe(mode)
+    expect(await readFile(blocker, 'utf8')).toBe('user file')
+    await chmod(blocker, 0o644)
+  })
+
   it('resolves source and Working-path collisions without replacing either file', async () => {
     const project = await root()
     const input = join(project, 'input.docx')

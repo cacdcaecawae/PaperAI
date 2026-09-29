@@ -115,21 +115,6 @@ export async function apply(ctx: ClientContext, config: Config = {}): Promise<()
     )
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'paperai-ui-workbench: dictionaries')
     const t = ctx.locale.bind(NS)
-    // A DSH Workspace is the shell-level account, while a PaperAI project is
-    // the product-level account that also owns the standard folders,
-    // PAPERAI.md, and Git repository.  Initialize every observed Workspace as
-    // soon as it enters the DSH ledger so the directory picker really means
-    // "create/open a PaperAI project".
-    const initializeWorkspaces = (): void => {
-      for (const workspace of ctx.workspaces.list.getSnapshot().items) {
-        void controller.ensureProject(workspace.workspaceId)
-      }
-    }
-    ctx.effect(
-      () => ctx.workspaces.list.subscribe(initializeWorkspaces),
-      'paperai-ui-workbench: eager project initialization',
-    )
-    initializeWorkspaces()
     ctx.on('connection/reset', () => { controller.refreshLoaded() })
     ctx.effect(
       () => ctx.remote.$on('paperai/document-changed', (change) => {

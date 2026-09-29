@@ -128,13 +128,16 @@ export function WorkspaceContent({
           )}
         </>
       )}
-      <ProjectDoctor
-        key={workspaceId}
-        state={diagnostics}
-        inspect={plan => inspectProject(workspaceId, plan)}
-        capture={documentId => captureExternal(workspaceId, documentId)}
-        t={t}
-      />
+      {/* A Workspace without a project has nothing to check until an explicit action creates one. */}
+      {state.overview?.initialized === true && (
+        <ProjectDoctor
+          key={workspaceId}
+          state={diagnostics}
+          inspect={plan => inspectProject(workspaceId, plan)}
+          capture={documentId => captureExternal(workspaceId, documentId)}
+          t={t}
+        />
+      )}
     </section>
   )
 }

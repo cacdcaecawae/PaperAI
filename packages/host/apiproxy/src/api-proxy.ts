@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
@@ -11,7 +12,7 @@ import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
-  Agent, AgentModelController, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus,
+  Agent, AgentModelController, AgentSetup, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
@@ -1044,6 +1045,20 @@ function changedWorkspaceView(workspaceId: string, value: unknown): WorkspaceVie
 }
 
 /**
+ * The cwd of an in-flight session creation: whether a joined request requires it to exist already, and the pending or
+ * settled `mkdir` of a creation that began without that requirement, which resolves to the first directory it made.
+ */
+interface CreationRoot {
+  readonly cwd: string
+  existing: boolean
+  created?: Promise<string | undefined>
+}
+
+async function requireDirectory(path: string): Promise<void> {
+  if (!(await stat(path)).isDirectory()) throw new Error(`workspace root "${path}" is not a directory`)
+}
+
+/**
  * Implement ApiProxy over a composed host context.
  * @param ctx - a context with the Host spine and Workspace registry mounted.
  * @param defaults - host routing and project-directory defaults.
@@ -1071,6 +1086,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const sessionAdmissionChains = new Map<SessionId, Promise<void>>()
   /** Client-chosen identity creation/resume, deduplicated across concurrent retries. */
   const sessionCreations = new Map<SessionId, Promise<Agent>>()
+  /** The cwd of each in-flight session creation, shared by the requests that join it. */
+  const creationRoots = new Map<SessionId, CreationRoot>()
   /** Serializes path ownership and explicit title checks with Workspace mutations. */
   let workspaceCreationChain = Promise.resolve()
   const pendingQuestions = new Map<RpcId, PendingQuestion>()
@@ -1601,15 +1618,44 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     }
   }
 
-  /** Resolve one requested identity to a live agent, creating or resuming it once. */
+  /**
+   * Resolve one requested identity to a live agent, creating or resuming it once.
+   * A plain cwd is created when missing; an `existingCwd` (a Workspace root) must
+   * already be a directory when the agent is resumed or created, and is never recreated.
+   * The constraint belongs to the shared creation, so it binds a creation that a
+   * plain-cwd request started and a Workspace-backed request joined; a request that
+   * joins once that creation is making its cwd fails instead if the mkdir made the root.
+   */
   async function ensureSession(
     sessionId: SessionId,
     cwd: string,
     checkPersistedIdentity: boolean,
     presetId?: string,
+    existingCwd = false,
   ): Promise<Agent> {
     let creation = sessionCreations.get(sessionId)
+    // A joining Workspace request binds only a creation of its own cwd; one of another cwd ends in a conflict below.
+    const joined = creation === undefined ? undefined : creationRoots.get(sessionId)
+    if (existingCwd && joined?.cwd === cwd) {
+      // Joined after the creation chose to make its root, the request needs that mkdir to have found the root.
+      if (joined.created !== undefined && await joined.created !== undefined) {
+        throw new Error(`workspace root "${cwd}" was removed while its session was created`)
+      }
+      joined.existing = true
+    }
     if (creation === undefined) {
+      const root: CreationRoot = { cwd, existing: existingCwd }
+      creationRoots.set(sessionId, root)
+      // The must-exist root is checked at the Agent's publication commit, after every setup await, so a root removed
+      // during setup, or required by a request that joined meanwhile, rolls the unpublished Agent back.
+      const requiringRoot = (setup: (agentCtx: Context) => Promise<void>): AgentSetup => async (agentCtx) => {
+        await setup(agentCtx)
+        return {
+          commit: () => {
+            if (root.existing && !statSync(cwd).isDirectory()) throw new Error(`workspace root "${cwd}" is not a directory`)
+          },
+        }
+      }
       creation = (async () => {
         const attached = ctx.sessions.get(sessionId)
         const live = ctx.agents.get(sessionId)
@@ -1646,14 +1692,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             resumeSessionId: sessionId,
             ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
             agentOptions: agentOptions(composition.factoryRoute),
-            setup: composition.setup,
+            setup: requiringRoot(composition.setup),
           })).agent
         }
 
-        try {
-          await mkdir(cwd, { recursive: true })
-        } catch (error: unknown) {
-          throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
+        if (!root.existing) {
+          try {
+            root.created = mkdir(cwd, { recursive: true })
+            await root.created
+          } catch (error: unknown) {
+            throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
+          }
         }
         const composition = await composeAgent(presetId)
         return (await ctx.agents.create({
@@ -1664,7 +1713,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             cwd,
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
           },
-          setup: composition.setup,
+          setup: requiringRoot(composition.setup),
         })).agent
       })().catch((error: unknown) => {
         // Another Host entry path may have published the same identity while
@@ -1681,6 +1730,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         throw error
       }).finally(() => {
         sessionCreations.delete(sessionId)
+        creationRoots.delete(sessionId)
       })
       sessionCreations.set(sessionId, creation)
     }
@@ -2172,7 +2222,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
         try {
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
+          // Also covers an already-live agent, which ensureSession returns without reaching its own check.
+          if (workspace !== undefined) await requireDirectory(workspace.path)
+          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, workspace !== undefined)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
             return err(request, {
