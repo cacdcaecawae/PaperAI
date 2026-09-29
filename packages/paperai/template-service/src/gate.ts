@@ -297,8 +297,9 @@ function sectionNodes(
 
 function styleCandidates(inspected: readonly InspectedWordNode[], target: string): InspectedWordNode[] {
   const textBearing = inspected.filter(node => node.type === 'paragraph' && node.text.trim().length > 0)
-  if (target === 'body') return textBearing.filter(node => !isHeading(node))
-  if (target === 'heading') return textBearing.filter(isHeading)
+  const headings = styleHeadings(textBearing)
+  if (target === 'body') return textBearing.filter(node => !headings.has(node))
+  if (target === 'heading') return textBearing.filter(node => headings.has(node))
   const level = /heading-(\d)/u.exec(target)?.[1]
   if (level === undefined) return textBearing
   return textBearing.filter(node => headingLevel(node.styleName) === Number(level))
@@ -312,6 +313,17 @@ function styleCandidates(inspected: readonly InspectedWordNode[], target: string
 function endsSection(node: InspectedWordNode | undefined, form: string | undefined): boolean {
   if (node === undefined || !isHeadingParagraph(node.text, node.styleName)) return false
   return headingLevel(node.styleName) !== undefined || !hasSectionNumber(node.text) || sectionNumberForm(node.text) === form
+}
+
+/**
+ * The paragraphs style checks treat as headings. A document that uses Word heading styles marks its headings with
+ * them, so there a numbered paragraph in body text, such as the list item 1、研究对象, is body text; a document
+ * without heading styles falls back to the inferred headings, numbered titles included.
+ */
+function styleHeadings(paragraphs: readonly InspectedWordNode[]): ReadonlySet<InspectedWordNode> {
+  const styled = paragraphs.some(node => headingLevel(node.styleName) !== undefined)
+  return new Set(paragraphs.filter(node => isHeading(node)
+    && (!styled || headingLevel(node.styleName) !== undefined || !hasSectionNumber(node.text))))
 }
 
 function isHeading(node: InspectedWordNode | undefined): boolean {

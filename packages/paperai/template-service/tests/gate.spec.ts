@@ -225,6 +225,22 @@ describe('checkTemplateContract', () => {
     expect(report.findings.map(finding => [finding.code, finding.message])).toEqual([['minimum_characters', '字数不足：14/15']])
   })
 
+  it('checks numbered list items as body text in a document that marks its headings with heading styles', async () => {
+    const paragraphs: Array<[string, string, string]> = [
+      ['第1章 绪论', 'heading 1', '黑体'], ['研究正文', 'Normal', '宋体'],
+      ['1、研究对象', 'Normal', '宋体'], ['2、研究方法', 'Normal', '宋体'], ['3、研究步骤', 'Normal', '宋体'],
+    ]
+    const text = paragraphs.map(([value], index) => ({ officePath: `/body/p[${index + 1}]`, text: value, kind: 'paragraph' as const }))
+    const children = paragraphs.map(([value, style, font], index) => ({
+      path: `/body/p[${index + 1}]`, type: 'paragraph', text: value, style, format: { 'effective.font.eastAsia': font },
+    }))
+    const report = await checkTemplateContract(engine({ text, children, valid: true }), document, contract([
+      rule('font', { target: 'heading', eastAsia: '黑体' }),
+      rule('font', { target: 'body', eastAsia: '宋体' }),
+    ]), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
   it('passes satisfied defaults and keeps warning-only style evidence non-blocking', async () => {
     const rules: TemplateRule[] = [
       rule('font', { eastAsia: '宋体', latin: 'Times New Roman' }),

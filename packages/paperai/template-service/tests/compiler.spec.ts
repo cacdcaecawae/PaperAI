@@ -108,7 +108,7 @@ describe('compileTemplateDraft', () => {
       ['说  明', 'heading 1'], ['注意：示例', 'heading 1'], ['注意力机制研究', 'heading 1'], ['要求工程分析', 'heading 1'],
       ['一级标题（小二号 Times New Roman）', 'heading 1'], ['英文标题（12号 Arial）', 'heading 1'], ['3号 Reactor 设计', 'heading 1'],
       ['（英文）摘要', 'heading 1'], ['（硕士）学位论文原创性声明', 'heading 1'], ['（一）研究背景', 'heading 2'], ['(2) 研究方法', 'heading 3'],
-      ['(注：本页可删除)', 'heading 1'],
+      ['(注：本页可删除)', 'heading 1'], ['一级标题（小二号微软雅黑）', 'heading 1'], ['二级标题（三号 方正小标宋）', 'heading 2'],
     ])
 
     // The annotation compiles its own format rules, but only real headings become sections.

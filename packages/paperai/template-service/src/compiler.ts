@@ -384,14 +384,16 @@ function isInstruction(text: string): boolean {
     || /(?:建议|字体、字号|不要设置页眉|只作为.*示范)/u.test(trimmed)
 }
 
-const FONT_SIZE = /小?[初一二三四五六七八\d]+号\s*[,、;]?\s*(?:字|[宋黑楷仿隶]|加粗|粗体|[）)]|Times|Arial|Calibri|Cambria|Helvetica|Courier|Georgia|Verdana)/u
+/** Typefaces a format annotation names after a size: a Chinese family by initial or name, or a common Latin one. */
+const TYPEFACE = '[宋黑楷仿隶]|微软雅黑|雅黑|方正|华文|幼圆|等线|Times|Arial|Calibri|Cambria|Helvetica|Courier|Georgia|Verdana'
+const FONT_SIZE = new RegExp(String.raw`小?[初一二三四五六七八\d]+号\s*[,、;]?\s*(?:字|加粗|粗体|[）)]|${TYPEFACE})`, 'u')
 
 /**
  * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行, instead of naming a section.
  * It is told by an annotation opening or a measurement (a size in 号 followed, possibly after a separator such as ，
- * or 、, by 字, a Chinese typeface initial or common Latin typeface such as Times New Roman or Arial, bold, or a closing
+ * or 、, by 字, a typeface such as 黑体, 微软雅黑, or Times New Roman, bold, or a closing
  * parenthesis; spacing in lines or points; a line-spacing multiple), not by vocabulary: 政策建议, 字体识别研究, and
- * 页眉检测方法 still name sections. A Latin typeface outside the listed common ones is not recognized.
+ * 页眉检测方法 still name sections. A typeface outside the listed ones is not recognized.
  */
 function isFormatAnnotation(text: string): boolean {
   // Full-width digits and parentheses read as their ASCII forms, as for section numbers.
