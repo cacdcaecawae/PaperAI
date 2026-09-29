@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
@@ -11,7 +12,7 @@ import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
-  Agent, AgentModelController, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus,
+  Agent, AgentModelController, AgentSetup, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
@@ -1645,6 +1646,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     if (creation === undefined) {
       const root: CreationRoot = { cwd, existing: existingCwd }
       creationRoots.set(sessionId, root)
+      // The must-exist root is checked at the Agent's publication commit, after every setup await, so a root removed
+      // during setup, or required by a request that joined meanwhile, rolls the unpublished Agent back.
+      const requiringRoot = (setup: (agentCtx: Context) => Promise<void>): AgentSetup => async (agentCtx) => {
+        await setup(agentCtx)
+        return {
+          commit: () => {
+            if (root.existing && !statSync(cwd).isDirectory()) throw new Error(`workspace root "${cwd}" is not a directory`)
+          },
+        }
+      }
       creation = (async () => {
         const attached = ctx.sessions.get(sessionId)
         const live = ctx.agents.get(sessionId)
@@ -1677,12 +1688,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
           const composition = await composeAgent(storedPreset)
-          if (root.existing) await requireDirectory(cwd)
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
             ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
             agentOptions: agentOptions(composition.factoryRoute),
-            setup: composition.setup,
+            setup: requiringRoot(composition.setup),
           })).agent
         }
 
@@ -1695,7 +1705,6 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
         }
         const composition = await composeAgent(presetId)
-        if (root.existing) await requireDirectory(cwd)
         return (await ctx.agents.create({
           sessionId,
           ...composition.factoryRoute === undefined ? {} : { factoryRoute: composition.factoryRoute },
@@ -1704,7 +1713,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             cwd,
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
           },
-          setup: composition.setup,
+          setup: requiringRoot(composition.setup),
         })).agent
       })().catch((error: unknown) => {
         // Another Host entry path may have published the same identity while

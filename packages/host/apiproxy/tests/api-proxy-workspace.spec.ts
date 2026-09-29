@@ -96,6 +96,8 @@ async function harness(
   ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
   await ctx.plugin(WorkspaceRegistry)
 
+  /** Runs between an Agent's setup and its publication commit. */
+  const hooks: { afterSetup?: () => void } = {}
   const factory: AgentFactory = {
     async createAgent(_ownerCtx, options) {
       const session = ctx.sessions.create(
@@ -103,6 +105,10 @@ async function harness(
         options.meta === undefined ? {} : { meta: options.meta },
       )
       const agent = stubAgent(session)
+      // As the registry does: settle setup against the Agent's scope, then commit immediately before publication.
+      const pending = await options.setup?.({ agent } as never)
+      hooks.afterSetup?.()
+      pending?.commit()
       const unregister = ctx.agents.register(agent)
       return {
         agent,
@@ -126,7 +132,7 @@ async function harness(
     ...extras.openPath === undefined ? {} : { openPath: extras.openPath },
     ...extras.canOpenPath === undefined ? {} : { canOpenPath: extras.canOpenPath },
   })
-  return { api, ctx, storageDomain, root }
+  return { api, ctx, storageDomain, root, hooks }
 }
 
 /** Stage one directory under the harness root for path adoption. */
@@ -455,6 +461,20 @@ describe('session creation and Workspace membership', () => {
 
     expect((await joined).result).toMatchObject({ ok: false })
     expect((await plain).result).toMatchObject({ ok: false })
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('does not publish an Agent whose Workspace root is removed during its setup', async () => {
+    const { api, ctx, root, hooks } = await harness()
+    const path = stageDir(root, 'removed-during-setup')
+    const workspace = expectOk(await api.workspace.create(request({ path }))).workspace
+    hooks.afterSetup = () => { rmSync(path, { recursive: true }) }
+    const sessionId = SessionId('workspace-root-removed-during-setup')
+
+    const response = await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId }))
+
+    expect(response.result).toMatchObject({ ok: false, error: { code: 'internal' } })
     expect(ctx.agents.get(sessionId)).toBeUndefined()
     expect(existsSync(path)).toBe(false)
   })
