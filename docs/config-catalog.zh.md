@@ -3505,7 +3505,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/paperai/template-service/src/index.ts:90`](../packages/paperai/template-service/src/index.ts)
+来源：[`packages/paperai/template-service/src/index.ts:91`](../packages/paperai/template-service/src/index.ts)
 
 <a id="paperaitool-document"></a>
 

@@ -324,6 +324,22 @@ describe('PaperTemplateService', () => {
     expect(repository.documents.get(legacy.sourceDocumentId)?.documentKind).toBe('template-source')
   })
 
+  it('compiles a pack member against its declared required sections', async () => {
+    const sourcePath = join(root, 'source.doc')
+    const normalizedPath = join(root, 'normalized.docx')
+    await writeFile(sourcePath, 'source-doc')
+    await writeFile(normalizedPath, 'normalized-docx')
+    const manifest = packManifest(sourcePath, normalizedPath, 'format-reference', ['manuscript'])
+    const sections = ['致谢']
+    service.registerPack({ ...manifest, members: [{ ...manifest.members[0]!, requiredSections: sections }] })
+    // A pack that reuses its array afterwards must not change the rules it registered.
+    sections[0] = '摘要'
+
+    await expect(service.installPack({ projectId: ProjectId('project-1'), packId: manifest.id }))
+      .rejects.toThrow('required section not found in formatting reference: 致谢')
+    expect(service.listContracts(ProjectId('project-1'))).toEqual([])
+  })
+
   it('validates confirmation and matching roles without bypassing the commit owner', async () => {
     const sourcePath = join(root, 'source.doc')
     const normalizedPath = join(root, 'normalized.docx')
@@ -511,6 +527,17 @@ describe('PaperTemplateService', () => {
       ...base,
       members: [{ ...base.members[0]!, appliesToRoles: [] }],
     })).toThrow('appliesToRoles')
+    expect(() => service.registerPack({
+      ...base,
+      members: [{ ...base.members[0]!, requiredSections: ['致谢'] }],
+    })).toThrow('requiredSections applies only to a format-reference member')
+    // An empty declaration would silently disable every section rule, and a blank title can never match.
+    const reference = { ...base.members[0]!, usage: 'format-reference' as const }
+    // So would a title that normalizes to nothing or to another title's key.
+    for (const requiredSections of [[], ['摘要', ' '], ['第1章'], ['（说明）'], ['结论', '结  论']]) {
+      expect(() => service.registerPack({ ...base, members: [{ ...reference, requiredSections }] }), JSON.stringify(requiredSections))
+        .toThrow('requiredSections must list distinct section titles')
+    }
 
     const construct = (config: ConstructorParameters<typeof PaperTemplateService>[1]) => {
       const isolated = new Context()

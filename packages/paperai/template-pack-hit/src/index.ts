@@ -37,6 +37,7 @@ const ManifestSchema = z.object({
     appliesToRoles: z.array(RoleSchema).min(1),
     usage: UsageSchema,
     sourceVersion: z.string().min(1),
+    requiredSections: z.array(z.string().min(1)).min(1).optional(),
     source: AssetSchema.extend({ originalFileName: z.string().min(1) }),
     normalized: AssetSchema,
   })).min(1),
@@ -79,6 +80,7 @@ function parseMember(member: z.infer<typeof ManifestSchema>['members'][number]):
     appliesToRoles: Object.freeze(member.appliesToRoles),
     usage: member.usage,
     sourceVersion: member.sourceVersion,
+    ...(member.requiredSections === undefined ? {} : { requiredSections: Object.freeze(member.requiredSections) }),
     source: Object.freeze({
       path: join(ASSET_ROOT, member.source.file),
       originalFileName: member.source.originalFileName,

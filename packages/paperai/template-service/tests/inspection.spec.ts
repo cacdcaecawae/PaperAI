@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseBodyInspection } from '../src/inspection.ts'
+import { isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from '../src/inspection.ts'
 
 describe('parseBodyInspection', () => {
   it('returns no nodes for absent or malformed body results', () => {
@@ -44,5 +44,54 @@ describe('parseBodyInspection', () => {
         { type: 'body', children: [{ path: '/body/p[1]', type: 'paragraph', text: '保留', format: {} }] },
       ],
     })).toEqual([{ path: '/body/p[1]', type: 'paragraph', text: '保留', format: {} }])
+  })
+})
+
+describe('isHeadingParagraph', () => {
+  it('reads every supported section number in body text as a heading, but not a numbered sentence', () => {
+    for (const text of ['第五章 结论', '第一节  研究背景', '1、研究背景', '1) 研究方法', '①研究内容', '一、研究背景',
+      'Chapter 1 Introduction', '1.1 研究背景', '1.2.1 国内研究现状（示例，可删除）', '3 结论',
+      '（一）研究背景']) {
+      expect(isHeadingParagraph(text, 'Normal'), text).toBe(true)
+    }
+    for (const text of ['1、首先分析数据，然后建立模型。', '2019年研究进展', '12 个样本表明，结果显著',
+      '①'.padEnd(45, '长')]) {
+      expect(isHeadingParagraph(text, 'Normal'), text).toBe(false)
+    }
+  })
+
+  it('reads a common section title in body text through a trailing note, as sectionKey() compares it', () => {
+    for (const text of ['结论（本章总结）', '致  谢(可选)', '学位论文原创性声明（须签字）', '（英文）摘要', '（硕士）学位论文原创性声明']) {
+      expect(isHeadingParagraph(text, 'Normal'), text).toBe(true)
+    }
+    expect(isHeadingParagraph('（本章总结）', 'Normal')).toBe(false)
+    expect(isHeadingParagraph('（英文）摘要应简明扼要', 'Normal')).toBe(false)
+  })
+
+  it('compares section titles without their number, whitespace, or case', () => {
+    expect(sectionKey('第6章 结  论')).toBe(sectionKey('结论'))
+    expect(sectionKey('Chapter 3 METHODS')).toBe(sectionKey('methods'))
+    expect(sectionKey('第1章')).toBe('')
+    // A delimiter after a chapter number is part of the number.
+    expect(sectionKey('第1章：绪论')).toBe(sectionKey('绪论'))
+    expect(sectionKey('第二节、研究方法')).toBe(sectionKey('研究方法'))
+    expect(sectionKey('Chapter 1: Introduction')).toBe(sectionKey('introduction'))
+    expect(sectionKey('Chapter 2. Methods')).toBe(sectionKey('methods'))
+    expect(sectionKey('1.1、研究背景')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('1.2.3：研究方法')).toBe(sectionKey('研究方法'))
+    // Only a trailing note is dropped; a parenthetical that title text follows belongs to the title.
+    expect(sectionKey('研究背景（示例）')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('研究背景（示例')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('实验结果（含分析）与讨论')).not.toBe(sectionKey('实验结果'))
+    // Full-width numbers count as numbers, and circled ones stay numbers too.
+    expect(sectionKey('第１章 结论')).toBe(sectionKey('结论'))
+    expect(sectionKey('１．１\u3000研究背景')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('①研究内容')).toBe(sectionKey('研究内容'))
+    expect(sectionKey('（一）研究背景')).toBe(sectionKey('研究背景'))
+    expect(sectionKey('(12) 研究方法')).toBe(sectionKey('研究方法'))
+    expect(sectionKey('（英文）摘要')).not.toBe(sectionKey('摘要'))
+    expect(isHeadingParagraph('１．１\u3000研究背景', 'Normal')).toBe(true)
+    // The label keeps the heading's own characters.
+    expect(sectionLabel('第１章　实验结果（含分析）与讨论')).toBe('实验结果（含分析）与讨论')
   })
 })

@@ -53,11 +53,92 @@ describe('compileTemplateDraft', () => {
     expect(compiled.contract.slots).toEqual([])
     expect(compiled.contract.pageSetup).toEqual({})
     expect(compiled.contract.rules.map(rule => rule.kind)).toEqual(expect.arrayContaining([
-      'fixed-text', 'required-section', 'reference-count', 'minimum-characters', 'font', 'font-size', 'paragraph-spacing',
+      'required-section', 'reference-count', 'minimum-characters', 'font', 'font-size', 'paragraph-spacing',
     ]))
     expect(compiled.contract.rules).not.toContainEqual(expect.objectContaining({ kind: 'table-structure' }))
     expect(compiled.nodes.at(-1)?.kind).toBe('table')
     expect(compiled.contract.styleMap).toHaveProperty('heading 1')
+  })
+
+  it('requires only the sections a pack declares, without copying research headings, annotations, citations, or TOC entries', async () => {
+    const compiled = await compileFormatReference([
+      ['摘  要', 'heading 1'], ['Abstract', 'heading 1'], ['目  录', 'Normal'],
+      ['结  论', 'heading 1'], ['参考文献', 'heading 1'],
+      ['第4章  基于FLUENT软件的轴承静态特性研究', 'heading 1'],
+      ['6.2  多孔质石墨渗透率测试试验', 'heading 2'],
+      ['0.023 12', 'Normal'],
+      ['哈尔滨工业大学←（楷体小2号字加粗）', 'Normal'],
+      ['［12］谌颖．哈尔滨工业大学，1992：8-13.', 'Normal'],
+      ['摘  要\tI', '目录 1'], ['Abstract\tII', 'TOC 1'],
+      ['参考文献', 'TOC 1'], ['结论', '目录 1'],
+      ['（摘要应说明研究工作）', 'heading 1'],
+      ['攻读博士学位期间取得创新性成果', 'heading 1'], ['致  谢', 'heading 1'],
+    ], ['摘要', 'Abstract', '目录', '结论', '参考文献'])
+
+    expect(compiled.contract.fixedNodeIds).toEqual([])
+    expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([
+      ['required-section', { text: '摘  要' }],
+      ['required-section', { text: 'Abstract' }],
+      ['required-section', { text: '目  录' }],
+      ['required-section', { text: '结  论' }],
+      ['required-section', { text: '参考文献' }],
+    ])
+  })
+
+  it('requires every unnumbered heading of a formatting reference that declares no sections', async () => {
+    const compiled = await compileFormatReference([
+      // Section titles a sample sets in body text still count; only a heading style marks any other title.
+      ['摘  要', 'heading 1'], ['ABSTRACT', 'Normal'],
+      ['致  谢\t30', 'TOC 1'],
+      ['第1章  绪论', 'heading 1'], ['1.1  研究背景', 'heading 2'], ['1.2.1 国内研究现状', 'heading 3'],
+      ['第一章  绪论', 'heading 1'], ['一、研究背景', 'heading 2'], ['1、国内研究现状', 'heading 3'],
+      ['Chapter 1 Introduction', 'heading 1'], ['第十二章 结论', 'heading 1'],
+      ['第一节  研究背景', 'heading 2'], ['第2节 研究现状', 'heading 2'], ['1) 研究方法', 'heading 3'], ['①研究内容', 'heading 3'],
+      ['图1-1  系统结构', 'heading 1'], ['（摘要应说明研究工作）', 'heading 1'],
+      ['学位论文原创性声明', 'Normal'], ['致  谢', 'Normal'], ['本文遵守学位论文原创性声明。', 'Normal'],
+      ['本人已阅读学位论文原创性声明', 'Normal'], ['本人已阅读学位论文原创性声明.', 'Normal'],
+      ['条标题 4号字，建议段前0.5行，段后0.5行', 'heading 2'], ['政策建议', 'heading 1'],
+      ['字体识别研究', 'heading 1'], ['页眉检测方法', '标题 1'], ['正文 1.5倍行距', 'heading 2'],
+      ['1.1研究背景', 'heading 2'], ['一 研究背景', 'heading 2'], ['一级标题（小二号黑体）', 'heading 1'],
+      ['实验结果（含分析）与讨论', 'heading 1'], ['二号楼设计', 'heading 1'],
+      ['Figure 1 System overview', 'heading 1'], ['Table 2 Results', 'heading 1'], ['图一 系统结构', 'heading 1'],
+      ['第１章　绪论', 'heading 1'], ['图１ 系统结构', 'heading 1'], ['一级标题（４号黑体）', 'heading 1'],
+      ['一级标题（小二号，黑体）', 'heading 1'], ['二级标题（三号、加粗）', 'heading 2'],
+      ['［12］作者．题名', 'heading 1'], ['[3] Smith J. Title', 'heading 1'], ['【4】作者．题名', 'heading 1'],
+      ['说  明', 'heading 1'], ['注意：示例', 'heading 1'], ['注意力机制研究', 'heading 1'], ['要求工程分析', 'heading 1'],
+      ['一级标题（小二号 Times New Roman）', 'heading 1'], ['英文标题（12号 Arial）', 'heading 1'], ['3号 Reactor 设计', 'heading 1'],
+      ['（英文）摘要', 'heading 1'], ['（硕士）学位论文原创性声明', 'heading 1'], ['（一）研究背景', 'heading 2'], ['(2) 研究方法', 'heading 3'],
+      ['(注：本页可删除)', 'heading 1'], ['一级标题（小二号微软雅黑）', 'heading 1'], ['二级标题（三号 方正小标宋）', 'heading 2'],
+    ])
+
+    // The annotation compiles its own format rules, but only real headings become sections.
+    expect(compiled.contract.rules.filter(rule => rule.kind === 'required-section').map(rule => [rule.kind, rule.expected])).toEqual([
+      ['required-section', { text: '摘  要' }],
+      ['required-section', { text: 'ABSTRACT' }],
+      ['required-section', { text: '学位论文原创性声明' }],
+      ['required-section', { text: '致  谢' }],
+      ['required-section', { text: '政策建议' }],
+      ['required-section', { text: '字体识别研究' }],
+      ['required-section', { text: '页眉检测方法' }],
+      ['required-section', { text: '实验结果（含分析）与讨论' }],
+      ['required-section', { text: '二号楼设计' }],
+      ['required-section', { text: '注意力机制研究' }],
+      ['required-section', { text: '要求工程分析' }],
+      ['required-section', { text: '3号 Reactor 设计' }],
+      ['required-section', { text: '（英文）摘要' }],
+      ['required-section', { text: '（硕士）学位论文原创性声明' }],
+    ])
+  })
+
+  it('finds a declared section under the number the formatting reference gives it', async () => {
+    // Set in body text, the numbered heading is still one.
+    const compiled = await compileFormatReference([['第五章  结  论', 'Normal']], ['结论'])
+    expect(compiled.contract.rules.map(rule => [rule.kind, rule.expected])).toEqual([['required-section', { text: '结  论' }]])
+  })
+
+  it('rejects a declared section the formatting reference does not contain', async () => {
+    await expect(compileFormatReference([['摘  要', 'heading 1']], ['摘要', '致谢']))
+      .rejects.toThrow('required section not found in formatting reference: 致谢')
   })
 
   it('detects text and date fields plus form tables', async () => {
@@ -167,6 +248,15 @@ function input(templateId: string, sourceDocumentId: string) {
     origin: { kind: 'upload' as const, label: '边界模板', originalFileName: 'source.docx' },
     now: '2026-08-28T00:00:00.000Z',
   }
+}
+
+async function compileFormatReference(examples: ReadonlyArray<readonly [string, string]>, requiredSections?: readonly string[]) {
+  const nodes = examples.map(([text], index) => ({ officePath: `/body/p[${index + 1}]`, text, kind: 'paragraph' as const }))
+  return await compileTemplateDraft({
+    readTextNodes: vi.fn(async () => nodes),
+    inspect: vi.fn(async () => ({ results: [{ type: 'body', children: nodes.map((node, index) =>
+      inspected(node.officePath, node.text, examples[index]![1])) }] })),
+  } as never, { ...input('format', 'source'), usage: 'format-reference', ...(requiredSections === undefined ? {} : { requiredSections }) })
 }
 
 function inspected(path: string, text: string, style: string): Record<string, unknown> {

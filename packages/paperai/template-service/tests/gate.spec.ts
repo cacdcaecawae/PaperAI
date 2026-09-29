@@ -139,6 +139,63 @@ describe('checkTemplateContract', () => {
     ]))
   })
 
+  it('finds a formatting reference’s required section only in a heading, not a TOC entry or a sentence', async () => {
+    const rules = [
+      rule('required-section', { text: '结  论' }), rule('required-section', { text: '致  谢' }),
+      rule('required-section', { text: '参考文献' }), rule('required-section', { text: '研究背景' }),
+      rule('required-section', { text: '政策建议' }),
+    ]
+    const input = {
+      text: [
+        { officePath: '/body/p[1]', text: '结论', kind: 'paragraph' as const },
+        { officePath: '/body/p[2]', text: '本文结论如下。', kind: 'paragraph' as const },
+        { officePath: '/body/p[3]', text: '致  谢', kind: 'paragraph' as const },
+        { officePath: '/body/p[4]', text: '参考文献综述', kind: 'paragraph' as const },
+        { officePath: '/body/p[5]', text: '1.1  研究背景', kind: 'paragraph' as const },
+        { officePath: '/body/p[6]', text: '政策建议', kind: 'paragraph' as const },
+      ],
+      children: [
+        { path: '/body/p[1]', type: 'paragraph', text: '结论', style: 'toc 1', format: {} },
+        { path: '/body/p[2]', type: 'paragraph', text: '本文结论如下。', style: 'Normal', format: {} },
+        { path: '/body/p[3]', type: 'paragraph', text: '致  谢', style: 'Normal', format: {} },
+        { path: '/body/p[4]', type: 'paragraph', text: '参考文献综述', style: 'heading 1', format: {} },
+        { path: '/body/p[5]', type: 'paragraph', text: '1.1  研究背景', style: 'heading 2', format: {} },
+        { path: '/body/p[6]', type: 'paragraph', text: '政策建议', style: '标题 1', format: {} },
+      ],
+      valid: true,
+    }
+
+    const reference = await checkTemplateContract(engine(input), document, contract(rules, { usage: 'format-reference' }), 'delivery-export')
+    expect(reference.findings.map(item => [item.code, item.expected])).toEqual([
+      ['required_section_missing', '结  论'],
+      ['required_section_missing', '参考文献'],
+    ])
+
+    // A form template's filled-in outline items are plain paragraphs, so its sections stay found in any text.
+    const form = await checkTemplateContract(engine(input), document, contract(rules), 'delivery-export')
+    expect(form.findings).toEqual([])
+  })
+
+  it('meets a numbered required section whatever the manuscript numbers it', async () => {
+    const rules = ['第5章 结论', 'Chapter 2 Methods', '一、研究背景', '①研究内容'].map(text => rule('required-section', { text }))
+    const headings = ['第6章 结  论', 'Chapter 3 Methods', '二、研究背景', '研究内容']
+    const report = await checkTemplateContract(engine({
+      text: headings.map((text, index) => ({ officePath: `/body/p[${String(index + 1)}]`, text, kind: 'paragraph' as const })),
+      children: headings.map((text, index) => ({ path: `/body/p[${String(index + 1)}]`, type: 'paragraph', text, style: 'heading 1', format: {} })),
+      valid: true,
+    }), document, contract(rules, { usage: 'format-reference' }), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
+  it('reads a heading level from a localized Word heading style', async () => {
+    const report = await checkTemplateContract(engine({
+      text: [{ officePath: '/body/p[1]', text: '1.1 研究背景', kind: 'paragraph' }],
+      children: [{ path: '/body/p[1]', type: 'paragraph', text: '1.1 研究背景', style: '标题 2', format: { 'effective.size': '14pt' } }],
+      valid: true,
+    }), document, contract([rule('font-size', { target: 'heading-2', points: 14 })]), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
   it('turns an inspection rejection into one blocking finding', async () => {
     const broken = {
       readTextNodes: vi.fn(() => rejectWireValue('broken engine')),
@@ -154,6 +211,63 @@ describe('checkTemplateContract', () => {
     const errorReport = await checkTemplateContract(broken as never, document, contract([]), 'delivery-export')
     expect(errorReport.findings[0]?.code).toBe('template_inspection_failed')
     expect(errorReport.findings[0]?.message).toContain('engine error')
+  })
+
+  it('counts a section through its numbered list items and ends it at the next number of its own form', async () => {
+    const text = ['1. 研究内容', '本节正文', '1、研究对象', '对象说明', '2. 研究方法', '方法正文'].map((value, index) => ({
+      officePath: `/body/p[${index + 1}]`, text: value, kind: 'paragraph' as const,
+    }))
+    const children = text.map(node => ({ path: node.officePath, type: 'paragraph', text: node.text, style: 'Normal', format: {} }))
+    const report = await checkTemplateContract(engine({ text, children, valid: true }), document, contract([
+      rule('minimum-characters', { minimum: 14, heading: '研究内容' }),
+      rule('minimum-characters', { minimum: 15, heading: '研究内容' }),
+    ]), 'delivery-export')
+    expect(report.findings.map(finding => [finding.code, finding.message])).toEqual([['minimum_characters', '字数不足：14/15']])
+  })
+
+  it('checks numbered list items as body text in a document that marks its headings with heading styles', async () => {
+    const paragraphs: Array<[string, string, string]> = [
+      ['第1章 绪论', 'heading 1', '黑体'], ['研究正文', 'Normal', '宋体'],
+      ['1、研究对象', 'Normal', '宋体'], ['2、研究方法', 'Normal', '宋体'], ['3、研究步骤', 'Normal', '宋体'],
+    ]
+    const text = paragraphs.map(([value], index) => ({ officePath: `/body/p[${index + 1}]`, text: value, kind: 'paragraph' as const }))
+    const children = paragraphs.map(([value, style, font], index) => ({
+      path: `/body/p[${index + 1}]`, type: 'paragraph', text: value, style, format: { 'effective.font.eastAsia': font },
+    }))
+    const report = await checkTemplateContract(engine({ text, children, valid: true }), document, contract([
+      rule('font', { target: 'heading', eastAsia: '黑体' }),
+      rule('font', { target: 'body', eastAsia: '宋体' }),
+    ]), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
+  it('does not take a numbered list item for a required section in a document with heading styles', async () => {
+    const report = await checkTemplateContract(paragraphsEngine([
+      ['第1章 绪论', 'heading 1'], ['1、研究背景', 'Normal'], ['正文', 'Normal'],
+    ]), document, contract([rule('required-section', { text: '研究背景' })], { usage: 'format-reference' }), 'delivery-export')
+    expect(report.findings.map(finding => finding.code)).toEqual(['required_section_missing'])
+  })
+
+  it('keeps directly formatted chapter, dotted, and styled-form headings beside styled ones', async () => {
+    const report = await checkTemplateContract(paragraphsEngine([
+      ['第1章 绪论', 'heading 1', '黑体'], ['1.1 研究背景', 'Normal', '黑体'], ['1.2 研究方法', 'Normal', '黑体'],
+      ['一、研究现状', 'heading 2', '黑体'], ['二、研究内容', 'Normal', '黑体'], ['研究正文', 'Normal', '宋体'],
+    ]), document, contract([
+      rule('font', { target: 'heading', eastAsia: '黑体' }),
+      rule('font', { target: 'body', eastAsia: '宋体' }),
+      rule('required-section', { text: '研究内容' }),
+    ], { usage: 'format-reference' }), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
+  it('ends a counted section at a sibling whose number omits the delimiter its own number carries', async () => {
+    const report = await checkTemplateContract(paragraphsEngine([
+      ['1.1、研究背景', 'Normal'], ['背景正文', 'Normal'], ['1.2 研究方法', 'Normal'], ['方法正文', 'Normal'],
+    ]), document, contract([
+      rule('minimum-characters', { minimum: 4, heading: '研究背景' }),
+      rule('minimum-characters', { minimum: 5, heading: '研究背景' }),
+    ]), 'delivery-export')
+    expect(report.findings.map(finding => finding.message)).toEqual(['字数不足：4/5'])
   })
 
   it('passes satisfied defaults and keeps warning-only style evidence non-blocking', async () => {
@@ -213,6 +327,16 @@ describe('checkTemplateContract', () => {
     expect(report.findings.every(item => item.severity === 'warning')).toBe(true)
   })
 })
+
+/** An engine over paragraphs given as text, style, and East Asian font. */
+function paragraphsEngine(rows: ReadonlyArray<readonly [string, string, string?]>): never {
+  const text = rows.map(([value], index) => ({ officePath: `/body/p[${index + 1}]`, text: value, kind: 'paragraph' as const }))
+  const children = rows.map(([value, style, font], index) => ({
+    path: `/body/p[${index + 1}]`, type: 'paragraph', text: value, style,
+    format: font === undefined ? {} : { 'effective.font.eastAsia': font },
+  }))
+  return engine({ text, children, valid: true })
+}
 
 function engine(input: {
   text: Array<{ officePath: string; text: string; kind: 'paragraph' | 'table' | 'unknown' }>

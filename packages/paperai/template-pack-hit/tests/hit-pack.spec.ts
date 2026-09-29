@@ -16,12 +16,15 @@ describe('HIT template pack', () => {
     expect(HIT_TEMPLATE_PACK).toMatchObject({
       id: 'hit-master-thesis',
       name: 'HIT 硕士毕设',
-      version: 'provided-snapshot-2026-08-28',
+      version: 'provided-snapshot-2026-08-28-format-rules-v2',
     })
     expect(HIT_TEMPLATE_PACK.members.map(member => [member.id, member.usage, member.appliesToRoles])).toEqual([
       ['proposal', 'form-template', ['proposal']],
       ['midterm', 'form-template', ['midterm']],
       ['thesis-format', 'format-reference', ['manuscript']],
+    ])
+    expect(HIT_TEMPLATE_PACK.members.map(member => member.requiredSections)).toEqual([
+      undefined, undefined, ['摘要', 'Abstract', '目录', '结论', '参考文献'],
     ])
     for (const member of HIT_TEMPLATE_PACK.members) {
       const source = await readFile(member.source.path)

@@ -1863,7 +1863,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async installPack(input: InstallTemplatePackInput, signal?: AbortSignal): Promise<TemplateContract[]>',
-        description: 'Install selected members, verifying package bytes before OfficeCLI inspection. Repeating the same project, pack version, member, and source digest returns the existing draft or confirmed contract without another compilation.',
+        description: 'Install selected members, verifying package bytes before OfficeCLI inspection. Repeating the same project, pack version, member, and source digest under the same compiler revision returns the existing draft or confirmed contract without another compilation.',
         parameters: [{ name: 'input', description: 'project, pack, and optional member selection.' }, { name: 'signal', description: 'optional cancellation signal.' }],
         returns: 'contracts in manifest order.',
       },
@@ -6118,7 +6118,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TemplatePackMember',
-    declaration: 'export interface TemplatePackMember {\n    readonly id: TemplatePackMemberId;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n    readonly sourceVersion: string;\n    readonly source: TemplatePackSourceAsset;\n    readonly normalized: TemplatePackNormalizedAsset;\n}',
+    declaration: 'export interface TemplatePackMember {\n    readonly id: TemplatePackMemberId;\n    readonly name: string;\n    readonly description: string;\n    readonly appliesToRoles: readonly DocumentRole[];\n    readonly usage: TemplateUsage;\n    readonly sourceVersion: string;\n    readonly requiredSections?: readonly string[];\n    readonly source: TemplatePackSourceAsset;\n    readonly normalized: TemplatePackNormalizedAsset;\n}',
   },
   {
     name: 'TemplatePackMemberSummary',

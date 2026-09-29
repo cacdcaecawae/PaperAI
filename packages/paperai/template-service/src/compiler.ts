@@ -21,7 +21,7 @@ import type {
   TemplateUsage,
 } from '@paperai/domain'
 import type { StoredTemplateAssets } from './storage.ts'
-import { parseBodyInspection } from './inspection.ts'
+import { halfWidth, hasSectionNumber, isHeadingParagraph, parseBodyInspection, sectionKey, sectionLabel } from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 /** Complete records published before a draft contract becomes visible. */
@@ -31,6 +31,12 @@ export interface CompiledTemplateDraft {
   readonly contract: TemplateContract
 }
 
+/**
+ * Part of every compiled contract's identity. Bump it whenever a change alters what an existing sample compiles to,
+ * so repeating an install or upload compiles the sample again instead of returning the contract compiled before.
+ */
+export const COMPILER_REVISION = 1
+
 /** Inputs whose identities and immutable assets are owned by the template service. */
 export interface CompileTemplateDraftInput {
   readonly projectId: ProjectId
@@ -39,13 +45,17 @@ export interface CompileTemplateDraftInput {
   readonly name: string
   readonly appliesToRoles: readonly DocumentRole[]
   readonly usage: TemplateUsage
+  /** Pack-declared headings a formatting reference requires, as in `TemplatePackMember.requiredSections`. */
+  readonly requiredSections?: readonly string[]
   readonly assets: StoredTemplateAssets
   readonly origin: TemplateOrigin
   readonly now: string
 }
 
 /**
- * Compile OfficeCLI text and format evidence into durable nodes and a draft contract.
+ * Compile OfficeCLI evidence into durable nodes and a draft contract. Formatting
+ * references contribute their declared or unnumbered section headings, not fixed
+ * example research text.
  * @param engine - configured PaperAI document engine.
  * @param input - service-owned identities, provenance, roles, and immutable paths.
  * @param signal - optional cancellation signal.
@@ -87,7 +97,7 @@ export async function compileTemplateDraft(
       templateText: node.text,
     }))
   }
-  for (const node of compileRequiredSections(nodes, input.usage)) {
+  for (const node of compileRequiredSections(nodes, input.usage, input.requiredSections)) {
     rules.push(makeRule(input.sourceDocumentId, node, 'required-section', `包含章节：${compactLabel(node.text)}`, 'error', {
       text: sectionLabel(node.text),
     }))
@@ -151,7 +161,7 @@ function compileNode(
   const style = inspected?.format ?? {}
   const kind = textNode.kind === 'table'
     ? 'table'
-    : isHeading(textNode.text, inspected?.styleName) ? 'heading' : textNode.kind
+    : isHeadingParagraph(textNode.text, inspected?.styleName) ? 'heading' : textNode.kind
   return {
     id: DocumentNodeId(`node-${digest(`${documentId}\0${textNode.officePath}`).slice(0, 24)}`),
     documentId,
@@ -221,9 +231,33 @@ function fieldFor(text: string): FieldDefinition | undefined {
   return FIELDS.find(field => field.pattern.test(text))
 }
 
-function compileRequiredSections(nodes: readonly DocumentNode[], usage: TemplateUsage): DocumentNode[] {
+// Arabic or Chinese chapter and section numbers (第N章, 第N节), 1.2 / 一、 / 1、 / 1) enumerations, circled
+// numbers, Chapter N, and figure or table captions. Spelled-out or Roman chapter numbers are not recognized.
+/** A figure or table caption, which a sample may set in a heading style: 图1-1, 表 2, 图一, Figure 1, Fig. 2, Table 3. */
+const CAPTION = /^(?:[图表]\s*[\d一二三四五六七八九十]|(?:fig(?:ure)?\.?|table)\s*\d)/iu
+/** A numbered bibliography entry, which a sample may set in a heading style: [12] 作者．题名, ［3］, 【4】, 〔5〕. */
+const CITATION = /^[[【〔]\s*\d+\s*[\]】〕]/u
+
+function compileRequiredSections(
+  nodes: readonly DocumentNode[],
+  usage: TemplateUsage,
+  declared: readonly string[] | undefined,
+): DocumentNode[] {
   if (usage === 'format-reference') {
-    return nodes.filter(node => node.kind === 'heading' && node.text.trim().length > 0 && node.text.length <= 100)
+    const headings = nodes.filter(node => node.kind === 'heading' && node.text.trim().length > 0)
+    if (declared === undefined) {
+      // Numbered chapters and sections, captions, citations, and annotations belong to the sample's own content.
+      return headings.filter((node) => {
+        const text = halfWidth(node.text).trim()
+        return node.text.length <= 100 && !isFormatAnnotation(node.text)
+          && !hasSectionNumber(node.text) && !CAPTION.test(text) && !CITATION.test(text)
+      })
+    }
+    return declared.map((title) => {
+      const node = headings.find(heading => sectionKey(heading.text) === sectionKey(title))
+      if (node === undefined) throw new Error(`template-service: required section not found in formatting reference: ${title}`)
+      return node
+    })
   }
   const sections: DocumentNode[] = []
   let inOutline = false
@@ -340,31 +374,44 @@ function isStyleRule(kind: TemplateRuleKind): boolean {
   return kind === 'font' || kind === 'font-size' || kind === 'paragraph-spacing'
 }
 
+// A keyword opens an annotation only as a whole marker (说明：, 说  明), not as the start of a title such as 注意力机制研究,
+// and a parenthesis only when it holds the whole paragraph, as in （摘要应说明研究工作）, not （英文）摘要.
+const ANNOTATION_START = /^(?:(?:说\s*明|填写说明|注意|要求)(?=$|[\s:：,，、;；.。(（])|↑|[（(][^）)]*[）)]?\s*$)/u
+
 function isInstruction(text: string): boolean {
   const trimmed = text.trim()
-  return /^(?:说\s*明|填写说明|注意|要求|↑|（|\()/u.test(trimmed)
+  return ANNOTATION_START.test(trimmed)
     || /(?:建议|字体、字号|不要设置页眉|只作为.*示范)/u.test(trimmed)
 }
 
+/** Typefaces a format annotation names after a size: a Chinese family by initial or name, or a common Latin one. */
+const TYPEFACE = '[宋黑楷仿隶]|微软雅黑|雅黑|方正|华文|幼圆|等线|Times|Arial|Calibri|Cambria|Helvetica|Courier|Georgia|Verdana'
+const FONT_SIZE = new RegExp(String.raw`小?[初一二三四五六七八\d]+号\s*[,、;]?\s*(?:字|加粗|粗体|[）)]|${TYPEFACE})`, 'u')
+
+/**
+ * A sample heading that describes its own format, such as 条标题 4号字，建议段前0.5行, instead of naming a section.
+ * It is told by an annotation opening or a measurement (a size in 号 followed, possibly after a separator such as ，
+ * or 、, by 字, a typeface such as 黑体, 微软雅黑, or Times New Roman, bold, or a closing
+ * parenthesis; spacing in lines or points; a line-spacing multiple), not by vocabulary: 政策建议, 字体识别研究, and
+ * 页眉检测方法 still name sections. A typeface outside the listed ones is not recognized.
+ */
+function isFormatAnnotation(text: string): boolean {
+  // Full-width digits and parentheses read as their ASCII forms, as for section numbers.
+  const trimmed = halfWidth(text).trim()
+  return ANNOTATION_START.test(trimmed) || FONT_SIZE.test(trimmed)
+    || /(?:段[前后]\s*[\d.]+\s*(?:行|磅|pt)|[\d.]+\s*倍行距|行距\s*[\d.]+)/u.test(trimmed)
+}
+
 function isFixedText(text: string, usage: TemplateUsage): boolean {
-  const compact = text.replaceAll(/\s+/gu, '')
+  if (usage === 'format-reference') return false
+  const compact = withoutWhitespace(text)
   if (/哈尔滨工业大学/u.test(compact)) return true
   if (/硕士学位(?:论文)?(?:开题|中期)报告/u.test(compact)) return true
-  if (usage === 'format-reference' && /^(?:摘要|Abstract|目录|参考文献|结论)$/u.test(compact)) return true
   return false
 }
 
-function isHeading(text: string, styleName: string | undefined): boolean {
-  if (styleName?.toLowerCase().includes('heading') === true) return true
-  const trimmed = text.trim()
-  return /^(?:第\s*\d+\s*章|\d+(?:\.\d+)+\s+|摘\s*要$|Abstract$|目\s*录$|参考文献$|结\s*论$)/u.test(trimmed)
-}
-
-function sectionLabel(text: string): string {
-  return text
-    .replace(/^\d+(?:\.\d+)*[．.]?\s*/u, '')
-    .replace(/[（(].*$/u, '')
-    .trim()
+function withoutWhitespace(text: string): string {
+  return text.replaceAll(/\s+/gu, '')
 }
 
 function compactLabel(text: string): string {

@@ -46,6 +46,14 @@ export interface TemplatePackMember {
   readonly appliesToRoles: readonly DocumentRole[]
   readonly usage: TemplateUsage
   readonly sourceVersion: string
+  /**
+   * Headings a formatting reference requires, matched against the sample by title: a section number, a trailing
+   * parenthesized note, and whitespace are ignored, and the rest is compared NFKC-normalized and case-folded, so
+   * `第1章 结论` and `结论` name the same section. Registration rejects an empty list and an entry that names no
+   * section once normalized or the same section as another entry. Omitted: every unnumbered heading of the sample
+   * is required.
+   */
+  readonly requiredSections?: readonly string[]
   readonly source: TemplatePackSourceAsset
   readonly normalized: TemplatePackNormalizedAsset
 }

@@ -20,7 +20,13 @@ The document type decides the format. A document created from the project's set 
 
 A custom set is built by adding one Word file per document type with its usage: a form template is the document itself, and a formatting reference governs a manuscript the user uploads. Custom sets persist at `<storageRoot>/library/library.json` with their files in the template asset store; the built-in set comes from the shipped pack manifest. A custom set can be deleted while projects reference it: those projects show a missing template until they choose again, and documents keep their bound formats.
 
+Formatting references provide format evidence and structural headings, while form templates provide fields and fixed content. Which headings a formatting reference requires is pack data, not compiler policy: a pack member declares `requiredSections` (the HIT thesis example declares 摘要, Abstract, 目录, 结论, and 参考文献), and a reference without the declaration, such as a custom upload, requires every unnumbered heading of its sample, so an institution's standalone 致谢, originality declaration, or `ABSTRACT` survives. Numbered example research headings, captions, bibliography entries, cover annotations, and TOC entries cannot establish mandatory manuscript text. The delivery check mirrors this: a formatting reference's required section is met only by a heading of the manuscript with that whole title, never by a TOC entry, a sentence that names it, or a longer title that contains it. Changes to a built-in pack's compiled rules receive an explicit pack/member revision so an author can reapply the format; existing confirmed contracts remain immutable evidence for bound documents.
+
 ## Alternatives considered
+
+**Requiring every heading and institutional-name occurrence in a formatting example.** Rejected: those paragraphs can belong to the example's research subject, citations, or printing instructions. Treating them as required content forces an independent thesis to reproduce the example to pass delivery checks.
+
+**A fixed allowlist of section titles in the compiler.** Rejected: the list is one institution's policy, and applied to every custom formatting reference it silently drops that institution's other required sections.
 
 **Templates as a level of the sidebar hierarchy.** Rejected: a template is configuration, not content of one project, and listing it beside documents and Sessions is what made the sidebar unreadable.
 

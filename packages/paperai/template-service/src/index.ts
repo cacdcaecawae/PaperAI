@@ -20,7 +20,8 @@ import type {
   TemplateOrigin,
 } from '@paperai/domain'
 import type PaperRepository from '@paperai/repository'
-import { compileTemplateDraft } from './compiler.ts'
+import { COMPILER_REVISION, compileTemplateDraft } from './compiler.ts'
+import { sectionKey } from './inspection.ts'
 import type { CompiledTemplateDraft } from './compiler.ts'
 import { checkTemplateContract } from './gate.ts'
 import { TemplateLibrary } from './library.ts'
@@ -230,8 +231,8 @@ export class PaperTemplateService extends Service {
 
   /**
    * Install selected members, verifying package bytes before OfficeCLI inspection.
-   * Repeating the same project, pack version, member, and source digest returns
-   * the existing draft or confirmed contract without another compilation.
+   * Repeating the same project, pack version, member, and source digest under the same
+   * compiler revision returns the existing draft or confirmed contract without another compilation.
    * @param input - project, pack, and optional member selection.
    * @param signal - optional cancellation signal.
    * @returns contracts in manifest order.
@@ -243,7 +244,7 @@ export class PaperTemplateService extends Service {
     const members = selectedMembers(pack, input.memberIds)
     const contracts: TemplateContract[] = []
     for (const member of members) {
-      const seed = `built-in\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
+      const seed = `built-in\0compiler-${COMPILER_REVISION}\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
       const templateId = deterministicTemplateId(seed)
       contracts.push(await this.withLease(templateId, async () => {
         const existing = this.ctx.paperRepository.getTemplate(templateId)
@@ -265,6 +266,7 @@ export class PaperTemplateService extends Service {
           name: member.name,
           appliesToRoles: member.appliesToRoles,
           usage: member.usage,
+          ...(member.requiredSections === undefined ? {} : { requiredSections: member.requiredSections }),
           assets,
           origin,
         }, signal)
@@ -285,7 +287,7 @@ export class PaperTemplateService extends Service {
     validateName(input.name)
     const roles = validateRoles(input.appliesToRoles)
     const assets = await this.assets.importUpload(input.sourcePath, signal)
-    const seed = `upload\0${input.projectId}\0${assets.sourceSha256}\0${roles.join(',')}\0${input.usage}`
+    const seed = `upload\0compiler-${COMPILER_REVISION}\0${input.projectId}\0${assets.sourceSha256}\0${roles.join(',')}\0${input.usage}`
     const templateId = deterministicTemplateId(seed)
     return await this.withLease(templateId, async () => {
       const existing = this.ctx.paperRepository.getTemplate(templateId)
@@ -501,9 +503,22 @@ function retainManifest(manifest: TemplatePackManifest): TemplatePackManifest {
     memberIds.add(member.id)
     validateName(member.name)
     const roles = validateRoles(member.appliesToRoles)
+    const { requiredSections } = member
+    // Only a formatting reference compiles declared sections, so anywhere else they would be dropped silently.
+    if (requiredSections !== undefined && member.usage !== 'format-reference') {
+      throw new Error(`template-service: requiredSections applies only to a format-reference member: ${member.id}`)
+    }
+    // An empty declaration would compile no section rule at all and skip inferring them, disabling the check; a
+    // title that normalizes to nothing, such as 第1章, or to another title's key would compile a rule that means nothing.
+    const keys = requiredSections?.map(sectionKey)
+    if (keys !== undefined && (keys.length === 0 || keys.some(key => key.length === 0) || new Set(keys).size !== keys.length)) {
+      throw new Error(`template-service: requiredSections must list distinct section titles: ${member.id}`)
+    }
     return Object.freeze({
       ...member,
       appliesToRoles: Object.freeze(roles),
+      // Copied, because freezing the member is shallow and a pack may reuse the array it registered.
+      ...(requiredSections === undefined ? {} : { requiredSections: Object.freeze([...requiredSections]) }),
       source: Object.freeze({ ...member.source }),
       normalized: Object.freeze({ ...member.normalized }),
     })

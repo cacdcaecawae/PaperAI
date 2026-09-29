@@ -1,0 +1,33 @@
+- strong: 正式版已完成交付检查并导出
+- complementary "格式检查":
+  - heading "格式检查" [level=2]
+  - button "关闭面板":
+    - img
+  - paragraph: 检查已保存版本是否满足模板要求。正式导出前会重新检查；请先保存修改。
+  - text: 已通过全部要求
+  - button "检查"
+  - list:
+    - listitem:
+      - strong: 包含章节：摘 要
+      - paragraph: 包含章节：摘 要。来源：摘 要
+      - text: 位置：/body/p[82]
+    - listitem:
+      - strong: 包含章节：Abstract
+      - paragraph: 包含章节：Abstract。来源：Abstract
+      - text: 位置：/body/p[95]
+    - listitem:
+      - strong: 包含章节：目 录
+      - paragraph: 包含章节：目 录。来源：目 录
+      - text: 位置：/body/p[107]
+    - listitem:
+      - strong: 包含章节：结 论
+      - paragraph: 包含章节：结 论。来源：结 论
+      - text: 位置：/body/p[291]
+    - listitem:
+      - strong: 包含章节：参考文献
+      - paragraph: 包含章节：参考文献。来源：参考文献
+      - text: 位置：/body/p[303]
+    - listitem:
+      - strong: 页面设置与模板一致
+      - paragraph: 页面设置与模板一致。来源：（理工类）
+      - text: 位置：/body
