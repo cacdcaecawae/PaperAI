@@ -115,7 +115,8 @@ export function isHeadingParagraph(text: string, styleName: string | undefined):
   if (TOC_STYLE.test(styleName ?? '')) return false
   if (styleName?.toLowerCase().includes('heading') === true || LOCALIZED_HEADING_STYLE.test(styleName ?? '')) return true
   const trimmed = text.trim()
-  const compact = trimmed.replaceAll(/\s+/gu, '')
+  // A trailing note does not hide a common title, as in 结论（本章总结）, since sectionKey() drops it too.
+  const compact = trimmed.replace(TRAILING_NOTE, '').replaceAll(/\s+/gu, '')
   return isNumberedTitle(trimmed)
     || /^(?:摘要|abstract|目录|结论|参考文献|致谢|acknowledge?ments?)$/iu.test(compact)
     || DECLARATION_TITLE.test(compact)
