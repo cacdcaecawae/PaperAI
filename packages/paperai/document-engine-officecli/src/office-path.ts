@@ -9,7 +9,9 @@ const WORD_ID_NS = 'http://schemas.microsoft.com/office/word/2010/wordml'
 /**
  * Resolve one OfficeCLI body address against the unmodified document XML.
  * @param root - Word document element whose descendants are addressed.
- * @param officePath - numeric or paraId address, optionally prefixed by /document.
+ * @param officePath - numeric or paraId address, optionally prefixed by /document. Spellings OfficeCLI never prints,
+ * such as an omitted index on a unique segment or a zero-padded ordinal, resolve here but have no text-index entry,
+ * so removals and anchors must use the address readTextNodes reports.
  * @returns the uniquely addressed original element.
  * @throws when the address is unsupported, missing, or ambiguous.
  */
@@ -22,13 +24,19 @@ export function resolveOfficePath(root: XmlElement, officePath: string): XmlElem
   for (const segment of path.slice(1).split('/')) {
     const match = /^(body|tbl|tr|tc|p)(?:\[(?:(\d+)|@paraId=(['"]?)([A-Za-z0-9]+)\3)\])?$/u.exec(segment)
     if (match === null || (match[4] !== undefined && match[1] !== 'p')) reject()
-    const candidates = Array.from(node.childNodes).filter((child): child is XmlElement =>
+    // OfficeCLI view shares body paragraph/table counters with first-level content controls.
+    const children = Array.from(node.childNodes).flatMap(child => node.localName === 'body'
+      && child.nodeType === child.ELEMENT_NODE && (child as XmlElement).namespaceURI === WORD_NS
+      && (child as XmlElement).localName === 'sdt' && match[2] !== undefined
+      ? Array.from((child as XmlElement).getElementsByTagNameNS(WORD_NS, 'sdtContent')[0]?.childNodes ?? [])
+      : [child])
+    const candidates = children.filter((child): child is XmlElement =>
       child.nodeType === child.ELEMENT_NODE && child.namespaceURI === WORD_NS && child.localName === match[1])
     const found = match[4] !== undefined
       ? candidates.filter(child => child.getAttributeNS(WORD_ID_NS, 'paraId') === match[4])
       : match[2] === undefined ? candidates : candidates.slice(Number(match[2]) - 1, Number(match[2]))
     const [target, duplicate] = found
-    if (target === undefined || duplicate !== undefined) reject()
+    if (target === undefined || duplicate !== undefined || target.parentNode !== node) reject()
     node = target
   }
   return node

@@ -1,0 +1,3 @@
+- paragraph: 首行缩进的段落，由 Agent 修改后 两个空格仍在
+- text: "　　首行缩进的段落，由 Agent 修改后  两个空格仍在"
+- stale Agent edits: NODE_TEXT_CONFLICT, NODE_TEXT_CONFLICT

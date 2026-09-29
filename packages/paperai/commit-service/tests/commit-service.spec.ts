@@ -810,7 +810,12 @@ describe('PaperCommitService', () => {
       { type: 'bind-template', templateId: secondTemplate },
       { type: 'milestone', label: '  review-ready  ' },
     ])
-    expect(compiled.engineMutations).toHaveLength(4)
+    expect(compiled.engineMutations).toEqual([
+      { type: 'insert-paragraph', text: 'append' },
+      { type: 'insert-paragraph', text: 'after', after: '/body/p[1]', style: 'Body', baseText: 'alpha' },
+      { type: 'insert-paragraph', text: 'before', before: '/body/p[1]', baseText: 'alpha' },
+      { type: 'remove', officePath: '/body/p[1]', baseText: 'alpha' },
+    ])
     expect(compiled.operations.map(operation => operation.type)).toEqual([
       'insert-node', 'insert-node', 'insert-node', 'delete-node',
       'bind-template', 'bind-template', 'milestone',
@@ -825,6 +830,8 @@ describe('PaperCommitService', () => {
       { before: 'alpha', after: 'beta' },
       { before: 'beta', after: 'gamma' },
     ])
+    expect(sequential.engineMutations.map(mutation => 'baseText' in mutation ? mutation.baseText : undefined))
+      .toEqual(['alpha', 'beta'])
     await expect(compile(harness, [
       { type: 'delete-node', nodeId: harness.nodeId },
       replaceMutation(harness.nodeId, 'alpha', 'beta'),
@@ -851,6 +858,7 @@ describe('PaperCommitService', () => {
     expect(formatted.engineMutations).toEqual([{
       type: 'replace-text',
       officePath: '/body/p[1]',
+      baseText: 'alpha',
       text: 'alpha',
       runs: [{ text: 'al', bold: true }, { text: 'pha' }],
     }])
@@ -860,7 +868,7 @@ describe('PaperCommitService', () => {
     }])).rejects.toThrow('do not spell its text')
     const paragraphs = [{ text: 'al', runs: [{ text: 'al', font: 'Arial' }] }, { text: 'pha', format: { align: 'center' as const } }]
     expect((await compile(harness, [{ ...replaceMutation(harness.nodeId, 'alpha', 'al\npha'), paragraphs }])).engineMutations)
-      .toEqual([{ type: 'replace-text', officePath: '/body/p[1]', text: 'al\npha', paragraphs }])
+      .toEqual([{ type: 'replace-text', officePath: '/body/p[1]', baseText: 'alpha', text: 'al\npha', paragraphs }])
     for (const invalid of [
       { nextText: '', paragraphs: [] },
       { nextText: 'alpha', paragraphs: [{ text: 'beta' }] },

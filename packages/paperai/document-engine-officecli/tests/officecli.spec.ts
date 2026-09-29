@@ -9,8 +9,10 @@ import type {
   SubprocessOutputRead,
   SubprocessSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
+import type { EngineMutation } from '@paperai/document-engine'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OfficeCliDocumentEngine, OfficeCliError, officeCliBin } from '../src/index.ts'
+import { resolveOfficePath } from '../src/office-path.ts'
 
 interface Reply {
   stdout?: string
@@ -92,8 +94,20 @@ function fixture(respond: (spec: SubprocessSpawnSpec) => Reply) {
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const documentXml = (body: string) => '<w:document xmlns:w="' + W + '"><w:body>' + body + '</w:body></w:document>'
 const paragraphXml = (text: string) => '<w:p><w:r><w:t>' + text + '</w:t></w:r></w:p>'
+// OfficeCLI's text view of the fixture: every addressable body paragraph as its plain text.
+const textElements = (body: string) => {
+  const root = new DOMParser().parseFromString(documentXml(body), 'application/xml').documentElement!
+  return Array.from(root.getElementsByTagNameNS(W, 'p'), (_, index) => `/body/p[${index + 1}]`).flatMap((path) => {
+    try {
+      return [{ path, text: resolveOfficePath(root, path).textContent }]
+    } catch {
+      return []
+    }
+  })
+}
 const xmlFixture = (body: string) => fixture(spec => spec.argv.includes('/document')
-  ? { stdout: JSON.stringify({ data: documentXml(body) }) } : {})
+  ? { stdout: JSON.stringify({ data: documentXml(body) }) }
+  : spec.argv.includes('text') ? { stdout: JSON.stringify({ data: { elements: textElements(body) } }) } : {})
 const writtenBody = (test: ReturnType<typeof fixture>) => new DOMParser().parseFromString(test.batches[0]!.xml, 'application/xml').documentElement!
 const childElements = (node: XmlElement) => Array.from(node.childNodes)
   .filter((child): child is XmlElement => child.nodeType === child.ELEMENT_NODE)
@@ -121,7 +135,10 @@ describe('OfficeCliDocumentEngine', () => {
 
   it('parses nested Office paths and leaves the resident document running', async () => {
     const { calls, engine } = fixture(spec => spec.argv.includes('text')
-      ? { stdout: '[/document/body/p[1]] 第一段\n[/document/body/tbl[1]/tr[1]/tc[1]/p[1]] 单元格\nnoise' }
+      ? { stdout: JSON.stringify({ data: { elements: [
+        { path: '/document/body/p[1]', text: '第一段' },
+        { path: '/document/body/tbl[1]/tr[1]/tc[1]/p[1]', text: '单元格' },
+      ] } }) }
       : {})
     await expect(engine.readTextNodes('D:\\paper.docx')).resolves.toEqual([
       { officePath: '/document/body/p[1]', text: '第一段', kind: 'paragraph' },
@@ -130,34 +147,93 @@ describe('OfficeCliDocumentEngine', () => {
     expect(calls.map(call => call.argv.slice(1, 3))).toEqual([['view', 'D:\\paper.docx']])
   })
 
-  it('ignores malformed text records and classifies non-paragraph nodes', async () => {
+  it('preserves whitespace and path-like continuation lines in structured text records', async () => {
     const { engine } = fixture(spec => spec.argv.includes('text')
-      ? { stdout: '[bad] ignored\n[/document/body/sdt[1]] field\n[/unterminated\n' }
+      ? { stdout: JSON.stringify({ data: { elements: [
+        { path: '/body/p[1]', text: '　　\tfirst\n[/body/p[2]] continuation\n ' },
+        { path: '/body/bookmarkStart', type: 'bookmarkStart' },
+        { path: '/document/body/sdt[1]', text: 'field' },
+      ] } }) }
       : {})
     await expect(engine.readTextNodes('paper.docx')).resolves.toEqual([
+      { officePath: '/body/p[1]', text: '　　\tfirst\n[/body/p[2]] continuation\n ', kind: 'paragraph' },
       { officePath: '/document/body/sdt[1]', text: 'field', kind: 'unknown' },
     ])
   })
 
-  it('applies ordered structural mutations with one document read and one command-file batch', async () => {
+  it.each([{}, { elements: null }, { elements: [null] }, { elements: [3] },
+    { elements: [{}] }, { elements: [{ path: 2, text: '' }] }, { elements: [{ path: 'bad', text: '' }] },
+    { elements: [{ path: '/body/p[1]', text: null }] },
+  ])('rejects malformed text records instead of returning an incomplete index: %j', async (data) => {
+    const { engine } = fixture(() => ({ stdout: JSON.stringify({ data }) }))
+    await expect(engine.readTextNodes('paper.docx')).rejects.toThrow(OfficeCliError)
+  })
+
+  it('applies ordered structural mutations with one document read, one index read, and one command-file batch', async () => {
     const test = xmlFixture(paragraphXml('alpha') + paragraphXml('beta') + paragraphXml('gamma'))
     await test.engine.applyMutations('paper.docx', [
-      { type: 'replace-text', officePath: '/body/p[1]', text: 'edited' },
-      { type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' },
-      { type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
-      { type: 'remove', officePath: '/body/p[3]' },
+      { baseText: 'alpha', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' },
+      { baseText: 'edited', type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' },
+      { baseText: 'beta', type: 'replace-text', officePath: '/body/p[2]', text: 'beta edited' },
+      { baseText: 'gamma', type: 'remove', officePath: '/body/p[3]' },
     ])
     expect(childElements(writtenBody(test)).map(node => node.textContent)).toEqual(['edited', 'inserted', 'beta edited'])
-    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch', 'save'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'view', 'batch', 'save'])
     expect(test.batches).toHaveLength(1)
     expect(test.batches[0]).toMatchObject({ command: 'raw-set', part: '/word/document.xml', xpath: '/w:document/w:body', action: 'replace' })
     expect(existsSync(test.batches[0]!.input)).toBe(false)
     expect(test.calls.find(call => call.argv.includes('batch'))?.argv).toContain('--input')
   })
 
+  it('reads the styles part once to recognize a removal target numbered by its paragraph style', async () => {
+    const body = '<w:p><w:pPr><w:pStyle w:val="Chapter"/></w:pPr><w:r><w:t>chapter</w:t></w:r></w:p>' + paragraphXml('tail')
+    const test = fixture(spec => spec.argv.includes('/document') ? { stdout: JSON.stringify({ data: documentXml(body) }) }
+      : spec.argv.includes('/styles') ? { stdout: JSON.stringify({ data: '<w:styles xmlns:w="' + W + '"><w:style w:type="paragraph" '
+        + 'w:styleId="Chapter"><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style></w:styles>' }) }
+        : spec.argv.includes('text')
+          ? { stdout: JSON.stringify({ data: { elements: [{ path: '/body/p[1]', text: '1. chapter' }, { path: '/body/p[2]', text: 'tail' }] } }) }
+          : {})
+    await test.engine.applyMutations('paper.docx', [{ type: 'remove', officePath: '/body/p[1]', baseText: '1. chapter' }])
+    expect(childElements(writtenBody(test)).map(node => node.textContent)).toEqual(['tail'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'view', 'raw', 'batch', 'save'])
+    expect(test.calls.filter(call => call.argv.includes('/styles'))).toHaveLength(1)
+  })
+
+  it('edits, inserts, and removes the indexed paragraphs after a content control', async () => {
+    const test = xmlFixture(paragraphXml('First') + '<w:sdt><w:sdtContent>' + paragraphXml('InSdt')
+      + '</w:sdtContent></w:sdt>' + paragraphXml('Third') + paragraphXml('Fourth') + paragraphXml('Fifth'))
+    await test.engine.applyMutations('paper.docx', [
+      { type: 'replace-text', officePath: '/body/p[3]', baseText: 'Third', text: 'Third edited' },
+      { type: 'insert-paragraph', after: '/body/p[3]', baseText: 'Third edited', text: 'Inserted' },
+      { type: 'remove', officePath: '/body/p[4]', baseText: 'Fourth' },
+    ])
+    expect(childElements(writtenBody(test)).map(node => node.textContent))
+      .toEqual(['First', 'InSdt', 'Third edited', 'Inserted', 'Fifth'])
+  })
+
+  it.each<EngineMutation>([
+    { type: 'replace-text', officePath: '/body/p[1]', baseText: 'original', text: 'edited' },
+    { type: 'remove', officePath: '/body/p[1]', baseText: 'original' },
+    { type: 'insert-paragraph', after: '/body/p[1]', baseText: 'original', text: 'inserted' },
+  ])('rejects $type when indexed whitespace or text differs from the actual target before sending a write', async (mutation) => {
+    const test = xmlFixture(paragraphXml('　　original\ntail'))
+    await expect(test.engine.applyMutations('paper.docx', [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
+    expect(test.calls.map(call => call.argv[1])).not.toContain('batch')
+    expect(test.batches).toEqual([])
+  })
+
+  it('refuses an insertion anchor without indexed text', async () => {
+    const test = xmlFixture(paragraphXml('original'))
+    // Statically rejected (anchored insertions require baseText); the runtime check stays for dynamic callers.
+    // @ts-expect-error an insertion anchor requires baseText
+    const mutation: EngineMutation = { type: 'insert-paragraph', after: '/body/p[1]', text: 'inserted' }
+    await expect(test.engine.applyMutations('paper.docx', [mutation])).rejects.toThrow('NODE_TEXT_CONFLICT')
+    expect(test.batches).toEqual([])
+  })
+
   it('keeps command arguments bounded for a large multi-paragraph batch', async () => {
     const test = xmlFixture(Array.from({ length: 70 }, (_, index) => paragraphXml(`paragraph ${index}`)).join(''))
-    await test.engine.applyMutations('paper.docx', Array.from({ length: 70 }, (_, index) => ({
+    await test.engine.applyMutations('paper.docx', Array.from({ length: 70 }, (_, index) => ({ baseText: `paragraph ${index}`,
       type: 'replace-text' as const, officePath: `/body/p[${index + 1}]`, text: `edited ${index} ${'x'.repeat(800)}`,
     })))
     expect(writtenBody(test).getElementsByTagNameNS(W, 'p')).toHaveLength(70)
@@ -174,7 +250,7 @@ describe('OfficeCliDocumentEngine', () => {
 
   it('writes explicit run overrides and retains opaque original run metadata', async () => {
     const test = xmlFixture('<w:p><w:r><w:rPr><w:lang w:val="en-US"/><w:vertAlign w:val="subscript"/></w:rPr><w:t>original</w:t></w:r></w:p>')
-    await test.engine.applyMutations('paper.docx', [{
+    await test.engine.applyMutations('paper.docx', [{ baseText: 'original',
       type: 'replace-text', officePath: '/body/p[1]', text: 'bold rest',
       runs: [{ text: 'bold', bold: true, size: '16pt', font: 'Arial', color: '#ff0000' }, { text: ' rest', italic: true, underline: false }],
     }])
@@ -190,7 +266,7 @@ describe('OfficeCliDocumentEngine', () => {
 
   it('preserves soft breaks and tabs when reconstructing multiple runs', async () => {
     const test = fixture(() => ({}))
-    await test.engine.applyMutations('paper.docx', [{
+    await test.engine.applyMutations('paper.docx', [{ baseText: 'original',
       type: 'replace-text', officePath: '/body/p[1]', text: 'first\vnextlast\vline\tend',
       runs: [{ text: 'first\vnext', bold: true }, { text: 'last\vline\tend', italic: true }],
     }])
@@ -204,11 +280,11 @@ describe('OfficeCliDocumentEngine', () => {
     const test = xmlFixture('<w:p><w:pPr><w:keepNext/><w:spacing w:line="360" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial"/></w:rPr></w:pPr>'
       + '<w:r><w:rPr><w:lang w:val="zh-CN"/></w:rPr><w:t>original</w:t></w:r></w:p>' + paragraphXml('tail'))
     await test.engine.applyMutations('paper.docx', [
-      { type: 'replace-text', officePath: '/body/p[1]', text: 'one\ntwo', paragraphs: [
+      { baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'one\ntwo', paragraphs: [
         { text: 'one', format: { align: 'center' } },
         { text: 'two', runs: [{ text: 'two', underline: false }], format: { indent: '24pt' } },
       ] },
-      { type: 'replace-text', officePath: '/body/p[2]', text: 'tail edited' },
+      { baseText: 'tail', type: 'replace-text', officePath: '/body/p[2]', text: 'tail edited' },
     ])
     const paragraphs = Array.from(writtenBody(test).getElementsByTagNameNS(W, 'p'))
     expect(paragraphs.map(node => node.textContent)).toEqual(['one', 'two', 'tail edited'])
@@ -221,7 +297,7 @@ describe('OfficeCliDocumentEngine', () => {
   it('resolves paragraph style names once while preserving unchanged text XML', async () => {
     const test = xmlFixture('<w:p><w:r w:rsidR="AABB"><w:rPr><w:lang w:val="en-US"/></w:rPr><w:t>original</w:t></w:r></w:p>')
     await test.engine.applyMutations('paper.docx', [
-      { type: 'replace-text', officePath: '/body/p[1]', text: 'original', paragraphs: [{ text: 'original', format: { style: 'Heading 1', lineSpacing: '2x' } }] },
+      { baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'original', paragraphs: [{ text: 'original', format: { style: 'Heading 1', lineSpacing: '2x' } }] },
       { type: 'insert-paragraph', text: 'inserted', style: 'normal' },
     ])
     const paragraphs = Array.from(writtenBody(test).getElementsByTagNameNS(W, 'p'))
@@ -241,10 +317,10 @@ describe('OfficeCliDocumentEngine', () => {
   it('rejects an insertion into a table row before writing any batch', async () => {
     const test = xmlFixture('<w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>')
     await expect(test.engine.applyMutations('paper.docx', [
-      { type: 'insert-paragraph', before: '/body/tbl[1]/tr[1]/tc[1]', text: 'invalid' },
+      { baseText: 'original', type: 'insert-paragraph', before: '/body/tbl[1]/tr[1]/tc[1]', text: 'invalid' },
     ])).rejects.toThrow('INVALID_INSERT_POSITION')
     expect(test.batches).toEqual([])
-    expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
+    expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'view'])
   })
 
   it('reads defined paragraph style IDs and display names without changing the document', async () => {
@@ -302,7 +378,7 @@ describe('OfficeCliDocumentEngine', () => {
     '<w:fldChar w:fldCharType="begin"/>', '<w:footnoteReference w:id="1"/>',
   ])('rejects text objects that the editor cannot project: %s', async (inline) => {
     const test = xmlFixture('<w:p><w:r><w:t>before</w:t>' + inline + '<w:t>after</w:t></w:r></w:p>')
-    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+    await expect(test.engine.applyMutations('paper.docx', [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
       .rejects.toThrow('UNSUPPORTED_DOCUMENT_CONTENT')
     expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
     expect(test.batches).toEqual([])
@@ -311,23 +387,23 @@ describe('OfficeCliDocumentEngine', () => {
   it.each(['<w:br w:type="page"/>', '<w:br w:type="column"/>', '<w:lastRenderedPageBreak/>'])
   ('retains non-text break markers omitted from the projected text: %s', async (inline) => {
     const test = xmlFixture('<w:p><w:r><w:t>before</w:t>' + inline + '<w:t>after</w:t></w:r></w:p>')
-    await test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'before edited after' }])
+    await test.engine.applyMutations('paper.docx', [{ baseText: 'beforeafter', type: 'replace-text', officePath: '/body/p[1]', text: 'before edited after' }])
     expect(new XMLSerializer().serializeToString(writtenBody(test))).toContain(inline)
   })
 
   it('retains a clear-bearing soft break unless the replacement text explicitly removes it', async () => {
     const body = '<w:p><w:r><w:t>before</w:t><w:br w:clear="all"/><w:t>after</w:t></w:r></w:p>'
     const retained = xmlFixture(body)
-    await retained.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'before\vafter edited' }])
+    await retained.engine.applyMutations('paper.docx', [{ baseText: 'before\vafter', type: 'replace-text', officePath: '/body/p[1]', text: 'before\vafter edited' }])
     expect(new XMLSerializer().serializeToString(writtenBody(retained))).toContain('<w:br w:clear="all"/>')
     const removed = xmlFixture(body)
-    await removed.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'beforeafter edited' }])
+    await removed.engine.applyMutations('paper.docx', [{ baseText: 'before\vafter', type: 'replace-text', officePath: '/body/p[1]', text: 'beforeafter edited' }])
     expect(writtenBody(removed).getElementsByTagNameNS(W, 'br')).toHaveLength(0)
   })
 
   it('accepts soft breaks and tabs inside a nested table paragraph', async () => {
     const test = xmlFixture('<w:tbl><w:tr><w:tc><w:p><w:r><w:t>before</w:t><w:br/><w:tab/><w:t>after</w:t></w:r></w:p></w:tc></w:tr></w:tbl>')
-    await test.engine.applyMutations('paper.docx', [{
+    await test.engine.applyMutations('paper.docx', [{ baseText: 'before\v\tafter',
       type: 'replace-text', officePath: '/body/tbl[1]/tr[1]/tc[1]/p[1]', text: 'before\v\tafter edited',
     }])
     const body = writtenBody(test)
@@ -340,7 +416,7 @@ describe('OfficeCliDocumentEngine', () => {
   it.each(['vertAlign', 'strike', 'dstrike', 'vanish', 'rStyle', 'rPrChange', 'lang', 'rtl'])
   ('retains opaque run property %s while changing text', async (property) => {
     const test = xmlFixture('<w:p><w:r><w:rPr><w:' + property + ' w:val="detail"/></w:rPr><w:t>original</w:t></w:r></w:p>')
-    await test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
+    await test.engine.applyMutations('paper.docx', [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
     expect(writtenBody(test).getElementsByTagNameNS(W, property)[0]?.getAttributeNS(W, 'val')).toBe('detail')
   })
 
@@ -351,14 +427,14 @@ describe('OfficeCliDocumentEngine', () => {
     '<w:u w:val="double" w:color="FF0000"/>', '<w:b w:val="0"/><w:bCs/>',
   ])('retains script and theme details while changing unrelated paragraph text: %s', async (properties) => {
     const test = xmlFixture('<w:p><w:r><w:rPr>' + properties + '</w:rPr><w:t>original</w:t></w:r></w:p>')
-    await test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
+    await test.engine.applyMutations('paper.docx', [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }])
     expect(new XMLSerializer().serializeToString(writtenBody(test))).toContain(properties)
   })
 
   it.each(['<broken>', '', null, '<document/>', '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'])
   ('rejects unavailable or malformed document XML before writing: %j', async (data) => {
     const test = fixture(spec => spec.argv.includes('raw') ? { stdout: JSON.stringify({ data }) } : {})
-    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+    await expect(test.engine.applyMutations('paper.docx', [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
       .rejects.toThrow()
     expect(test.calls.map(call => call.argv[1])).toEqual(['raw'])
     expect(test.batches).toEqual([])
@@ -366,7 +442,7 @@ describe('OfficeCliDocumentEngine', () => {
 
   it('removes its temporary command file after an OfficeCLI batch failure', async () => {
     const test = fixture(spec => spec.argv.includes('batch') ? { exitCode: 1, stderr: 'batch rejected' } : {})
-    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+    await expect(test.engine.applyMutations('paper.docx', [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
       .rejects.toThrow('batch rejected')
     expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch'])
     expect(existsSync(test.batches[0]!.input)).toBe(false)
@@ -387,7 +463,7 @@ describe('OfficeCliDocumentEngine', () => {
     { ...successfulBatch(), results: [{ index: 0, skipped: true }] },
   ])('rejects an unsuccessful or incomplete batch response despite exit code zero: %j', async (data) => {
     const test = fixture(spec => spec.argv.includes('batch') ? { stdout: JSON.stringify({ data }) } : {})
-    await expect(test.engine.applyMutations('paper.docx', [{ type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
+    await expect(test.engine.applyMutations('paper.docx', [{ baseText: 'original', type: 'replace-text', officePath: '/body/p[1]', text: 'edited' }]))
       .rejects.toThrow('OfficeCLI did not apply the complete document batch')
     expect(test.calls.map(call => call.argv[1])).toEqual(['raw', 'batch'])
     expect(existsSync(test.batches[0]!.input)).toBe(false)
@@ -582,7 +658,7 @@ describe('OfficeCliDocumentEngine', () => {
         engine.inspect('paper.docx', '/document/body/p[1]', 2, signal),
       (engine: OfficeCliDocumentEngine, signal: AbortSignal) =>
         engine.applyMutations('paper.docx', [
-          { type: 'replace-text', officePath: '/document/body/p[1]', text: 'changed' },
+          { baseText: 'original', type: 'replace-text', officePath: '/document/body/p[1]', text: 'changed' },
         ], signal),
       (engine: OfficeCliDocumentEngine, signal: AbortSignal) => engine.validate('paper.docx', signal),
     ]
