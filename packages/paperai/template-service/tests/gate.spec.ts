@@ -241,6 +241,35 @@ describe('checkTemplateContract', () => {
     expect(report.findings).toEqual([])
   })
 
+  it('does not take a numbered list item for a required section in a document with heading styles', async () => {
+    const report = await checkTemplateContract(paragraphsEngine([
+      ['第1章 绪论', 'heading 1'], ['1、研究背景', 'Normal'], ['正文', 'Normal'],
+    ]), document, contract([rule('required-section', { text: '研究背景' })], { usage: 'format-reference' }), 'delivery-export')
+    expect(report.findings.map(finding => finding.code)).toEqual(['required_section_missing'])
+  })
+
+  it('keeps directly formatted chapter, dotted, and styled-form headings beside styled ones', async () => {
+    const report = await checkTemplateContract(paragraphsEngine([
+      ['第1章 绪论', 'heading 1', '黑体'], ['1.1 研究背景', 'Normal', '黑体'], ['1.2 研究方法', 'Normal', '黑体'],
+      ['一、研究现状', 'heading 2', '黑体'], ['二、研究内容', 'Normal', '黑体'], ['研究正文', 'Normal', '宋体'],
+    ]), document, contract([
+      rule('font', { target: 'heading', eastAsia: '黑体' }),
+      rule('font', { target: 'body', eastAsia: '宋体' }),
+      rule('required-section', { text: '研究内容' }),
+    ], { usage: 'format-reference' }), 'delivery-export')
+    expect(report.findings).toEqual([])
+  })
+
+  it('ends a counted section at a sibling whose number omits the delimiter its own number carries', async () => {
+    const report = await checkTemplateContract(paragraphsEngine([
+      ['1.1、研究背景', 'Normal'], ['背景正文', 'Normal'], ['1.2 研究方法', 'Normal'], ['方法正文', 'Normal'],
+    ]), document, contract([
+      rule('minimum-characters', { minimum: 4, heading: '研究背景' }),
+      rule('minimum-characters', { minimum: 5, heading: '研究背景' }),
+    ]), 'delivery-export')
+    expect(report.findings.map(finding => finding.message)).toEqual(['字数不足：4/5'])
+  })
+
   it('passes satisfied defaults and keeps warning-only style evidence non-blocking', async () => {
     const rules: TemplateRule[] = [
       rule('font', { eastAsia: '宋体', latin: 'Times New Roman' }),
@@ -298,6 +327,16 @@ describe('checkTemplateContract', () => {
     expect(report.findings.every(item => item.severity === 'warning')).toBe(true)
   })
 })
+
+/** An engine over paragraphs given as text, style, and East Asian font. */
+function paragraphsEngine(rows: ReadonlyArray<readonly [string, string, string?]>): never {
+  const text = rows.map(([value], index) => ({ officePath: `/body/p[${index + 1}]`, text: value, kind: 'paragraph' as const }))
+  const children = rows.map(([value, style, font], index) => ({
+    path: `/body/p[${index + 1}]`, type: 'paragraph', text: value, style,
+    format: font === undefined ? {} : { 'effective.font.eastAsia': font },
+  }))
+  return engine({ text, children, valid: true })
+}
 
 function engine(input: {
   text: Array<{ officePath: string; text: string; kind: 'paragraph' | 'table' | 'unknown' }>

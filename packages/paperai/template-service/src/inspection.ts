@@ -94,13 +94,27 @@ export function hasSectionNumber(text: string): boolean {
 }
 
 /**
- * The form of a paragraph's opening section number with each number replaced by `N`, so sibling sections share it:
- * `1. 研究内容` and `2. 研究方法` both read `N.`, while the list item `1、研究对象` reads `N、`.
+ * The form of a paragraph's opening section number, with each Arabic number read as `N` and each Chinese one as `C`,
+ * so sibling sections share it: `1. 研究内容` and `2. 研究方法` both read `N.`, while the list item `1、研究对象` reads
+ * `N、` and `一、研究背景` reads `C、`. The optional delimiter after a chapter or dotted number is dropped, so `1.1、`
+ * and `1.2` both read `N.N`.
  * @param text - paragraph text.
  * @returns the number form, or `undefined` when no section number opens the paragraph.
  */
 export function sectionNumberForm(text: string): string | undefined {
-  return SECTION_NUMBER.exec(halfWidth(text).trim())?.[0].trim().replaceAll(new RegExp(`[\\d${NUMERALS}]+`, 'gu'), 'N')
+  const form = SECTION_NUMBER.exec(halfWidth(text).trim())?.[0].trim()
+    .replaceAll(/\d+/gu, 'N').replaceAll(new RegExp(`[${NUMERALS}]+`, 'gu'), 'C')
+  return form !== undefined && isStructuralForm(form) ? form.replace(/\s*[:.、]$/u, '') : form
+}
+
+/**
+ * Whether a section-number form is a chapter or dotted number (第N章, Chapter N, N.N), which only a heading carries,
+ * rather than an enumeration (N、, (N), ①, C、, N.) that a list item may carry too.
+ * @param form - a `sectionNumberForm()` result.
+ * @returns true for a chapter or dotted number form.
+ */
+export function isStructuralForm(form: string): boolean {
+  return /^(?:第|chapter)|N\.N/iu.test(form)
 }
 
 /**

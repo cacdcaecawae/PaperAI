@@ -11,7 +11,9 @@ import type {
   TemplateContract,
   TemplateRule,
 } from '@paperai/domain'
-import { hasSectionNumber, headingLevel, isHeadingParagraph, parseBodyInspection, sectionKey, sectionNumberForm } from './inspection.ts'
+import {
+  hasSectionNumber, headingLevel, isHeadingParagraph, isStructuralForm, parseBodyInspection, sectionKey, sectionNumberForm,
+} from './inspection.ts'
 import type { InspectedWordNode } from './inspection.ts'
 
 type FindingExtra = Omit<Partial<GateFinding>, 'id' | 'severity' | 'code' | 'message'>
@@ -79,9 +81,10 @@ export async function checkTemplateContract(
   const textByPath = new Map(textNodes.map(node => [node.officePath, node.text]))
   const inspectedByPath = new Map(inspected.map(node => [node.path, node]))
   const joinedText = textNodes.map(node => node.text).join('\n')
+  const headings = documentHeadings(inspected)
   for (const rule of template.rules) {
     if (!rule.enabled) continue
-    checkRule(rule, template.usage, textNodes, inspected, textByPath, inspectedByPath, joinedText, findings)
+    checkRule(rule, template.usage, textNodes, inspected, headings, textByPath, inspectedByPath, joinedText, findings)
   }
   return report(document, template, mode, findings)
 }
@@ -91,6 +94,7 @@ function checkRule(
   usage: TemplateContract['usage'],
   textNodes: readonly EngineTextNode[],
   inspected: readonly InspectedWordNode[],
+  headings: ReadonlySet<InspectedWordNode>,
   textByPath: ReadonlyMap<string, string>,
   inspectedByPath: ReadonlyMap<string, InspectedWordNode>,
   joinedText: string,
@@ -104,7 +108,7 @@ function checkRule(
       // entry, a sentence naming it, or a longer title such as 参考文献综述 does not count. A form template's outline
       // items are ordinary paragraphs once filled in, so its text stays searched whole.
       const present = expected === undefined || (rule.kind === 'required-section' && usage === 'format-reference'
-        ? inspected.some(node => isHeading(node) && sectionKey(node.text) === sectionKey(expected))
+        ? [...headings].some(node => sectionKey(node.text) === sectionKey(expected))
         : canonical(joinedText).includes(canonical(expected)))
       if (!present) {
         findings.push(ruleFinding(rule, `${rule.kind.replace('-', '_')}_missing`, `缺少${rule.kind === 'fixed-text' ? '固定文字' : '必需章节'}：${expected}`, { expected }))
@@ -126,19 +130,19 @@ function checkRule(
       return
     }
     case 'font':
-      checkFont(rule, inspected, findings)
+      checkFont(rule, inspected, headings, findings)
       return
     case 'font-size':
-      checkFontSize(rule, inspected, findings)
+      checkFontSize(rule, inspected, headings, findings)
       return
     case 'paragraph-spacing':
-      checkParagraphSpacing(rule, inspected, findings)
+      checkParagraphSpacing(rule, inspected, headings, findings)
       return
     case 'page-setup':
       checkPageSetup(rule, inspected, findings)
       return
     case 'minimum-characters':
-      checkMinimumCharacters(rule, textNodes, inspectedByPath, findings)
+      checkMinimumCharacters(rule, textNodes, inspectedByPath, headings, findings)
       return
     case 'reference-count':
       checkReferenceCount(rule, textNodes, findings)
@@ -169,9 +173,14 @@ function checkRule(
   }
 }
 
-function checkFont(rule: TemplateRule, inspected: readonly InspectedWordNode[], findings: GateFinding[]): void {
+function checkFont(
+  rule: TemplateRule,
+  inspected: readonly InspectedWordNode[],
+  headings: ReadonlySet<InspectedWordNode>,
+  findings: GateFinding[],
+): void {
   const target = expectedString(rule.expected, 'target') ?? 'body'
-  const candidates = styleCandidates(inspected, target)
+  const candidates = styleCandidates(inspected, headings, target)
   const expectedEastAsia = expectedString(rule.expected, 'eastAsia')
   const expectedLatin = expectedString(rule.expected, 'latin')
   if (expectedEastAsia !== undefined) {
@@ -188,19 +197,29 @@ function checkFont(rule: TemplateRule, inspected: readonly InspectedWordNode[], 
   }
 }
 
-function checkFontSize(rule: TemplateRule, inspected: readonly InspectedWordNode[], findings: GateFinding[]): void {
+function checkFontSize(
+  rule: TemplateRule,
+  inspected: readonly InspectedWordNode[],
+  headings: ReadonlySet<InspectedWordNode>,
+  findings: GateFinding[],
+): void {
   const expected = expectedNumber(rule.expected, 'points')
   if (expected === undefined) return
   const target = expectedString(rule.expected, 'target') ?? 'body'
-  const actual = dominant(styleCandidates(inspected, target).flatMap(node => valueFrom(node.format, [
+  const actual = dominant(styleCandidates(inspected, headings, target).flatMap(node => valueFrom(node.format, [
     'effective.size', 'size', 'markRPr.size',
   ]).flatMap(parsePoints)))
   compareStyleValue(rule, 'font_size_mismatch', expected, actual, findings)
 }
 
-function checkParagraphSpacing(rule: TemplateRule, inspected: readonly InspectedWordNode[], findings: GateFinding[]): void {
+function checkParagraphSpacing(
+  rule: TemplateRule,
+  inspected: readonly InspectedWordNode[],
+  headings: ReadonlySet<InspectedWordNode>,
+  findings: GateFinding[],
+): void {
   const target = expectedString(rule.expected, 'target') ?? 'body'
-  const candidates = styleCandidates(inspected, target)
+  const candidates = styleCandidates(inspected, headings, target)
   const expectedBefore = expectedNumber(rule.expected, 'beforeLines')
   const expectedAfter = expectedNumber(rule.expected, 'afterLines')
   if (expectedBefore !== undefined) {
@@ -246,6 +265,7 @@ function checkMinimumCharacters(
   rule: TemplateRule,
   textNodes: readonly EngineTextNode[],
   inspectedByPath: ReadonlyMap<string, InspectedWordNode>,
+  headings: ReadonlySet<InspectedWordNode>,
   findings: GateFinding[],
 ): void {
   const minimum = expectedNumber(rule.expected, 'minimum')
@@ -253,7 +273,7 @@ function checkMinimumCharacters(
   const heading = expectedString(rule.expected, 'heading')
   const selected = heading === undefined
     ? textNodes
-    : sectionNodes(textNodes, inspectedByPath, heading)
+    : sectionNodes(textNodes, inspectedByPath, headings, heading)
   const actual = selected.reduce((sum, node) => sum + canonical(node.text).length, 0)
   if (actual < minimum) {
     findings.push(ruleFinding(rule, 'minimum_characters', `字数不足：${actual}/${minimum}`, {
@@ -278,6 +298,7 @@ function checkReferenceCount(rule: TemplateRule, textNodes: readonly EngineTextN
 function sectionNodes(
   nodes: readonly EngineTextNode[],
   inspectedByPath: ReadonlyMap<string, InspectedWordNode>,
+  headings: ReadonlySet<InspectedWordNode>,
   heading: string,
 ): readonly EngineTextNode[] {
   const start = nodes.findIndex(node => canonical(node.text).includes(canonical(heading)))
@@ -287,7 +308,7 @@ function sectionNodes(
   let end = nodes.length
   for (let index = start + 1; index < nodes.length; index += 1) {
     const candidate = nodes[index]
-    if (candidate !== undefined && endsSection(inspectedByPath.get(candidate.officePath), form)) {
+    if (candidate !== undefined && endsSection(inspectedByPath.get(candidate.officePath), headings, form)) {
       end = index
       break
     }
@@ -295,9 +316,12 @@ function sectionNodes(
   return nodes.slice(start + 1, end)
 }
 
-function styleCandidates(inspected: readonly InspectedWordNode[], target: string): InspectedWordNode[] {
+function styleCandidates(
+  inspected: readonly InspectedWordNode[],
+  headings: ReadonlySet<InspectedWordNode>,
+  target: string,
+): InspectedWordNode[] {
   const textBearing = inspected.filter(node => node.type === 'paragraph' && node.text.trim().length > 0)
-  const headings = styleHeadings(textBearing)
   if (target === 'body') return textBearing.filter(node => !headings.has(node))
   if (target === 'heading') return textBearing.filter(node => headings.has(node))
   const level = /heading-(\d)/u.exec(target)?.[1]
@@ -306,28 +330,34 @@ function styleCandidates(inspected: readonly InspectedWordNode[], target: string
 }
 
 /**
- * Whether a paragraph ends a section whose own number has the given form. A styled heading or a common section title
- * does; a numbered paragraph set in body text does only with the section's own number form (2. after 1.), so a list
- * item inside the section, such as 1、研究对象, stays part of its prose.
+ * Whether a heading of the document ends a section whose own number has the given form. A styled heading or a common
+ * section title does; a numbered heading set in body text does only with the section's own number form (2. after 1.),
+ * so a subsection or a list item inside the section stays part of it.
  */
-function endsSection(node: InspectedWordNode | undefined, form: string | undefined): boolean {
-  if (node === undefined || !isHeadingParagraph(node.text, node.styleName)) return false
+function endsSection(node: InspectedWordNode | undefined, headings: ReadonlySet<InspectedWordNode>, form: string | undefined): boolean {
+  if (node === undefined || !headings.has(node)) return false
   return headingLevel(node.styleName) !== undefined || !hasSectionNumber(node.text) || sectionNumberForm(node.text) === form
 }
 
 /**
- * The paragraphs style checks treat as headings. A document that uses Word heading styles marks its headings with
- * them, so there a numbered paragraph in body text, such as the list item 1、研究对象, is body text; a document
- * without heading styles falls back to the inferred headings, numbered titles included.
+ * The paragraphs a checked document uses as headings, for its required sections, style checks, and section bounds.
+ * A heading style or a common section title marks one, and so does a chapter or dotted number set in body text
+ * (第1章, 1.1), which a list item never carries. An enumeration set in body text (1、, (1), ①, 一、, 1.) marks one
+ * only when the document gives that number form a heading style or uses no heading styles at all; otherwise it is a
+ * list item, such as 1、研究对象 under a styled chapter.
+ * @param inspected - the document's inspected body children.
+ * @returns the heading paragraphs.
  */
-function styleHeadings(paragraphs: readonly InspectedWordNode[]): ReadonlySet<InspectedWordNode> {
-  const styled = paragraphs.some(node => headingLevel(node.styleName) !== undefined)
-  return new Set(paragraphs.filter(node => isHeading(node)
-    && (!styled || headingLevel(node.styleName) !== undefined || !hasSectionNumber(node.text))))
-}
-
-function isHeading(node: InspectedWordNode | undefined): boolean {
-  return node !== undefined && isHeadingParagraph(node.text, node.styleName)
+function documentHeadings(inspected: readonly InspectedWordNode[]): ReadonlySet<InspectedWordNode> {
+  const paragraphs = inspected.filter(node => node.type === 'paragraph' && node.text.trim().length > 0)
+  const styled = paragraphs.filter(node => headingLevel(node.styleName) !== undefined)
+  const styledForms = new Set(styled.map(node => sectionNumberForm(node.text)))
+  return new Set(paragraphs.filter((node) => {
+    if (!isHeadingParagraph(node.text, node.styleName)) return false
+    const form = sectionNumberForm(node.text)
+    return styled.length === 0 || headingLevel(node.styleName) !== undefined || form === undefined
+      || isStructuralForm(form) || styledForms.has(form)
+  }))
 }
 
 function fieldHasValue(actual: string, templateText: string | undefined): boolean {
