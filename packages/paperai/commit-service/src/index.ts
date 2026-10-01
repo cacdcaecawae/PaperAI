@@ -736,8 +736,11 @@ export class PaperCommitService extends Service {
     )
     const createdAt = new Date().toISOString()
     const commitId = DocumentCommitId(randomUUID())
+    // The candidate is indexed and checked as the document this commit publishes, so a type the same commit sets
+    // (set-document-type before bind-template) is the one its template must apply to.
+    const prospective: DocumentRecord = { ...structuredClone(request.document), role: request.role }
     const rebuilt = await this.dependencies.paperDocuments.buildCandidateIndex({
-      document: structuredClone(request.document),
+      document: prospective,
       candidatePath: request.candidatePath,
       commitId,
       currentNodes: structuredClone(request.currentNodes),
@@ -745,7 +748,7 @@ export class PaperCommitService extends Service {
     })
     const nextNodes = this.validateRebuiltIndex(request.document.id, commitId, rebuilt)
     const gate = await this.dependencies.paperTemplates.checkCandidate({
-      document: request.document,
+      document: prospective,
       candidatePath: request.candidatePath,
       ...(request.templateId === undefined ? {} : { templateId: request.templateId }),
       mode: 'continuous',
