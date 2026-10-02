@@ -261,8 +261,8 @@ it('keeps the same preview after interrupted image preparation and permits retry
   const preview = rail.querySelector('img')!.getAttribute('src')
   fireEvent.keyDown(textarea, { key: 'Enter' })
   const remove = rail.querySelector<HTMLButtonElement>('button[aria-label^="Remove image"]')!
-  expect(remove.disabled).toBe(true)
   fireEvent.click(remove)
+  expect(rail.querySelector('img')!.getAttribute('src')).toBe(preview)
   fail(new Error('image preparation interrupted'))
   await waitFor(() => { expect(textarea.readOnly).toBe(false) })
   expect(rail.querySelector('img')!.getAttribute('src')).toBe(preview)
