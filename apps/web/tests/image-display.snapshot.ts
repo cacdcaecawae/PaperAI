@@ -223,7 +223,7 @@ async function pasteDeferredImage(textarea: HTMLTextAreaElement, image: File): P
   })
 }
 
-it('locks image-only admission and preserves a newer draft when the accepted image clears', async () => {
+it('locks image-only admission against repeated sends and restores editing after acceptance', async () => {
   mountAssembledApp()
   await startAssembledFixtureSession()
   const textarea = await screen.findByPlaceholderText('Describe what you want to build', {}, { timeout: 10_000 }) as HTMLTextAreaElement
@@ -233,12 +233,13 @@ it('locks image-only admission and preserves a newer draft when the accepted ima
   await pasteDeferredImage(textarea, image)
   fireEvent.keyDown(textarea, { key: 'Enter' })
   expect(textarea.readOnly).toBe(true)
-  // A late input event already queued before the read-only render must survive settlement.
-  fireEvent.change(textarea, { target: { value: 'next message' } })
+  fireEvent.change(textarea, { target: { value: 'blocked while admitting' } })
+  expect(textarea.value).toBe('')
   fireEvent.keyDown(textarea, { key: 'Enter' })
   expect(read).toHaveBeenCalledOnce()
   finish(Uint8Array.of(1).buffer)
   await waitFor(() => { expect(textarea.readOnly).toBe(false) })
+  fireEvent.change(textarea, { target: { value: 'next message' } })
   expect({ draft: textarea.value, pendingImages: document.querySelectorAll('[aria-label="Pending images"]').length })
     .toMatchInlineSnapshot(`
       {
