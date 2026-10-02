@@ -202,12 +202,12 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
       const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
       await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
       await page.evaluate(() => new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        requestAnimationFrame(() => requestAnimationFrame(() => { resolve() }))
       }))
       expect(await errors.evaluate(state => state.seen)).toBe(false)
       expect(await page.getByRole('alert').count()).toBe(0)
     } finally {
-      await errors.evaluate(state => state.observer.disconnect())
+      await errors.evaluate((state) => { state.observer.disconnect() })
       await errors.dispose()
     }
     expect(tripwire.pageErrors).toEqual([])
