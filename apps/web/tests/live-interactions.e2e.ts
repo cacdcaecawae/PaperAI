@@ -147,6 +147,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     ).toBe(true)
     const loadingSnapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(LOADING_EXPECTED, loadingSnapshot, MODE)
+    const stopError = 'Stop rejected for retry coverage'
     let cancelRequests = 0
     await page.route('**/api/session.cancel', async (route) => {
       cancelRequests += 1
@@ -160,12 +161,12 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           type: 'server-response', rpcId: envelope.rpcId,
-          result: { ok: false, error: { code: 'internal', message: 'Stop rejected for retry coverage', details: {} } },
+          result: { ok: false, error: { code: 'internal', message: stopError, details: {} } },
         }),
       })
     })
     await page.getByRole('button', { name: 'Stop generating' }).click()
-    await page.getByRole('alert').filter({ hasText: 'Stop rejected for retry coverage' }).waitFor()
+    await page.getByRole('alert').filter({ hasText: stopError }).waitFor()
     await page.getByRole('button', { name: 'Stop generating' }).click()
     await settled
     expect(cancelRequests).toBe(2)
@@ -178,13 +179,37 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     await page.getByRole('alert').waitFor({ state: 'detached', timeout: 10_000 })
     await page.getByRole('button', { name: 'New session', exact: true }).last().click()
     await page.getByText('Into the Unknown', { exact: false }).waitFor({ timeout: 15_000 })
-    await page.getByRole('treeitem').filter({ hasText: 'Reply with a one-sentence description' }).first().click()
-    await page.getByText('Stopped', { exact: true }).waitFor({ timeout: 15_000 })
-    // Golden of the aborted end-state: the prompt bubble plus the frozen
-    // partial ('partial' is the hang entry's replayed prefix) and no more.
-    const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
-    await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
-    expect(await page.getByRole('alert').count()).toBe(0)
+    const searchButton = page.getByRole('button', { name: 'Search sessions' })
+    if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
+    await page.getByPlaceholder('Search sessions', { exact: false }).fill('event sourcing')
+    const original = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem')
+    await expect.poll(() => original.count(), { timeout: 15_000 }).toBe(1)
+    // Remember even a brief re-announcement; the toast can fade while the
+    // center-column golden stabilizes and lives outside that snapshot region.
+    const errors = await page.evaluateHandle((message) => {
+      const state = { seen: false, observer: new MutationObserver(() => {
+        state.seen ||= [...document.querySelectorAll('[role="alert"]')]
+          .some(element => element.textContent?.includes(message))
+      }) }
+      state.observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      return state
+    }, stopError)
+    try {
+      await original.click()
+      await page.getByText('Stopped', { exact: true }).waitFor({ timeout: 15_000 })
+      // Golden of the aborted end-state: the prompt bubble plus the frozen
+      // partial ('partial' is the hang entry's replayed prefix) and no more.
+      const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
+      await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }))
+      expect(await errors.evaluate(state => state.seen)).toBe(false)
+      expect(await page.getByRole('alert').count()).toBe(0)
+    } finally {
+      await errors.evaluate(state => state.observer.disconnect())
+      await errors.dispose()
+    }
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 120_000)
