@@ -93,7 +93,8 @@ describe('web e2e: whole-session stats survive history paging', () => {
         const envelope = JSON.parse(typeof message === 'string' ? message : message.toString('utf8')) as {
           payload?: { type?: string; sessionId?: string }
         }
-        if (dropNextSessionEvent && envelope.payload?.type === 'session/event' && envelope.payload.sessionId === SEED_ID) {
+        if (socket === mux && dropNextSessionEvent
+          && envelope.payload?.type === 'session/event' && envelope.payload.sessionId === SEED_ID) {
           dropNextSessionEvent = false
           return
         }
@@ -149,7 +150,7 @@ describe('web e2e: whole-session stats survive history paging', () => {
       await page.getByRole('button', { name: 'Load earlier' }).click()
       await expect.poll(() => held).toBe(true)
       if (mux === undefined) throw new Error('history session has no mux connection')
-      await mux.close({ code: 1012, reason: 'history reconnect regression' })
+      await mux.close({ code: 1000, reason: 'history reconnect regression' })
       await expect.poll(() => tailRequests, { timeout: 15_000 }).toBeGreaterThan(0)
       await expect.poll(
         () => page.getByRole('button', { name: 'Load earlier' }).evaluate((button: HTMLButtonElement) =>
@@ -205,10 +206,11 @@ describe('web e2e: whole-session stats survive history paging', () => {
     try {
       dropNextSessionEvent = true
       append('History gap omitted message')
+      await expect.poll(() => dropNextSessionEvent, { timeout: 10_000 }).toBe(false)
       append('History gap repair trigger')
-      await expect.poll(() => held).toBe(true)
+      await expect.poll(() => held, { timeout: 10_000 }).toBe(true)
       if (mux === undefined) throw new Error('history session has no mux connection')
-      await mux.close({ code: 1012, reason: 'gap repair reconnect regression' })
+      await mux.close({ code: 1000, reason: 'gap repair reconnect regression' })
       await page.getByText('History gap repair trigger', { exact: true }).waitFor({ timeout: 15_000 })
       await expect.poll(() => page.getByText('Loading history…', { exact: true }).count()).toBe(0)
       append('Live message after reconnect')
