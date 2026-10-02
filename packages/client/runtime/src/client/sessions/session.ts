@@ -77,7 +77,8 @@ export class Session implements SessionFace {
    *  a pre-disconnect open whose history request is already doomed. Stale doOpen
    *  passes drop all writes once the generation moves on. */
   private openGeneration = 0
-  private loadingOlder = false
+  /** One page request owns the loading indicator until settlement or window replacement. */
+  private olderRequest: object | null = null
   private pending = new Map<string, PendingInteraction>()
   private pendingRev = 0
   private pendingCache: { rev: number; value: PendingInteraction[] } | null = null
@@ -103,8 +104,8 @@ export class Session implements SessionFace {
   private lastAgentError: string | null = null
   /** Live events buffered during open/resync and stitched by sequence once history lands. */
   private liveBuffer: { event: SessionEvent; view: ToolEventView | undefined }[] = []
-  /** Gap repair in flight; live events detour to the buffer until the tail page lands. */
-  private stitching = false
+  /** Current gap-repair owner; live events buffer only while this request remains current. */
+  private repairRequest: object | null = null
   /** subscribed.lastSeq baseline (gap detection; null when no subscribed frame arrived — degrade to the liveBuffer dedup path). */
   private subscribedLastSeq: number | null = null
 
@@ -377,13 +378,15 @@ export class Session implements SessionFace {
     return promise
   }
 
-  /** Page up: pull one earlier page with the window's first seq as beforeSeq and prepend. */
+  /** Page up: prepend one earlier page unless a reconnect or gap repair supersedes its window. */
   async loadOlder(): Promise<void> {
-    if (this.openState !== 'open' || !this.hasMore || this.loadingOlder) return
-    this.loadingOlder = true
+    if (this.openState !== 'open' || !this.hasMore || this.olderRequest !== null) return
+    const request = {}
+    this.olderRequest = request
     this.notifier.markDirty()
     try {
       const { result } = await this.history({ beforeSeq: this.baseSeq, maxMessages: PAGE_MESSAGES })
+      if (this.olderRequest !== request) return
       if (!result.ok) return // keep the window as-is; do not overwrite openError (open already succeeded)
       const older = result.value.events
       if (older.length === 0) {
@@ -406,10 +409,13 @@ export class Session implements SessionFace {
       this.hasMore = result.value.hasMore
       this.conversation.prepend(older.map(conversationInput), this.hasMore)
     } catch (error) {
+      if (this.olderRequest !== request) return
       console.error('[web-runtime] loadOlder failed:', error)
     } finally {
-      this.loadingOlder = false
-      this.notifier.markDirty()
+      if (this.olderRequest === request) {
+        this.olderRequest = null
+        this.notifier.markDirty()
+      }
     }
   }
 
@@ -425,6 +431,8 @@ export class Session implements SessionFace {
     // that follows it, so ordering is guaranteed).
     if (this.openState === 'cold') return // never opened: no window to rebuild (doOpen flips to 'loading' synchronously, so cold implies no in-flight open)
     this.openGeneration++
+    this.olderRequest = null
+    this.repairRequest = null
     this.openPromise = null
     this.openState = 'cold'
     this.openError = null
@@ -667,6 +675,7 @@ export class Session implements SessionFace {
    *  baseline cannot overwrite a newer push frame); the window events themselves are
    *  never folded — the host is the only computation site. */
   private installWindow(entries: HistoryEntry[], hasMore: boolean, projections?: ProjectionsBaseline): void {
+    this.olderRequest = null
     this.events = entries.map(e => e.event)
     this.views = entries.map(e => e.view)
     this.baseSeq = this.events[0]?.seq ?? 0
@@ -698,7 +707,7 @@ export class Session implements SessionFace {
    *  raw range, which lets Conversation Definitions correlate every recorded event between its
    *  ends and lets a compaction checkpoint resolve its cited summary event. */
   private acceptLiveEvent(event: SessionEvent, view?: ToolEventView): void {
-    if (this.openState === 'loading' || this.stitching) {
+    if (this.openState === 'loading' || this.repairRequest !== null) {
       this.liveBuffer.push({ event, view })
       return
     }
@@ -720,22 +729,22 @@ export class Session implements SessionFace {
 
   /** Resync-lite: repull the tail page and stitch the liveBuffer through the shared
    *  installWindow path. No openState transition — the UI keeps the current window (no loading
-   *  flash); events arriving meanwhile detour to liveBuffer via the stitching flag. */
+   *  flash); events arriving meanwhile buffer behind the current repair request. */
   private async repairGap(): Promise<void> {
-    /* v8 ignore next -- re-entry guard: acceptLiveEvent already detours to liveBuffer while stitching, so no second call reaches here. */
-    if (this.stitching) return
-    this.stitching = true
-    const generation = this.openGeneration
+    /* v8 ignore next -- acceptLiveEvent already buffers while a repair is current, so no second call reaches here. */
+    if (this.repairRequest !== null) return
+    const request = {}
+    this.repairRequest = request
     try {
       const { result } = await this.history({ maxMessages: PAGE_MESSAGES })
       // Failure or superseded by a full resync: drop — the resync path rebuilds and clears the buffer itself.
-      if (result.ok && generation === this.openGeneration && this.openState === 'open') {
+      if (result.ok && this.repairRequest === request && this.openState === 'open') {
         this.installWindow(result.value.events, result.value.hasMore, result.value.projections)
       }
     } catch (error) {
-      console.error('[web-runtime] gap repair failed:', error)
+      if (this.repairRequest === request) console.error('[web-runtime] gap repair failed:', error)
     } finally {
-      this.stitching = false
+      if (this.repairRequest === request) this.repairRequest = null
     }
   }
 
@@ -776,7 +785,7 @@ export class Session implements SessionFace {
       openState: this.openState,
       openError: this.openError,
       hasMore: this.hasMore,
-      loadingOlder: this.loadingOlder,
+      loadingOlder: this.olderRequest !== null,
       promptError: this.promptError,
       blank: this.blankBit,
       lastAgentError: this.lastAgentError,

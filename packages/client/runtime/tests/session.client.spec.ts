@@ -375,6 +375,106 @@ describe('live event path', () => {
 })
 
 describe('paging', () => {
+  it('releases the old page request before replacement history finishes loading', async () => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'before reconnect', 'answer'), true)
+    await session.open()
+    const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => stale.promise
+    const paging = session.loadOlder()
+    const replacement = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => replacement.promise
+    const resyncing = session.resync()
+    expect(session.getSnapshot()).toMatchObject({ openState: 'loading', hasMore: true, loadingOlder: false })
+    const duringResync = session.getSnapshot()
+    stale.resolve(ok({ events: [], hasMore: false }))
+    await paging
+    expect(session.getSnapshot()).toBe(duringResync)
+
+    replacement.resolve(ok({ events: entries(plainTurn(12, 2, 'after reconnect', 'answer')) as never[], hasMore: true }))
+    await resyncing
+    expect(session.getSnapshot()).toMatchObject({ openState: 'open', hasMore: true, loadingOlder: false })
+  })
+
+  it('keeps reconnected history pageable when an older request settles afterward', async () => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'before reconnect', 'answer'), true)
+    await session.open()
+    const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => stale.promise
+    const paging = session.loadOlder()
+    api.onHistory = () => histResponse(plainTurn(12, 2, 'after reconnect', 'answer'), true)
+    await session.resync()
+
+    stale.resolve(ok({ events: entries(plainTurn(0, 0, 'older', 'answer')) as never[], hasMore: false }))
+    await paging
+    expect(session.getSnapshot()).toMatchObject({ hasMore: true, loadingOlder: false })
+    expect(chatSeqs(session.getSnapshot())).toEqual([12, 13, 14, 15, 16, 17])
+
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'before reconnect', 'answer'), true)
+    await session.loadOlder()
+    expect(api.callsOf('session.history')).toHaveLength(4)
+    expect(chatSeqs(session.getSnapshot())).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
+  })
+
+  it.each(['page', 'empty', 'error', 'throw'] as const)(
+    'lets fresh paging finish independently of a stale %s response after reconnect', async (outcome) => {
+      const { api, session } = makeSession()
+      api.onHistory = () => histResponse(plainTurn(6, 1, 'before reconnect', 'answer'), true)
+      await session.open()
+      const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => stale.promise
+      const oldPaging = session.loadOlder()
+      api.onHistory = () => histResponse(plainTurn(12, 2, 'after reconnect', 'answer'), true)
+      await session.resync()
+      expect(session.getSnapshot().loadingOlder).toBe(false)
+
+      const fresh = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => fresh.promise
+      const newPaging = session.loadOlder()
+      expect(api.callsOf('session.history')).toHaveLength(4)
+      const beforeStale = session.getSnapshot()
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      try {
+        if (outcome === 'throw') stale.reject(new Error('old connection closed'))
+        else if (outcome === 'error') stale.resolve(err({ code: 'internal', message: 'old connection closed', details: {} }))
+        else stale.resolve(ok({
+          events: outcome === 'page' ? entries(plainTurn(0, 0, 'older', 'answer')) as never[] : [],
+          hasMore: false,
+        }))
+        await oldPaging
+        expect(session.getSnapshot()).toBe(beforeStale)
+        expect(session.getSnapshot().loadingOlder).toBe(true)
+        expect(errorSpy).not.toHaveBeenCalled()
+        await session.loadOlder()
+        expect(api.callsOf('session.history')).toHaveLength(4)
+
+        fresh.resolve(ok({ events: entries(plainTurn(6, 1, 'before reconnect', 'answer')) as never[], hasMore: true }))
+        await newPaging
+        expect(session.getSnapshot()).toMatchObject({ hasMore: true, loadingOlder: false })
+        expect(chatSeqs(session.getSnapshot())).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
+      } finally {
+        errorSpy.mockRestore()
+      }
+    },
+  )
+
+  it('drops an older page after a live-gap repair replaced its history window', async () => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'before gap', 'answer'), true)
+    await session.open()
+    const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => stale.promise
+    const paging = session.loadOlder()
+    api.onHistory = () => histResponse(plainTurn(12, 2, 'after gap', 'answer'), true)
+    session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: ev.user(13, 'after gap') })
+    await vi.waitFor(() => { expect(chatSeqs(session.getSnapshot())).toEqual([12, 13, 14, 15, 16, 17]) })
+    stale.resolve(ok({ events: entries(plainTurn(0, 0, 'older', 'answer')) as never[], hasMore: false }))
+    await paging
+    expect(session.getSnapshot()).toMatchObject({ hasMore: true, loadingOlder: false })
+    expect(chatSeqs(session.getSnapshot())).toEqual([12, 13, 14, 15, 16, 17])
+  })
+
   it('prepends an older page and keeps seq continuity', async () => {
     const older = plainTurn(0, 0, '旧问', '旧答')
     const newer = plainTurn(6, 1, '新问', '新答')
@@ -866,6 +966,56 @@ describe('remaining branches', () => {
     })) // repair result: stale, dropped
     await resynced
     expect(session.getSnapshot().nodes.map(n => n.seq)).toEqual([7, 9])
+  })
+
+  it('renders new live events after reconnect while the old gap repair is still pending', async () => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(0, 0, 'before gap', 'answer'))
+    await session.open()
+    const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => stale.promise
+    session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: ev.user(9, 'gap') })
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'after reconnect', 'answer'))
+    await session.resync()
+
+    session.handleMuxEnvelope('live' as never, { type: 'session/event', sessionId: SID, event: ev.user(12, 'new live message') })
+    expect(chatSeqs(session.getSnapshot())).toEqual([6, 7, 8, 9, 10, 11, 12])
+    stale.resolve(ok({ events: entries(plainTurn(0, 0, 'obsolete', 'answer')) as never[], hasMore: false }))
+    await Promise.resolve()
+    expect(chatSeqs(session.getSnapshot())).toEqual([6, 7, 8, 9, 10, 11, 12])
+  })
+
+  it.each(['page', 'throw'] as const)('keeps a new gap repair owned when the stale repair settles with %s', async (outcome) => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(0, 0, 'before gap', 'answer'))
+    await session.open()
+    const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => stale.promise
+    session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: ev.user(9, 'gap') })
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'after reconnect', 'answer'))
+    await session.resync()
+
+    const fresh = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => fresh.promise
+    const first = ev.user(18, 'new gap')
+    const second = ev.user(19, 'buffered behind new gap')
+    session.handleMuxEnvelope('fresh-gap' as never, { type: 'session/event', sessionId: SID, event: first })
+    expect(api.callsOf('session.history')).toHaveLength(4)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      if (outcome === 'throw') stale.reject(new Error('old repair connection closed'))
+      else stale.resolve(ok({ events: [], hasMore: false }))
+      await Promise.resolve()
+      session.handleMuxEnvelope('fresh-buffer' as never, { type: 'session/event', sessionId: SID, event: second })
+      expect(api.callsOf('session.history')).toHaveLength(4)
+      expect(errorSpy).not.toHaveBeenCalled()
+      fresh.resolve(ok({ events: entries([...plainTurn(12, 2, 'repaired', 'answer'), first]) as never[], hasMore: true }))
+      await vi.waitFor(() => {
+        expect(chatSeqs(session.getSnapshot())).toEqual([12, 13, 14, 15, 16, 17, 18, 19])
+      })
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('successful cancel leaves no promptError', async () => {
