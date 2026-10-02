@@ -585,6 +585,7 @@ jobs:
           apps/web/tests/scaffold-hermetic.e2e.ts
           apps/web/tests/settings-chrome.e2e.ts
           apps/web/tests/shipped-composition.e2e.ts
+          apps/web/tests/stats-paged-history.e2e.ts
           apps/web/tests/turn-tail-actions.e2e.ts
           apps/web/tests/workspace-management.e2e.ts
           --maxWorkers=1
