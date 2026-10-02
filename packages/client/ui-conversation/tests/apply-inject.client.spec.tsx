@@ -215,7 +215,7 @@ describe('conversation slot inject API', () => {
       expect(composer.keyboard!.snapshot.imageIds).toEqual([id])
       expect(composer.draftImages!([id])).toMatchObject([{ id, previewUrl: 'blob:pending-image', file }])
       expect(revoked).not.toHaveBeenCalled()
-      settle({ ok: false, error: { code: 'agent-busy', message: 'busy', details: {} } })
+      settle({ ok: false, error: { code: 'agent-busy', message: 'busy', details: { reason: 'busy' } } })
       await vi.waitFor(() => { expect(composer.keyboard!.snapshot.phase).toBe('plain') })
       composer.keyboard!.submit('queue')
       await vi.waitFor(() => { expect(composer.keyboard!.snapshot.imageIds).toEqual([]) })
