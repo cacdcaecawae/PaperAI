@@ -197,6 +197,39 @@ describe('conversation slot inject API', () => {
     await b.runtime.dispose()
   })
 
+  it.each(['', 'with text'])('retains image bytes and preview when removal races pending admission (%j)', async (draft) => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:pending-image')
+    const revoked = vi.spyOn(URL, 'revokeObjectURL')
+    try {
+      let settle!: (result: Awaited<ReturnType<ISession['prompt']>>) => void
+      b.sessionFake.prompt.mockImplementationOnce(() => new Promise((resolve) => { settle = resolve }))
+      const composer = b.composerApi(ROOT)
+      const file = new File([Uint8Array.of(1, 2, 3)], 'retained.png', { type: 'image/png' })
+      expect(composer.addImages!([file])).toBeNull()
+      const id = composer.keyboard!.snapshot.imageIds[0]!
+      composer.keyboard!.setDraft(draft)
+      composer.keyboard!.submit('queue')
+      await vi.waitFor(() => { expect(b.sessionFake.prompt).toHaveBeenCalledOnce() })
+      composer.removeImage!(id)
+      expect(composer.keyboard!.snapshot.imageIds).toEqual([id])
+      expect(composer.draftImages!([id])).toMatchObject([{ id, previewUrl: 'blob:pending-image', file }])
+      expect(revoked).not.toHaveBeenCalled()
+      settle({ ok: false, error: { code: 'agent-busy', message: 'busy', details: {} } })
+      await vi.waitFor(() => { expect(composer.keyboard!.snapshot.phase).toBe('plain') })
+      composer.keyboard!.submit('queue')
+      await vi.waitFor(() => { expect(composer.keyboard!.snapshot.imageIds).toEqual([]) })
+      expect(b.sessionFake.prompt).toHaveBeenCalledTimes(2)
+      expect(b.sessionFake.prompt.mock.calls[1]?.[0]).toEqual(b.sessionFake.prompt.mock.calls[0]?.[0])
+      expect(revoked).toHaveBeenCalledExactlyOnceWith('blob:pending-image')
+      expect(composer.draftImages!([id])).toEqual([])
+    } finally {
+      await b.runtime.dispose()
+      created.mockRestore()
+      revoked.mockRestore()
+    }
+  })
+
   it('inject fails loud when the session resolves no binding or the scope lacks the service', async () => {
     const b = await bench()
     const entry = b.entryOf('conversation.composer.bar')

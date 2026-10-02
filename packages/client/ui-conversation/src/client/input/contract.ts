@@ -271,12 +271,10 @@ export type InputEvent =
   | { readonly type: 'paste-upgrade'; readonly attemptId: number; readonly span: TokenSpan; readonly reference: ReferenceInsert }
   /** Shell-observed attempt killers the machine cannot see itself (caret/selection ops, Slash interaction updates). */
   | { readonly type: 'invalidate-paste' }
-  | { readonly type: 'enter'; readonly mode: InputSubmitMode }
+  | { readonly type: 'enter'; readonly mode: InputSubmitMode; readonly hasImages?: boolean }
   | { readonly type: 'adjudicated'; readonly attempt: SubmitAttempt; readonly outcome: PickOutcome }
   | { readonly type: 'adjudication-failed'; readonly attempt: SubmitAttempt; readonly message: string }
   | { readonly type: 'submit-settled'; readonly attempt: SubmitAttempt; readonly ok: boolean; readonly outcome?: SubmitOutcome; readonly message?: string }
-  /** Commit an image-only send whose empty draft did not need an attempt. */
-  | { readonly type: 'send-committed' }
   | { readonly type: 'release' }
 
 /**
