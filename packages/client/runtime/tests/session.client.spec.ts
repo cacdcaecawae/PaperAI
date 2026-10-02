@@ -446,6 +446,52 @@ describe('paging', () => {
 })
 
 describe('prompt and cancel errors', () => {
+  it.each(['business', 'transport'] as const)('ignores a delayed %s stop failure after a newer stop succeeds', async (failure) => {
+    const { api, session } = makeSession()
+    session.handleRunning(true)
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => older.promise
+    const first = session.cancel()
+    api.onCancel = () => Promise.resolve(ok({ accepted: true as const }))
+    expect((await session.cancel()).ok).toBe(true)
+    session.handleRunning(false)
+    if (failure === 'transport') older.reject(new Error('old stop failed'))
+    else older.resolve(err({ code: 'internal', message: 'old stop failed', details: {} }))
+    expect((await first).ok).toBe(false)
+    expect(session.getSnapshot().running).toBe(false)
+    expect(session.getSnapshot().promptError).toBeNull()
+  })
+
+  it.each(['success', 'failure'] as const)('preserves the newer Stop failure after an older request settles with %s', async (outcome) => {
+    const { api, session } = makeSession()
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => older.promise
+    const first = session.cancel()
+    api.onCancel = () => Promise.resolve(err({ code: 'internal', message: 'new stop failed', details: {} }))
+    await session.cancel()
+    const newerError = session.getSnapshot().promptError
+    expect(newerError).toMatchObject({ op: 'stop', error: { message: 'new stop failed' } })
+    older.resolve(outcome === 'success'
+      ? ok({ accepted: true })
+      : err({ code: 'internal', message: 'old stop failed', details: {} }))
+    await first
+    expect(session.getSnapshot().promptError).toBe(newerError)
+  })
+
+  it('preserves a newer send failure when a pending stop fails', async () => {
+    const { api, session } = makeSession()
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => older.promise
+    const first = session.cancel()
+    api.onPrompt = () => Promise.resolve(err({ code: 'internal', message: 'new send failed', details: {} }))
+    await session.prompt([{ type: 'text', text: 'not accepted' }], 'queue')
+    const newerError = session.getSnapshot().promptError
+    expect(newerError).toMatchObject({ op: 'send', error: { message: 'new send failed' } })
+    older.resolve(err({ code: 'internal', message: 'old stop failed', details: {} }))
+    await first
+    expect(session.getSnapshot().promptError).toBe(newerError)
+  })
+
   it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async () => {
     const api = new FakeApiClient()
     const session = new Session(SID, api, fakeRemote(), {
