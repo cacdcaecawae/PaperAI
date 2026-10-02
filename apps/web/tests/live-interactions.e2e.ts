@@ -129,7 +129,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     await recordFixture(scaffold!, sessionId, FIXTURE)
   }, 200_000)
 
-  it.skipIf(MODE === 'record')('cancels a hung stream deterministically via the readyFile marker', async () => {
+  it.skipIf(MODE === 'record')('retries a rejected stop and keeps its failure cleared after session navigation', async () => {
     expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT])
     let marker = ''
     await launch((sidecarHome) => {
@@ -147,18 +147,44 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     ).toBe(true)
     const loadingSnapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(LOADING_EXPECTED, loadingSnapshot, MODE)
+    let cancelRequests = 0
+    await page.route('**/api/session.cancel', async (route) => {
+      cancelRequests += 1
+      if (cancelRequests !== 1) {
+        await route.continue()
+        return
+      }
+      const envelope = route.request().postDataJSON() as { rpcId: string }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          type: 'server-response', rpcId: envelope.rpcId,
+          result: { ok: false, error: { code: 'internal', message: 'Stop rejected for retry coverage', details: {} } },
+        }),
+      })
+    })
+    await page.getByRole('button', { name: 'Stop generating' }).click()
+    await page.getByRole('alert').filter({ hasText: 'Stop rejected for retry coverage' }).waitFor()
     await page.getByRole('button', { name: 'Stop generating' }).click()
     await settled
+    expect(cancelRequests).toBe(2)
     expect(turnEndReasons(sessionEvents).at(-1)).toBe('aborted')
     // Composer recovered; no streaming node lingers. The host settled first
     // (awaited above), but the abort frame reaches the browser over SSE — the
     // frozen-partial swap is eventually consistent, so poll rather than count.
     await expect.poll(() => page.locator('textarea').first().isEnabled(), { timeout: 10_000 }).toBe(true)
     await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
+    await page.getByRole('alert').waitFor({ state: 'detached', timeout: 10_000 })
+    await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+    await page.getByText('Into the Unknown', { exact: false }).waitFor({ timeout: 15_000 })
+    await page.getByRole('treeitem').filter({ hasText: 'Reply with a one-sentence description' }).first().click()
+    await page.getByText('Stopped', { exact: true }).waitFor({ timeout: 15_000 })
     // Golden of the aborted end-state: the prompt bubble plus the frozen
     // partial ('partial' is the hang entry's replayed prefix) and no more.
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
+    expect(await page.getByRole('alert').count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 120_000)

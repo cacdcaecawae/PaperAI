@@ -185,7 +185,10 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
   const type = (text: string): void => {
     fireEvent.change(textarea, { target: { value: text } })
   }
-  return { ctx, inputTriggers, controller, shell, wiring, view, textarea, type, sink, serialize, release }
+  return {
+    ctx, inputTriggers, controller, shell, wiring, view, textarea, type, sink, serialize, release,
+    api, session: sessions.sessionOf(actx)!, barProps,
+  }
 }
 
 async function bench(executeImpl?: (line: string) => Promise<SubmitOutcome>) {
@@ -195,6 +198,32 @@ async function bench(executeImpl?: (line: string) => Promise<SubmitOutcome>) {
   const base = await scopedBench((inputTriggers) => { inputTriggers.registerSource(source) })
   return { ...base, execute, executed, envelopes }
 }
+
+describe('stop recovery over the resident Session', () => {
+  it('does not re-announce a resolved stop error when the composer remounts', async () => {
+    const b = await bench()
+    b.view.unmount()
+    const props = { ...b.barProps, useSession: bindSnapshotSelector(b.session) }
+    const view = render(<InputBar {...props} />)
+    vi.useFakeTimers()
+    try {
+      b.api.onCancel = () => Promise.reject(new Error('stop wire unavailable'))
+      await act(async () => { await b.session.cancel() })
+      expect(view.getByRole('alert').textContent).toContain('stop wire unavailable')
+      act(() => { vi.advanceTimersByTime(4000) })
+      expect(view.queryByRole('alert')).toBeNull()
+
+      b.api.onCancel = () => Promise.resolve(ok({ accepted: true as const }))
+      await act(async () => { await b.session.cancel() })
+      view.unmount()
+      const returned = render(<InputBar {...props} />)
+      expect(returned.queryByRole('alert')).toBeNull()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
+  })
+})
 
 describe('scenario A: menu-pick /goal, type args, enter submits', () => {
   it('runs the whole claim chain through the real pipeline', async () => {

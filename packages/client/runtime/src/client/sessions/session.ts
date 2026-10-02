@@ -296,7 +296,8 @@ export class Session implements SessionFace {
 
   /**
    * Stop the active turn while the Host preserves pending inbox work; failures
-   * land in promptError (same error-strip display slot). A continuable
+   * land in promptError; success clears only the stop failure present when
+   * this request began, preserving any newer failure. A continuable
    * subagent address routes through `subagent.interrupt`, whose durable
    * parent-address authority works without a live parent Agent; a one-shot
    * address stays uncancellable (the UI offers no stop action, so this arm is
@@ -304,6 +305,7 @@ export class Session implements SessionFace {
    * @returns the cancel result.
    */
   async cancel(): Promise<RpcResult<{ accepted: true }>> {
+    const previousError = this.promptError
     const address = this.address
     if (address !== undefined && address.mode === 'one-shot') {
       const result: RpcResult<{ accepted: true }> = {
@@ -328,6 +330,9 @@ export class Session implements SessionFace {
     }
     if (!result.ok) {
       this.promptError = { op: 'stop', error: result.error }
+      this.notifier.markDirty()
+    } else if (previousError?.op === 'stop' && this.promptError === previousError) {
+      this.promptError = null
       this.notifier.markDirty()
     }
     return result
