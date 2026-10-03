@@ -35,7 +35,8 @@ describe('resident draft persistence', () => {
     await pending.promise
     expect(shell.snapshot).toMatchObject({ draft: '', imageIds: [], phase: 'plain' })
     expect(chat.getSnapshot().draft).toBe('')
-    expect(JSON.parse(localStorage.getItem('dsh.conversation.chat.accepted')!).draft).toBe('')
+    const persisted = JSON.parse(localStorage.getItem('dsh.conversation.chat.accepted')!) as { draft: string }
+    expect(persisted.draft).toBe('')
     shell.connectDraftStore('stale rendered value', chat.actions.setDraft)
     shell.undo()
     expect(shell.snapshot.draft).toBe('')

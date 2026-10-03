@@ -297,7 +297,7 @@ it('keeps admitted text empty after completing an image send in another session'
   expect(composer().readOnly).toBe(true)
   expect(read).toHaveBeenCalledOnce()
 
-  await startAssembledFixtureSession()
+  fireEvent.click(await screen.findByRole('button', { name: 'New session in fixture' }))
   await waitFor(() => { expect(composer().value).toBe('') })
   fireEvent.change(composer(), { target: { value: 'Other session draft' } })
   await act(async () => { finish(Uint8Array.of(1).buffer) })
@@ -309,7 +309,8 @@ it('keeps admitted text empty after completing an image send in another session'
   })
   expect(composer().value).toBe('Other session draft')
 
-  await openFixtureSession()
+  const sessions = await screen.findByRole('tree', { name: 'Workspace sessions' })
+  fireEvent.click(await within(sessions).findByText('Fixture 历史会话'))
   await waitFor(() => {
     expect(composer().readOnly).toBe(false)
     expect(composer().value).toBe('')

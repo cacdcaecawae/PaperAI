@@ -247,7 +247,8 @@ describe('conversation slot inject API', () => {
     finish({ ok: true, value: { accepted: true } })
     await vi.waitFor(() => { expect(old.state.getSnapshot().draft).toBe('') })
     expect(replacement.instance.getSnapshot().draft).toBe('replacement draft')
-    expect(JSON.parse(localStorage.getItem(`dsh.conversation.chat.${ROOT}`)!).draft).toBe('replacement draft')
+    const persisted = JSON.parse(localStorage.getItem(`dsh.conversation.chat.${ROOT}`)!) as { draft: string }
+    expect(persisted.draft).toBe('replacement draft')
     await b.runtime.dispose()
   })
 
