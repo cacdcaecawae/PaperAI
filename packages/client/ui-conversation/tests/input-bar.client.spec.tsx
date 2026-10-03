@@ -386,10 +386,20 @@ describe('image draft rail', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(sink).toHaveBeenCalledWith('', ['draft-1'], 'queue', expect.any(AbortSignal))
     expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
+    expect(textarea.readOnly).toBe(true)
+    fireEvent.change(textarea, { target: { value: 'blocked while admitting' } })
+    expect(textarea.value).toBe('')
+    act(() => { result.shell.actions.setDraft('newer draft action') })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(sink).toHaveBeenCalledOnce()
     await act(async () => { settle({ kind: 'success' }) })
     await vi.waitFor(() => {
       expect(attachmentOwner(result.slotCalls).attachments).toEqual([])
     })
+    expect(textarea.readOnly).toBe(false)
+    expect(textarea.value).toBe('newer draft action')
+    fireEvent.change(textarea, { target: { value: 'next message' } })
+    expect(textarea.value).toBe('next message')
   })
 
   it('announces an image-intake rejection as a fading toast, repeatable for the same reason', () => {

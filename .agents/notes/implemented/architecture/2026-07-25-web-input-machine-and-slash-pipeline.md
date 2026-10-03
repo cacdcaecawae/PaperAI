@@ -35,7 +35,9 @@ The event surface (`dispatch(ev)` is the single write entry; one transaction per
 - `paste-begin {text, selection, components?, generation?}` — the paste plus hot-snapshot synchronously matched components in one transaction (one Undo returns to before the paste); opens a PasteMatchAttempt.
 - `paste-upgrade {attemptId, span, reference}` — an asynchronous match upgrade as its own transaction (Undo in two steps); the attempt stays current, and insertedRange shrinks with each upgrade.
 - `invalidate-paste` — attempt-ending gestures observed at the DOM layer (caret/selection operations and the like).
-- `enter {mode}` / `adjudicated` / `adjudication-failed` / `submit-settled` / `release` — the submit-transaction plane: a SubmitAttempt (seq + AbortSignal) blocks backwash; success commits and clears the draft; failure rolls back under the drift guard (the enter-time snapshot is backfilled only while the live draft still equals it; if the user has typed again, only a notice fires).
+- `enter {mode, hasImages?}` / `adjudicated` / `adjudication-failed` / `submit-settled` / `release` — the submit-transaction plane: a SubmitAttempt (seq + AbortSignal) blocks backwash; success commits and clears the draft; failure rolls back under the drift guard (the enter-time snapshot is backfilled only while the live draft still equals it; if the user has typed again, only a notice fires).
+
+Image-only admission uses the same SubmitAttempt as text submission; attachment presence admits an empty draft without a second in-flight flag or settlement path. The facade refuses attachment additions and removals during admission. Browser bytes and preview URLs are released only after an accepted removal or successful send, so a refused removal cannot invalidate retry. An image-only success consumes the submitted images while preserving later text.
 
 The effect surface (executed by the shell): `adjudicate` (calls InputTriggerController.adjudicate), `begin-submit` (the claim.submit transaction), `default-sink` (ordinary messages, hub-orchestrated), `notice`.
 

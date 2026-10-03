@@ -182,11 +182,10 @@ export class InputMachine {
         this.paste = undefined
         return []
       }
-      case 'enter': return this.onEnter(ev.mode)
+      case 'enter': return this.onEnter(ev.mode, ev.hasImages === true)
       case 'adjudicated': return this.onAdjudicated(ev.attempt, ev.outcome)
       case 'adjudication-failed': return this.onAdjudicationFailed(ev.attempt, ev.message)
       case 'submit-settled': return this.onSubmitSettled(ev)
-      case 'send-committed': return this.onSendCommitted()
       case 'release': return this.onRelease()
       default: return unreachable(ev)
     }
@@ -480,7 +479,7 @@ export class InputMachine {
     return attempt
   }
 
-  private onEnter(mode: InputSubmitMode): InputEffect[] {
+  private onEnter(mode: InputSubmitMode, hasImages: boolean): InputEffect[] {
     if (this.phase === 'adjudicating' || this.phase === 'submitting') return []
     if (this.phase === 'claimed' && this.claim !== undefined) {
       const attempt = this.beginAttempt(mode)
@@ -489,7 +488,7 @@ export class InputMachine {
       return [{ type: 'begin-submit', attempt, claim: this.claim, args: argsAfter(this.draft, this.claim.token) }]
     }
     const trimmed = this.draft.trim()
-    if (trimmed === '') return []
+    if (trimmed === '' && !hasImages) return []
     this.paste = undefined
     if (trimmed.startsWith('/')) {
       const attempt = this.beginAttempt(mode)
@@ -546,13 +545,13 @@ export class InputMachine {
       this.phase = 'plain'
       this.claim = undefined
       this.occurrences = []
-      // Text appended after the sent snapshot during the Host round-trip
-      // survives the commit; edits interleaved with committed content cannot
-      // be separated from it, so only a pure suffix is retained.
+      // Image-only admission consumes no text typed during the round-trip.
+      // Text submissions retain only an appended suffix: interleaved edits
+      // cannot be separated from the committed content.
       const snapshot = flight.attempt.draftSnapshot
-      this.adopt(this.draft !== snapshot && this.draft.startsWith(snapshot)
-        ? this.draft.slice(snapshot.length)
-        : '')
+      this.adopt(this.draft === snapshot ? ''
+        : snapshot.trim() === '' ? this.draft
+          : this.draft.startsWith(snapshot) ? this.draft.slice(snapshot.length) : '')
       // Committed content is gone for good: undo must not resurrect a sent draft.
       this.log = []
       this.redoStack = []
@@ -575,19 +574,6 @@ export class InputMachine {
     this.phase = 'plain'
     this.claim = undefined
     return text === undefined ? [] : [{ type: 'notice', level: 'error', text }]
-  }
-
-  /** Cut undo state after an accepted image-only send. */
-  private onSendCommitted(): InputEffect[] {
-    if (this.phase !== 'plain') return []
-    this.claim = undefined
-    this.occurrences = []
-    this.adopt('')
-    this.log = []
-    this.redoStack = []
-    this.typingRun = undefined
-    this.paste = undefined
-    return []
   }
 
   private onRelease(): InputEffect[] {

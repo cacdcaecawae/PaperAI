@@ -35,7 +35,9 @@ Status: implemented
 - `paste-begin {text, selection, components?, generation?}`——粘贴 + 热快照同步匹配组件同 transaction（Undo 一次回粘贴前）；打开 PasteMatchAttempt。
 - `paste-upgrade {attemptId, span, reference}`——异步匹配升级为独立 transaction（Undo 两段）；attempt 保持 current，insertedRange 随升级收缩。
 - `invalidate-paste`——DOM 层观察到的 attempt 终结手势（caret/selection 操作等）。
-- `enter {mode}` / `adjudicated` / `adjudication-failed` / `submit-settled` / `release`——提交事务平面：SubmitAttempt（seq + AbortSignal）防回灌，成功 commit 清稿，失败带漂移守卫 rollback（回车时快照仅当 live draft 仍等于它才回填；用户已再输入则只发 notice）。
+- `enter {mode, hasImages?}` / `adjudicated` / `adjudication-failed` / `submit-settled` / `release`——提交事务平面：SubmitAttempt（seq + AbortSignal）防回灌，成功 commit 清稿，失败带漂移守卫 rollback（回车时快照仅当 live draft 仍等于它才回填；用户已再输入则只发 notice）。
+
+纯图片提交使用与文本提交相同的 SubmitAttempt；附件存在时允许提交空草稿，无需额外的进行中标志或结算路径。提交期间，门面拒绝添加和移除附件。只有接受移除或发送成功后才释放浏览器字节和预览 URL，因此被拒绝的移除不会破坏重试。纯图片发送成功后仅消耗已提交图片，保留后来输入的文字。
 
 效果面（shell 执行）：`adjudicate`（调 InputTriggerController.adjudicate）、`begin-submit`（claim.submit 事务）、`default-sink`（普通消息，hub 编排）、`notice`。
 
