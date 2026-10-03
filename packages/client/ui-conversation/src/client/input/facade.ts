@@ -100,8 +100,6 @@ export class SessionInputShell implements SessionInput {
   private noticeSeq = 0
   private lastMirroredDraft = ''
   private imageIds: readonly DraftAttachmentId[] = []
-  /** One image-only send at a time: Enter during the Host round-trip is a no-op. */
-  private imageSendInFlight = false
   private disposed = false
   /** Draft persistence mirror (chat store write; receives the clipboard projection, never display-only ranges). */
   private mirrorFn: ((text: string) => void) | undefined
@@ -136,13 +134,16 @@ export class SessionInputShell implements SessionInput {
    * Remove one image id from this draft. Busy admission phases refuse, like
    * {@link addImages}: a removal landing while a command submit serializes
    * would otherwise vanish from the rail yet still ride the in-flight send.
+   * @param id - draft-local image identity.
+   * @returns whether the draft removed the id; only then may its bytes and URL be released.
    */
-  removeImage(id: DraftAttachmentId): void {
-    if (this.snapshot.phase === 'adjudicating' || this.snapshot.phase === 'submitting') return
+  removeImage(id: DraftAttachmentId): boolean {
+    if (this.snapshot.phase === 'adjudicating' || this.snapshot.phase === 'submitting') return false
     const next = this.imageIds.filter(candidate => candidate !== id)
-    if (next.length === this.imageIds.length) return
+    if (next.length === this.imageIds.length) return false
     this.imageIds = next
     this.publish()
+    return true
   }
 
   /**
@@ -155,18 +156,6 @@ export class SessionInputShell implements SessionInput {
     if (next.length === this.imageIds.length) return
     this.imageIds = next
     this.publish()
-  }
-
-  /**
-   * Clear the draft as a successful-send commit: no undo unit is recorded and
-   * the undo history is cut, so Ctrl/Cmd-Z cannot resurrect sent content
-   * (the command path gets the same discipline from submit-settled success).
-   * @param imageIds - admitted image ids to remove from this draft.
-   */
-  commitSend(imageIds: readonly DraftAttachmentId[]): void {
-    const submitted = new Set(imageIds)
-    this.imageIds = this.imageIds.filter(id => !submitted.has(id))
-    this.run(this.core.dispatch({ type: 'send-committed' }))
   }
 
   /** Undo the latest transaction (InputBar intercepts the platform chord). */
@@ -207,22 +196,6 @@ export class SessionInputShell implements SessionInput {
    * dismisses and the menu tracks frozen.
    */
   submit(mode: InputSubmitMode = 'queue'): void {
-    if (this.snapshot.draft.trim() === '' && this.imageIds.length > 0) {
-      if (this.snapshot.phase === 'plain' && !this.imageSendInFlight) {
-        const imageIds = [...this.imageIds]
-        this.imageSendInFlight = true
-        void this.deps.defaultSink('', imageIds, mode, new AbortController().signal).then((outcome) => {
-          this.imageSendInFlight = false
-          if (this.disposed) return
-          if (outcome.kind === 'success') this.commitSend(imageIds)
-          else if (outcome.text !== undefined) this.notify('error', outcome.text)
-        }, (error: unknown) => {
-          this.imageSendInFlight = false
-          if (!this.disposed) this.notify('error', error instanceof Error ? error.message : String(error))
-        })
-      }
-      return
-    }
     // Claimed pre-gate: a claim that does not declare image acceptance never
     // submits while images are attached — one notice, everything retained.
     // Enter-time adjudication applies the same policy for unclaimed lines
@@ -232,7 +205,7 @@ export class SessionInputShell implements SessionInput {
       this.notify('error', this.deps.commandImages.unsupportedNotice(before.claim?.token ?? before.draft))
       return
     }
-    this.run(this.core.dispatch({ type: 'enter', mode }))
+    this.run(this.core.dispatch({ type: 'enter', mode, hasImages: this.imageIds.length > 0 }))
     const phase = this.snapshot.phase
     if (phase === 'adjudicating' || phase === 'submitting') {
       this.deps.popup?.()?.dismiss()

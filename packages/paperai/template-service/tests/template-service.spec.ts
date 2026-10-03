@@ -240,6 +240,7 @@ describe('PaperTemplateService', () => {
 
   afterEach(async () => {
     vi.clearAllMocks()
+    vi.useRealTimers()
     await ctx.fiber.dispose()
   })
 
@@ -280,6 +281,77 @@ describe('PaperTemplateService', () => {
     expect(service.listPacks()).toEqual([expect.objectContaining({ id: anotherManifest.id })])
     disposeAnother()
     expect(service.listPacks()).toEqual([])
+  })
+
+  it.each([
+    ['form-template', 'format-reference'],
+    ['format-reference', 'form-template'],
+  ] as const)('recompiles identical bytes when usage changes from %s to %s', async (initialUsage, nextUsage) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-30T00:00:00Z'))
+    const pack = await service.createLibraryPack({ name: 'Custom formats' })
+    const upload = { fileName: 'proposal.docx', bytes: Buffer.from('same-template-bytes') }
+    await service.addLibraryFormat({ packId: pack.id, role: 'proposal', usage: initialUsage, upload })
+    const input = { projectId: ProjectId('project-1'), packId: TemplatePackId(pack.id) }
+    const [initial] = await service.installPack(input)
+    if (initial === undefined) throw new Error('missing initial format')
+    const confirmed = await service.confirm(initial.id)
+
+    await service.addLibraryFormat({ packId: pack.id, role: 'proposal', usage: nextUsage, upload })
+    expect(service.listPacks()[0]?.members[0]?.usage).toBe(nextUsage)
+    const [replaced] = await service.installPack(input)
+    expect(replaced?.usage).toBe(nextUsage)
+    expect(replaced?.id).not.toBe(initial.id)
+    expect(replaced?.status).toBe('draft')
+    expect(service.getContract(initial.id)).toEqual(confirmed)
+    expect(await service.installPack(input)).toEqual([replaced])
+    expect(readTextNodes).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes replaced custom metadata without invalidating sibling formats', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-30T00:00:00Z'))
+    const pack = await service.createLibraryPack({ name: 'Custom formats' })
+    const upload = { fileName: 'proposal.docx', bytes: Buffer.from('same-template-bytes') }
+    await service.addLibraryFormat({ packId: pack.id, role: 'proposal', usage: 'form-template', name: 'Original', upload })
+    await service.addLibraryFormat({ packId: pack.id, role: 'midterm', usage: 'form-template', upload })
+    const input = { projectId: ProjectId('project-1'), packId: TemplatePackId(pack.id) }
+    const initial = await service.installPack(input)
+    const original = initial.find(contract => contract.appliesToRoles.includes('proposal'))
+    const sibling = initial.find(contract => contract.appliesToRoles.includes('midterm'))
+
+    await service.addLibraryFormat({ packId: pack.id, role: 'proposal', usage: 'form-template', name: 'Revised', upload })
+    const replaced = await service.installPack(input)
+    const revised = replaced.find(contract => contract.appliesToRoles.includes('proposal'))
+    expect(revised?.name).toBe('Revised')
+    expect(revised?.id).not.toBe(original?.id)
+    expect(replaced.find(contract => contract.appliesToRoles.includes('midterm'))).toEqual(sibling)
+    expect(readTextNodes).toHaveBeenCalledTimes(3)
+  })
+
+  it('recompiles when normalized DOCX bytes change without changing the source asset', async () => {
+    const sourcePath = join(root, 'source.doc')
+    const normalizedPath = join(root, 'normalized.docx')
+    await writeFile(sourcePath, 'source-doc')
+    await writeFile(normalizedPath, 'normalized-docx')
+    const manifest = packManifest(sourcePath, normalizedPath, 'form-template', ['proposal'])
+    const unregister = service.registerPack(manifest)
+    const input = { projectId: ProjectId('project-1'), packId: manifest.id }
+    const [initial] = await service.installPack(input)
+    unregister()
+    const bytes = Buffer.from('corrected-normalized-docx')
+    await writeFile(normalizedPath, bytes)
+    service.registerPack({
+      ...manifest,
+      members: manifest.members.map(member => ({
+        ...member,
+        normalized: { path: normalizedPath, sha256: sha256(bytes), size: bytes.byteLength },
+      })),
+    })
+    const [replaced] = await service.installPack(input)
+    expect(replaced?.id).not.toBe(initial?.id)
+    expect(replaced?.origin.normalizedSha256).toBe(sha256(bytes))
+    expect(readTextNodes).toHaveBeenCalledTimes(2)
   })
 
   it('uploads immutable DOCX and legacy DOC sources as reviewable drafts', async () => {

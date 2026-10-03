@@ -7,7 +7,7 @@
 // sessions.attachment route, the single-click ImageLightbox, and the composer
 // intake chain (paste → ordered thumbnail rail → image-only send enablement → remove).
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import {
   installAssembledBootEnv, mountAssembledApp, openAssembledFixtureHistory, startAssembledFixtureSession,
 } from './assembled-boot.ts'
@@ -206,4 +206,75 @@ it('renders a host dimension rejection with the projected 2000px limit', async (
     }
   `)
   expect(document.querySelector('[role="group"][aria-label="Pending images"]')).not.toBeNull()
+})
+
+/** Paste a delayed browser file through the assembled composer's intake. */
+async function pasteDeferredImage(textarea: HTMLTextAreaElement, image: File): Promise<Element> {
+  fireEvent.paste(textarea, {
+    clipboardData: {
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => image }],
+      getData: () => '',
+    },
+  })
+  return waitFor(() => {
+    const rail = document.querySelector('[role="group"][aria-label="Pending images"]')
+    if (rail === null) throw new Error('attachment rail missing')
+    return rail
+  })
+}
+
+it('locks image-only admission against repeated sends and restores editing after acceptance', async () => {
+  mountAssembledApp()
+  await startAssembledFixtureSession()
+  const textarea = await screen.findByPlaceholderText('Describe what you want to build', {}, { timeout: 10_000 }) as HTMLTextAreaElement
+  const image = new File([Uint8Array.of(1)], 'pending.png', { type: 'image/png' })
+  let finish!: (bytes: ArrayBuffer) => void
+  const read = vi.spyOn(image, 'arrayBuffer').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  await pasteDeferredImage(textarea, image)
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  expect(textarea.readOnly).toBe(true)
+  fireEvent.change(textarea, { target: { value: 'blocked while admitting' } })
+  expect(textarea.value).toBe('')
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  expect(read).toHaveBeenCalledOnce()
+  finish(Uint8Array.of(1).buffer)
+  await waitFor(() => { expect(textarea.readOnly).toBe(false) })
+  fireEvent.change(textarea, { target: { value: 'next message' } })
+  expect({ draft: textarea.value, pendingImages: document.querySelectorAll('[aria-label="Pending images"]').length })
+    .toMatchInlineSnapshot(`
+      {
+        "draft": "next message",
+        "pendingImages": 0,
+      }
+    `)
+})
+
+it('keeps the same preview after interrupted image preparation and permits retry', async () => {
+  mountAssembledApp()
+  await startAssembledFixtureSession()
+  const textarea = await screen.findByPlaceholderText('Describe what you want to build', {}, { timeout: 10_000 }) as HTMLTextAreaElement
+  const image = new File([Uint8Array.of(1)], 'retry.png', { type: 'image/png' })
+  let fail!: (reason: Error) => void
+  const read = vi.spyOn(image, 'arrayBuffer')
+    .mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+    .mockResolvedValueOnce(Uint8Array.of(1).buffer)
+  const rail = await pasteDeferredImage(textarea, image)
+  const preview = rail.querySelector('img')!.getAttribute('src')
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  const remove = rail.querySelector<HTMLButtonElement>('button[aria-label^="Remove image"]')!
+  fireEvent.click(remove)
+  expect(rail.querySelector('img')!.getAttribute('src')).toBe(preview)
+  fail(new Error('image preparation interrupted'))
+  await waitFor(() => { expect(textarea.readOnly).toBe(false) })
+  expect(rail.querySelector('img')!.getAttribute('src')).toBe(preview)
+  expect({ retained: rail.querySelector('img')!.getAttribute('alt'), removable: !remove.disabled })
+    .toMatchInlineSnapshot(`
+      {
+        "removable": true,
+        "retained": "retry.png",
+      }
+    `)
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  await waitFor(() => { expect(document.querySelector('[aria-label="Pending images"]')).toBeNull() })
+  expect(read).toHaveBeenCalledTimes(2)
 })
