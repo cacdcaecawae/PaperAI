@@ -183,7 +183,8 @@ describe('reference submission', () => {
 describe('submit transaction hardening', () => {
   it('sends one image-only prompt per settlement, ignoring Enter during the round-trip', async () => {
     let settle!: (outcome: SubmitOutcome) => void
-    const sink = vi.fn(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
+    const sink = vi.fn<ConstructorParameters<typeof SessionInputShell>[0]['defaultSink']>(() =>
+      new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
     const shell = new SessionInputShell({
       actx: {} as ClientContext,
       defaultSink: sink,
@@ -203,6 +204,45 @@ describe('submit transaction hardening', () => {
     expect(sink).toHaveBeenCalledTimes(2)
   })
 
+  it.each(['', '  \n '])('locks an image-only draft %j and preserves text entered during admission', async (draft) => {
+    let settle!: (outcome: SubmitOutcome) => void
+    const sink = vi.fn<ConstructorParameters<typeof SessionInputShell>[0]['defaultSink']>(() =>
+      new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
+    const shell = new SessionInputShell({ actx: {} as ClientContext, defaultSink: sink, commandImages })
+    const id = 'image-in-flight' as DraftAttachmentId
+    shell.setDraft(draft)
+    shell.addImages([id])
+    shell.submit('steer')
+    expect(shell.snapshot.phase).toBe('submitting')
+    expect(shell.addImages(['late-image' as DraftAttachmentId])).toBe(false)
+    shell.setDraft('next message')
+    shell.submit()
+    expect(sink).toHaveBeenCalledTimes(1)
+    expect(sink).toHaveBeenCalledWith('', [id], 'steer', expect.any(AbortSignal))
+    settle({ kind: 'success' })
+    await vi.waitFor(() => { expect(shell.snapshot.phase).toBe('plain') })
+    expect(shell.snapshot).toMatchObject({ draft: 'next message', imageIds: [] })
+    shell.undo()
+    expect(shell.snapshot.draft).toBe('next message')
+  })
+
+  it('aborts image-only admission and ignores its late settlement after disposal', async () => {
+    let settle!: (outcome: SubmitOutcome) => void
+    const sink = vi.fn<ConstructorParameters<typeof SessionInputShell>[0]['defaultSink']>(() =>
+      new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
+    const shell = new SessionInputShell({ actx: {} as ClientContext, defaultSink: sink, commandImages })
+    const id = 'disposed-image' as DraftAttachmentId
+    shell.addImages([id])
+    shell.submit()
+    const signal = sink.mock.calls[0]![3]
+    shell.dispose()
+    expect(signal.aborted).toBe(true)
+    settle({ kind: 'success' })
+    await Promise.resolve()
+    expect(shell.snapshot.imageIds).toEqual([id])
+    expect(shell.notices.getSnapshot()).toBeNull()
+  })
+
   it('retains an image-only rejection without duplicating its prompt error notice', async () => {
     const sink = vi.fn(() => Promise.resolve<SubmitOutcome>({ kind: 'error' }))
     const shell = new SessionInputShell({
@@ -217,6 +257,16 @@ describe('submit transaction hardening', () => {
     await Promise.resolve()
     expect(shell.snapshot.imageIds).toEqual([imageId])
     expect(shell.notices.getSnapshot()).toBeNull()
+  })
+
+  it('reports removal acceptance only for a present image outside admission', () => {
+    const shell = new SessionInputShell({ actx: {} as ClientContext, defaultSink: vi.fn(), commandImages })
+    const id = 'removable-image' as DraftAttachmentId
+    expect(shell.removeImage(id)).toBe(false)
+    shell.addImages([id])
+    expect(shell.removeImage(id)).toBe(true)
+    expect(shell.snapshot.imageIds).toEqual([])
+    expect(shell.removeImage(id)).toBe(false)
   })
 
   it('re-tracks at the caret when a continuing insert-text splice lands (directory descent)', () => {
