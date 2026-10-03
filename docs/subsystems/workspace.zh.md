@@ -1145,8 +1145,8 @@ listContracts(projectId: ProjectId): TemplateContract[]
 
 /**
  * Install selected members, verifying package bytes before OfficeCLI inspection.
- * Repeating the same project, pack version, member, and source digest under the same
- * compiler revision returns the existing draft or confirmed contract without another compilation.
+ * Repeating an unchanged project, pack, member metadata, and source/normalized assets
+ * under the same compiler revision returns the existing draft or confirmed contract.
  * @param input - project, pack, and optional member selection.
  * @param signal - optional cancellation signal.
  * @returns contracts in manifest order.

@@ -346,8 +346,7 @@ export function apply(ctx: Context): void {
           }
         },
         removeImage: (id) => {
-          conversation.releaseDraftImage(id)
-          shell.removeImage(id)
+          if (shell.removeImage(id)) conversation.releaseDraftImage(id)
         },
         draftImages: ids => conversation.draftImages(ids),
         resolveSubmitMode: (running, gesture, steeringAvailable) =>
