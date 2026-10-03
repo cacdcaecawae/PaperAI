@@ -19,6 +19,7 @@ import * as PaperProjectService from '@paperai/project-service'
 import * as PaperRepository from '@paperai/repository'
 import type { DocumentCommitPublication } from '@paperai/repository'
 import * as PaperTemplateService from '@paperai/template-service'
+import { TemplatePackId } from '@paperai/template-service'
 import { afterEach, expect, it } from 'vitest'
 import * as PaperCommitService from '../src/index.ts'
 import { readFileImage, resolveCommitFilePaths, storeSnapshot } from '../src/files.ts'
@@ -134,10 +135,17 @@ async function boot(directory: string): Promise<Context> {
   return ctx
 }
 
-async function importText(ctx: Context, directory: string, projectId: DocumentRecord['projectId'], name: string, text: string): Promise<DocumentRecord> {
+async function importText(
+  ctx: Context,
+  directory: string,
+  projectId: DocumentRecord['projectId'],
+  name: string,
+  text: string,
+  role: DocumentRecord['role'] = 'manuscript',
+): Promise<DocumentRecord> {
   const sourcePath = join(directory, `${name}.docx`)
   await writeFile(sourcePath, text, 'utf8')
-  const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath, role: 'manuscript' })
+  const result = await ctx.paperDocuments.importDocument({ projectId, sourcePath, role })
   if (result.status !== 'imported') throw new Error(result.detail)
   return result.document
 }
@@ -196,4 +204,30 @@ it('boots with a journal that cannot recover and keeps unrelated documents writa
   expect(ctx.paperCommits.listHistory(healthy.id).map(entry => entry.id)).toEqual([next.id])
   expect(await readFile(healthy.workingPath, 'utf8')).toBe('bravo revised')
   expect(ctx.paperRepository.listNodes(healthy.id).map(node => node.text)).toEqual(['bravo revised'])
+})
+
+it('checks a candidate as the document type the same commit sets before binding a template', async () => {
+  root = await mkdtemp(join(tmpdir(), 'paperai-commit-loader-'))
+  const ctx = await boot(root)
+  const { project } = await ctx.paperProjects.create({ rootPath: join(root, 'project'), name: 'Type and binding' })
+  const document = await importText(ctx, root, project.id, 'free', 'free text', 'other')
+  const pack = await ctx.paperTemplates.createLibraryPack({ name: 'Proposal formats' })
+  await ctx.paperTemplates.addLibraryFormat({
+    packId: pack.id, role: 'proposal', usage: 'format-reference',
+    upload: { fileName: 'proposal.docx', bytes: Buffer.from('proposal sample') },
+  })
+  const [installed] = await ctx.paperTemplates.installPack({ projectId: project.id, packId: TemplatePackId(pack.id) })
+  const template = await ctx.paperTemplates.confirm(installed!.id)
+  const head = ctx.paperRepository.getDocument(document.id)?.headCommitId
+
+  const commit = await ctx.paperCommits.submit({
+    documentId: document.id, actor, message: 'Apply the proposal format', ...(head === undefined ? {} : { baseCommitId: head }),
+    mutations: [{ type: 'set-document-type', documentType: 'proposal' }, { type: 'bind-template', templateId: template.id }],
+  })
+
+  expect(ctx.paperRepository.getDocument(document.id)).toMatchObject({ role: 'proposal', templateId: template.id })
+  const immediate = await ctx.paperTemplates.check({ documentId: document.id, mode: 'continuous' })
+  expect(immediate.findings.map(finding => finding.code)).not.toContain('template_role_mismatch')
+  expect(commit.gate.findings.map(finding => finding.code)).toEqual(immediate.findings.map(finding => finding.code))
+  expect(commit.gate.status).toBe(immediate.status)
 })

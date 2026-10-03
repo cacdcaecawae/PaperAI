@@ -23,7 +23,7 @@ Compiled mutations cover `replace-text`, `insert-node`, `delete-node`, `bind-tem
 
 ## Publication and Recovery
 
-Each document has one in-process FIFO. The service copies the Working DOCX to a private project-local candidate, compiles supported domain mutations to Office-path mutations, asks `documentEngine` to save and validate that candidate, and asks `paperDocuments` to rebuild its semantic index without publishing it.
+Each document has one in-process FIFO. The service copies the Working DOCX to a private project-local candidate, compiles supported domain mutations to Office-path mutations, asks `documentEngine` to save and validate that candidate, and asks `paperDocuments` to rebuild its semantic index without publishing it. The rebuilt index and the commit's template check both read the document metadata the commit will publish, so a `set-document-type` earlier in the batch decides which type a `bind-template` must apply to.
 
 Compiled replacements, removals, and insertion anchors carry the indexed `baseText`, including text from an earlier replacement in the same batch. The engine verifies the actual target before editing; matching only the caller's text against the index cannot detect a stale index or an incorrect Office-path binding.
 
