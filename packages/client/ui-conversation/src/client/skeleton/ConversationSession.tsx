@@ -171,8 +171,8 @@ export function ConversationSessionHeader({
  * @returns the active view area, or null while the Session remains blank.
  */
 export function ConversationSession({
-  sessionId, useSession, useInput, inputActions, useStore, actions,
-  renderSlot, views, bindDraftMirror, releaseSessionImages,
+  sessionId, useSession, inputActions, useStore, actions,
+  renderSlot, views, connectDraftStore, releaseSessionImages,
 }: ConversationSessionProps) {
   useSyncExternalStore(views.subscribe, views.version)
   const tabs = views.list()
@@ -180,17 +180,14 @@ export function ConversationSession({
   const active = resolveActiveView(tabs, selectedId)
   const composerPhase = useSession(s => s.composerPhase)
   const blank = useSession(s => s.blank)
-  const inputState = useInput(s => s)
   const storedDraft = useStore(s => s.draft)
   // `?? null`: persisted snapshots from before the inspect field rehydrate without it.
   const inspect = useStore(s => s.inspect ?? null)
 
   useEffect(() => {
-    if (inputState.draft === '' && storedDraft !== '') inputActions.setDraft(storedDraft)
-    const unmirror = bindDraftMirror(actions.setDraft)
-    return () => { unmirror() }
-    // Mount-only (deps pinned to inputActions): later store writes come from
-    // the machine mirror, not this seed effect.
+    connectDraftStore(storedDraft, actions.setDraft)
+    // The shell and cached store share the session scope lifetime; navigation
+    // unmounts only this view, so offscreen settlements must keep persisting.
   }, [inputActions])
 
   useEffect(() => () => {

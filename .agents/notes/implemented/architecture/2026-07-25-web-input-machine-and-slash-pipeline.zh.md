@@ -88,10 +88,12 @@ skill/@subagent 引用不走占位符 + occurrence 身份链——纯文本引�
 - 发送即原文（不再 `<skill>` 序列化）；气泡侧 MessageItem 双形状装饰（legacy `<skill>` 标签 + 纯文本 token）。
 - 旧 occurrence/paste/serialize 链全部保留在盘未删（additive；删除另成将来一刀）。装饰响应性：InputBar 以 uSES 订阅 shell 的 lexicon source，scope 出生预热后才 settle 的名录会直接点亮已有 draft token，无需菜单交互或无关重渲染。
 
+草稿持久化连接随常驻输入存在，不随严格会话视图卸载：待处理的发送可能在导航后完成，仅在返回时同步会让此前的页面刷新恢复已发送文本。首次连接只为尚未修改或提交的输入采纳存储文本；之后由状态机拥有空草稿、引用身份与撤销状态，并向缓存 store 写入剪贴板投影。UI 插件卸载会永久释放旧连接，即使运行时会话仍在，迟到的效果或发送结算也不能覆盖替换 store 的草稿。
+
 ### 每会话供数贡献与键盘私面
 
 - ui-conversation（hub 兼贡献者）经 `sessions.provide` 供 `'input'` hook（机器状态 + queue overlay）+ `inputActions` prop（`setDraft`/`submit`，稳定 void 回调）。
-- 公私分界：公共 provide 只放 React 语汇成员；键盘/DOM 命令面（track/arbitrate/space/undo/redo/paste/dismissPopup/bindMirror——同步返回值、disposer 语义）是 InputBar 独占，走 InputBar entry 自己的 inject 包内私递，不出插件边界。
+- 公私分界：公共 provide 只放 React 语汇成员；键盘/DOM 命令面（track/arbitrate/space/undo/redo/paste/dismissPopup——同步返回值）是 InputBar 独占，走 InputBar entry 自己的 inject 包内私递，不出插件边界。
 
 ### slot 体系
 
