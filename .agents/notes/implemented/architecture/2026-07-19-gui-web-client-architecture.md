@@ -133,5 +133,6 @@ Token streams no longer shake the render tree: Assistant chunks update one busin
 | Clear only the shared loading flag | Consumers can retain their own guards until the awaited operation finishes, so owner invalidation also completes that operation |
 | Reject superseded page operations | Existing view callers use finally without a rejection handler; normal local completion preserves the void completion API and keeps earlier-history availability in hasMore |
 | Recover gaps only on reconnect | A failed unary history request does not imply a closed mux; an otherwise finished turn can remain missing |
+| Forget a baseline gap after the initial stitch request | An idle session may emit no further live frames; failed or incomplete stitching must remain retryable on navigation, even with no buffered suffix |
 | Unbounded automatic history retries | Operation-triggered retries avoid an independent background retry policy and leave the current window usable |
 | Release buffering in an outer completion callback | A later frame can arrive after installation but before that callback, so the buffer owner ends with installation instead |

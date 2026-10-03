@@ -12,6 +12,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { HistoryEntry, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
@@ -563,6 +564,122 @@ describe('web e2e: whole-session stats survive history paging', () => {
         for (const projection of heldProjections) mux?.send(projection)
         heldProjections = []
       }
+    }
+  }, 60_000)
+
+  it('retries an incomplete subscribed baseline on navigation without new live events', async () => {
+    const baselineId = 'baseline-gap-navigation-web-e2e'
+    const title = 'Subscribed baseline recovery'
+    await seedSession(scaffold, buildSeed(3, title), baselineId)
+    const agent = await scaffold.ctx.agents.resume({ resumeSessionId: SessionId(baselineId) })
+    const baselinePage = await newEnglishPage(browser)
+    const baselineConsole = watchConsole(baselinePage)
+    const subscribed = Promise.withResolvers<() => void>()
+    let connections = 0
+    let liveEvents = 0
+    let tailRequests = 0
+    await baselinePage.routeWebSocket('**/api/events.mux', (socket) => {
+      connections++
+      const server = socket.connectToServer()
+      server.onMessage((message) => {
+        const envelope = JSON.parse(typeof message === 'string' ? message : message.toString('utf8')) as {
+          payload?: { type: string; sessionId?: string }
+        }
+        if (envelope.payload?.sessionId === baselineId) {
+          if (envelope.payload.type === 'session/subscribed') {
+            subscribed.resolve(() => { socket.send(message) })
+            return
+          }
+          if (envelope.payload.type === 'session/event') liveEvents++
+        }
+        socket.send(message)
+      })
+    })
+    await baselinePage.route('**/api/session.history', async (route) => {
+      const request = route.request().postDataJSON() as { payload?: { sessionId?: string; beforeSeq?: number } }
+      if (request.payload?.sessionId !== baselineId || request.payload.beforeSeq !== undefined) {
+        await route.continue()
+        return
+      }
+      const ordinal = ++tailRequests
+      // The baseline arrives while the real Session's initial history is pending.
+      if (ordinal === 1) (await subscribed.promise)()
+      const response = await route.fetch()
+      const body = await response.json() as { result: RpcResult<{ events: HistoryEntry[]; hasMore: boolean }> }
+      if (ordinal === 2) {
+        body.result = { ok: false, error: { code: 'internal', message: 'Intentional baseline stitch failure', details: {} } }
+      } else if (ordinal <= 3 && body.result.ok) {
+        const lastTurn = body.result.value.events.find(entry => entry.event.type === 'turn/start' && entry.event.data.turn === 3)
+        if (lastTurn === undefined) throw new Error('baseline fixture lacks the third turn')
+        body.result.value.events = body.result.value.events.filter(entry => entry.event.seq < lastTurn.event.seq)
+      }
+      await route.fulfill({ response, json: body })
+    })
+    try {
+      onTestFailed(() => saveFailureShot(baselinePage, 'web-e2e-baseline-gap-navigation'))
+      await baselinePage.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      const group = baselinePage.locator('[role="treeitem"]').first()
+      await group.waitFor({ timeout: 15_000 })
+      if (await group.getAttribute('aria-expanded') !== 'true') await group.click()
+      const original = baselinePage.locator('[role="treeitem"][aria-selected]').filter({ hasText: title })
+      const away = baselinePage.locator('[role="treeitem"][aria-selected]').filter({ hasText: AWAY_TITLE })
+      await original.click()
+      await baselinePage.getByText('r2', { exact: true }).waitFor({ timeout: 15_000 })
+      await expect.poll(() => tailRequests).toBe(2)
+      await expect.poll(() => baselinePage.getByText('Loading history…', { exact: true }).count()).toBe(0)
+      expect(await baselinePage.getByText('r3', { exact: true }).count()).toBe(0)
+      const transcript: { phase: string; replies: string[] }[] = []
+      const capture = async (phase: string): Promise<void> => {
+        transcript.push({ phase, replies: await baselinePage.locator('[data-chat-flow]').getByText(/^r[23]$/).allTextContents() })
+      }
+      await capture('initial stitch failed')
+      for (const ordinal of [3, 4]) {
+        await away.click()
+        await expect.poll(() => away.getAttribute('aria-selected')).toBe('true')
+        await expect.poll(() => baselinePage.getByText('r2', { exact: true }).count()).toBe(0)
+        const historyResponse = baselinePage.waitForResponse((response) => {
+          if (!response.url().endsWith('/api/session.history')) return false
+          const request = response.request().postDataJSON() as { payload?: { sessionId?: string } }
+          return request.payload?.sessionId === baselineId
+        })
+        await original.click()
+        await (await historyResponse).finished()
+        await expect.poll(() => tailRequests, { timeout: 10_000 }).toBe(ordinal)
+        await baselinePage.getByText(ordinal === 3 ? 'r2' : 'r3', { exact: true }).waitFor({ timeout: 10_000 })
+        await capture(ordinal === 3 ? 'navigation still incomplete' : 'navigation recovered')
+      }
+      expect(transcript).toMatchInlineSnapshot(`
+        [
+          {
+            "phase": "initial stitch failed",
+            "replies": [
+              "r2",
+            ],
+          },
+          {
+            "phase": "navigation still incomplete",
+            "replies": [
+              "r2",
+            ],
+          },
+          {
+            "phase": "navigation recovered",
+            "replies": [
+              "r2",
+              "r3",
+            ],
+          },
+        ]
+      `)
+      expect(connections).toBe(1)
+      expect(liveEvents).toBe(0)
+      expect(baselineConsole.pageErrors).toEqual([])
+      expect(baselineConsole.warnings).toEqual([])
+    } finally {
+      subscribed.resolve(() => {})
+      await baselinePage.unrouteAll({ behavior: 'wait' })
+      await baselinePage.close()
+      await agent.dispose()
     }
   }, 60_000)
 

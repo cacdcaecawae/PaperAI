@@ -1020,6 +1020,38 @@ describe('remaining branches', () => {
     expect(snapshot.nodes.map(n => n.seq)).toEqual([1, 3]) // first window kept
   })
 
+  it.each(['error', 'incomplete', 'empty'] as const)(
+    'retries a baseline gap on navigation after an %s stitch response',
+    async (outcome) => {
+      const { api, session } = makeSession()
+      const first = plainTurn(0, 0, 'first', 'answer')
+      const full = [...first, ...plainTurn(6, 1, 'second', 'final answer')]
+      let calls = 0
+      api.onHistory = () => {
+        calls++
+        if (calls === 2 && outcome === 'error') {
+          return Promise.resolve(err({ code: 'internal', message: 'stitch failed', details: {} }))
+        }
+        return histResponse(outcome === 'empty' ? [] : first)
+      }
+      session.handleMuxEnvelope('baseline' as never, { type: 'session/subscribed', sessionId: SID, lastSeq: 11 })
+      await session.open()
+      expect(calls).toBe(2)
+      expect(session.getSnapshot().openState).toBe('open')
+      expect(chatSeqs(session.getSnapshot())).toEqual(outcome === 'empty' ? [] : [0, 1, 2, 3, 4, 5])
+      api.onHistory = () => { calls++; return histResponse(first) }
+      await session.open()
+      expect(calls).toBe(3)
+      expect(chatSeqs(session.getSnapshot())).toEqual([0, 1, 2, 3, 4, 5])
+      api.onHistory = () => { calls++; return histResponse(full) }
+      await session.open()
+      expect(calls).toBe(4)
+      expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+      await session.open()
+      expect(calls).toBe(4)
+    },
+  )
+
   it('approval frame with callId/reason keeps the optional fields; duplicate resolved is a no-op', () => {
     const { session } = makeSession()
     session.handleMuxEnvelope('ra' as never, {

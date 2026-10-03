@@ -681,9 +681,7 @@ export class Session implements SessionFace {
         return
       }
       this.installWindow(result.value.events, result.value.hasMore, result.value.projections)
-      // Gap detection: baseline past the window tail and liveBuffer did not cover it -> pull the tail page once more.
-      const tailSeq = this.windowTailSeq()
-      if (this.subscribedLastSeq !== null && tailSeq !== null && this.subscribedLastSeq > tailSeq) {
+      if (this.gapRepairNeeded) {
         result = (await this.history({ maxMessages: PAGE_MESSAGES })).result
         if (generation !== this.openGeneration) return
         if (result.ok) this.installWindow(result.value.events, result.value.hasMore, result.value.projections)
@@ -729,6 +727,8 @@ export class Session implements SessionFace {
         this.appendLive(item.event, item.view)
       }
     }
+    const tailSeq = this.windowTailSeq() ?? -1
+    this.gapRepairNeeded ||= this.subscribedLastSeq !== null && this.subscribedLastSeq > tailSeq
     this.notifier.markDirty()
   }
 
