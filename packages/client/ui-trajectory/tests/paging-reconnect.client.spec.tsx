@@ -11,15 +11,18 @@ import { bindSnapshotSelector, stubSettingsScope } from '@deepseek-ai/dsh-client
 import { apply as localeApply, inject as localeInject } from '@deepseek-ai/dsh-client-locale/client'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { ComponentType, ComponentProps } from 'react'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { apply, inject } from '../src/client/index.ts'
-import { en } from '../src/client/locales.ts'
-import type { TrajectoryView, TrajectoryViewInjected } from '../src/client/TrajectoryView.tsx'
+import { TrajectoryView, type TrajectoryViewInjected } from '../src/client/TrajectoryView.tsx'
 
 const SID = 'trajectory-paging-reconnect' as SessionId
 type HistoryReply = Awaited<ReturnType<IApiClient['sessions']['history']>>
 type Consumer = 'table' | 'timeline'
+// StoredEntry erases inject callbacks; the selected registration's mapped
+// result retains its declared members and satisfies the stored record type.
+type TrajectoryInjection = (sessionId: SessionId) => {
+  [Key in keyof TrajectoryViewInjected]: TrajectoryViewInjected[Key]
+}
 
 function page(seq: number, text: string, hasMore: boolean): HistoryReply {
   const events: HistoryEntry[] = [{
@@ -52,6 +55,7 @@ async function bench(history: IApiClient['sessions']['history']) {
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
   ctx.plugin({ inject: [...localeInject], apply: localeApply })
   await ctx.plugin({ inject: [...inject], apply }).await()
+  ctx.locale.setLocale('en')
   // History is the only programmed Session operation; event and view
   // assembly remain real.
   const api = { sessions: { history } } as unknown as IApiClient
@@ -63,9 +67,9 @@ async function bench(history: IApiClient['sessions']['history']) {
   }, { conversation: { events: ctx.conversationEvents, views: ctx.conversationViews } })
   await session.open()
   const entry = slots.entries('conversation.view').find(candidate => candidate.options.id === 'trajectory')
-  if (entry === undefined) throw new Error('Trajectory entry was not registered')
-  const View = entry.component as ComponentType<ComponentProps<typeof TrajectoryView>>
-  const injectEntry = entry.inject as (sessionId: SessionId) => TrajectoryViewInjected
+  if (entry?.inject === undefined) throw new Error('Trajectory injection was not registered')
+  expect(entry.component).toBe(TrajectoryView)
+  const injectEntry = entry.inject as TrajectoryInjection
   const injected = injectEntry(SID)
   const loadOlder = vi.spyOn(session, 'loadOlder')
   const mountedSession = session
@@ -73,12 +77,12 @@ async function bench(history: IApiClient['sessions']['history']) {
     getSnapshot: () => mountedSession.getSnapshot(),
     subscribe: listener => mountedSession.subscribe(listener),
   })
-  render(<View
+  render(<TrajectoryView
     {...({ sessionId: SID, useSession } as ConvViewProps)}
     loadOlder={injected.loadOlder}
     setActualDuration={injected.setActualDuration}
     useDuration={bindSnapshotSelector(injected.hooks.duration)}
-    t={key => en[key]}
+    t={ctx.locale.bind('trajectory')}
   />)
   return { session, loadOlder }
 }
