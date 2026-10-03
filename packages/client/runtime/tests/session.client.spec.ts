@@ -446,6 +446,52 @@ describe('paging', () => {
 })
 
 describe('prompt and cancel errors', () => {
+  it.each(['business', 'transport'] as const)('ignores a delayed %s stop failure after a newer stop succeeds', async (failure) => {
+    const { api, session } = makeSession()
+    session.handleRunning(true)
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => older.promise
+    const first = session.cancel()
+    api.onCancel = () => Promise.resolve(ok({ accepted: true as const }))
+    expect((await session.cancel()).ok).toBe(true)
+    session.handleRunning(false)
+    if (failure === 'transport') older.reject(new Error('old stop failed'))
+    else older.resolve(err({ code: 'internal', message: 'old stop failed', details: {} }))
+    expect((await first).ok).toBe(false)
+    expect(session.getSnapshot().running).toBe(false)
+    expect(session.getSnapshot().promptError).toBeNull()
+  })
+
+  it.each(['success', 'failure'] as const)('preserves the newer Stop failure after an older request settles with %s', async (outcome) => {
+    const { api, session } = makeSession()
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => older.promise
+    const first = session.cancel()
+    api.onCancel = () => Promise.resolve(err({ code: 'internal', message: 'new stop failed', details: {} }))
+    await session.cancel()
+    const newerError = session.getSnapshot().promptError
+    expect(newerError).toMatchObject({ op: 'stop', error: { message: 'new stop failed' } })
+    older.resolve(outcome === 'success'
+      ? ok({ accepted: true })
+      : err({ code: 'internal', message: 'old stop failed', details: {} }))
+    await first
+    expect(session.getSnapshot().promptError).toBe(newerError)
+  })
+
+  it('preserves a newer send failure when a pending stop fails', async () => {
+    const { api, session } = makeSession()
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => older.promise
+    const first = session.cancel()
+    api.onPrompt = () => Promise.resolve(err({ code: 'internal', message: 'new send failed', details: {} }))
+    await session.prompt([{ type: 'text', text: 'not accepted' }], 'queue')
+    const newerError = session.getSnapshot().promptError
+    expect(newerError).toMatchObject({ op: 'send', error: { message: 'new send failed' } })
+    older.resolve(err({ code: 'internal', message: 'old stop failed', details: {} }))
+    await first
+    expect(session.getSnapshot().promptError).toBe(newerError)
+  })
+
   it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async () => {
     const api = new FakeApiClient()
     const session = new Session(SID, api, fakeRemote(), {
@@ -560,6 +606,71 @@ describe('prompt and cancel errors', () => {
     const result = await session.cancel()
     expect(result.ok).toBe(false)
     expect(session.getSnapshot().promptError).toMatchObject({ op: 'stop', error: { code: 'internal' } })
+  })
+
+  it.each(['session', 'subagent'] as const)('clears a previous %s stop failure after a successful retry', async (route) => {
+    const api = new FakeApiClient()
+    const session = new Session(SID, api, fakeRemote(), route === 'subagent'
+      ? { address: { parentSessionId: PARENT, childSessionId: SID, mode: 'continuable' } }
+      : {})
+    const failed = () => Promise.reject(new Error('stop transport down'))
+    if (route === 'subagent') api.onSubagentInterrupt = failed
+    else api.onCancel = failed
+    expect((await session.cancel()).ok).toBe(false)
+    expect(session.getSnapshot().promptError).toMatchObject({ op: 'stop' })
+
+    const accepted = () => Promise.resolve(ok({ accepted: true as const }))
+    if (route === 'subagent') api.onSubagentInterrupt = accepted
+    else api.onCancel = accepted
+    expect((await session.cancel()).ok).toBe(true)
+    expect(session.getSnapshot().promptError).toBeNull()
+  })
+
+  it('keeps a failed stop visible until its retry succeeds', async () => {
+    const { api, session } = makeSession()
+    api.onCancel = () => Promise.resolve(err({ code: 'internal', message: 'stop failed', details: {} }))
+    await session.cancel()
+    const previousError = session.getSnapshot().promptError
+    const retry = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => retry.promise
+    const stopping = session.cancel()
+    expect(session.getSnapshot().promptError).toBe(previousError)
+    retry.resolve(ok({ accepted: true }))
+    await stopping
+    expect(session.getSnapshot().promptError).toBeNull()
+  })
+
+  it('preserves an unrelated send failure after a successful stop', async () => {
+    const { api, session } = makeSession()
+    api.onPrompt = () => Promise.resolve(err({ code: 'internal', message: 'send failed', details: {} }))
+    await session.prompt([{ type: 'text', text: 'not accepted' }], 'queue')
+    const sendError = session.getSnapshot().promptError
+    await session.cancel()
+    expect(session.getSnapshot().promptError).toBe(sendError)
+  })
+
+  it.each(['send', 'stop'] as const)('preserves a newer %s failure when an earlier stop retry succeeds', async (operation) => {
+    const { api, session } = makeSession()
+    api.onCancel = () => Promise.resolve(err({ code: 'internal', message: 'initial stop failed', details: {} }))
+    await session.cancel()
+    const retry = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    api.onCancel = () => retry.promise
+    const stopping = session.cancel()
+    const failed = () => Promise.resolve(err<{ accepted: true }>({
+      code: 'internal', message: 'newer failure', details: {},
+    }))
+    if (operation === 'send') {
+      api.onPrompt = failed
+      await session.prompt([{ type: 'text', text: 'not accepted' }], 'queue')
+    } else {
+      api.onCancel = failed
+      await session.cancel()
+    }
+    const newerError = session.getSnapshot().promptError
+    expect(newerError).toMatchObject({ op: operation, error: { message: 'newer failure' } })
+    retry.resolve(ok({ accepted: true }))
+    await stopping
+    expect(session.getSnapshot().promptError).toBe(newerError)
   })
 
   it('reads session-authorized attachment bytes and keeps the opaque id on the wire', async () => {

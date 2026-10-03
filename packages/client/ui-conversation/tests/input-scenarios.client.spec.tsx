@@ -18,7 +18,7 @@ import { InputTriggerService } from '@deepseek-ai/dsh-client-ui-input-trigger/cl
 import type {
   ClientSessionContext, CommandClaim, PickOutcome, SubmitEnvelope, SubmitImageAttachment, SubmitOutcome,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import { FakeApiClient, fakeRemote, ok } from '../../runtime/tests/fake-api.client.ts'
+import { FakeApiClient, deferred, fakeRemote, ok } from '../../runtime/tests/fake-api.client.ts'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { DraftAttachmentId } from '../src/client/input/contract.ts'
@@ -185,7 +185,10 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
   const type = (text: string): void => {
     fireEvent.change(textarea, { target: { value: text } })
   }
-  return { ctx, inputTriggers, controller, shell, wiring, view, textarea, type, sink, serialize, release }
+  return {
+    ctx, inputTriggers, controller, shell, wiring, view, textarea, type, sink, serialize, release,
+    api, session: sessions.sessionOf(actx)!, barProps,
+  }
 }
 
 async function bench(executeImpl?: (line: string) => Promise<SubmitOutcome>) {
@@ -195,6 +198,71 @@ async function bench(executeImpl?: (line: string) => Promise<SubmitOutcome>) {
   const base = await scopedBench((inputTriggers) => { inputTriggers.registerSource(source) })
   return { ...base, execute, executed, envelopes }
 }
+
+describe('stop recovery over the resident Session', () => {
+  it('does not announce an older Stop rejection after a second click succeeds', async () => {
+    const b = await bench()
+    b.view.unmount()
+    const sessions = b.ctx.get('sessions') as SessionRuntime
+    const reportRunning = async (running: boolean): Promise<void> => {
+      b.api.onList = () => Promise.resolve(ok({ items: [{
+        sessionId: b.session.sessionId, updatedAt: 1, running, blank: false, cwd: '/w/a',
+      }] }) as never)
+      await sessions.refresh()
+    }
+    await reportRunning(true)
+    const older = deferred<Awaited<ReturnType<FakeApiClient['onCancel']>>>()
+    let attempts = 0
+    b.api.onCancel = () => attempts++ === 0 ? older.promise : Promise.resolve(ok({ accepted: true as const }))
+    const calls: ReturnType<typeof b.session.cancel>[] = []
+    const props = {
+      ...b.barProps,
+      useSession: bindSnapshotSelector(b.session),
+      stop: () => { calls.push(b.session.cancel()) },
+    }
+    const view = render(<InputBar {...props} />)
+    const stop = view.getByRole('button', { name: '停止生成' })
+    fireEvent.click(stop)
+    expect((stop as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(stop)
+    expect(attempts).toBe(2)
+    expect(calls).toHaveLength(2)
+    await act(async () => {
+      expect((await calls[1]!).ok).toBe(true)
+      await reportRunning(false)
+    })
+    expect(view.queryByRole('button', { name: '停止生成' })).toBeNull()
+    await act(async () => {
+      older.reject(new Error('older stop rejected'))
+      expect((await calls[0]!).ok).toBe(false)
+    })
+    expect(view.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not re-announce a resolved stop error when the composer remounts', async () => {
+    const b = await bench()
+    b.view.unmount()
+    const props = { ...b.barProps, useSession: bindSnapshotSelector(b.session) }
+    const view = render(<InputBar {...props} />)
+    vi.useFakeTimers()
+    try {
+      b.api.onCancel = () => Promise.reject(new Error('stop wire unavailable'))
+      await act(async () => { await b.session.cancel() })
+      expect(view.getByRole('alert').textContent).toContain('stop wire unavailable')
+      act(() => { vi.advanceTimersByTime(4000) })
+      expect(view.queryByRole('alert')).toBeNull()
+
+      b.api.onCancel = () => Promise.resolve(ok({ accepted: true as const }))
+      await act(async () => { await b.session.cancel() })
+      view.unmount()
+      const returned = render(<InputBar {...props} />)
+      expect(returned.queryByRole('alert')).toBeNull()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
+  })
+})
 
 describe('scenario A: menu-pick /goal, type args, enter submits', () => {
   it('runs the whole claim chain through the real pipeline', async () => {

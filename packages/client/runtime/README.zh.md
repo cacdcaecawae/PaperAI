@@ -21,6 +21,8 @@ ISessions.create() 创建由 Host 持有的会话，可显式传入 agentPreset�
 
 ## Workspace 与 Session 列表
 
+只有最新的 `Session.cancel()` 请求可以更新停止反馈；重试成功后清除请求开始时的停止失败；无关的发送失败及更新的失败保留。返回已停止的会话时，不会再次提示已经解决的停止错误。
+
 `ctx.sessions.retainBinding(id)` 在调用方负责的 Host 替换期间保留列表行和浏览器作用域。返回的幂等释放函数结束这份租约；实时列表行优先，最后一份租约释放后会显露未完成的移除，用户后续导航仍然有效。保留绑定维持草稿和工作区关联，但不会使已移除的 Session 可写。
 
 Host 替换 Agent 时，Session 实例保留身份。`host/session-removed` 禁用交互，并清除投影值和序号水位，同时保留常驻 store 及其被订阅的读取接口；之后收到同一 id 的 `host/session-added` 时，常驻实例恢复可用。列表基线可能早于替换操作，因此不能单凭它清除移除标记。空会话切换 Agent 驱动后，输入框和模型选择器可以继续使用，权限等投影更新也能继续传递到已展示的 Session。
