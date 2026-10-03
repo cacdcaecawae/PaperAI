@@ -578,6 +578,7 @@ jobs:
           apps/web/tests/code-mode-round.e2e.ts
           apps/web/tests/goal-multi-turn-actions.e2e.ts
           apps/web/tests/hmr-live.e2e.ts
+          apps/web/tests/live-interactions.e2e.ts
           apps/web/tests/minimal-preset.snapshot.ts
           apps/web/tests/navigation-panes.e2e.ts
           apps/web/tests/plugin-config.e2e.ts

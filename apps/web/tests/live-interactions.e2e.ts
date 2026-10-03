@@ -121,6 +121,17 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     return { settled }
   }
 
+  async function observeStopError(message: string) {
+    return page.evaluateHandle((text) => {
+      const state = { seen: false, observer: new MutationObserver(() => {
+        state.seen ||= [...document.querySelectorAll('[role="alert"]')]
+          .some(element => element.textContent?.includes(text))
+      }) }
+      state.observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      return state
+    }, message)
+  }
+
   it.skipIf(MODE !== 'record')('records the base fixture live through the composer', async () => {
     await launch()
     onTestFailed(() => saveFailureShot(page, 'web-e2e-interactions-record'))
@@ -129,7 +140,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     await recordFixture(scaffold!, sessionId, FIXTURE)
   }, 200_000)
 
-  it.skipIf(MODE === 'record')('cancels a hung stream deterministically via the readyFile marker', async () => {
+  it.skipIf(MODE === 'record')('retries a rejected stop and keeps its failure cleared after session navigation', async () => {
     expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT])
     let marker = ''
     await launch((sidecarHome) => {
@@ -147,18 +158,129 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     ).toBe(true)
     const loadingSnapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(LOADING_EXPECTED, loadingSnapshot, MODE)
+    const stopError = 'Stop rejected for retry coverage'
+    let cancelRequests = 0
+    await page.route('**/api/session.cancel', async (route) => {
+      cancelRequests += 1
+      if (cancelRequests !== 1) {
+        await route.continue()
+        return
+      }
+      const envelope = route.request().postDataJSON() as { rpcId: string }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          type: 'server-response', rpcId: envelope.rpcId,
+          result: { ok: false, error: { code: 'internal', message: stopError, details: {} } },
+        }),
+      })
+    })
+    await page.getByRole('button', { name: 'Stop generating' }).click()
+    await page.getByRole('alert').filter({ hasText: stopError }).waitFor()
     await page.getByRole('button', { name: 'Stop generating' }).click()
     await settled
+    expect(cancelRequests).toBe(2)
     expect(turnEndReasons(sessionEvents).at(-1)).toBe('aborted')
     // Composer recovered; no streaming node lingers. The host settled first
     // (awaited above), but the abort frame reaches the browser over SSE — the
     // frozen-partial swap is eventually consistent, so poll rather than count.
     await expect.poll(() => page.locator('textarea').first().isEnabled(), { timeout: 10_000 }).toBe(true)
     await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
-    // Golden of the aborted end-state: the prompt bubble plus the frozen
-    // partial ('partial' is the hang entry's replayed prefix) and no more.
-    const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
-    await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
+    await page.getByRole('alert').waitFor({ state: 'detached', timeout: 10_000 })
+    await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+    await page.getByText('Into the Unknown', { exact: false }).waitFor({ timeout: 15_000 })
+    const searchButton = page.getByRole('button', { name: 'Search sessions' })
+    if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
+    await page.getByPlaceholder('Search sessions', { exact: false }).fill('event sourcing')
+    const original = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem')
+    await expect.poll(() => original.count(), { timeout: 15_000 }).toBe(1)
+    // Remember even a brief re-announcement; the toast can fade while the
+    // center-column golden stabilizes and lives outside that snapshot region.
+    const errors = await observeStopError(stopError)
+    try {
+      await original.click()
+      await page.getByText('Stopped', { exact: true }).waitFor({ timeout: 15_000 })
+      // Golden of the aborted end-state: the prompt bubble plus the frozen
+      // partial ('partial' is the hang entry's replayed prefix) and no more.
+      const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
+      await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => { resolve() }))
+      }))
+      expect(await errors.evaluate(state => state.seen)).toBe(false)
+      expect(await page.getByRole('alert').count()).toBe(0)
+    } finally {
+      await errors.evaluate((state) => { state.observer.disconnect() })
+      await errors.dispose()
+    }
+    expect(tripwire.pageErrors).toEqual([])
+    expect(tripwire.warnings).toEqual([])
+  }, 120_000)
+
+  it.skipIf(MODE === 'record')('ignores a delayed Stop rejection after a newer click succeeds', async () => {
+    let marker = ''
+    await launch((sidecarHome) => {
+      marker = join(sidecarHome, '.hang-ready')
+      return { patches: [{ at: 0, entry: { kind: 'hang', readyFile: marker } }] }
+    })
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-stop-response-order'))
+    const { settled } = await sendPrompt()
+    await expect.poll(() => existsSync(marker), { timeout: 15_000 }).toBe(true)
+    const stopError = 'Delayed stop rejection'
+    let releaseOlder!: () => void
+    const held = new Promise<void>((resolve) => { releaseOlder = resolve })
+    let attempts = 0
+    let olderRpcId = ''
+    await page.route('**/api/session.cancel', async (route) => {
+      attempts += 1
+      if (attempts !== 1) {
+        await route.continue()
+        return
+      }
+      const envelope = route.request().postDataJSON() as { rpcId: string }
+      olderRpcId = envelope.rpcId
+      await held
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          type: 'server-response', rpcId: envelope.rpcId,
+          result: { ok: false, error: { code: 'internal', message: stopError, details: {} } },
+        }),
+      })
+    })
+    const errors = await observeStopError(stopError)
+    try {
+      const stop = page.getByRole('button', { name: 'Stop generating' })
+      await stop.click()
+      await expect.poll(() => attempts).toBe(1)
+      const accepted = page.waitForResponse(response =>
+        response.url().endsWith('/api/session.cancel')
+        && (response.request().postDataJSON() as { rpcId: string }).rpcId !== olderRpcId)
+      await stop.click()
+      expect(await (await accepted).json()).toMatchObject({ result: { ok: true, value: { accepted: true } } })
+      await settled
+      expect(attempts).toBe(2)
+      await stop.waitFor({ state: 'detached', timeout: 10_000 })
+      expect(turnEndReasons(sessionEvents).at(-1)).toBe('aborted')
+      const delivered = page.waitForResponse(response =>
+        response.url().endsWith('/api/session.cancel')
+        && (response.request().postDataJSON() as { rpcId: string }).rpcId === olderRpcId)
+      releaseOlder()
+      await (await delivered).finished()
+      const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
+      await compareOrRefreshGolden(CANCEL_EXPECTED, snapshot, MODE)
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => { resolve() }))
+      }))
+      expect(await errors.evaluate(state => state.seen)).toBe(false)
+      expect(await page.getByRole('alert').count()).toBe(0)
+    } finally {
+      releaseOlder()
+      await errors.evaluate((state) => { state.observer.disconnect() })
+      await errors.dispose()
+    }
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 120_000)
