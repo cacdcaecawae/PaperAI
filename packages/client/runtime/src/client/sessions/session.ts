@@ -101,6 +101,7 @@ export class Session implements SessionFace {
   private blankBit = true
   private removed = false
   private promptError: PromptError | null = null
+  private cancelGeneration = 0
   private lastAgentError: string | null = null
   /** Live events buffered during open/resync and stitched by sequence once history lands. */
   private liveBuffer: { event: SessionEvent; view: ToolEventView | undefined }[] = []
@@ -299,7 +300,8 @@ export class Session implements SessionFace {
 
   /**
    * Stop the active turn while the Host preserves pending inbox work; failures
-   * land in promptError (same error-strip display slot). A continuable
+   * land in promptError only from the latest stop request and cannot replace
+   * newer failures. Success clears the stop failure observed at entry. A continuable
    * subagent address routes through `subagent.interrupt`, whose durable
    * parent-address authority works without a live parent Agent; a one-shot
    * address stays uncancellable (the UI offers no stop action, so this arm is
@@ -307,6 +309,8 @@ export class Session implements SessionFace {
    * @returns the cancel result.
    */
   async cancel(): Promise<RpcResult<{ accepted: true }>> {
+    const generation = ++this.cancelGeneration
+    const previousError = this.promptError
     const address = this.address
     if (address !== undefined && address.mode === 'one-shot') {
       const result: RpcResult<{ accepted: true }> = {
@@ -329,8 +333,12 @@ export class Session implements SessionFace {
     } catch (error) {
       result = transportError(error)
     }
+    if (generation !== this.cancelGeneration || this.promptError !== previousError) return result
     if (!result.ok) {
       this.promptError = { op: 'stop', error: result.error }
+      this.notifier.markDirty()
+    } else if (previousError?.op === 'stop') {
+      this.promptError = null
       this.notifier.markDirty()
     }
     return result

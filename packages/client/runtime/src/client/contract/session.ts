@@ -61,7 +61,11 @@ export interface ISession {
   /**
    * Cancel the running turn. Pending queued work remains and resumes in FIFO
    * order after the Host reaches cancellation quiescence.
-   * @returns acceptance, or the business error.
+   * Only the latest stop request may update snapshot.promptError, and only if
+   * that error has not changed since the request began. Success clears only
+   * the stop failure observed at entry; unrelated send failures remain visible.
+   * Acceptance does not mark the turn stopped; Host events own that state.
+   * @returns acceptance, or a business/transport error.
    */
   cancel(): Promise<RpcResult<{ accepted: true }>>
   /**

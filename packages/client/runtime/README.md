@@ -19,6 +19,8 @@ The callback returns one synchronous disposer or an iterable of disposers. A gen
 
 ## Workspace and Session lists
 
+Only the latest `Session.cancel()` request can update stop feedback. A successful retry clears the stop failure it observed at entry. Unrelated send failures and newer failures remain visible, so returning to a stopped session cannot re-announce a resolved stop error.
+
 `ctx.sessions.retainBinding(id)` keeps a listed row and its browser scope available during a caller-owned Host replacement. Its idempotent disposer releases that lease; live rows take precedence, the last release exposes an unresolved removal, and newer navigation remains selected. A retained binding preserves draft and workspace association but does not make a removed Session writable.
 
 Session instances retain their identity across Host Agent replacement. `host/session-removed` disables interaction and clears projection values and sequence watermarks while preserving the resident store and its subscribed faces; a subsequent `host/session-added` for the same id reactivates the resident instance. A list baseline alone cannot clear removal because it may precede the replacement. This lets a blank session switch Agent drivers without leaving its composer and model selector disabled, and keeps permission and other projection updates connected to the displayed Session.
