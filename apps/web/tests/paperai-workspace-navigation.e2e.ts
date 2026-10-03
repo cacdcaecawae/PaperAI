@@ -11,6 +11,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { DocumentCommitId, DocumentId, TemplateContractId } from '@paperai/domain'
 import type {} from '@paperai/workbench-service'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
@@ -34,7 +35,7 @@ const TEMPLATE_MISSING_EXPECTED = join(SNAPSHOT_DIR, 'template-missing.expected.
 const MODE = webSnapshotMode()
 
 /** Small valid OOXML document sent through the assembled PaperAI import path. */
-function fixtureDocxBase64(): string {
+function fixtureDocxBase64(text = 'Workspace navigation fixture'): string {
   return Buffer.from(zipSync({
     '[Content_Types].xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8"?>'
@@ -53,7 +54,7 @@ function fixtureDocxBase64(): string {
     'word/document.xml': strToU8(
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
-      + '<w:p><w:r><w:t>Workspace navigation fixture</w:t></w:r></w:p>'
+      + `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`
       + '<w:sectPr/></w:body></w:document>',
     ),
   })).toString('base64')
@@ -294,6 +295,8 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
       'start.expected.md',
       'template-dialog.expected.md',
       'template-missing.expected.md',
+      'template-replacement.expected.md',
+      'template-commit-gate.expected.md',
       'templates.expected.md',
     ])
   })
@@ -354,3 +357,113 @@ it('offers a template after picking a fresh project and creates one document in 
     await scaffold.close()
   }
 }, 120_000)
+
+it('keeps template replacements independent and checks a retyped manuscript as its published version', async () => {
+  const scaffold = await launchWebScaffold({ extraOverlayPath: PAPERAI_OVERLAY })
+  let browser: Browser | undefined
+  let page: Page | undefined
+  try {
+    const { ctx } = scaffold
+    const workbench = ctx.paperaiWorkbench
+    const projectRoot = join(scaffold.workspaceCwd, 'template-replacement')
+    await mkdir(projectRoot)
+    const workspace = await ctx.workspaceRegistry.create(projectRoot, 'Template replacement')
+    const workspaceId = workspace.id
+    const sessionId = SessionId('template-replacement-author')
+    const library = await workbench.createTemplateSet({ name: 'Proposal formats' })
+    const pack = library.sets.find(set => set.name === 'Proposal formats')!
+    const format = {
+      packId: pack.packId, documentType: 'proposal' as const, name: 'Proposal format',
+      fileName: 'proposal.docx', contentBase64: fixtureDocxBase64('Original form body'),
+    }
+    await workbench.addTemplateFormat({ ...format, usage: 'form-template' })
+    await workbench.setProjectTemplate({ workspaceId, packId: pack.packId })
+    const original = await workbench.createFromTemplate({ workspaceId, sessionId, documentType: 'proposal', name: 'Original form' })
+    if (original.status !== 'imported') throw new Error(original.detail)
+    const originalId = DocumentId(String(original.opened.document.documentId))
+    const originalTemplateId = TemplateContractId(original.opened.document.template!.templateId)
+    const originalContract = structuredClone(ctx.paperTemplates.getContract(originalTemplateId)!)
+    const originalPath = ctx.paperRepository.getDocument(originalId)!.workingPath
+    const originalBytes = await readFile(originalPath)
+
+    // Only usage changes; neither the Word bytes nor the member filename does.
+    await workbench.addTemplateFormat({ ...format, usage: 'format-reference' })
+    await expect(workbench.createFromTemplate({ workspaceId, sessionId, documentType: 'proposal' }))
+      .rejects.toThrow('upload the manuscript')
+    expect((await workbench.overview({ workspaceId })).documents).toHaveLength(1)
+    const upload = { fileName: 'manuscript.docx', contentBase64: fixtureDocxBase64('Independent manuscript') }
+    const newer = await workbench.createFromTemplate({
+      workspaceId, sessionId, documentType: 'proposal', name: 'New manuscript', upload,
+    })
+    if (newer.status !== 'imported') throw new Error(newer.detail)
+    expect(newer.opened.document.template!.templateId).not.toBe(originalTemplateId)
+    expect(ctx.paperRepository.getDocument(originalId)!.templateId).toBe(originalTemplateId)
+    expect(newer.opened.document.nodes.map(node => node.text)).toEqual(['Independent manuscript'])
+    const reapplied = await workbench.applyTemplate({
+      documentId: original.opened.document.documentId, baseRevision: original.opened.document.revision,
+      baseCommitId: original.opened.document.headCommitId, sessionId, documentType: 'proposal',
+    })
+    expect(reapplied.document.template!.templateId).toBe(newer.opened.document.template!.templateId)
+    expect(reapplied.createdCommitId).not.toBe(original.createdCommitId)
+    expect(ctx.paperTemplates.getContract(originalTemplateId)).toEqual(originalContract)
+    expect(await readFile(originalPath)).toEqual(originalBytes)
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'template-replacement.expected.md'), JSON.stringify({
+      originalUsage: originalContract.usage,
+      replacementUsage: newer.opened.document.template!.usage,
+      originalText: reapplied.document.nodes.map(node => node.text),
+      manuscriptText: newer.opened.document.nodes.map(node => node.text),
+      originalContractPreserved: true,
+      reapplicationCreatedVersion: true,
+    }, null, 2), MODE)
+
+    const free = await workbench.importDocument({ workspaceId, sessionId, ...upload, name: 'Free manuscript' })
+    if (free.status !== 'imported') throw new Error(free.detail)
+    expect(free.opened.document.documentType).toBe('other')
+    expect(free.opened.document.template).toBeNull()
+    const applied = await workbench.applyTemplate({
+      documentId: free.opened.document.documentId, baseRevision: free.opened.document.revision,
+      baseCommitId: free.opened.document.headCommitId, sessionId, documentType: 'proposal',
+    })
+    const id = DocumentId(String(applied.document.documentId))
+    const published = ctx.paperRepository.getDocument(id)!
+    const commit = ctx.paperRepository.getCommit(DocumentCommitId(String(applied.createdCommitId)))!
+    const continuous = await ctx.paperTemplates.check({ documentId: id, mode: 'continuous' })
+    const committedCodes = commit.gate.findings.map(finding => finding.code).sort()
+    const continuousCodes = continuous.findings.map(finding => finding.code).sort()
+    expect(published.role).toBe('proposal')
+    expect(String(published.templateId)).toBe(applied.document.template!.templateId)
+    expect(committedCodes).not.toContain('template_role_mismatch')
+    expect(committedCodes).toEqual(continuousCodes)
+    expect(commit.gate.status).toBe(continuous.status)
+    expect(await readFile(published.workingPath)).toEqual(Buffer.from(upload.contentBase64, 'base64'))
+
+    browser = await chromium.launch()
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+    const tripwire = watchConsole(page)
+    await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+    await page.getByRole('treeitem', { name: 'Template replacement' }).click()
+    await page.getByRole('region', { name: '文档', exact: true })
+      .getByRole('button', { name: '打开 Free manuscript.docx', exact: true }).click()
+    await page.locator('[data-paperai-toolbar]').getByTitle('模板', { exact: true }).click()
+    const panel = page.getByRole('complementary', { name: '模板', exact: true })
+    await panel.getByText('Proposal format', { exact: true }).waitFor({ timeout: 20_000 })
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'template-commit-gate.expected.md'), [
+      JSON.stringify({
+        documentType: published.role,
+        usage: applied.document.template!.usage,
+        commitGate: { status: commit.gate.status, codes: committedCodes },
+        continuousGate: { status: continuous.status, codes: continuousCodes },
+        text: applied.document.nodes.map(node => node.text),
+      }, null, 2),
+      await panel.ariaSnapshot(),
+    ].join('\n\n'), MODE)
+    expect(tripwire.pageErrors).toEqual([])
+    expect(tripwire.warnings).toEqual([])
+  } catch (error) {
+    if (page !== undefined) await saveFailureShot(page, 'web-e2e-paperai-template-replacement')
+    throw error
+  } finally {
+    await browser?.close()
+    await scaffold.close()
+  }
+}, 180_000)
