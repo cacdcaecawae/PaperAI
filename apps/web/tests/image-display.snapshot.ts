@@ -314,14 +314,12 @@ it('keeps admitted text empty after completing an image send in another session'
   await waitFor(() => {
     expect(composer().readOnly).toBe(false)
     expect(composer().value).toBe('')
-    expect([...document.querySelectorAll('[data-align="end"]')]
-      .filter(row => row.textContent?.includes(submitted))).toHaveLength(1)
+    expect(screen.queryAllByText(submitted, { exact: true })).toHaveLength(1)
   })
   expect({
     draft: composer().value,
     pendingImages: document.querySelectorAll('[aria-label="Pending images"]').length,
-    admittedMessages: [...document.querySelectorAll('[data-align="end"]')]
-      .filter(row => row.textContent?.includes(submitted)).length,
+    admittedMessages: screen.queryAllByText(submitted, { exact: true }).length,
   }).toMatchInlineSnapshot(`
     {
       "admittedMessages": 1,
