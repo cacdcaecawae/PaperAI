@@ -88,10 +88,12 @@ skill/@subagent references skip the placeholder + occurrence identity chain — 
 - Sending is the literal text (no more `<skill>` serialization); on the bubble side MessageItem decorates both shapes (the legacy `<skill>` tag + plain-text tokens).
 - The old occurrence/paste/serialize chain stays on disk in full, undeleted (additive; deletion is a separate future cut). Decoration reactivity: InputBar subscribes to the shell's lexicon source (uSES), so a roll that settles after the scope-birth prewarm lights existing draft tokens up without any menu interaction or unrelated re-render.
 
+The draft persistence connection follows resident input rather than the strict view: pending admission can finish after navigation, and synchronizing only on return leaves a page refresh able to restore submitted text. The first connection adopts stored text only before input has been edited or submitted; afterwards the machine owns empty drafts, reference identity, and undo state, while the cached store receives the clipboard projection. UI-plugin unload permanently releases the old connection even when runtime sessions survive, so late effects and admission settlements cannot overwrite a replacement store.
+
 ### Per-session provide contributions and the private keyboard surface
 
 - ui-conversation (the hub doubling as a contributor) supplies through `sessions.provide` the `'input'` hook (machine state + the queue overlay) plus the `inputActions` prop (`setDraft`/`submit`, stable void callbacks).
-- The public/private boundary: the public provide carries only React-vocabulary members; the keyboard/DOM command surface (track/arbitrate/space/undo/redo/paste/dismissPopup/bindMirror — synchronous return values, disposer semantics) is InputBar-exclusive, passed privately in-package through the InputBar entry's own inject, never leaving the plugin boundary.
+- The public/private boundary: the public provide carries only React-vocabulary members; the keyboard/DOM command surface (track/arbitrate/space/undo/redo/paste/dismissPopup — synchronous return values) is InputBar-exclusive, passed privately in-package through the InputBar entry's own inject, never leaving the plugin boundary.
 
 ### The slot system
 

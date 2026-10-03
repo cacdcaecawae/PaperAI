@@ -46,7 +46,13 @@ export class InputHub implements SessionInputResolver {
   constructor(
     private readonly rootCtx: ClientContext,
     private readonly t: TranslateNS<'conversation'>,
-  ) {}
+  ) {
+    rootCtx.effect(() => () => {
+      // Session scopes may survive a UI plugin reload; their cached chat
+      // stores do not, so old input cannot keep writing the replaced store.
+      for (const shell of this.shells.values()) shell.releaseDraftStore()
+    }, 'conversation.input: draft persistence')
+  }
 
   /**
    * Resolve the facade for one session-scope ctx (SessionInputResolver face).

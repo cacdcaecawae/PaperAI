@@ -185,10 +185,9 @@ describe('conversation slot inject API', () => {
     expect(b.inputApi(ROOT).state).toBe(state)
     // The draft mirror rides the conversation inject face.
     const mirrored: string[] = []
-    const unbind = injected.bindDraftMirror(text => mirrored.push(text))
+    injected.connectDraftStore('stale persisted draft', text => mirrored.push(text))
     actions.setDraft('mirrored text')
-    expect(mirrored).toEqual(['mirrored text'])
-    unbind()
+    expect(mirrored).toEqual(['typed during flight', 'mirrored text'])
     // Stop failure is swallowed (promptError owns the display).
     b.sessionFake.cancel.mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'x', details: {} } })
     b.composerApi(ROOT).stop!()
@@ -228,6 +227,29 @@ describe('conversation slot inject API', () => {
       created.mockRestore()
       revoked.mockRestore()
     }
+  })
+
+  it('disconnects a retained draft writer when the UI plugin is replaced', async () => {
+    const b = await bench()
+    const before = b.conversationApi(ROOT)
+    before.injected.connectDraftStore('', before.instance.actions.setDraft)
+    let finish!: (result: Awaited<ReturnType<ISession['prompt']>>) => void
+    b.sessionFake.prompt.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const old = b.inputApi(ROOT)
+    old.actions.setDraft('pending old draft')
+    old.actions.submit()
+    await b.feature.dispose()
+    await b.runtime.mount({ inject: [...inject], apply })
+    const replacement = b.conversationApi(ROOT)
+    replacement.injected.connectDraftStore(replacement.instance.getSnapshot().draft, replacement.instance.actions.setDraft)
+    b.inputApi(ROOT).actions.setDraft('replacement draft')
+    before.injected.connectDraftStore('stale passive effect', before.instance.actions.setDraft)
+    finish({ ok: true, value: { accepted: true } })
+    await vi.waitFor(() => { expect(old.state.getSnapshot().draft).toBe('') })
+    expect(replacement.instance.getSnapshot().draft).toBe('replacement draft')
+    const persisted = JSON.parse(localStorage.getItem(`dsh.conversation.chat.${ROOT}`)!) as { draft: string }
+    expect(persisted.draft).toBe('replacement draft')
+    await b.runtime.dispose()
   })
 
   it('inject fails loud when the session resolves no binding or the scope lacks the service', async () => {

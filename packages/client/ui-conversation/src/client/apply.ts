@@ -269,7 +269,7 @@ export function apply(ctx: Context): void {
       return {
         views,
         releaseSessionImages: (id) => { conversation.releaseSessionImages(id) },
-        bindDraftMirror: write => inputHub.shell(sessionId).bindMirror(write),
+        connectDraftStore: (draft, write) => { inputHub.shell(sessionId).connectDraftStore(draft, write) },
       }
     },
   }, ConversationSession)
