@@ -113,10 +113,6 @@ src/client/
 - **状态住哪**：业务数据（事件、流式、待答）→ 永远对象层；父知道的 → renderSlot 现场的 owner props；单组件私有（滚动、搜索词、展开集）→ 组件状态；跨 entry 共享或跨重挂载存活（选中、草稿、面板宽）→ entry 声明的 store（[slot 体系标准](2026-07-22-slot-type-chain-implementation.zh.md)）。
 - **通知通道**：帧驱动/异步 = `markDirty` 合批；受控输入需要同 tick 的用户手势直接回响 = `notifyNow`。
 
-## 历史分页与修复验证
-
-[Session 测试](../../../../packages/client/runtime/tests/session.client.spec.ts)覆盖分页失效时的完成结果、迟到的传输结果、失败和不完整的修复、共用完成结果、延迟事件、陈旧所有者以及窗口安装后立即到达的帧。[已注册 Trajectory 入口测试](../../../../packages/client/ui-trajectory/tests/paging-reconnect.client.spec.tsx)把真实 Session 与已挂载的 Table、Timeline 消费方组合起来，包括新分页进行期间陈旧请求返回的情况。[完整组装的浏览器场景](../../../../apps/web/tests/stats-paged-history.e2e.ts)验证同一组已挂载控件在重连后恢复可用，并在陈旧响应仍被扣留时加载新的分页；同时验证一元历史请求失败后，在 mux 保持连接的情况下通过导航恢复 transcript（文本记录）。源码层的微任务调度验证操作顺序，不代表浏览器原生帧的实际时序。
-
 ## Consequences
 
 token 流不再震荡渲染树：Assistant chunk 只更新一个业务 Context，每 animation frame 最多发布一次对应 keyed Node；无关行的 selector 结果保持原引用，因此不会重渲染。UI 功能以独立插件的粒度装载、失败、停用——一个崩溃的 slot 注册项只黑一张卡，一个装载失败的 bundle 在 UI 切入之前大声报错。接受的代价：loader/模块表机件是团队端到端自持的定制基建；一次成型启动（无渐进渲染）用首屏粒度换装配简单；双类型 program 让「这个文件归哪个聚合」成为开发者偶尔要回答的问题。
