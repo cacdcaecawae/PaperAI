@@ -77,8 +77,8 @@ export class Session implements SessionFace {
    *  a pre-disconnect open whose history request is already doomed. Stale doOpen
    *  passes drop all writes once the generation moves on. */
   private openGeneration = 0
-  /** One page request owns the loading indicator until settlement or window replacement. */
-  private olderRequest: object | null = null
+  /** One page operation owns its loading indicator and completion until settlement or invalidation. */
+  private olderRequest: { complete(): void } | null = null
   private pending = new Map<string, PendingInteraction>()
   private pendingRev = 0
   private pendingCache: { rev: number; value: PendingInteraction[] } | null = null
@@ -104,8 +104,10 @@ export class Session implements SessionFace {
   private lastAgentError: string | null = null
   /** Live events buffered during open/resync and stitched by sequence once history lands. */
   private liveBuffer: { event: SessionEvent; view: ToolEventView | undefined }[] = []
-  /** Current gap-repair owner; live events buffer only while this request remains current. */
-  private repairRequest: object | null = null
+  /** Unrepaired gaps remain retryable after their current history request settles. */
+  private gapRepairNeeded = false
+  /** Current gap-repair completion, shared by live arrivals and explicit opens. */
+  private repairRequest: Promise<void> | null = null
   /** subscribed.lastSeq baseline (gap detection; null when no subscribed frame arrived — degrade to the liveBuffer dedup path). */
   private subscribedLastSeq: number | null = null
 
@@ -366,9 +368,13 @@ export class Session implements SessionFace {
     return { ok: true, value: { matched: result.value !== undefined } }
   }
 
-  /** First open: pull the tail page (idempotent — in-flight/already-open returns the existing promise). */
+  /**
+   * Pull the tail page on first open or retry an unrepaired gap; concurrent requests coalesce.
+   * A failed repair keeps the current window and remains retryable on a later open or live event.
+   * @returns completion of the current initial read or one repair attempt, not proof of recovery.
+   */
   open(): Promise<void> {
-    if (this.openState === 'open') return Promise.resolve()
+    if (this.openState === 'open') return this.gapRepairNeeded ? this.repairGap() : Promise.resolve()
     if (this.openPromise !== null) return this.openPromise
     const promise = this.doOpen(this.openGeneration).finally(() => {
       // Identity-guarded: a superseded open must not null out the promise resync just started.
@@ -378,12 +384,22 @@ export class Session implements SessionFace {
     return promise
   }
 
-  /** Page up: prepend one earlier page unless a reconnect or gap repair supersedes its window. */
-  async loadOlder(): Promise<void> {
-    if (this.openState !== 'open' || !this.hasMore || this.olderRequest !== null) return
-    const request = {}
-    this.olderRequest = request
-    this.notifier.markDirty()
+  /**
+   * Prepend one earlier page unless a reconnect or gap repair supersedes its window.
+   * @returns local completion on settlement or invalidation; an obsolete transport may remain pending.
+   */
+  loadOlder(): Promise<void> {
+    if (this.openState !== 'open' || !this.hasMore || this.olderRequest !== null) return Promise.resolve()
+    return new Promise<void>((complete) => {
+      const request = { complete }
+      this.olderRequest = request
+      this.notifier.markDirty()
+      void this.readOlderPage(request)
+    })
+  }
+
+  /** The transport outcome can mutate only the page operation that still owns this window. */
+  private async readOlderPage(request: { complete(): void }): Promise<void> {
     try {
       const { result } = await this.history({ beforeSeq: this.baseSeq, maxMessages: PAGE_MESSAGES })
       if (this.olderRequest !== request) return
@@ -416,7 +432,15 @@ export class Session implements SessionFace {
         this.olderRequest = null
         this.notifier.markDirty()
       }
+      request.complete()
     }
+  }
+
+  /** Release callers with the superseded page operation, without awaiting its transport. */
+  private invalidateOlderRequest(): void {
+    const request = this.olderRequest
+    this.olderRequest = null
+    request?.complete()
   }
 
   /** Reconnect rebuild (manager calls this on onConnected for instances that were opened):
@@ -431,8 +455,9 @@ export class Session implements SessionFace {
     // that follows it, so ordering is guaranteed).
     if (this.openState === 'cold') return // never opened: no window to rebuild (doOpen flips to 'loading' synchronously, so cold implies no in-flight open)
     this.openGeneration++
-    this.olderRequest = null
+    this.invalidateOlderRequest()
     this.repairRequest = null
+    this.gapRepairNeeded = false
     this.openPromise = null
     this.openState = 'cold'
     this.openError = null
@@ -667,7 +692,8 @@ export class Session implements SessionFace {
     }
   }
 
-  /** Install the history window + stitch the liveBuffer (seq is the sole dedup key).
+  /** Install the history window and contiguous buffered events, retaining any unresolved suffix.
+   *  Seq is the sole dedup key.
    *  Stitching MUST NOT route through acceptLiveEvent: openState is still 'loading' here
    *  (doOpen flips it after install), so recursing would push every buffered event straight
    *  back into liveBuffer where nothing ever drains it — a silent drop loop.
@@ -675,7 +701,7 @@ export class Session implements SessionFace {
    *  baseline cannot overwrite a newer push frame); the window events themselves are
    *  never folded — the host is the only computation site. */
   private installWindow(entries: HistoryEntry[], hasMore: boolean, projections?: ProjectionsBaseline): void {
-    this.olderRequest = null
+    this.invalidateOlderRequest()
     this.events = entries.map(e => e.event)
     this.views = entries.map(e => e.view)
     this.baseSeq = this.events[0]?.seq ?? 0
@@ -683,9 +709,18 @@ export class Session implements SessionFace {
     if (this.events.some(event => event.type === 'turn/start')) this.firstPromptPendingTurn = false
     this.conversation.replaceWindow(entries.map(conversationInput), hasMore)
     if (projections !== undefined) this.projections.seed(projections)
-    const buffered = this.liveBuffer
+    const buffered = this.liveBuffer.sort((left, right) => left.event.seq - right.event.seq)
     this.liveBuffer = []
-    for (const item of buffered) this.appendLive(item.event, item.view)
+    this.gapRepairNeeded = false
+    for (const item of buffered) {
+      const tailSeq = this.windowTailSeq()
+      if (this.gapRepairNeeded || (tailSeq !== null && item.event.seq > tailSeq + 1)) {
+        this.gapRepairNeeded = true
+        this.liveBuffer.push(item)
+      } else {
+        this.appendLive(item.event, item.view)
+      }
+    }
     this.notifier.markDirty()
   }
 
@@ -713,7 +748,8 @@ export class Session implements SessionFace {
     }
     if (this.openState !== 'open') return // cold/error: no window upkeep (history fully backfills on open)
     const tailSeq = this.windowTailSeq()
-    if (tailSeq !== null && event.seq > tailSeq + 1) {
+    if (this.gapRepairNeeded || (tailSeq !== null && event.seq > tailSeq + 1)) {
+      this.gapRepairNeeded = true
       this.liveBuffer.push({ event, view })
       void this.repairGap()
       return
@@ -727,20 +763,26 @@ export class Session implements SessionFace {
     else if (publication === 'animation-frame') this.notifier.markFrameDirty()
   }
 
-  /** Resync-lite: repull the tail page and stitch the liveBuffer through the shared
-   *  installWindow path. No openState transition — the UI keeps the current window (no loading
-   *  flash); events arriving meanwhile buffer behind the current repair request. */
-  private async repairGap(): Promise<void> {
-    /* v8 ignore next -- acceptLiveEvent already buffers while a repair is current, so no second call reaches here. */
-    if (this.repairRequest !== null) return
-    const request = {}
+  /** Repull once per open/live trigger while keeping the last contiguous window visible. */
+  private repairGap(): Promise<void> {
+    if (this.repairRequest !== null) return this.repairRequest
+    let resolve!: () => void
+    let reject!: (error: unknown) => void
+    const request = new Promise<void>((onResolved, onRejected) => {
+      resolve = onResolved
+      reject = onRejected
+    })
     this.repairRequest = request
+    void this.doRepairGap(request).then(resolve, reject)
+    return request
+  }
+
+  /** The repair owns buffering through installation, releasing it before the next live frame. */
+  private async doRepairGap(request: Promise<void>): Promise<void> {
     try {
       const { result } = await this.history({ maxMessages: PAGE_MESSAGES })
-      // Failure or superseded by a full resync: drop — the resync path rebuilds and clears the buffer itself.
-      if (result.ok && this.repairRequest === request && this.openState === 'open') {
-        this.installWindow(result.value.events, result.value.hasMore, result.value.projections)
-      }
+      if (this.repairRequest !== request || this.openState !== 'open') return
+      if (result.ok) this.installWindow(result.value.events, result.value.hasMore, result.value.projections)
     } catch (error) {
       if (this.repairRequest === request) console.error('[web-runtime] gap repair failed:', error)
     } finally {

@@ -375,18 +375,84 @@ describe('live event path', () => {
 })
 
 describe('paging', () => {
+  it.each([
+    ['resync', 'page'], ['resync', 'empty'], ['resync', 'error'], ['resync', 'throw'],
+    ['gap replacement', 'page'], ['gap replacement', 'empty'], ['gap replacement', 'error'], ['gap replacement', 'throw'],
+  ] as const)('finishes superseded page callers on %s before stale %s replies', async (invalidation, outcome) => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'initial', 'answer'), true)
+    await session.open()
+    const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => stale.promise
+    let localBusy = true
+    let completions = 0
+    const paging = session.loadOlder().finally(() => { localBusy = false; completions++ })
+    expect(session.getSnapshot().loadingOlder).toBe(true)
+    const replacement = plainTurn(12, 2, 'replacement', 'answer')
+    api.onHistory = () => histResponse(replacement, true)
+    if (invalidation === 'resync') await session.resync()
+    else {
+      session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: replacement[1]! })
+    }
+    await vi.waitFor(() => { expect(localBusy).toBe(false) })
+    expect(completions).toBe(1)
+    expect(session.getSnapshot()).toMatchObject({ loadingOlder: false, hasMore: true })
+    await paging
+    const fresh = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => fresh.promise
+    localBusy = true
+    const next = session.loadOlder().finally(() => { localBusy = false; completions++ })
+    expect(session.getSnapshot().loadingOlder).toBe(true)
+    const before = session.getSnapshot()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      if (outcome === 'throw') stale.reject(new Error('stale transport failed'))
+      else if (outcome === 'error') stale.resolve(err({ code: 'internal', message: 'stale response failed', details: {} }))
+      else stale.resolve(await histResponse(outcome === 'page' ? plainTurn(0, 0, 'stale', 'answer') : [], false))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(localBusy).toBe(true)
+      expect(session.getSnapshot()).toBe(before)
+      expect(completions).toBe(1)
+      expect(errorSpy).not.toHaveBeenCalled()
+      fresh.resolve(await histResponse(plainTurn(6, 1, 'older fresh', 'answer'), true))
+      await next
+      expect(localBusy).toBe(false)
+      expect(completions).toBe(2)
+      expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq + 6))
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('settles an older-page caller when the current transport throws synchronously', async () => {
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(6, 1, 'initial', 'answer'), true)
+    await session.open()
+    api.onHistory = () => { throw new Error('synchronous page failure') }
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      expect(await session.loadOlder()).toBeUndefined()
+      expect(session.getSnapshot()).toMatchObject({ loadingOlder: false, hasMore: true, openState: 'open', openError: null })
+      expect(errorSpy).toHaveBeenCalledOnce()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it('releases the old page request before replacement history finishes loading', async () => {
     const { api, session } = makeSession()
     api.onHistory = () => histResponse(plainTurn(6, 1, 'before reconnect', 'answer'), true)
     await session.open()
     const stale = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
     api.onHistory = () => stale.promise
-    const paging = session.loadOlder()
+    let pagingFinished = false
+    const paging = session.loadOlder().finally(() => { pagingFinished = true })
     const replacement = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
     api.onHistory = () => replacement.promise
     const resyncing = session.resync()
     expect(session.getSnapshot()).toMatchObject({ openState: 'loading', hasMore: true, loadingOlder: false })
     const duringResync = session.getSnapshot()
+    await vi.waitFor(() => { expect(pagingFinished).toBe(true) })
     stale.resolve(ok({ events: [], hasMore: false }))
     await paging
     expect(session.getSnapshot()).toBe(duringResync)
@@ -875,7 +941,7 @@ describe('remaining branches', () => {
     expect(session.getSnapshot().nodes).toEqual([])
   })
 
-  it('repairGap failure logs and clears stitching; concurrent gaps coalesce into one repair', async () => {
+  it('gap repair failure keeps the contiguous window; concurrent gaps coalesce into one request', async () => {
     const { api, session } = makeSession()
     api.onHistory = () => histResponse(plainTurn(0, 0, 'a', 'b'))
     await session.open()
@@ -892,11 +958,197 @@ describe('remaining branches', () => {
       expect(repairs).toBe(1)
       gate.reject(new Error('repair wire down'))
       await vi.waitFor(() => { expect(errorSpy).toHaveBeenCalled() })
-      // Window unchanged; a later successful repull still lands the buffered frames.
+      // The failed request never publishes the buffered events across the gap.
       expect(session.getSnapshot().nodes).toHaveLength(2)
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it.each(['throw', 'error'] as const)(
+    'gap repair retries on open after %s without another live event',
+    async (failure) => {
+      const { api, session } = makeSession()
+      const first = plainTurn(0, 0, 'first question', 'first answer')
+      const next = plainTurn(6, 1, 'second question', 'final answer')
+      api.onHistory = () => histResponse(first)
+      await session.open()
+      session.handleRunning(true)
+      const gate = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => gate.promise
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      try {
+        for (const event of next.slice(1)) {
+          session.handleMuxEnvelope('live' as never, { type: 'session/event', sessionId: SID, event })
+        }
+        expect(api.callsOf('session.history')).toHaveLength(2)
+        session.handleRunning(false)
+        if (failure === 'throw') gate.reject(new Error('repair wire down'))
+        else gate.resolve(err({ code: 'internal', message: 'repair response failed', details: {} }))
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(chatSeqs(session.getSnapshot())).toEqual([0, 1, 2, 3, 4, 5])
+        expect(session.getSnapshot().running).toBe(false)
+        api.onHistory = () => histResponse([...first, ...next])
+        await session.open()
+        expect(api.callsOf('session.history')).toHaveLength(3)
+        expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+        expect(session.getSnapshot().turnEnds.get(1)).toBe(11)
+        await session.open()
+        expect(api.callsOf('session.history')).toHaveLength(3)
+      } finally {
+        errorSpy.mockRestore()
+      }
+    },
+  )
+
+  it('gap repair completion is shared by concurrent opens', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const next = plainTurn(6, 1, 'second', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => gate.promise
+    session.handleMuxEnvelope('live' as never, { type: 'session/event', sessionId: SID, event: next[1]! })
+    const left = session.open()
+    const right = session.open()
+    expect(left).toBe(right)
+    let settled = false
+    void left.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(api.callsOf('session.history')).toHaveLength(2)
+    gate.resolve(await histResponse([...first, ...next]))
+    await Promise.all([left, right])
+    expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+  })
+
+  it('gap repair keeps an incomplete successful page retryable without appending a hole', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const next = plainTurn(6, 1, 'second', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    for (const event of next.slice(1)) {
+      session.handleMuxEnvelope('live' as never, { type: 'session/event', sessionId: SID, event })
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(chatSeqs(session.getSnapshot())).toEqual([0, 1, 2, 3, 4, 5])
+    expect(api.callsOf('session.history')).toHaveLength(2)
+    await session.open()
+    expect(api.callsOf('session.history')).toHaveLength(3)
+    expect(chatSeqs(session.getSnapshot())).toEqual([0, 1, 2, 3, 4, 5])
+    api.onHistory = () => histResponse([...first, ...next])
+    await session.open()
+    expect(api.callsOf('session.history')).toHaveLength(4)
+    expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+  })
+
+  it('gap repair stitches a delayed missing event before buffered later events', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const next = plainTurn(6, 1, 'second', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    api.onHistory = () => Promise.resolve(err({ code: 'internal', message: 'transient', details: {} }))
+    for (const event of next.slice(1)) {
+      session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event })
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+    api.onHistory = () => histResponse(first)
+    session.handleMuxEnvelope('delayed' as never, { type: 'session/event', sessionId: SID, event: next[0]! })
+    await vi.waitFor(() => {
+      expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+    })
+    await session.open()
+    expect(api.callsOf('session.history')).toHaveLength(3)
+  })
+
+  it('gap repair accepts the final frame in the microtask immediately after window installation', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const next = plainTurn(6, 1, 'second', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => gate.promise
+    session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: next[1]! })
+    const repair = session.open()
+    gate.resolve(await histResponse([...first, ...next.slice(0, -1)]))
+    queueMicrotask(() => {
+      session.handleMuxEnvelope('final' as never, { type: 'session/event', sessionId: SID, event: next.at(-1)! })
+    })
+    await repair
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await session.open()
+    expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+    expect(session.getSnapshot().turnEnds.get(1)).toBe(11)
+    expect(api.callsOf('session.history')).toHaveLength(2)
+  })
+
+  it('gap repair releases ownership when the history transport throws synchronously', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const next = plainTurn(6, 1, 'second', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      api.onHistory = () => { throw new Error('synchronous history failure') }
+      session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: next[1]! })
+      api.onHistory = () => histResponse([...first, ...next])
+      await session.open()
+      expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+      expect(session.getSnapshot().turnEnds.get(1)).toBe(11)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('gap repair hands a late new gap to a fresh owner before the old completion settles', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const second = plainTurn(6, 1, 'second', 'answer')
+    const third = plainTurn(12, 2, 'third', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    const oldGate = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => oldGate.promise
+    session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: second[1]! })
+    const oldRepair = session.open()
+    const fresh = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    api.onHistory = () => fresh.promise
+    oldGate.resolve(await histResponse([...first, ...second.slice(0, -1)]))
+    queueMicrotask(() => {
+      session.handleMuxEnvelope('new-gap' as never, { type: 'session/event', sessionId: SID, event: third[0]! })
+    })
+    await oldRepair
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(api.callsOf('session.history')).toHaveLength(3)
+    session.handleMuxEnvelope('buffered' as never, { type: 'session/event', sessionId: SID, event: third[1]! })
+    expect(api.callsOf('session.history')).toHaveLength(3)
+    expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 11 }, (_, seq) => seq))
+    const newRepair = session.open()
+    fresh.resolve(await histResponse([...first, ...second, ...third]))
+    await newRepair
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 18 }, (_, seq) => seq))
+  })
+
+  it('gap repair remains recoverable through reconnect after a failed request', async () => {
+    const { api, session } = makeSession()
+    const first = plainTurn(0, 0, 'first', 'answer')
+    const next = plainTurn(6, 1, 'second', 'answer')
+    api.onHistory = () => histResponse(first)
+    await session.open()
+    api.onHistory = () => Promise.resolve(err({ code: 'internal', message: 'transient', details: {} }))
+    session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: next[1]! })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    api.onHistory = () => histResponse([...first, ...next])
+    await session.resync()
+    expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, seq) => seq))
+    await session.open()
+    expect(api.callsOf('session.history')).toHaveLength(3)
   })
 
   it('doOpen transport throw of a stale generation is swallowed (generation guard in catch)', async () => {
@@ -985,7 +1237,7 @@ describe('remaining branches', () => {
     expect(chatSeqs(session.getSnapshot())).toEqual([6, 7, 8, 9, 10, 11, 12])
   })
 
-  it.each(['page', 'throw'] as const)('keeps a new gap repair owned when the stale repair settles with %s', async (outcome) => {
+  it.each(['page', 'error', 'throw'] as const)('keeps a new gap repair owned when the stale repair settles with %s', async (outcome) => {
     const { api, session } = makeSession()
     api.onHistory = () => histResponse(plainTurn(0, 0, 'before gap', 'answer'))
     await session.open()
@@ -1004,6 +1256,7 @@ describe('remaining branches', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       if (outcome === 'throw') stale.reject(new Error('old repair connection closed'))
+      else if (outcome === 'error') stale.resolve(err({ code: 'internal', message: 'stale repair response', details: {} }))
       else stale.resolve(ok({ events: [], hasMore: false }))
       await Promise.resolve()
       session.handleMuxEnvelope('fresh-buffer' as never, { type: 'session/event', sessionId: SID, event: second })
@@ -1163,4 +1416,135 @@ describe('reference stability (the memo contract)', () => {
     feed(ev.assistant(12, 1, '完成'))
     expect(session.getSnapshot()).not.toBe(resolved)
   })
+})
+
+describe('gap repair and paging ownership together', () => {
+  for (const failure of ['error', 'throw'] as const) for (const staleOutcome of ['page', 'error', 'throw'] as const) {
+    it(`open retries a failed ${failure} repair, releases the older caller, and ignores its late ${staleOutcome}`, async () => {
+      const { api, session } = makeSession()
+      const first = plainTurn(6, 1, 'first', 'answer')
+      const next = plainTurn(12, 2, 'next', 'answer')
+      api.onHistory = () => histResponse(first, true)
+      await session.open()
+      const oldPage = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => oldPage.promise
+      let oldFinished = false
+      let freshFinished = false
+      let freshPaging: Promise<void> | undefined
+      let completionWindow: number[] | undefined
+      const freshPage = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      const oldPaging = session.loadOlder().finally(() => {
+        oldFinished = true
+        completionWindow = chatSeqs(session.getSnapshot())
+        // Match a consumer immediately requesting more after its previous finally.
+        freshPaging = session.loadOlder().finally(() => { freshFinished = true })
+      })
+      const failedRepair = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => failedRepair.promise
+      for (const event of next.slice(1)) session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event })
+      const failedOpen = session.open()
+      if (failure === 'throw') failedRepair.reject(new Error('repair failed'))
+      else failedRepair.resolve(err({ code: 'internal', message: 'repair failed', details: {} }))
+      await failedOpen
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(oldFinished, 'a failed repair has not replaced the old page window').toBe(false)
+      expect(session.getSnapshot().loadingOlder).toBe(true)
+      expect(chatSeqs(session.getSnapshot())).toEqual([6, 7, 8, 9, 10, 11])
+      const retry = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => retry.promise
+      const reopened = session.open()
+      expect(session.open(), 'navigation/open attempts share the owned retry').toBe(reopened)
+      expect(api.callsOf('session.history').length).toBe(4)
+      // The resumed caller must see the installed window and be able to own a new page.
+      api.onHistory = () => freshPage.promise
+      retry.resolve(await histResponse(next, true))
+      await reopened
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(oldFinished, 'successful retry finishes the superseded caller before old transport settles').toBe(true)
+      await oldPaging
+      expect(completionWindow).toEqual([12, 13, 14, 15, 16, 17])
+      expect(api.callsOf('session.history').length).toBe(5)
+      expect(session.getSnapshot().loadingOlder).toBe(true)
+      expect(freshFinished).toBe(false)
+      const before = session.getSnapshot()
+      if (staleOutcome === 'throw') oldPage.reject(new Error('obsolete page failed'))
+      else if (staleOutcome === 'error') oldPage.resolve(err({ code: 'internal', message: 'obsolete page failed', details: {} }))
+      else oldPage.resolve(await histResponse(plainTurn(0, 0, 'obsolete', 'answer'), false))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(session.getSnapshot(), 'obsolete page cannot alter the current window or owner').toBe(before)
+      expect(freshFinished).toBe(false)
+      freshPage.resolve(await histResponse(first, true))
+      await freshPaging
+      expect(freshFinished).toBe(true)
+      expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, i) => i + 6))
+      await session.open()
+      expect(api.callsOf('session.history').length, 'a repaired open does not disturb pagination or reread').toBe(5)
+    })
+  }
+
+  for (const order of ['page first', 'repair first'] as const) {
+    it(`reconnect supersedes both owners and late ${order} settlement cannot clear fresh work`, async () => {
+      const { api, session } = makeSession()
+      api.onHistory = () => histResponse(plainTurn(6, 1, 'initial', 'answer'), true)
+      await session.open()
+      const oldPage = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => oldPage.promise
+      let oldFinished = false
+      const oldPaging = session.loadOlder().finally(() => { oldFinished = true })
+      const oldRepair = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => oldRepair.promise
+      session.handleMuxEnvelope('gap' as never, { type: 'session/event', sessionId: SID, event: plainTurn(12, 2, 'obsolete', 'answer')[1]! })
+      const oldOpening = session.open()
+      const replacement = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => replacement.promise
+      const resyncing = session.resync()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(oldFinished, 'reconnect completes the obsolete page while both old RPCs remain pending').toBe(true)
+      await oldPaging
+      const current = plainTurn(18, 3, 'current', 'answer')
+      replacement.resolve(await histResponse(current, true))
+      await resyncing
+      const freshPage = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => freshPage.promise
+      let freshFinished = false
+      const freshPaging = session.loadOlder().finally(() => { freshFinished = true })
+      const freshRepair = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => freshRepair.promise
+      const next = plainTurn(24, 4, 'fresh live', 'answer')
+      session.handleMuxEnvelope('new-gap' as never, { type: 'session/event', sessionId: SID, event: next[1]! })
+      const freshOpening = session.open()
+      const before = session.getSnapshot()
+      const settlePage = () => oldPage.resolve(err({ code: 'internal', message: 'obsolete page', details: {} }))
+      const settleRepair = () => oldRepair.reject(new Error('obsolete repair'))
+      for (const settle of order === 'page first' ? [settlePage, settleRepair] : [settleRepair, settlePage]) {
+        settle()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(session.getSnapshot()).toBe(before)
+        expect(freshFinished).toBe(false)
+        expect(session.open(), 'late work cannot replace the current repair owner').toBe(freshOpening)
+      }
+      await oldOpening
+      expect(api.callsOf('session.history').length).toBe(6)
+      freshRepair.resolve(await histResponse(next, true))
+      await freshOpening
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(freshFinished, 'new repair invalidates only its own older-page caller').toBe(true)
+      await freshPaging
+      expect(chatSeqs(session.getSnapshot())).toEqual([24, 25, 26, 27, 28, 29])
+      const lastPage = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+      api.onHistory = () => lastPage.promise
+      let lastFinished = false
+      const lastPaging = session.loadOlder().finally(() => { lastFinished = true })
+      const freshWindow = session.getSnapshot()
+      freshPage.resolve(await histResponse(plainTurn(12, 2, 'late previous page', 'answer'), false))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(session.getSnapshot()).toBe(freshWindow)
+      expect(lastFinished).toBe(false)
+      lastPage.resolve(await histResponse(current, true))
+      await lastPaging
+      expect(chatSeqs(session.getSnapshot())).toEqual(Array.from({ length: 12 }, (_, i) => i + 18))
+      await session.open()
+      expect(api.callsOf('session.history').length).toBe(7)
+    })
+  }
 })

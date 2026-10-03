@@ -55,7 +55,9 @@ SlotRegistry 分别为 renderer 提供 `useSessions` 与 `useWorkspaces` 的裸 
 
 ## Conversation 组装
 
-每个 `Session` 都把连续事件窗口交给 `ConversationNodeAssembler`。插件注册业务 Definition，把单个事件映射为稳定的 `{kind, id}`，在唯一 start 事件处创建 State，折叠有关联的 update，再为已注册的视图目标构造最终节点。Assembler 负责 Context 索引、只读前序 Context 查询，以及引用稳定的 Turn/Step Location 索引。实时 append 只对每个 Definition 求值一次，并且只更新命中的 Context；加载更早分页时保留已有 Context 与节点身份，只匹配新 prepend 的事件，并重放前序依赖或 Location 事实发生变化的 Context。完整替换仅用于 open、resync 和 gap repair。 重连会释放仍在进行的旧页请求和缺口修复请求；窗口替换也会释放旧页请求。其迟到结果不能更改恢复后的历史、阻塞新的实时事件或结束后续请求。
+每个 `Session` 都把连续事件窗口交给 `ConversationNodeAssembler`。插件注册业务 Definition，把单个事件映射为稳定的 `{kind, id}`，在唯一 start 事件处创建 State，折叠有关联的 update，再为已注册的视图目标构造最终节点。Assembler 负责 Context 索引、只读前序 Context 查询，以及引用稳定的 Turn/Step Location 索引。实时 append 只对每个 Definition 求值一次，并且只更新命中的 Context；加载更早分页时保留已有 Context 与节点身份，只匹配新 prepend 的事件，并重放前序依赖或 Location 事实发生变化的 Context。完整替换仅用于 open、resync 和 gap repair。 重连会释放仍在进行的旧页请求和缺口修复请求；窗口替换也会释放旧页请求。其迟到结果不能更改恢复后的历史、阻塞新的实时事件或结束后续请求。 被取代的旧页操作也会兑现面向调用方的完成结果，不等待陈旧传输返回，使视图本地的加载标记能够结束。完成不表示已经追加分页，也不表示历史已经耗尽；消费方从当前快照与 `hasMore` 读取这些事实。
+
+实时事件出现序号缺口时，后续事件持续缓冲，直到尾页响应恢复连续窗口。失败或仍不完整的修复保留重试资格：重新打开 Session 或收到另一条实时事件时，读取一次新的尾页；并发打开共用在途修复。当前窗口继续显示，不切换到加载状态。修复在安装窗口的同时结束缓冲所有权，先于下一条实时帧。重试由事件触发；没有新的打开操作或实时事件时，不运行后台重试。
 
 Definition 作者只根据当前事件完成匹配，为每条关联事件提供稳定业务 id，并保证 update 能按日志 `seq` 回放；renderer 只消费最终 Node data 与受限 Location value，不扫描 Session 或 Chat 集合。完整注册和分页路径见 [Conversation Node 实操手册](../../../docs/cookbook/adding-a-conversation-node.zh.md)。
 

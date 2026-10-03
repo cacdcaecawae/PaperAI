@@ -68,7 +68,7 @@ Session.handleMuxEnvelope ──► contiguous Event window
 Notifier 微任务合批 ──► ConversationSnapshot 缓存 ──uSES──► 组件
 ```
 
-- **Session**（session.ts）：懒建、常驻——建成后在后台持续吃帧，切走切回秒显。操作面：`prompt`/`cancel`（RPC 透传；失败落进快照的 `promptError`）、`open`（拉尾页 history，幂等）、`loadOlder`（向上翻页，防重入）、`resync`（重连 = 清窗口重跑 open）。订阅面：`subscribe`/`getSnapshot`（恒返缓存引用）——`implements ObservableSnapshot<ConversationSnapshot>`，构造时挂 `useSelector = bindSnapshotSelector(this)`，Session 本身就是 uSES 源。帧分发是一个 switch：`session/event` 帧按 seq 去重（唯一去重键），open 在途时缓冲，否则追加 + 增量投影；open/缝合按 seq 合并 live 缓冲并去重，`subscribed.lastSeq` 超出窗口尾则回补一次。 旧页读取和缺口修复以请求身份标识取代独立忙碌标记：重连释放两类请求的所有权，窗口替换释放旧页读取。未完成的旧请求不能阻塞恢复后的分页或实时事件，其结束也不能清除后续请求的所有权。
+- **Session**（session.ts）：懒建、常驻——建成后在后台持续吃帧，切走切回秒显。操作面：`prompt`/`cancel`（RPC 透传；失败落进快照的 `promptError`）、`open`（拉尾页 history；重试已知缺口；其他情况下幂等）、`loadOlder`（向上翻页，防重入）、`resync`（重连 = 清窗口重跑 open）。订阅面：`subscribe`/`getSnapshot`（恒返缓存引用）——`implements ObservableSnapshot<ConversationSnapshot>`，构造时挂 `useSelector = bindSnapshotSelector(this)`，Session 本身就是 uSES 源。帧分发是一个 switch：`session/event` 帧按 seq 去重（唯一去重键），open 在途时缓冲，否则追加 + 增量投影；open/缝合按 seq 合并 live 缓冲并去重，`subscribed.lastSeq` 超出窗口尾则回补一次。 旧页读取和缺口修复以请求身份标识取代独立忙碌标记：重连释放两类请求的所有权，窗口替换释放旧页读取。未完成的旧请求不能阻塞恢复后的分页或实时事件，其结束也不能清除后续请求的所有权。 分页失效会兑现调用方正在等待的同一操作完成结果，同时保留针对陈旧传输的请求身份检查。Trajectory Table 和 Timeline 因而可以结束本地加载标记，无须等待该传输。返回类型仍为 `Promise<void>`：完成表示操作在本地结束或失效，`hasMore` 表示是否还有更早的历史，Trajectory 包装层只报告视图是否变化。 实时缺口的未修复状态独立于当前修复请求保留：失败或不完整的响应保留连续窗口与缓冲后缀。显式打开或后续实时事件触发一次修复；并发打开共用其完成结果。所有者在安装窗口的同一次异步续行中释放缓冲权，因此下一帧可以直接追加或取得新的修复所有权。
 - **ConversationSnapshot**（conversation.ts）：顶层不可变快照约定。`chat` 包含结构化 `order`、identity 稳定的 keyed Node reader、Turn/Step index 和 timeline；`nodes`、`partial`、`runningCalls`、`turnTimings`、`turnEnds` 是未迁移 Trajectory 消费方使用的兼容 slice。pending interaction、queue、running、removed、open state、paging 和 prompt error 仍是 Session 信息。**引用纪律**（memo 与 uSES 的前提）：未变化的子结构和 Node value 保持引用；单个业务更新只替换对应 key 的 value，除非它的顺序或 Location 发生变化。React 仍只订阅 Session 这一处 observable source，并由框架提供的 `useSession(selector)` 隔离 Node 与 Location 聚合更新。
 - **SessionManager**（manager.ts）：实例簇 + 帧总入口 + 会话列表。带 sessionId 的帧只投已存在实例（mux 广播不得把每个会话都实例化）；例外是审批/问答 `requested` 帧——它们不落 history、open 无法回补，故缓冲进 `pendingBuffers`，实例化时回放。
 - **Notifier**（notifier.ts）：两条通知通道，按变更来源取用。`markDirty()`（默认；帧驱动一律用它）按微任务合批——N 次变更、一次通知、一次重渲染；flush 先重建快照缓存再通知。`notifyNow()`（仅用户手势的直接回响）同 tick 重建并通知——受控输入的回响若延到微任务，DOM 会回滚、光标跳尾。帧驱动代码用 notifyNow 会让合批塌回逐帧渲染；禁。
@@ -113,6 +113,10 @@ src/client/
 - **状态住哪**：业务数据（事件、流式、待答）→ 永远对象层；父知道的 → renderSlot 现场的 owner props；单组件私有（滚动、搜索词、展开集）→ 组件状态；跨 entry 共享或跨重挂载存活（选中、草稿、面板宽）→ entry 声明的 store（[slot 体系标准](2026-07-22-slot-type-chain-implementation.zh.md)）。
 - **通知通道**：帧驱动/异步 = `markDirty` 合批；受控输入需要同 tick 的用户手势直接回响 = `notifyNow`。
 
+## 历史分页与修复验证
+
+[Session 测试](../../../../packages/client/runtime/tests/session.client.spec.ts)覆盖分页失效时的完成结果、迟到的传输结果、失败和不完整的修复、共用完成结果、延迟事件、陈旧所有者以及窗口安装后立即到达的帧。[已注册 Trajectory 入口测试](../../../../packages/client/ui-trajectory/tests/paging-reconnect.client.spec.tsx)把真实 Session 与已挂载的 Table、Timeline 消费方组合起来，包括新分页进行期间陈旧请求返回的情况。[完整组装的浏览器场景](../../../../apps/web/tests/stats-paged-history.e2e.ts)验证同一组已挂载控件在重连后恢复可用，并在陈旧响应仍被扣留时加载新的分页；同时验证一元历史请求失败后，在 mux 保持连接的情况下通过导航恢复 transcript（文本记录）。源码层的微任务调度验证操作顺序，不代表浏览器原生帧的实际时序。
+
 ## Consequences
 
 token 流不再震荡渲染树：Assistant chunk 只更新一个业务 Context，每 animation frame 最多发布一次对应 keyed Node；无关行的 selector 结果保持原引用，因此不会重渲染。UI 功能以独立插件的粒度装载、失败、停用——一个崩溃的 slot 注册项只黑一张卡，一个装载失败的 bundle 在 UI 切入之前大声报错。接受的代价：loader/模块表机件是团队端到端自持的定制基建；一次成型启动（无渐进渲染）用首屏粒度换装配简单；双类型 program 让「这个文件归哪个聚合」成为开发者偶尔要回答的问题。
@@ -126,3 +130,8 @@ token 流不再震荡渲染树：Assistant chunk 只更新一个业务 Context�
 | 业务数据进 zustand 切片 | 事件窗口/累积器是行为状态机，不是扁平切片；对象层保住快照粒度与合批的可控性 |
 | Tool 行使用平行的字符串键组件注册表 | ui-tool 的 keyed 子 slot 通过唯一的 slot 注册模型承载运行时开放的 Tool 名称集合（[toolview 溶解](2026-07-23-toolview-dissolution.zh.md)） |
 | 首个 web 客户端交付就做渐进/Suspense 启动 | 一次成型严格更简单；loader 的按插件状态面已保留，渐进点亮日后可落地而无需重构 |
+| 只清除共享加载标记 | 消费方可能在等待操作完成期间保留本地标记，因此所有者使请求失效时也要完成该操作 |
+| 拒绝被取代的分页操作 | 现有视图调用方使用 finally，但没有拒绝处理器；正常的本地完成结果保留 void 完成接口，并继续由 hasMore 表示是否还有更早的历史 |
+| 仅通过重连恢复缺口 | 一元历史请求失败不代表 mux 关闭；已经结束的轮次仍可能持续缺失 |
+| 无界自动重试历史请求 | 操作触发的重试避免引入独立后台重试策略，并保持当前窗口可用 |
+| 在外层完成回调中释放缓冲权 | 后续帧可能在安装后、回调前到达，因此缓冲所有权随窗口安装结束 |
