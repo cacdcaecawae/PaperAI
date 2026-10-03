@@ -23,7 +23,7 @@ PaperAI 的可恢复文档版本服务。`PaperCommitService` 提供 `ctx.paperC
 
 ## 发布与恢复
 
-每个文档有一个进程内 FIFO。服务把 Working DOCX 复制为项目内的私有候选文件，把受支持的领域修改编译为 Office 路径修改，要求 `documentEngine` 保存并校验候选文件，再要求 `paperDocuments` 重建语义索引但不发布索引。
+每个文档有一个进程内 FIFO。服务把 Working DOCX 复制为项目内的私有候选文件，把受支持的领域修改编译为 Office 路径修改，要求 `documentEngine` 保存并校验候选文件，再要求 `paperDocuments` 重建语义索引但不发布索引。重建索引和本次提交的模板检查都读取提交将要发布的文档元数据，因此同一批次中位于前面的 `set-document-type` 决定 `bind-template` 必须适用的文档类型。
 
 编译后的替换、删除和插入锚点携带索引 `baseText`，包括同一批次中前一项替换产生的文字。引擎在编辑前验证实际目标；仅比较调用方文字和索引无法发现陈旧索引或错误的 Office 路径绑定。
 
