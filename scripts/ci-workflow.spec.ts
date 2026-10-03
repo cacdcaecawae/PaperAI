@@ -215,7 +215,7 @@ describe('CI workflow', () => {
       'code-mode-round.e2e.ts', 'goal-multi-turn-actions.e2e.ts', 'hmr-live.e2e.ts',
       'minimal-preset.snapshot.ts', 'navigation-panes.e2e.ts', 'plugin-config.e2e.ts',
       'replay-round-trip.e2e.ts', 'scaffold-hermetic.e2e.ts', 'settings-chrome.e2e.ts',
-      'shipped-composition.e2e.ts', 'turn-tail-actions.e2e.ts', 'workspace-management.e2e.ts',
+      'shipped-composition.e2e.ts', 'stats-paged-history.e2e.ts', 'turn-tail-actions.e2e.ts', 'workspace-management.e2e.ts',
       'live-interactions.e2e.ts',
     ]) expect(uiCommands).toContain(`apps/web/tests/${suite}`)
 
