@@ -356,11 +356,11 @@ describe('web e2e: whole-session stats survive history paging', () => {
       } finally {
         staleRelease.resolve(undefined)
         freshRelease.resolve(undefined)
-        await page.unroute('**/api/session.history')
         const pending = []
         if (olderRequests >= 1) pending.push(staleFulfilled.promise)
         if (olderRequests >= 2) pending.push(freshFulfilled.promise)
         await Promise.all(pending)
+        await page.unroute('**/api/session.history')
         await mountedTable.dispose()
         await mountedTimeline.dispose()
         await page.getByRole('tab', { name: 'Chat', exact: true }).click()
@@ -444,7 +444,8 @@ describe('web e2e: whole-session stats survive history paging', () => {
     const returned = Promise.withResolvers<undefined>()
     await page.route('**/api/session.history', async (route) => {
       const request = route.request().postDataJSON() as {
-        rpcId: string; payload?: { sessionId?: string; beforeSeq?: number }
+        rpcId: string
+        payload?: { sessionId?: string; beforeSeq?: number }
       }
       if (request.payload?.sessionId !== SEED_ID || request.payload.beforeSeq !== undefined) {
         await route.continue()
@@ -496,7 +497,7 @@ describe('web e2e: whole-session stats survive history paging', () => {
       expect(await page.getByText(answer, { exact: true }).count()).toBe(0)
       expect(await page.getByText(`r${TURNS}`, { exact: true }).count()).toBe(1)
       const eventsBeforeFailure = forwardedSessionEvents
-      const failedResponse = page.waitForResponse(response => {
+      const failedResponse = page.waitForResponse((response) => {
         if (new URL(response.url()).pathname !== '/api/session.history') return false
         return (response.request().postDataJSON() as { rpcId: string }).rpcId === failedRpcId
       })

@@ -37,16 +37,14 @@ function page(seq: number, text: string, hasMore: boolean): HistoryReply {
 
 async function bench(history: IApiClient['sessions']['history']) {
   const ctx = new Context()
-  let session: Session | undefined
   onTestFinished(async () => {
     cleanup()
-    session?.dispose()
     await ctx.fiber.dispose()
   })
   const slots = new SlotRegistry(ctx)
   await ctx.plugin(ConversationEventRegistry).await()
   await ctx.plugin(ConversationViewRegistry).await()
-  ctx.provide('sessions', { binding: () => session === undefined ? undefined : { session } })
+  ctx.provide('sessions', { binding: () => ({ session }) })
   slots.register({
     name: 'root', children: { 'conversation.view': { kind: 'list', scope: 'session' } },
   }, (_props: { renderSlot?: unknown }) => null)
@@ -59,12 +57,13 @@ async function bench(history: IApiClient['sessions']['history']) {
   // History is the only programmed Session operation; event and view
   // assembly remain real.
   const api = { sessions: { history } } as unknown as IApiClient
-  session = new Session(SID, api, {
+  const session = new Session(SID, api, {
     commands: {
       list: () => Promise.resolve({ ok: true, value: [] }),
       execute: () => Promise.resolve({ ok: true, value: undefined }),
     },
   }, { conversation: { events: ctx.conversationEvents, views: ctx.conversationViews } })
+  onTestFinished(() => { session.dispose() })
   await session.open()
   const entry = slots.entries('conversation.view').find(candidate => candidate.options.id === 'trajectory')
   if (entry?.inject === undefined) throw new Error('Trajectory injection was not registered')

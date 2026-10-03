@@ -431,7 +431,7 @@ describe('paging', () => {
     api.onHistory = () => { throw new Error('synchronous page failure') }
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
-      expect(await session.loadOlder()).toBeUndefined()
+      await session.loadOlder()
       expect(session.getSnapshot()).toMatchObject({ loadingOlder: false, hasMore: true, openState: 'open', openError: null })
       expect(errorSpy).toHaveBeenCalledOnce()
     } finally {
@@ -1514,8 +1514,8 @@ describe('gap repair and paging ownership together', () => {
       session.handleMuxEnvelope('new-gap' as never, { type: 'session/event', sessionId: SID, event: next[1]! })
       const freshOpening = session.open()
       const before = session.getSnapshot()
-      const settlePage = () => oldPage.resolve(err({ code: 'internal', message: 'obsolete page', details: {} }))
-      const settleRepair = () => oldRepair.reject(new Error('obsolete repair'))
+      const settlePage = () => { oldPage.resolve(err({ code: 'internal', message: 'obsolete page', details: {} })) }
+      const settleRepair = () => { oldRepair.reject(new Error('obsolete repair')) }
       for (const settle of order === 'page first' ? [settlePage, settleRepair] : [settleRepair, settlePage]) {
         settle()
         await new Promise(resolve => setTimeout(resolve, 0))
