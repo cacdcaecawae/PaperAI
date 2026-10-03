@@ -231,8 +231,8 @@ export class PaperTemplateService extends Service {
 
   /**
    * Install selected members, verifying package bytes before OfficeCLI inspection.
-   * Repeating the same project, pack version, member, and source digest under the same
-   * compiler revision returns the existing draft or confirmed contract without another compilation.
+   * Repeating an unchanged project, pack, member metadata, and source/normalized assets
+   * under the same compiler revision returns the existing draft or confirmed contract.
    * @param input - project, pack, and optional member selection.
    * @param signal - optional cancellation signal.
    * @returns contracts in manifest order.
@@ -244,7 +244,12 @@ export class PaperTemplateService extends Service {
     const members = selectedMembers(pack, input.memberIds)
     const contracts: TemplateContract[] = []
     for (const member of members) {
-      const seed = `built-in\0compiler-${COMPILER_REVISION}\0${input.projectId}\0${pack.id}\0${pack.version}\0${member.id}\0${member.source.sha256}`
+      const seed = JSON.stringify([
+        'built-in', COMPILER_REVISION, input.projectId, pack.id, pack.version, pack.name,
+        member.id, member.name, member.sourceVersion, member.usage, member.appliesToRoles,
+        member.requiredSections ?? null, member.source.originalFileName,
+        member.source.sha256, member.normalized.sha256,
+      ])
       const templateId = deterministicTemplateId(seed)
       contracts.push(await this.withLease(templateId, async () => {
         const existing = this.ctx.paperRepository.getTemplate(templateId)
