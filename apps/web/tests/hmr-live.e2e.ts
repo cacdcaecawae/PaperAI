@@ -126,7 +126,7 @@ it('hot-reloads a client plugin and accepts a reference in its replacement input
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(String(error)))
     const consoleErrors: string[] = []
-    page.on('console', message => {
+    page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text())
     })
     await page.goto(baseUrl, { waitUntil: 'load' })

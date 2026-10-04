@@ -93,7 +93,7 @@ skill/@subagent 引用不走占位符 + occurrence 身份链——纯文本引�
 - ui-conversation（hub 兼贡献者）经 `sessions.provide` 供 `'input'` hook（机器状态 + queue overlay）+ `inputActions` prop（`setDraft`/`submit`，稳定 void 回调）。
 - 公私分界：公共 provide 只放 React 语汇成员；键盘/DOM 命令面（track/arbitrate/space/undo/redo/paste/dismissPopup/bindMirror——同步返回值、disposer 语义）是 InputBar 独占，走 InputBar entry 自己的 inject 包内私递，不出插件边界。
 
-输入外壳只在会话作用域和 conversation 插件都存活时存在。任一所有者的 effect 都会释放另一侧登记，避免存活的作用域把选择事件发给已卸载插件，也避免存活插件保留失效作用域。清理移除作用域监听器、停止队列订阅、释放草稿图片并中止发送受理事务。后续选择交给替换外壳；旧回调不能启动发送或队列插话、接受图片，也不能重新连接持久化。已经开始的引用 codec 工作使用独立取消信号，但外壳释放后，其迟到结果不能到达消息发送入口。
+输入外壳只在会话作用域和 conversation 插件都存活时存在。任一所有者的 effect 都会释放另一侧登记，避免存活的作用域把选择事件发给已卸载插件，也避免存活插件保留失效作用域。清理移除作用域监听器、停止队列订阅、释放草稿图片并中止发送受理事务。后续选择交给替换外壳；旧回调不能启动发送或队列插话、接受图片，也不能重新连接持久化。已经开始的引用 codec 工作使用独立取消信号，但外壳释放后，其迟到结果不能到达消息发送入口。 slot 条目只在 conversation 服务激活后发布，对常驻会话进行插件重载时也如此。
 
 ### slot 体系
 
