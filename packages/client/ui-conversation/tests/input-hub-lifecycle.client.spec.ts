@@ -1,6 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import type { SessionBinding, SessionFace, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import { createScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SubmitOutcome } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { DraftAttachmentId } from '../src/client/input/contract.ts'
 import type { SessionInputShell } from '../src/client/input/facade.ts'
@@ -10,7 +11,9 @@ import { zh } from '../src/client/locales.ts'
 
 async function bench() {
   const ctx = new Context()
-  const scope = ctx.plugin(() => {})
+  const sessionId = 'retained' as SessionId
+  const scoped = createScope(ctx, sessionId)
+  const scope = scoped.fiber
   await scope
   const subscribers = new Set<() => void>()
   const sends: { text: string; signal: AbortSignal }[] = []
@@ -33,8 +36,8 @@ async function bench() {
     },
   } as unknown as SessionFace
   const binding: SessionBinding = {
-    sessionId: 'retained' as SessionId,
-    ctx: scope.ctx,
+    sessionId,
+    ctx: scoped.ctx,
     session,
   }
   ctx.reflect.provide('conversation', {
@@ -43,14 +46,14 @@ async function bench() {
       return pending
     },
     releaseDraftImage: (id: DraftAttachmentId) => { releases.push(id) },
-  } as never)
+  })
   const mount = async () => {
     let hub!: InputHub
     const feature = ctx.plugin((pluginCtx) => { hub = new InputHub(pluginCtx, makeTranslate(zh)) })
     await feature
     return { feature, hub, shell: hub.shellFor(binding) }
   }
-  const pick = (shell: SessionInputShell) => scope.ctx.bail(scope.ctx, 'slash/input-insert-reference', {
+  const pick = (shell: SessionInputShell) => scoped.ctx.bail(scoped.ctx, 'slash/input-insert-reference', {
     reference: { source: 'reference', ref: 'doc-a', label: 'Research notes', clipboardText: '@Research notes' },
     span: { start: 0, end: shell.snapshot.draft.length, draftRev: shell.snapshot.draftRev },
   })
