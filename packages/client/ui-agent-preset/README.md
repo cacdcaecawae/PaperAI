@@ -24,6 +24,8 @@ The new-session chip declares `conversation.hero.agentPreset.mark`, a root-scope
 
 An unclaimed selected key renders the existing generic Agent-preset icon; unclaimed menu rows remain text-only. The slot changes presentation only: roster metadata, staged selection, blank-session application, and the host's `agent-preset-locked` rule are unchanged.
 
+The chip and header label each wait for their own slot declaration and return after redeclaration. Their shared controller follows the conversation service lifetime; its session subscription is owned before either visual registration begins.
+
 ## The session-header label
 
 A third surface, beside the session title: the preset THIS session runs, as static chrome. A control there would promise a switch the host refuses outright. It reads the preset from the session's own summary and resolves the display name against the same roster the General row reads. Forwarded `agent-preset/selected` owner events fold committed blank-session switches into that shared summary in every tab; the initiating tab may already have applied the RPC echo, and the merge is idempotent.

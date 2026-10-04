@@ -15,7 +15,7 @@ import type { ISession, SessionId, ToolResultNode } from '@deepseek-ai/dsh-clien
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { apply as applyConversation, inject as injectConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import * as ConversationPlugin from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { apply as applyTool, inject as injectTool } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { toolChatSnapshot } from './tool-details-render.client.tsx'
@@ -87,7 +87,7 @@ async function bench(nodes: ToolResultNode[]) {
     },
   })
   await runtime.root.declare(LAYOUT_CHILDREN, AppRoot)
-  await runtime.mount({ inject: [...injectConversation], apply: applyConversation })
+  await runtime.mount(ConversationPlugin)
   await runtime.mount({ inject: [...injectTool], apply: applyTool })
   return { runtime, slots: runtime.slots, layout }
 }
@@ -240,7 +240,7 @@ describe('registrant declaration injection', () => {
     expect(runtime.slots.entries('tool.call.toolview')).toHaveLength(0)
 
     // Mounting the package declares the slot and activates the waiting entry.
-    await runtime.mount({ inject: [...injectConversation], apply: applyConversation })
+    await runtime.mount(ConversationPlugin)
     await runtime.mount({ inject: [...injectTool], apply: applyTool })
     expect(runtime.slots.entries('tool.call.toolview').map(e => e.options.key))
       .toEqual(expect.arrayContaining(['bash', 'late']))

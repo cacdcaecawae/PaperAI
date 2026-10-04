@@ -10,7 +10,7 @@ import { SlotTestRuntime, usePinnedBrowserLanguages, stubSettingsScope } from '@
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, inject } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import * as ConversationPlugin from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ComposerBarInjected } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 // The service reads its initial locale from the browser; these specs assert
@@ -56,7 +56,7 @@ async function bench(observePublication = false) {
       }
     })
     : () => {}
-  const feature = await runtime.mount({ inject: [...inject], apply })
+  const feature = await runtime.mount(ConversationPlugin)
   return { runtime, feature, slots: runtime.slots, publishedDrafts, publicationErrors, stopPublicationProbe }
 }
 
@@ -70,7 +70,7 @@ describe('apply wiring', () => {
     const b = await bench(true)
     try {
       await b.feature.dispose()
-      await b.runtime.mount({ inject: [...inject], apply })
+      await b.runtime.mount(ConversationPlugin)
       expect(b.publicationErrors).toEqual([])
       expect(b.publishedDrafts).toEqual(['', ''])
     } finally {
