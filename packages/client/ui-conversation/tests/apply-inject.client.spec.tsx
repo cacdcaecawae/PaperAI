@@ -234,7 +234,8 @@ describe('conversation slot inject API', () => {
     const before = b.conversationApi(ROOT)
     before.injected.connectDraftStore('', before.instance.actions.setDraft)
     let finish!: (result: Awaited<ReturnType<ISession['prompt']>>) => void
-    b.sessionFake.prompt.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const submitted = new Promise<Awaited<ReturnType<ISession['prompt']>>>((resolve) => { finish = resolve })
+    b.sessionFake.prompt.mockReturnValueOnce(submitted)
     const old = b.inputApi(ROOT)
     old.actions.setDraft('pending old draft')
     old.actions.submit()
@@ -248,7 +249,6 @@ describe('conversation slot inject API', () => {
     replacement.injected.connectDraftStore(replacement.instance.getSnapshot().draft, replacement.instance.actions.setDraft)
     b.inputApi(ROOT).actions.setDraft('replacement draft')
     expect(() => { before.injected.connectDraftStore('stale passive effect', before.instance.actions.setDraft) }).not.toThrow()
-    const submitted = b.sessionFake.prompt.mock.results[0]!.value
     finish({ ok: true, value: { accepted: true } })
     await submitted
     await Promise.resolve()
