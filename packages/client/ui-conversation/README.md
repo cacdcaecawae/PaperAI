@@ -52,6 +52,8 @@ A finished turn materializes one ordered `turn-tail` Conversation Node. Its engi
 
 The chat view delegates logged user text through `conversation.message.userText`. Product plugins may project a recognized context into a readable quotation; ordinary messages retain the built-in rendering, and copy actions and model history keep the complete logged text.
 
+Input listeners, queue subscriptions, draft images, and admission attempts belong to both the session scope and the conversation plugin. Unloading either releases the shell once. Retained callbacks cannot start another admission or queue steer, accept images, or reconnect draft persistence. Session slots publish after their conversation service becomes active, including plugin replacement.
+
 ## Model Experience
 
 None, as the conversation UI renders session history and streams in the browser; nothing here reaches a model request.

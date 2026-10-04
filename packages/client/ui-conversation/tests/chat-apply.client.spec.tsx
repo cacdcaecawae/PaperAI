@@ -10,7 +10,8 @@ import { SlotTestRuntime, usePinnedBrowserLanguages, stubSettingsScope } from '@
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, inject } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import * as ConversationPlugin from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ComposerBarInjected } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 // The service reads its initial locale from the browser; these specs assert
 // the shipped Chinese copy, so they state the browser they assume.
@@ -19,7 +20,7 @@ usePinnedBrowserLanguages('zh-CN')
 const ROOT = 'root-1' as SessionId
 const CHILD = 'child-1' as SessionId
 
-async function bench() {
+async function bench(observePublication = false) {
   const runtime = await SlotTestRuntime.create()
   runtime.provide('connection', { api: { settings: {} }, isLoopback: false })
   // The plugin injects both; these specs exercise no settings path.
@@ -41,8 +42,22 @@ async function bench() {
     'settings.general.item': { kind: 'list', scope: 'root' },
   }, (_p: { renderSlot?: unknown }) => null)
 
-  const feature = await runtime.mount({ inject: [...inject], apply })
-  return { runtime, feature, slots: runtime.slots }
+  const publishedDrafts: string[] = []
+  const publicationErrors: unknown[] = []
+  const stopPublicationProbe = observePublication
+    ? runtime.slots.subscribe('conversation.composer.bar', () => {
+      const entry = runtime.slots.entries('conversation.composer.bar')[0]
+      if (entry === undefined) return
+      const injectComposer = entry.inject as unknown as (id: SessionId) => ComposerBarInjected
+      try {
+        publishedDrafts.push(injectComposer(ROOT).keyboard!.snapshot.draft)
+      } catch (error) {
+        publicationErrors.push(error)
+      }
+    })
+    : () => {}
+  const feature = await runtime.mount(ConversationPlugin)
+  return { runtime, feature, slots: runtime.slots, publishedDrafts, publicationErrors, stopPublicationProbe }
 }
 
 /** First stored entry for a key (inject/store live directly on StoredEntry). */
@@ -51,6 +66,19 @@ function renderEntryOf(slots: Awaited<ReturnType<typeof bench>>['slots'], key: '
 }
 
 describe('apply wiring', () => {
+  it('publishes composer entries only after their service is ready, including replacement over a resident session', async () => {
+    const b = await bench(true)
+    try {
+      await b.feature.dispose()
+      await b.runtime.mount(ConversationPlugin)
+      expect(b.publicationErrors).toEqual([])
+      expect(b.publishedDrafts).toEqual(['', ''])
+    } finally {
+      b.stopPublicationProbe()
+      await b.runtime.dispose()
+    }
+  })
+
   it('provides the conversation service', async () => {
     const b = await bench()
     expect(b.runtime.ctx.get('conversation')).toBeDefined()

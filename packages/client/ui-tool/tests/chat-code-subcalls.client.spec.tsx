@@ -13,7 +13,7 @@ import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import {
-  ConversationEventRegistry, ConversationViewRegistry, createSnapshotStore,
+  ConversationEventRegistry, ConversationViewRegistry, createScope, createSnapshotStore,
   EMPTY_CONVERSATION_VIEWS, SlotRegistry,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
@@ -107,6 +107,8 @@ async function bench(snapshot: ConversationSnapshot) {
   await ctx.plugin(ConversationEventRegistry).await()
   await ctx.plugin(ConversationViewRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
+  const sessionScope = createScope(ctx, SID)
+  await sessionScope.fiber.await()
 
   const session = createSnapshotStore<ConversationSnapshot>(snapshot)
   const list = createSnapshotStore<SessionListState>({
@@ -126,7 +128,7 @@ async function bench(snapshot: ConversationSnapshot) {
   const sessionsFake = {
     list,
     binding: (id: SessionId) => (id === SID
-      ? { sessionId: SID, session, ctx: { effect: () => {}, on: () => () => {} } }
+      ? { sessionId: SID, session, ctx: sessionScope.ctx }
       : undefined),
     scope: () => ({ get: () => scoped }),
     scopeOf: () => SID,

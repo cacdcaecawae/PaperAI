@@ -162,6 +162,7 @@ function sessionsDouble(state: {
 }) {
   const listeners = new Set<() => void>()
   return {
+    listenerCount: () => listeners.size,
     retainBinding: () => () => {},
     list: {
       getSnapshot: () => state,
@@ -187,6 +188,63 @@ function ExternalPresetMark(_props: AgentPresetBrandMarkOwnerProps) {
 }
 
 describe('ui-agent-preset apply', () => {
+  it.each(['plugin', 'service'])('waits for each conversation declaration and releases listeners on %s disposal', async (owner) => {
+    const { ctx, slots } = await bench()
+    try {
+      declareRoot(slots)
+      const sessions = sessionsDouble({ byId: {} })
+      ctx.provide('sessions', sessions as never)
+      ctx.provide('workspaces', workspacesDouble() as never)
+      const service = ctx.plugin((serviceCtx: Context) => {
+        serviceCtx.provide('conversation', { blocks: { hold: () => () => {} } } as never)
+      })
+      await service.await()
+      const feature = ctx.plugin({ inject: [...inject], apply })
+      await feature.await()
+      await vi.waitFor(() => { expect(sessions.listenerCount()).toBe(1) })
+      expect(() => { sessions.notify() }).not.toThrow()
+      expect(slots.entries('conversation.hero.agentPreset')).toHaveLength(0)
+      expect(slots.entries('conversation.session.header.actions')).toHaveLength(0)
+
+      const conversation = slots.register({
+        name: 'conversation',
+        children: {
+          'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
+          'conversation.session.header': { kind: 'single', scope: 'session' },
+        },
+      } as never, () => null)
+      await vi.waitFor(() => { expect(slots.entries('conversation.hero.agentPreset')).toHaveLength(1) })
+      expect(slots.entries('conversation.session.header.actions')).toHaveLength(0)
+      const declareHeader = () => slots.register({
+        name: 'conversation.session.header',
+        children: { 'conversation.session.header.actions': { kind: 'list', scope: 'session' } },
+      } as never, () => null)
+      let header = declareHeader()
+      await vi.waitFor(() => { expect(slots.entries('conversation.session.header.actions')).toHaveLength(1) })
+      header()
+      await vi.waitFor(() => { expect(slots.entries('conversation.session.header.actions')).toHaveLength(0) })
+      expect(slots.entries('conversation.hero.agentPreset')).toHaveLength(1)
+      header = declareHeader()
+      await vi.waitFor(() => { expect(slots.entries('conversation.session.header.actions')).toHaveLength(1) })
+      header()
+      conversation()
+      await vi.waitFor(() => { expect(slots.entries('conversation.hero.agentPreset')).toHaveLength(0) })
+      declareConversation(slots)
+      await vi.waitFor(() => {
+        expect(slots.entries('conversation.hero.agentPreset')).toHaveLength(1)
+        expect(slots.entries('conversation.session.header.actions')).toHaveLength(1)
+      })
+
+      await (owner === 'plugin' ? feature : service).dispose()
+      await vi.waitFor(() => { expect(sessions.listenerCount()).toBe(0) })
+      expect(slots.entries('conversation.hero.agentPreset')).toHaveLength(0)
+      expect(slots.entries('conversation.session.header.actions')).toHaveLength(0)
+      expect(() => { sessions.notify() }).not.toThrow()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('declares the services it uses', () => {
     expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'settingsScope'])
   })

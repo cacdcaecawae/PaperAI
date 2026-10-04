@@ -182,23 +182,6 @@ export function apply(ctx: ClientContext): void {
         seat.stage('cordis', true)
         scope.workspaces.startSession()
       }
-      const chip = scope.slots.register({
-        name: 'conversation.hero.agentPreset',
-        locale: 'settings.agentPreset',
-        inject: seatInjected,
-        children: {
-          'conversation.hero.agentPreset.mark': { kind: 'keyed', scope: 'root' },
-          'conversation.hero.agentPreset.status': { kind: 'single', scope: 'root' },
-        },
-      }, AgentPresetSeat)
-      const label = scope.slots.register({
-        name: 'conversation.session.header.actions',
-        id: 'agent-preset',
-        // Static session context occupies the header's leading negative-order band.
-        order: -10,
-        locale: 'settings.agentPreset',
-        inject: labelInjected,
-      }, AgentPresetLabel)
       return () => {
         seat.dispose()
         stop()
@@ -207,10 +190,26 @@ export function apply(ctx: ClientContext): void {
         presetSelected()
         rosterReaders.delete(readRoster)
         creatorDraft = undefined
-        chip()
-        label()
       }
     }, 'ui-agent-preset: new-session chip and header label')
+
+    scope.slots.inject('conversation.hero.agentPreset', () => scope.slots.register({
+      name: 'conversation.hero.agentPreset',
+      locale: 'settings.agentPreset',
+      inject: seatInjected,
+      children: {
+        'conversation.hero.agentPreset.mark': { kind: 'keyed', scope: 'root' },
+        'conversation.hero.agentPreset.status': { kind: 'single', scope: 'root' },
+      },
+    }, AgentPresetSeat))
+    scope.slots.inject('conversation.session.header.actions', () => scope.slots.register({
+      name: 'conversation.session.header.actions',
+      id: 'agent-preset',
+      // Static session context occupies the header's leading negative-order band.
+      order: -10,
+      locale: 'settings.agentPreset',
+      inject: labelInjected,
+    }, AgentPresetLabel))
   })
 
   const sectionInjected = (): AgentPresetSectionInjected => ({
