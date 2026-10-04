@@ -149,7 +149,7 @@ it('hot-reloads a client plugin and accepts a reference in its replacement input
     try {
       await expect.poll(() => input.inputValue()).toBe('@reference')
     } catch (error) {
-      const textareas = await page.locator('textarea').evaluateAll(elements => elements.map(element => ({
+      const textareas = await page.locator('textarea').evaluateAll((elements: HTMLTextAreaElement[]) => elements.map(element => ({
         value: element.value,
         disabled: element.disabled,
         readOnly: element.readOnly,
