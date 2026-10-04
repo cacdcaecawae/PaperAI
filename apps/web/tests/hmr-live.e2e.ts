@@ -125,6 +125,10 @@ it('hot-reloads a client plugin and accepts a reference in its replacement input
     const page = await browser.newPage({ locale: 'en-US' })
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(String(error)))
+    const consoleErrors: string[] = []
+    page.on('console', message => {
+      if (message.type() === 'error') consoleErrors.push(message.text())
+    })
     await page.goto(baseUrl, { waitUntil: 'load' })
     await page.getByText(oldText, { exact: true }).waitFor({ timeout: 15_000 })
     const welcome = page.getByRole('dialog', { name: 'Internal Testing Notice' })
@@ -142,7 +146,19 @@ it('hot-reloads a client plugin and accepts a reference in its replacement input
 
     await writeFile(sourcePath, updatedSource)
     await page.getByText(newText, { exact: true }).waitFor({ timeout: 30_000 })
-    await expect.poll(() => input.inputValue()).toBe('@reference')
+    try {
+      await expect.poll(() => input.inputValue()).toBe('@reference')
+    } catch (error) {
+      const textareas = await page.locator('textarea').evaluateAll(elements => elements.map(element => ({
+        value: element.value,
+        disabled: element.disabled,
+        readOnly: element.readOnly,
+        placeholder: element.placeholder,
+        phase: element.dataset.phase,
+      })))
+      const text = await page.locator('body').innerText()
+      throw new Error(`HMR input recovery failed: ${JSON.stringify({ textareas, text, pageErrors, consoleErrors })}`, { cause: error })
+    }
     await input.fill('@reference')
     const menu = page.getByRole('listbox', { name: 'Trigger suggestions' })
     await menu.getByRole('option', { name: /File \u00b7 reference\.txt/ }).click()
