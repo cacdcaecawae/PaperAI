@@ -2,8 +2,8 @@
  * InputHub: the SessionInputResolver implementation (`ctx.conversation.input`) — one
  * SessionInputShell per session, created inside the sessions provide
  * materialization (the 'input' standard-kit entry IS the
- * creation trigger) and torn down by the scope disposer (instance-and-scope
- * share one lifecycle). The hub registers the three scoped input-mutation
+ * creation trigger) and released when either the session scope or the
+ * owning conversation plugin unloads. The hub registers the four scoped input-mutation
  * listeners on each session's actx (the sole consumer side of the ui-input-trigger
  * bail events) and owns the default-sink choreography: every session is a
  * real host entity, so the sink is one unconditional prompt path.
@@ -64,7 +64,7 @@ export class InputHub implements SessionInputResolver {
    * Resident shell for one session binding — the provide-channel entry
    * (called during scope materialization, BEFORE the scope record is
    * queryable, hence binding-fed and hence the thunked slash/popup deps).
-   * Wires the scoped event listeners + teardown into the session scope.
+   * Both the session scope and plugin own the shell and its event listeners.
    * @param binding - session assembly handle.
    * @returns the shell.
    */
@@ -72,32 +72,33 @@ export class InputHub implements SessionInputResolver {
     const existing = this.shells.get(binding.sessionId)
     if (existing !== undefined) return existing
     const { sessionId: id, session, ctx: actx } = binding
-    const shell = new SessionInputShell({
-      actx,
-      inputTriggers: () => this.controller(actx),
-      popup: () => this.popup(actx),
-      queue: queueReadFaceOf(session),
-      defaultSink: (text, imageIds, mode, signal) => this.sink(session, text, imageIds, mode, signal),
-      steerQueue: () => { void this.steerQueue(session, shell) },
-      commandImages: {
-        serialize: ids => this.conversation().serializeDraftImages(ids),
-        // Asymmetric with serialize on purpose: release settles AFTER the
-        // submit RPC, where session teardown may already have unloaded the
-        // conversation service (the same tolerance as the scope disposer
-        // above); leaked preview URLs then die with the document.
-        release: (ids) => {
-          const conversation = this.rootCtx.get('conversation') as ConversationAttachmentFace | undefined
-          for (const imageId of ids) conversation?.releaseDraftImage(imageId)
+    // Each owner releases the other registration, so neither retains a dead shell.
+    let shell!: SessionInputShell
+    let disposePlugin: (() => void) | undefined
+    disposePlugin = this.rootCtx.effect(() => actx.effect(() => {
+      shell = new SessionInputShell({
+        actx,
+        inputTriggers: () => this.controller(actx),
+        popup: () => this.popup(actx),
+        queue: queueReadFaceOf(session),
+        defaultSink: (text, imageIds, mode, signal) => this.sink(session, text, imageIds, mode, signal),
+        steerQueue: () => { void this.steerQueue(session, shell) },
+        commandImages: {
+          serialize: ids => this.conversation().serializeDraftImages(ids),
+          // Asymmetric with serialize on purpose: release settles AFTER the
+          // submit RPC, where session teardown may already have unloaded the
+          // conversation service (the same tolerance as the scope disposer
+          // above); leaked preview URLs then die with the document.
+          release: (ids) => {
+            const conversation = this.rootCtx.get('conversation') as ConversationAttachmentFace | undefined
+            for (const imageId of ids) conversation?.releaseDraftImage(imageId)
+          },
+          unsupportedNotice: token => this.t('command.imagesUnsupported', {
+            command: token.trim().replace(/^\//u, ''),
+          }),
         },
-        unsupportedNotice: token => this.t('command.imagesUnsupported', {
-          command: token.trim().replace(/^\//u, ''),
-        }),
-      },
-    })
-    this.shells.set(id, shell)
-    // The one teardown axis: listeners, shell, and map entries all ride the
-    // scope fiber (nothing here outlives the scope).
-    actx.effect(() => {
+      })
+      this.shells.set(id, shell)
       const offs = [
         actx.on('slash/input-begin-command', req =>
           shell.beginCommand(req.claim, req.span) ? true : undefined),
@@ -109,14 +110,15 @@ export class InputHub implements SessionInputResolver {
           shell.insertText(req.text, req.span, req.continue === true) ? true : undefined),
       ]
       return () => {
+        void disposePlugin?.()
         for (const off of offs) off()
         const drafts = shell.snapshot.imageIds
         shell.dispose()
-        this.shells.delete(id)
+        if (this.shells.get(id) === shell) this.shells.delete(id)
         const conversation = this.rootCtx.get('conversation') as ConversationAttachmentFace | undefined
         for (const imageId of drafts) conversation?.releaseDraftImage(imageId)
       }
-    }, 'conversation.input: session shell')
+    }, 'conversation.input: session shell'), 'conversation.input: plugin shell')
     return shell
   }
 

@@ -4,6 +4,7 @@ import { existsSync, globSync, statSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -12,7 +13,8 @@ import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { readClientBuildRecord } from '../../../scripts/client-build-environment.ts'
 import { pnpmInvocation } from '../../../scripts/pnpm-invocation.ts'
-import { REPO_ROOT } from './support.ts'
+import { connectFreshWorkspace, REPO_ROOT } from './support.ts'
+import { compareOrRefreshGolden, webSnapshotMode } from './scaffold.ts'
 
 function spawnSpec(argv: readonly string[], cwd: string, env?: Record<string, string>): SubprocessSpawnSpec {
   return {
@@ -79,7 +81,7 @@ async function stopTree(child: SubprocessHandle): Promise<void> {
   await child.done
 }
 
-it('hot-reloads a real client-plugin source edit without refreshing the page', async () => {
+it('hot-reloads a client plugin and accepts a reference in its replacement input without refreshing', async () => {
   const world = await mkdtemp(join(tmpdir(), 'dsh-web-hmr-world-'))
   const sourcePath = join(REPO_ROOT, 'packages/client/ui-conversation/src/client/locales.ts')
   const binPath = join(REPO_ROOT, 'apps/cli/lib/bin.js')
@@ -125,6 +127,10 @@ it('hot-reloads a real client-plugin source edit without refreshing the page', a
     page.on('pageerror', error => pageErrors.push(String(error)))
     await page.goto(baseUrl, { waitUntil: 'load' })
     await page.getByText(oldText, { exact: true }).waitFor({ timeout: 15_000 })
+    await connectFreshWorkspace(page, world)
+    await writeFile(join(world, 'workspace', 'reference.txt'), 'reference fixture\n')
+    const input = page.locator('textarea:enabled[placeholder="Describe what you want to build"]')
+    await input.fill('@reference')
     const pageIdentity = await page.evaluate(() => {
       const identity = crypto.randomUUID()
       Object.defineProperty(window, '__dshHmrPageIdentity', { value: identity })
@@ -133,8 +139,21 @@ it('hot-reloads a real client-plugin source edit without refreshing the page', a
 
     await writeFile(sourcePath, updatedSource)
     await page.getByText(newText, { exact: true }).waitFor({ timeout: 30_000 })
-    expect(await page.evaluate(() => (window as Window & { __dshHmrPageIdentity?: string }).__dshHmrPageIdentity))
-      .toBe(pageIdentity)
+    await expect.poll(() => input.inputValue()).toBe('@reference')
+    await input.fill('@reference')
+    const menu = page.getByRole('listbox', { name: 'Trigger suggestions' })
+    await menu.getByRole('option', { name: /File \u00b7 reference\.txt/ }).click()
+    await expect.poll(() => input.inputValue()).toBe('@reference.txt ')
+    const reference = page.locator('[data-reference-appearance="file"]')
+    await expect.poll(() => reference.textContent()).toBe('@reference.txt')
+    const preserved = await page.evaluate(() => (window as Window & { __dshHmrPageIdentity?: string }).__dshHmrPageIdentity) === pageIdentity
+    expect(preserved).toBe(true)
+    const snapshot = `draft ${JSON.stringify(await input.inputValue())}\nreference ${JSON.stringify(await reference.textContent())}\npage preserved ${String(preserved)}`
+    await compareOrRefreshGolden(
+      fileURLToPath(new URL('./snapshots/hmr-live/reference.expected.md', import.meta.url)),
+      snapshot,
+      webSnapshotMode(),
+    )
     expect(pageErrors).toEqual([])
   } catch (error) {
     failures.push(error)
