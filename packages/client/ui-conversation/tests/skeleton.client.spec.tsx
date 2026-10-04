@@ -155,6 +155,7 @@ function mount(
   const seatOwners: { key: string; owner: unknown }[] = []
   let pickerOwner: unknown
   let heroContentOwner: unknown
+  let sessionVisible = true
   const renderSlot = ((key: string, owner: object, opts?: { only?: string; fallback?: ReactNode }) => {
     slotCalls.push(key)
     if (key === 'conversation.input.model' || key === 'conversation.input.plan') {
@@ -188,6 +189,7 @@ function mount(
       )
     }
     if (key === 'conversation.session') {
+      if (!sessionVisible) return null
       return (
         <ConversationSession
           sessionId={SID}
@@ -203,7 +205,7 @@ function mount(
           renderSlot={renderSlot as never}
           views={views}
           releaseSessionImages={vi.fn()}
-          bindDraftMirror={write => wiring.bindMirror(write)}
+          connectDraftStore={(draft, write) => { wiring.connectDraftStore(draft, write) }}
         />
       )
     }
@@ -274,7 +276,11 @@ function mount(
   }
   const view = render(<ConversationRoot {...props} />)
   return {
-    view, chat, sink, retargetWorkspace, session, slotCalls, lineageOwners, seatOwners, open,
+    view, chat, sink, wiring, retargetWorkspace, session, slotCalls, lineageOwners, seatOwners, open,
+    setSessionVisible: (visible: boolean) => {
+      sessionVisible = visible
+      view.rerender(<ConversationRoot {...props} />)
+    },
     pickerOwner: () => pickerOwner,
     heroContentOwner: () => heroContentOwner,
     rerender: () => { view.rerender(<ConversationRoot {...props} />) },
@@ -368,6 +374,20 @@ describe('ConversationRoot resident composer', () => {
     expect(b.sink).toHaveBeenCalledWith('ordinary revised', [], 'queue', expect.any(AbortSignal))
     expect((b.view.getByRole('button', { name: 'Child' }) as HTMLButtonElement).disabled).toBe(true)
     expect(b.view.queryByText('Root')).toBeNull()
+  })
+
+  it('does not restore admitted text when the strict session view remounts', async () => {
+    const b = mount(conversationSnapshot())
+    let finish!: (outcome: { kind: 'success' }) => void
+    b.sink.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    fireEvent.change(b.view.getByRole('textbox'), { target: { value: 'describe this' } })
+    fireEvent.keyDown(b.view.getByRole('textbox'), { key: 'Enter' })
+    b.setSessionVisible(false)
+    await act(async () => { finish({ kind: 'success' }) })
+    expect(b.chat.getSnapshot().draft).toBe('')
+    b.setSessionVisible(true)
+    expect((b.view.getByRole('textbox') as HTMLTextAreaElement).value).toBe('')
+    expect(b.sink).toHaveBeenCalledTimes(1)
   })
 
   it('shows hierarchy only for subagents and opens their ordinary owner', () => {
