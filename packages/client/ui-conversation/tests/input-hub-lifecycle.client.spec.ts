@@ -31,7 +31,7 @@ async function bench() {
       steers.push(id)
       return Promise.resolve({ ok: true, value: { accepted: true } })
     },
-  } as SessionFace
+  } as unknown as SessionFace
   const binding: SessionBinding = {
     sessionId: 'retained' as SessionId,
     ctx: scope.ctx as SessionBinding['ctx'],
