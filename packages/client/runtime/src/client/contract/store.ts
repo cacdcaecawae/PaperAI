@@ -85,11 +85,17 @@ function rafBatch(notify: () => void): () => void {
  */
 export function createSnapshotStore<T>(
   init: T, opts?: { flush?: 'raf' | 'sync'; persist?: { name: string } }): SnapshotStore<T> {
+  return createSnapshotStoreOwner(init, opts).store
+}
+
+function createSnapshotStoreOwner<T>(
+  init: T, opts?: { flush?: 'raf' | 'sync'; persist?: { name: string } },
+): { store: SnapshotStore<T>; stopPersistence: (() => void) | undefined } {
   // Immer enters through produce() in update() below (identical semantics to
   // the immer middleware without its setState-signature mutator generics).
   const withSelector = subscribeWithSelector(() => init)
   const api: StoreApi<T> = createStore<T>()(withSelector)
-  if (opts?.persist) attachPersistence(api, opts.persist.name)
+  const stopPersistence = opts?.persist === undefined ? undefined : attachPersistence(api, opts.persist.name)
 
   let subscribe = (fn: () => void) => api.subscribe(fn)
   if (opts?.flush === 'raf') {
@@ -102,7 +108,7 @@ export function createSnapshotStore<T>(
     }
   }
 
-  return {
+  const store: SnapshotStore<T> = {
     getSnapshot: () => api.getState(),
     subscribe: fn => subscribe(fn),
     update: (mutator) => {
@@ -114,6 +120,7 @@ export function createSnapshotStore<T>(
       api.setState(devFreeze(next), true)
     },
   }
+  return { store, stopPersistence }
 }
 
 /**
@@ -124,7 +131,7 @@ export function createSnapshotStore<T>(
  * because the corruption happens before serialization. Storage failures
  * (quota, private mode) only disable persistence, never break the store.
  */
-function attachPersistence<T>(api: StoreApi<T>, name: string): void {
+function attachPersistence<T>(api: StoreApi<T>, name: string): (() => void) | undefined {
   // Non-browser runs (node e2e booting the client tree) have no localStorage:
   // persistence silently disables — same contract as a storage failure, minus
   // the per-store console noise a ReferenceError would produce.
@@ -137,7 +144,7 @@ function attachPersistence<T>(api: StoreApi<T>, name: string): void {
   } catch (error) {
     console.error(`snapshot store '${name}' rehydration failed:`, error)
   }
-  api.subscribe((state) => {
+  return api.subscribe((state) => {
     try {
       localStorage.setItem(name, JSON.stringify(state))
     } catch (error) {
@@ -212,9 +219,10 @@ export function defineStore<T, A extends ActionsDecl<T>>(
       const persistKey = decl.persist === undefined
         ? undefined
         : scopeKey === undefined ? decl.persist : `${decl.persist}.${scopeKey}`
-      const store = createSnapshotStore<T>(
+      const { store, stopPersistence } = createSnapshotStoreOwner<T>(
         decl.init(),
         persistKey !== undefined ? { persist: { name: persistKey } } : undefined)
+      let persistenceCleared = false
       const actions = {} as Record<string, (...params: unknown[]) => void>
       for (const key of Object.keys(decl.actions)) {
         const mutate = decl.actions[key] as (draft: T, ...params: unknown[]) => void
@@ -226,6 +234,9 @@ export function defineStore<T, A extends ActionsDecl<T>>(
         subscribe: fn => store.subscribe(fn),
         store,
         clearPersisted: () => {
+          if (persistenceCleared) return
+          persistenceCleared = true
+          stopPersistence?.()
           if (persistKey === undefined || typeof localStorage === 'undefined') return
           try {
             localStorage.removeItem(persistKey)

@@ -99,10 +99,11 @@ export class SessionInputShell implements SessionInput {
   private readonly core = new InputMachine({ now: () => Date.now() })
   private noticeSeq = 0
   private lastMirroredDraft = ''
+  private draftOwned = false
   private imageIds: readonly DraftAttachmentId[] = []
   private disposed = false
   private readonly unsubscribeQueue: (() => void) | undefined
-  /** Draft persistence mirror (chat store write; receives the clipboard projection, never display-only ranges). */
+  /** Clipboard persistence writer, released with the owning shell. */
   private mirrorFn: ((text: string) => void) | undefined
 
   constructor(private readonly deps: SessionInputDeps) {
@@ -119,6 +120,7 @@ export class SessionInputShell implements SessionInput {
    * (narrows the machine's occurrence math; absent → diff scan).
    */
   setDraft(text: string, editRange?: EditRange): void {
+    this.draftOwned = true
     this.run(this.core.dispatch({ type: 'draft-changed', draft: text, ...(editRange !== undefined ? { editRange } : {}) }))
   }
 
@@ -199,6 +201,7 @@ export class SessionInputShell implements SessionInput {
    */
   submit(mode: InputSubmitMode = 'queue'): void {
     if (this.disposed) return
+    this.draftOwned = true
     // Claimed pre-gate: a claim that does not declare image acceptance never
     // submits while images are attached — one notice, everything retained.
     // Enter-time adjudication applies the same policy for unclaimed lines
@@ -381,19 +384,21 @@ export class SessionInputShell implements SessionInput {
   }
 
   /**
-   * Bind the draft persistence mirror (chat store write). Adopt-on-bind: the
-   * store draft may hold a persisted value from a previous mount; the caller
-   * seeds it via setDraft BEFORE binding, and afterwards every machine-adopted
-   * draft mirrors out.
+   * Connect the session's cached draft store for the shell lifetime. Only a
+   * pristine shell adopts persisted text; resident input, including an empty
+   * draft, remains authoritative. Each connection writes the current clipboard
+   * projection, and offscreen settlements keep persisting until disposal.
+   * @param persistedDraft - stored text available at the first connection.
    * @param write - store draft write.
-   * @returns the unbind disposer.
    */
-  bindMirror(write: (text: string) => void): () => void {
-    if (this.disposed) return () => {}
+  connectDraftStore(persistedDraft: string, write: (text: string) => void): void {
+    if (this.disposed) return
+    const adopt = !this.draftOwned && this.core.state.draftRev === 0 && this.core.state.phase === 'plain'
+    this.draftOwned = true
+    if (adopt && persistedDraft !== '') this.setDraft(persistedDraft)
     this.mirrorFn = write
-    return () => {
-      if (this.mirrorFn === write) this.mirrorFn = undefined
-    }
+    this.lastMirroredDraft = projectClipboard(this.snapshot)
+    write(this.lastMirroredDraft)
   }
 
   // ---- effect executor ----

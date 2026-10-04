@@ -19,6 +19,8 @@ The callback returns one synchronous disposer or an iterable of disposers. A gen
 
 ## Workspace and Session lists
 
+Pruning a session scope permanently stops its stores' persistence before removing their keys. Retained callbacks can still update the old in-memory instance, but cannot recreate storage or overwrite a replacement instance. Repeated cleanup leaves the replacement's key intact.
+
 Only the latest `Session.cancel()` request can update stop feedback. A successful retry clears the stop failure it observed at entry. Unrelated send failures and newer failures remain visible, so returning to a stopped session cannot re-announce a resolved stop error.
 
 `ctx.sessions.retainBinding(id)` keeps a listed row and its browser scope available during a caller-owned Host replacement. Its idempotent disposer releases that lease; live rows take precedence, the last release exposes an unresolved removal, and newer navigation remains selected. A retained binding preserves draft and workspace association but does not make a removed Session writable.
