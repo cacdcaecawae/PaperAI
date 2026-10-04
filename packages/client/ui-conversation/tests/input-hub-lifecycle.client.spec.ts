@@ -20,9 +20,12 @@ async function bench() {
   const releases: DraftAttachmentId[] = []
   let finish!: (outcome: SubmitOutcome) => void
   const pending = new Promise<SubmitOutcome>((resolve) => { finish = resolve })
-  const queued: { id: string; placement: 'queued' }[] = []
   const steers: string[] = []
-  const snapshot = { queue: queued }
+  let snapshot: { queue: readonly { id: string; placement: 'queued' }[] } = { queue: [] }
+  const setQueue = (queue: typeof snapshot.queue) => {
+    snapshot = { queue }
+    for (const fn of subscribers) fn()
+  }
   // The hub consumes only the queue observable and passes the Session to its sink.
   const session = {
     getSnapshot: () => snapshot,
@@ -57,7 +60,7 @@ async function bench() {
     reference: { source: 'reference', ref: 'doc-a', label: 'Research notes', clipboardText: '@Research notes' },
     span: { start: 0, end: shell.snapshot.draft.length, draftRev: shell.snapshot.draftRev },
   })
-  return { scope, binding, subscribers, sends, releases, queued, steers, finish, mount, pick }
+  return { scope, binding, subscribers, sends, releases, setQueue, steers, finish, mount, pick }
 }
 
 describe('input hub lifetime', () => {
@@ -117,7 +120,7 @@ describe('input hub lifetime', () => {
     old.shell.bindMirror(text => writes.push(text))
     old.shell.actions.setDraft('obsolete edit')
     old.shell.actions.submit()
-    b.queued.push({ id: 'q1', placement: 'queued' })
+    b.setQueue([{ id: 'q1', placement: 'queued' }])
     old.shell.steerQueue()
     b.finish({ kind: 'success' })
     await Promise.resolve()
