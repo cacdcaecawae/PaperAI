@@ -74,8 +74,7 @@ export class InputHub implements SessionInputResolver {
     const { sessionId: id, session, ctx: actx } = binding
     // Each owner releases the other registration, so neither retains a dead shell.
     let shell!: SessionInputShell
-    let disposePlugin: (() => void) | undefined
-    disposePlugin = this.rootCtx.effect(() => actx.effect(() => {
+    const disposePlugin: () => Promise<void> = this.rootCtx.effect(() => actx.effect(() => {
       shell = new SessionInputShell({
         actx,
         inputTriggers: () => this.controller(actx),
@@ -110,7 +109,7 @@ export class InputHub implements SessionInputResolver {
           shell.insertText(req.text, req.span, req.continue === true) ? true : undefined),
       ]
       return () => {
-        void disposePlugin?.()
+        void disposePlugin()
         for (const off of offs) off()
         const drafts = shell.snapshot.imageIds
         shell.dispose()

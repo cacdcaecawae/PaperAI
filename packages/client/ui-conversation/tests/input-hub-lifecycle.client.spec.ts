@@ -14,7 +14,7 @@ async function bench() {
   const sessionId = 'retained' as SessionId
   const scoped = createScope(ctx, sessionId)
   const scope = scoped.fiber
-  await scope
+  await scope.await()
   const subscribers = new Set<() => void>()
   const sends: { text: string; signal: AbortSignal }[] = []
   const releases: DraftAttachmentId[] = []
