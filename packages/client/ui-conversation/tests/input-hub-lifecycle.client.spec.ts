@@ -34,7 +34,7 @@ async function bench() {
   } as unknown as SessionFace
   const binding: SessionBinding = {
     sessionId: 'retained' as SessionId,
-    ctx: scope.ctx as SessionBinding['ctx'],
+    ctx: scope.ctx,
     session,
   }
   ctx.reflect.provide('conversation', {

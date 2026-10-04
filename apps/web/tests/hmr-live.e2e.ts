@@ -146,7 +146,10 @@ it('hot-reloads a client plugin and accepts a reference in its replacement input
     await expect.poll(() => input.inputValue()).toBe('@reference.txt ')
     const reference = page.locator('[data-reference-appearance="file"]')
     await expect.poll(() => reference.textContent()).toBe('@reference.txt')
-    const preserved = await page.evaluate(() => (window as Window & { __dshHmrPageIdentity?: string }).__dshHmrPageIdentity) === pageIdentity
+    const currentPageIdentity = await page.evaluate(
+      () => (window as Window & { __dshHmrPageIdentity?: string }).__dshHmrPageIdentity,
+    )
+    const preserved = currentPageIdentity === pageIdentity
     expect(preserved).toBe(true)
     const snapshot = `draft ${JSON.stringify(await input.inputValue())}\nreference ${JSON.stringify(await reference.textContent())}\npage preserved ${String(preserved)}`
     await compareOrRefreshGolden(
