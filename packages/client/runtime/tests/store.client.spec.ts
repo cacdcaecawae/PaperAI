@@ -188,6 +188,53 @@ describe('defineStore', () => {
     expect(backing.has('spec.chat')).toBe(true)
   })
 
+  it('retires persistence before late actions and preserves a replacement with the same scope key', () => {
+    const backing = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => { backing.set(k, v) },
+      removeItem: (k: string) => { backing.delete(k) },
+    })
+    const handle = defineStore({
+      init: () => ({ draft: '' }),
+      persist: 'spec.retired',
+      actions: { setDraft: (d, text: string) => { d.draft = text } },
+    })
+    const old = handle.create('same-session')
+    old.actions.setDraft('pending')
+    old.clearPersisted()
+    old.actions.setDraft('late settlement')
+    expect(old.getSnapshot().draft).toBe('late settlement')
+    expect(backing.has('spec.retired.same-session')).toBe(false)
+
+    const replacement = handle.create('same-session')
+    replacement.actions.setDraft('replacement draft')
+    old.actions.setDraft('another old callback')
+    old.clearPersisted()
+    expect(JSON.parse(backing.get('spec.retired.same-session')!)).toEqual({ draft: 'replacement draft' })
+    replacement.actions.setDraft('current edit')
+    expect(JSON.parse(backing.get('spec.retired.same-session')!)).toEqual({ draft: 'current edit' })
+  })
+
+  it('stops writes even when clearing storage throws', () => {
+    const setItem = vi.fn()
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem,
+      removeItem: () => { throw new Error('storage unavailable') },
+    })
+    const store = defineStore({
+      init: () => ({ n: 0 }),
+      persist: 'spec.retired-error',
+      actions: { increment: (d) => { d.n += 1 } },
+    }).create('scope')
+    store.actions.increment()
+    expect(setItem).toHaveBeenCalledTimes(1)
+    store.clearPersisted()
+    store.actions.increment()
+    expect(setItem).toHaveBeenCalledTimes(1)
+  })
+
   it('clearPersisted is a no-op without a persist declaration or without storage', () => {
     const inst = declare().create('s1')   // no persist key declared
     expect(() => { inst.clearPersisted() }).not.toThrow()

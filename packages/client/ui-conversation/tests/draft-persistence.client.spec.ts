@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SubmitOutcome } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { SessionInputShell } from '../src/client/input/facade.ts'
@@ -23,6 +24,36 @@ function deferred() {
 beforeEach(() => { localStorage.clear() })
 
 describe('resident draft persistence', () => {
+  it('keeps a pruned scope absent when admission settles before asynchronous input cleanup', async () => {
+    const ctx = new Context()
+    const scope = ctx.plugin(() => {})
+    await scope
+    const pending = deferred()
+    const shell = input(() => pending.promise)
+    scope.ctx.effect(() => () => { shell.dispose() }, 'input cleanup')
+    const handle = createChatStore()
+    const old = handle.create('pruned')
+    shell.connectDraftStore('', old.actions.setDraft)
+    shell.setDraft('pending image description')
+    shell.addImages(['image' as DraftAttachmentId])
+    shell.submit()
+    const removal = Promise.resolve().then(() => {
+      const disposal = scope.dispose()
+      old.clearPersisted()
+      return disposal
+    })
+    pending.resolve({ kind: 'success' })
+    await removal
+    expect(localStorage.getItem('dsh.conversation.chat.pruned')).toBeNull()
+
+    const replacement = handle.create('pruned')
+    replacement.actions.setDraft('replacement draft')
+    old.actions.setDraft('late callback')
+    old.clearPersisted()
+    const persisted = JSON.parse(localStorage.getItem('dsh.conversation.chat.pruned')!) as { draft: string }
+    expect(persisted.draft).toBe('replacement draft')
+  })
+
   it('persists accepted text and image consumption before the view returns', async () => {
     const pending = deferred()
     const shell = input(() => pending.promise)
