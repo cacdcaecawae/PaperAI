@@ -100,7 +100,7 @@ export interface InputNotice {
 export interface ComposerKeyboard {
   /** Live machine state for event-handler reads (render reads go through useInput). */
   readonly snapshot: InputState
-  /** Draft write with the DOM-observed edit shape (narrows occurrence math). */
+  /** Draft write; an explicit edit range replaces intersecting references even when text is unchanged. */
   setDraft(text: string, editRange?: EditRange): void
   /** Submit with an explicit delivery mode resolved by the keyboard policy. */
   submit(mode: InputSubmitMode): void
@@ -249,7 +249,7 @@ export interface SubmitAttempt {
  * injected clock reading; only single-char typing coalescing reads it.
  */
 export type InputEvent =
-  /** Full next draft from the textarea; editRange narrows the occurrence math (absent → diff scan). */
+  /** Full next draft; an explicit range replaces intersecting references even for unchanged text (absent → diff scan). */
   | { readonly type: 'draft-changed'; readonly draft: string; readonly editRange?: EditRange }
   | { readonly type: 'begin-command'; readonly claim: CommandClaim; readonly span: TokenSpan }
   /** Place one inline reference at the span and mint the occurrence (scoped insert-reference event payload). */
