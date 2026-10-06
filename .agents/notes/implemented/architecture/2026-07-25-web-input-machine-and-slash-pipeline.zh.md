@@ -88,6 +88,10 @@ skill/@subagent 引用不走占位符 + occurrence 身份链——纯文本引�
 - 发送即原文（不再 `<skill>` 序列化）；气泡侧 MessageItem 双形状装饰（legacy `<skill>` 标签 + 纯文本 token）。
 - 旧 occurrence/paste/serialize 链全部保留在盘未删（additive；删除另成将来一刀）。装饰响应性：InputBar 以 uSES 订阅 shell 的 lexicon source，scope 出生预热后才 settle 的名录会直接点亮已有 draft token，无需菜单交互或无关重渲染。
 
+工作区导航可能在任一输入仍拥有受理事务时完成。因此，草稿转移要求两个输入状态机都处于 plain 或 claimed；命令判定与发送受理期间，文本和图片身份保留在原外壳。导航仍可继续，受理失败后原输入可重试。这也避免了可复用的空白目标会话在首个请求待受理时被覆盖草稿。每次工作区选择在会话插件内拥有一个意图身份。更新的选择、中途所选会话的变化或插件卸载都会使它失效。保留的回调首先确认其渲染时的会话仍与当前选择一致。Host 连接创建可以独立完成，但只有仍有效的当前意图可以转移草稿并打开目标；选择失败也不会恢复更早的选择。
+
+草稿跨输入转移时使用剪贴板投影，因为 occurrence 身份属于来源状态机。仅有展示标签无法保留会话召回或嵌套文件引用。目标接收规范引用文本，而不继承来源的 occurrence 表。全范围编辑同时移除目标 occurrence，包括其展示文本与传入文本相同的情况；否则，不变的标签可能悄悄保留另一个引用身份。该编辑是一次撤销事务，并使待完成的粘贴匹配失效。相对文件引用保持原文，不重定位到来源 Workspace。
+
 ### 每会话供数贡献与键盘私面
 
 - ui-conversation（hub 兼贡献者）经 `sessions.provide` 供 `'input'` hook（机器状态 + queue overlay）+ `inputActions` prop（`setDraft`/`submit`，稳定 void 回调）。
