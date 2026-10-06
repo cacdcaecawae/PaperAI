@@ -211,6 +211,23 @@ export function apply(ctx: Context): void {
     },
   }), 'ui-conversation: input standard-kit provider')
 
+  // One pending Workspace choice owns draft transfer and navigation. Null
+  // permanently closes this owner when its conversation plugin unloads.
+  let workspacePick: symbol | undefined | null
+  ctx.effect(() => {
+    let selected = sessions.list.getSnapshot().current
+    const stop = sessions.list.subscribe(() => {
+      const next = sessions.list.getSnapshot().current
+      if (next === selected) return
+      selected = next
+      if (workspacePick !== null) workspacePick = undefined
+    })
+    return () => {
+      workspacePick = null
+      stop()
+    }
+  }, 'ui-conversation: Workspace selection ownership')
+
   // Resident current-session-optional shell. It owns the stable Hero/composer
   // frame while strict session slots fill only their session-bound regions.
   slots.register({
@@ -234,27 +251,37 @@ export function apply(ctx: Context): void {
     inject: (sessionId: SessionId | undefined): ConversationInjected => ({
       hooks: { composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId) },
       selectWorkspace: async (workspaceId) => {
-        const nextId = await workspaces.connectWorkspace(workspaceId)
-        if (sessionId !== undefined && nextId !== sessionId) {
-          const from = inputHub.shell(sessionId)
-          const next = inputHub.shell(nextId)
-          const source = from.snapshot
-          const target = next.snapshot
-          const draft = source.draft
-          const imageIds = source.imageIds
-          if ((source.phase === 'plain' || source.phase === 'claimed')
-            && (target.phase === 'plain' || target.phase === 'claimed')
-            && (imageIds.length === 0 || next.addImages(imageIds))) {
-            if (draft !== '') {
-              next.setDraft(draft)
-              from.setDraft('')
-            }
-            if (imageIds.length > 0) {
-              for (const id of imageIds) from.removeImage(id)
+        const selected = sessions.list.getSnapshot().current
+        if (workspacePick === null || selected !== sessionId) return
+        const request = Symbol()
+        workspacePick = request
+        try {
+          const nextId = await workspaces.connectWorkspace(workspaceId)
+          if (workspacePick !== request || sessions.list.getSnapshot().current !== selected) return
+          workspacePick = undefined
+          if (sessionId !== undefined && nextId !== sessionId) {
+            const from = inputHub.shell(sessionId)
+            const next = inputHub.shell(nextId)
+            const source = from.snapshot
+            const target = next.snapshot
+            const draft = source.draft
+            const imageIds = source.imageIds
+            if ((source.phase === 'plain' || source.phase === 'claimed')
+              && (target.phase === 'plain' || target.phase === 'claimed')
+              && (imageIds.length === 0 || next.addImages(imageIds))) {
+              if (draft !== '') {
+                next.setDraft(draft)
+                from.setDraft('')
+              }
+              if (imageIds.length > 0) {
+                for (const id of imageIds) from.removeImage(id)
+              }
             }
           }
+          sessions.open(nextId)
+        } finally {
+          if (workspacePick === request) workspacePick = undefined
         }
-        sessions.open(nextId)
       },
     }),
   }, ConversationRoot)

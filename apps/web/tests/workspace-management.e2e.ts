@@ -612,9 +612,9 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
 
   it.skipIf(MODE === 'record')('issued zero model calls and stayed clean', async () => {
     expect(tripwire.warnings).toEqual([])
-    // The browser and pending-transfer goldens are owned by this spec;
+    // The browser and workspace-transfer goldens are owned by this spec;
     // the seed it reuses is owned (and inventory-guarded) by seeded-history.
-    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md', 'pending-draft-transfer.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md', 'pending-draft-transfer.expected.md', 'latest-workspace-choice.expected.md'])
   })
 })
 
@@ -723,6 +723,103 @@ it('keeps a pending image admission on its source while a delayed workspace pick
   } finally {
     connectRelease.resolve(undefined)
     promptRelease.resolve(undefined)
+    await page.unrouteAll({ behavior: 'wait' })
+    await browser.close()
+    await world.close()
+  }
+}, 120_000)
+
+
+it('keeps the latest workspace selected when an older connection replies afterward', async () => {
+  const world = await launchWebScaffold({})
+  const browser = await chromium.launch()
+  const page = await newEnglishPage(browser)
+  const tripwire = watchConsole(page)
+  const olderRequested = Promise.withResolvers<undefined>()
+  const latestRequested = Promise.withResolvers<undefined>()
+  const releaseOlder = Promise.withResolvers<undefined>()
+  const releaseLatest = Promise.withResolvers<undefined>()
+  const routeErrors: unknown[] = []
+  const draft = 'Carry this to the latest workspace'
+  try {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-latest-choice'))
+    await page.goto(world.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    const welcome = page.getByRole('dialog').filter({ hasText: 'Internal Testing Notice' })
+    if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'Continue', exact: true }).click()
+    await connectFreshWorkspace(page, world.workspaceCwd, 'source-choice')
+    const olderPath = join(world.workspaceCwd, 'older-workspace')
+    const latestPath = join(world.workspaceCwd, 'latest-workspace')
+    await mkdir(olderPath, { recursive: true })
+    await mkdir(latestPath, { recursive: true })
+    const olderWorkspace = await world.ctx.workspaceRegistry.create(olderPath, 'older-workspace')
+    const latestWorkspace = await world.ctx.workspaceRegistry.create(latestPath, 'latest-workspace')
+    await page.route('**/api/session.create', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { payload: { workspaceId?: string } }
+        const workspaceId = request.payload.workspaceId
+        if (workspaceId !== olderWorkspace.id && workspaceId !== latestWorkspace.id) {
+          await route.continue()
+          return
+        }
+        const older = workspaceId === olderWorkspace.id
+        const requested = older ? olderRequested : latestRequested
+        requested.resolve(undefined)
+        const response = await route.fetch()
+        await (older ? releaseOlder : releaseLatest).promise
+        await route.fulfill({ response })
+      } catch (error) { routeErrors.push(error) }
+    })
+    const composer = page.locator('textarea').first()
+    await composer.fill(draft)
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'older-workspace', exact: true }).click()
+    await olderRequested.promise
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'latest-workspace', exact: true }).click()
+    await latestRequested.promise
+    const latestReply = page.waitForResponse((response) => {
+      if (!response.url().endsWith('/api/session.create')) return false
+      const request = response.request().postDataJSON() as { payload: { workspaceId?: string } }
+      return request.payload.workspaceId === latestWorkspace.id
+    })
+    releaseLatest.resolve(undefined)
+    const latestResponse = await latestReply
+    expect((await latestResponse.json() as { result: { ok: boolean } }).result.ok).toBe(true)
+    await latestResponse.finished()
+    const back = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await back.isVisible()) await back.click()
+    await page.getByRole('treeitem', { name: 'latest-workspace', exact: true }).click()
+    const latestSessions = page.getByRole('tree', { name: 'Workspace sessions' })
+    const selected = latestSessions.getByRole('treeitem', { selected: true })
+    await expect.poll(() => selected.count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => composer.inputValue()).toBe(draft)
+    const olderReply = page.waitForResponse((response) => {
+      if (!response.url().endsWith('/api/session.create')) return false
+      const request = response.request().postDataJSON() as { payload: { workspaceId?: string } }
+      return request.payload.workspaceId === olderWorkspace.id
+    })
+    releaseOlder.resolve(undefined)
+    const olderResponse = await olderReply
+    expect((await olderResponse.json() as { result: { ok: boolean } }).result.ok).toBe(true)
+    await olderResponse.finished()
+    // Let response continuations and React's frame work commit before checking
+    // that the completed older request left the visible selection untouched.
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => { requestAnimationFrame(() => { resolve() }) })
+    }))
+    expect(await selected.count()).toBe(1)
+    expect(await composer.inputValue()).toBe(draft)
+    await compareOrRefreshGolden(
+      join(SNAPSHOT_DIR, 'latest-workspace-choice.expected.md'),
+      `latest selected ${await selected.count() === 1}\ndraft ${JSON.stringify(await composer.inputValue())}`,
+      MODE,
+    )
+    expect(routeErrors).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  } finally {
+    releaseOlder.resolve(undefined)
+    releaseLatest.resolve(undefined)
     await page.unrouteAll({ behavior: 'wait' })
     await browser.close()
     await world.close()

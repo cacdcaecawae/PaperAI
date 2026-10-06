@@ -418,10 +418,140 @@ describe('conversation slot inject API', () => {
     }
   })
 
+  it.each([false, true])('only the latest workspace choice can transfer and open (olderFirst=%s)', async (olderFirst) => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:latest-choice')
+    try {
+      const OLDER = 'older-workspace-session' as SessionId
+      const LATEST = 'latest-workspace-session' as SessionId
+      await b.runtime.sessions.add({ id: OLDER }, { current: false })
+      await b.runtime.sessions.add({ id: LATEST }, { current: false })
+      let finishOlder!: (id: SessionId) => void
+      let finishLatest!: (id: SessionId) => void
+      const olderConnection = new Promise<SessionId>((resolve) => { finishOlder = resolve })
+      const latestConnection = new Promise<SessionId>((resolve) => { finishLatest = resolve })
+      b.runtime.workspaces.stub('connectWorkspace', id => id === 'older-workspace' ? olderConnection : latestConnection)
+      const source = b.composerApi(ROOT)
+      source.keyboard!.setDraft('carry to latest')
+      expect(source.addImages!([new File([Uint8Array.of(1)], 'latest.png', { type: 'image/png' })])).toBeNull()
+      const imageIds = source.keyboard!.snapshot.imageIds
+      const choose = b.residentApi(ROOT).selectWorkspace
+      const older = choose('older-workspace' as never)
+      const latest = choose('latest-workspace' as never)
+      if (olderFirst) {
+        finishOlder(OLDER)
+        await older
+        expect(b.runtime.sessions.calls.filter(call => call.method === 'open')).toEqual([])
+        finishLatest(LATEST)
+        await latest
+      } else {
+        finishLatest(LATEST)
+        await latest
+        finishOlder(OLDER)
+        await older
+      }
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open'))
+        .toEqual([{ method: 'open', args: [LATEST] }])
+      expect(b.composerApi(LATEST).keyboard!.snapshot).toMatchObject({ draft: 'carry to latest', imageIds })
+      expect(b.composerApi(OLDER).keyboard!.snapshot).toMatchObject({ draft: '', imageIds: [] })
+      expect(source.keyboard!.snapshot).toMatchObject({ draft: '', imageIds: [] })
+    } finally {
+      await b.runtime.dispose()
+      created.mockRestore()
+    }
+  })
+
+  it.each([false, true])('a later session selection invalidates the pending workspace choice (returns=%s)', async (returnToSource) => {
+    const b = await bench()
+    try {
+      const OTHER = 'selected-elsewhere' as SessionId
+      const TARGET = 'abandoned-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      await b.runtime.sessions.add({ id: TARGET }, { current: false })
+      let finish!: (id: SessionId) => void
+      b.runtime.workspaces.stub('connectWorkspace', () => new Promise<SessionId>((resolve) => { finish = resolve }))
+      b.inputApi(ROOT).actions.setDraft('keep at source')
+      const pending = b.residentApi(ROOT).selectWorkspace('abandoned-workspace' as never)
+      await b.runtime.sessions.setCurrent(OTHER)
+      if (returnToSource) await b.runtime.sessions.setCurrent(ROOT)
+      finish(TARGET)
+      await pending
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open')).toEqual([])
+      expect(b.inputApi(ROOT).state.getSnapshot().draft).toBe('keep at source')
+      expect(b.inputApi(TARGET).state.getSnapshot().draft).toBe('')
+    } finally { await b.runtime.dispose() }
+  })
+
+  it.each([false, true])('plugin unload cancels pending and retained workspace callbacks (hero=%s)', async (fromHero) => {
+    const b = await bench()
+    try {
+      const TARGET = 'unloaded-target' as SessionId
+      await b.runtime.sessions.add({ id: TARGET }, { current: false })
+      if (fromHero) await b.runtime.sessions.setCurrent(undefined)
+      const choose = b.residentApi(fromHero ? undefined : ROOT).selectWorkspace
+      let finish!: (id: SessionId) => void
+      b.runtime.workspaces.stub('connectWorkspace', () => new Promise<SessionId>((resolve) => { finish = resolve }))
+      const pending = choose('unloaded-workspace' as never)
+      await b.feature.dispose()
+      finish(TARGET)
+      await expect(pending).resolves.toBeUndefined()
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open')).toEqual([])
+      await expect(choose('another-workspace' as never)).resolves.toBeUndefined()
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open')).toEqual([])
+      expect(b.runtime.workspaces.calls.filter(call => call.method === 'connectWorkspace')).toHaveLength(1)
+    } finally { await b.runtime.dispose() }
+  })
+
+  it.each([false, true])('a retained callback cannot act for a different current session (hero=%s)', async (fromHero) => {
+    const b = await bench()
+    try {
+      const OTHER = 'new-current' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      if (fromHero) await b.runtime.sessions.setCurrent(undefined)
+      const choose = b.residentApi(fromHero ? undefined : ROOT).selectWorkspace
+      await b.runtime.sessions.setCurrent(OTHER)
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      await choose('obsolete-workspace' as never)
+      expect(b.runtime.workspaces.calls.filter(call => call.method === 'connectWorkspace')).toEqual([])
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open')).toEqual([])
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('a latest connection failure does not revive an older choice and permits retry', async () => {
+    const b = await bench()
+    try {
+      const OLDER = 'failed-choice-older' as SessionId
+      const LATEST = 'failed-choice-latest' as SessionId
+      await b.runtime.sessions.add({ id: OLDER }, { current: false })
+      await b.runtime.sessions.add({ id: LATEST }, { current: false })
+      let finishOlder!: (id: SessionId) => void
+      let failLatest!: (error: Error) => void
+      const olderConnection = new Promise<SessionId>((resolve) => { finishOlder = resolve })
+      const latestConnection = new Promise<SessionId>((_resolve, reject) => { failLatest = reject })
+      b.runtime.workspaces.stub('connectWorkspace', id => id === 'older-workspace' ? olderConnection : latestConnection)
+      b.inputApi(ROOT).actions.setDraft('retry latest choice')
+      const choose = b.residentApi(ROOT).selectWorkspace
+      const older = choose('older-workspace' as never)
+      const latest = choose('latest-workspace' as never)
+      failLatest(new Error('connection failed'))
+      await expect(latest).rejects.toThrow('connection failed')
+      finishOlder(OLDER)
+      await older
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open')).toEqual([])
+      expect(b.inputApi(ROOT).state.getSnapshot().draft).toBe('retry latest choice')
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(LATEST))
+      await choose('retry-workspace' as never)
+      expect(b.runtime.sessions.calls.filter(call => call.method === 'open'))
+        .toEqual([{ method: 'open', args: [LATEST] }])
+      expect(b.inputApi(LATEST).state.getSnapshot().draft).toBe('retry latest choice')
+    } finally { await b.runtime.dispose() }
+  })
+
   it('selectWorkspace edge arms: no-session resident, empty-draft move, connect failure retryable', async () => {
     const b = await bench()
     // No-session resident (hero before any session): connect resolves and
     // navigation proceeds without any draft choreography.
+    await b.runtime.sessions.setCurrent(undefined)
     const noSession = b.residentApi(undefined)
     b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(ROOT))
     void noSession.selectWorkspace('workspace-0' as never)
@@ -446,7 +576,7 @@ describe('conversation slot inject API', () => {
     // the rollback) and no further navigation happens.
     const opens = b.runtime.sessions.calls.filter(c => c.method === 'open').length
     b.runtime.workspaces.stub('connectWorkspace', () => Promise.reject(new Error('offline')))
-    await expect(resident.selectWorkspace('workspace-4' as never)).rejects.toThrow('offline')
+    await expect(b.residentApi(OTHER).selectWorkspace('workspace-4' as never)).rejects.toThrow('offline')
     expect(b.runtime.sessions.calls.filter(c => c.method === 'open')).toHaveLength(opens)
     await b.runtime.dispose()
   })
