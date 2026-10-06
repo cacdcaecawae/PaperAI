@@ -17,7 +17,9 @@ import { join, sep } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-title'
 import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
@@ -614,7 +616,7 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
     expect(tripwire.warnings).toEqual([])
     // The browser and workspace-transfer goldens are owned by this spec;
     // the seed it reuses is owned (and inventory-guarded) by seeded-history.
-    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md', 'pending-draft-transfer.expected.md', 'latest-workspace-choice.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md', 'pending-draft-transfer.expected.md', 'latest-workspace-choice.expected.md', 'reference-draft-transfer.expected.md'])
   })
 })
 
@@ -820,6 +822,90 @@ it('keeps the latest workspace selected when an older connection replies afterwa
   } finally {
     releaseOlder.resolve(undefined)
     releaseLatest.resolve(undefined)
+    await page.unrouteAll({ behavior: 'wait' })
+    await browser.close()
+    await world.close()
+  }
+}, 120_000)
+
+it('keeps a selected session reference parseable after moving its draft to another workspace', async () => {
+  const world = await launchWebScaffold({})
+  const browser = await chromium.launch()
+  const page = await newEnglishPage(browser)
+  const tripwire = watchConsole(page)
+  const submitted = Promise.withResolvers<unknown>()
+  const routeErrors: unknown[] = []
+  const referenceId = 'workspace-transfer-reference'
+  const canonical = `@[Research notes](dsh-session:${Buffer.from(JSON.stringify(referenceId)).toString('base64url')})`
+  const retryError = 'Reference transfer admission rejected'
+  try {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-reference-transfer'))
+    const reference = Session.create(SessionId(referenceId))
+    reference.append('turn/start', { turn: 1 })
+    const user = reference.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'Source context for the workspace reference.' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    reference.append('session/title', { title: 'Research notes', messageSeqs: [user.seq], source: { kind: 'fallback' } })
+    reference.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    await seedSession(world, [
+      JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION, id: '{{sessionId}}', createdAt: 0, cwd: '{{cwd}}' }),
+      ...reference.events.map(event => JSON.stringify(event)), '',
+    ].join('\n'), referenceId)
+    await page.goto(world.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    const welcome = page.getByRole('dialog').filter({ hasText: 'Internal Testing Notice' })
+    if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'Continue', exact: true }).click()
+    await connectFreshWorkspace(page, world.workspaceCwd, 'reference-source')
+    const targetPath = join(world.workspaceCwd, 'reference-target')
+    await mkdir(targetPath, { recursive: true })
+    await world.ctx.workspaceRegistry.create(targetPath, 'reference-target')
+    await page.route('**/api/session.prompt', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { rpcId: string; payload: { content: unknown } }
+        submitted.resolve(request.payload.content)
+        await route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({
+            type: 'server-response', rpcId: request.rpcId,
+            result: { ok: false, error: { code: 'internal', message: retryError, details: {} } },
+          }),
+        })
+      } catch (error) { routeErrors.push(error) }
+    })
+    const composer = page.locator('textarea').first()
+    await composer.fill('@Research')
+    const menu = page.getByRole('listbox', { name: 'Trigger suggestions' })
+    await menu.getByRole('option', { name: /Session \u00b7 Research notes/ }).click()
+    await expect.poll(() => composer.inputValue()).toBe('@Research notes ')
+    await expect.poll(() => page.locator('[data-reference-appearance="session"]').count()).toBe(1)
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'reference-target', exact: true }).click()
+    const back = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await back.isVisible()) await back.click()
+    await page.getByRole('treeitem', { name: 'reference-target', exact: true }).click()
+    const selected = page.getByRole('tree', { name: 'Workspace sessions' }).getByRole('treeitem', { selected: true })
+    await expect.poll(() => selected.count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => composer.inputValue()).toBe(canonical + ' ')
+    const destination = { draft: await composer.inputValue(), selected: await selected.count() === 1 }
+    await composer.press('Enter')
+    const content = await submitted.promise
+    expect(content).toEqual([{ type: 'text', text: canonical }])
+    await page.getByRole('alert').filter({ hasText: retryError }).waitFor()
+    expect(await composer.inputValue()).toBe(canonical + ' ')
+    if (await back.isVisible()) await back.click()
+    const sourceRow = page.getByRole('treeitem', { name: 'reference-source', exact: true })
+    await sourceRow.hover()
+    await sourceRow.getByRole('button', { name: 'New session in reference-source' }).click()
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe('')
+    await compareOrRefreshGolden(
+      join(SNAPSHOT_DIR, 'reference-draft-transfer.expected.md'),
+      `destination ${JSON.stringify(destination)}\nsubmitted ${JSON.stringify(content)}\nsource ${JSON.stringify({ draft: await composer.inputValue() })}`,
+      MODE,
+    )
+    expect(routeErrors).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  } finally {
     await page.unrouteAll({ behavior: 'wait' })
     await browser.close()
     await world.close()

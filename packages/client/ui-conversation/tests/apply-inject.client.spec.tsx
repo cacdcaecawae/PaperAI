@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SlotTestRuntime, usePinnedBrowserLanguages, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionBehaviorOverrides } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import type { ReferenceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { ISession, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
@@ -31,6 +32,18 @@ import type { createChatStore } from '../src/client/stores.ts'
 usePinnedBrowserLanguages('zh-CN')
 
 const ROOT = 'root-1' as SessionId
+const SESSION_REFERENCE = {
+  source: 'reference', ref: '@[Research notes](dsh-session:InNvdXJjZSI)', label: 'Research notes',
+  appearance: 'session', clipboardText: '@[Research notes](dsh-session:InNvdXJjZSI)',
+} satisfies ReferenceInsert
+const FILE_REFERENCE = {
+  source: 'reference', ref: '@src/reference.txt', label: 'reference.txt',
+  appearance: 'file', clipboardText: '@src/reference.txt',
+} satisfies ReferenceInsert
+const QUOTED_REFERENCE = {
+  source: 'reference', ref: '@"docs/Research notes.md"', label: 'Research notes.md',
+  appearance: 'file', clipboardText: '@"docs/Research notes.md"',
+} satisfies ReferenceInsert
 
 type ChatInstance = ReturnType<ReturnType<typeof createChatStore>['create']>
 type ChatActions = ChatInstance['actions']
@@ -121,10 +134,20 @@ async function bench() {
     }
     return { state, actions }
   }
+  /** Apply a real scoped reference pick at the end of the current draft. */
+  const appendReference = (id: SessionId, reference: ReferenceInsert) => {
+    const input = composerApi(id).keyboard!
+    const start = input.snapshot.draft.length
+    input.setDraft(input.snapshot.draft + '@')
+    const scope = runtime.sessions.scope(id)!
+    expect(scope.bail(scope, 'slash/input-insert-reference', {
+      reference, span: { start, end: start + 1, draftRev: input.snapshot.draftRev },
+    })).toBe(true)
+  }
   return {
     runtime, feature, slots: runtime.slots, entryOf,
     conversationApi, conversationHeaderApi, residentApi, composerApi, chatViewApi, inputApi,
-    sessionFake, layoutFake,
+    sessionFake, layoutFake, appendReference,
   }
 }
 
@@ -310,6 +333,203 @@ describe('conversation slot inject API', () => {
     expect(state.getSnapshot().draft).toBe('')
     expect(b.inputApi(OTHER).state.getSnapshot().draft).toBe('carry me')
     await b.runtime.dispose()
+  })
+
+  it.each([SESSION_REFERENCE, FILE_REFERENCE, QUOTED_REFERENCE])('carries canonical reference text across workspace selection ($ref)', async (reference) => {
+    const b = await bench()
+    try {
+      const OTHER = 'reference-target' as SessionId
+      const targetSession = sessionFakeFor()
+      await b.runtime.sessions.add({ id: OTHER, session: targetSession }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      b.appendReference(ROOT, reference)
+      const source = b.composerApi(ROOT).keyboard!
+      expect(source.snapshot.draft).toBe(`@${reference.label} `)
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(source.snapshot).toMatchObject({ draft: '', occurrences: [] })
+      const target = b.composerApi(OTHER).keyboard!
+      expect(target.snapshot.draft).toBe(reference.clipboardText + ' ')
+      target.submit('queue')
+      await vi.waitFor(() => { expect(targetSession.prompt).toHaveBeenCalledOnce() })
+      expect(targetSession.prompt).toHaveBeenCalledWith(
+        [{ type: 'text', text: reference.clipboardText }], 'queue', expect.any(AbortSignal),
+      )
+      expect(b.sessionFake.prompt).not.toHaveBeenCalled()
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('preserves multiple reference identities and surrounding text during workspace transfer', async () => {
+    const b = await bench()
+    try {
+      const OTHER = 'multiple-reference-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      const source = b.composerApi(ROOT).keyboard!
+      source.setDraft('Compare ')
+      b.appendReference(ROOT, SESSION_REFERENCE)
+      source.setDraft(source.snapshot.draft + 'with ')
+      b.appendReference(ROOT, FILE_REFERENCE)
+      source.setDraft(source.snapshot.draft + 'please')
+      expect(source.snapshot.occurrences).toHaveLength(2)
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(b.composerApi(OTHER).keyboard!.snapshot.draft)
+        .toBe(`Compare ${SESSION_REFERENCE.clipboardText} with ${FILE_REFERENCE.clipboardText} please`)
+      expect(source.snapshot).toMatchObject({ draft: '', occurrences: [] })
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('transfers an edited reference as ordinary text without restoring its former identity', async () => {
+    const b = await bench()
+    try {
+      const OTHER = 'edited-reference-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      b.appendReference(ROOT, FILE_REFERENCE)
+      const source = b.composerApi(ROOT).keyboard!
+      source.setDraft('@reference-edited.txt ')
+      expect(source.snapshot.occurrences).toEqual([])
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(b.composerApi(OTHER).keyboard!.snapshot.draft).toBe('@reference-edited.txt ')
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('keeps structured references on the source during pending admission', async () => {
+    const b = await bench()
+    try {
+      const OTHER = 'pending-reference-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      b.runtime.provide('inputTriggers', {
+        sessionOf: () => ({ serializeReference: (_source: string, ref: string) => Promise.resolve(ref), track: vi.fn() }),
+      } as never)
+      let settle!: (result: Awaited<ReturnType<ISession['prompt']>>) => void
+      b.sessionFake.prompt.mockImplementationOnce(() => new Promise((resolve) => { settle = resolve }))
+      b.appendReference(ROOT, SESSION_REFERENCE)
+      const source = b.composerApi(ROOT).keyboard!
+      source.submit('queue')
+      await vi.waitFor(() => { expect(b.sessionFake.prompt).toHaveBeenCalledOnce() })
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(source.snapshot.draft).toBe('@Research notes ')
+      expect(source.snapshot.occurrences).toHaveLength(1)
+      expect(b.composerApi(OTHER).keyboard!.snapshot.draft).toBe('')
+      settle({ ok: false, error: { code: 'internal', message: 'retry source', details: {} } })
+      await vi.waitFor(() => { expect(source.snapshot.phase).toBe('plain') })
+      expect(source.snapshot.occurrences).toHaveLength(1)
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('retains transferred canonical references and image bytes after destination rejection and retry', async () => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:reference-transfer')
+    const revoked = vi.spyOn(URL, 'revokeObjectURL')
+    try {
+      const OTHER = 'rejected-reference-target' as SessionId
+      const targetSession = sessionFakeFor()
+      targetSession.prompt.mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'retry target', details: {} } })
+      await b.runtime.sessions.add({ id: OTHER, session: targetSession }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      const source = b.composerApi(ROOT)
+      b.appendReference(ROOT, SESSION_REFERENCE)
+      expect(source.addImages!([new File([Uint8Array.of(1, 2, 3)], 'reference.png', { type: 'image/png' })])).toBeNull()
+      const imageIds = source.keyboard!.snapshot.imageIds
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(source.keyboard!.snapshot).toMatchObject({ draft: '', occurrences: [], imageIds: [] })
+      const target = b.composerApi(OTHER)
+      target.keyboard!.submit('queue')
+      await vi.waitFor(() => { expect(target.keyboard!.snapshot.phase).toBe('plain') })
+      expect(target.keyboard!.snapshot).toMatchObject({ draft: SESSION_REFERENCE.clipboardText + ' ', imageIds })
+      expect(target.draftImages!(imageIds)).toHaveLength(1)
+      expect(revoked).not.toHaveBeenCalled()
+      target.keyboard!.submit('queue')
+      await vi.waitFor(() => { expect(target.keyboard!.snapshot.draft).toBe('') })
+      expect(targetSession.prompt).toHaveBeenCalledTimes(2)
+      expect(targetSession.prompt.mock.calls[1]?.[0]).toEqual(targetSession.prompt.mock.calls[0]?.[0])
+      expect(targetSession.prompt.mock.calls[0]?.[0].at(-1)).toEqual({ type: 'text', text: SESSION_REFERENCE.clipboardText })
+      expect(target.keyboard!.snapshot.imageIds).toEqual([])
+      expect(target.draftImages!(imageIds)).toEqual([])
+    } finally {
+      await b.runtime.dispose()
+      created.mockRestore()
+      revoked.mockRestore()
+    }
+  })
+
+  it('moves an image-only draft without releasing the transferred attachment', async () => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:image-only-transfer')
+    const revoked = vi.spyOn(URL, 'revokeObjectURL')
+    try {
+      const OTHER = 'image-only-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      const source = b.composerApi(ROOT)
+      expect(source.addImages!([new File([Uint8Array.of(1)], 'only.png', { type: 'image/png' })])).toBeNull()
+      const imageIds = source.keyboard!.snapshot.imageIds
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(source.keyboard!.snapshot).toMatchObject({ draft: '', imageIds: [] })
+      const target = b.composerApi(OTHER)
+      expect(target.keyboard!.snapshot).toMatchObject({ draft: '', imageIds })
+      expect(target.draftImages!(imageIds)).toHaveLength(1)
+      expect(revoked).not.toHaveBeenCalled()
+    } finally {
+      await b.runtime.dispose()
+      created.mockRestore()
+      revoked.mockRestore()
+    }
+  })
+
+  it.each([false, true])('replaces destination reference identities in one undoable edit (suffix=%s)', async (withSuffix) => {
+    const b = await bench()
+    try {
+      const OTHER = 'occupied-reference-target' as SessionId
+      const targetSession = sessionFakeFor()
+      await b.runtime.sessions.add({ id: OTHER, session: targetSession }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      const source = b.composerApi(ROOT).keyboard!
+      const target = b.composerApi(OTHER).keyboard!
+      source.setDraft('Use ')
+      target.setDraft('Use ')
+      b.appendReference(ROOT, { ...FILE_REFERENCE, ref: '@reference.txt', clipboardText: '@reference.txt' })
+      b.appendReference(OTHER, FILE_REFERENCE)
+      if (withSuffix) {
+        source.setDraft(source.snapshot.draft + 'fresh')
+        target.setDraft(target.snapshot.draft + 'old')
+      }
+      const before = target.snapshot
+      const transferred = 'Use @reference.txt ' + (withSuffix ? 'fresh' : '')
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      expect(source.snapshot).toMatchObject({ draft: '', occurrences: [] })
+      expect(target.snapshot).toMatchObject({ draft: transferred, occurrences: [] })
+      target.undo()
+      expect(target.snapshot).toMatchObject({ draft: before.draft, occurrences: before.occurrences })
+      target.redo()
+      expect(target.snapshot).toMatchObject({ draft: transferred, occurrences: [] })
+      target.submit('queue')
+      await vi.waitFor(() => { expect(targetSession.prompt).toHaveBeenCalledOnce() })
+      expect(targetSession.prompt).toHaveBeenCalledWith(
+        [{ type: 'text', text: transferred.trim() }], 'queue', expect.any(AbortSignal),
+      )
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('does not reinterpret incoming ordinary text as the destination old reference', async () => {
+    const b = await bench()
+    try {
+      const OTHER = 'ordinary-reference-target' as SessionId
+      const targetSession = sessionFakeFor()
+      await b.runtime.sessions.add({ id: OTHER, session: targetSession }, { current: false })
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      b.appendReference(OTHER, SESSION_REFERENCE)
+      b.composerApi(ROOT).keyboard!.setDraft('@Research notes ')
+      await b.residentApi(ROOT).selectWorkspace('reference-workspace' as never)
+      const target = b.composerApi(OTHER).keyboard!
+      expect(target.snapshot).toMatchObject({ draft: '@Research notes ', occurrences: [] })
+      target.submit('queue')
+      await vi.waitFor(() => { expect(targetSession.prompt).toHaveBeenCalledOnce() })
+      expect(targetSession.prompt).toHaveBeenCalledWith(
+        [{ type: 'text', text: '@Research notes' }], 'queue', expect.any(AbortSignal),
+      )
+    } finally { await b.runtime.dispose() }
   })
 
   it.each([true, false])('keeps a pending source admission on its session while workspace navigation completes (accepted=%s)', async (accepted) => {

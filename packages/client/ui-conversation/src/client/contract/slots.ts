@@ -493,6 +493,8 @@ export interface ConversationInjected {
    * Connect the selected Workspace and open its reusable/new blank session.
    * Carry the current draft only while both inputs are outside adjudication
    * and submission; a pending admission keeps its text and images in place.
+   * Transferred references use canonical clipboard text, independent of the
+   * source input's occurrence identities.
    * Only the current view's latest choice may navigate. A selected-session change
    * or plugin unload invalidates pending choices; stale callbacks do nothing.
    */

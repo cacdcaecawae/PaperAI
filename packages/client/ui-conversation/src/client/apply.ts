@@ -23,6 +23,7 @@ import type { IConversation } from './service.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './input/blocks.ts'
 import { InputHub } from './input/hub.ts'
+import { projectClipboard } from './input/machine.ts'
 import { ComposerSubmissionPolicy } from './input/submission-policy.ts'
 import { InputBar } from './skeleton/InputBar.tsx'
 import { EnterBehaviorRow } from './settings/EnterBehaviorRow.tsx'
@@ -264,13 +265,13 @@ export function apply(ctx: Context): void {
             const next = inputHub.shell(nextId)
             const source = from.snapshot
             const target = next.snapshot
-            const draft = source.draft
+            const draft = projectClipboard(source)
             const imageIds = source.imageIds
             if ((source.phase === 'plain' || source.phase === 'claimed')
               && (target.phase === 'plain' || target.phase === 'claimed')
               && (imageIds.length === 0 || next.addImages(imageIds))) {
               if (draft !== '') {
-                next.setDraft(draft)
+                next.setDraft(draft, { start: 0, end: target.draft.length, insertedLength: draft.length })
                 from.setDraft('')
               }
               if (imageIds.length > 0) {

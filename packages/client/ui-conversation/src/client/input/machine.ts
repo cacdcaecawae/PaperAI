@@ -258,7 +258,7 @@ export class InputMachine {
   // ---- draft transactions ----
 
   private onDraftChanged(draft: string, editRange?: EditRange): InputEffect[] {
-    if (draft === this.draft) return []
+    if (draft === this.draft && editRange === undefined) return []
     const range = editRange ?? diffEdit(this.draft, draft)
     // Single-char typing coalesces into the open run while contiguous and
     // inside the merge window; anything else opens its own transaction.
