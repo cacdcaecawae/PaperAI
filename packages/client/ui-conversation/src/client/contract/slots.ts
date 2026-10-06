@@ -491,7 +491,8 @@ export type ChatStore = ReturnType<typeof createChatStore>
 export interface ConversationInjected {
   /**
    * Connect the selected Workspace and open its reusable/new blank session.
-   * When a blank session is already current, carry its draft to the target.
+   * Carry the current draft only while both inputs are outside adjudication
+   * and submission; a pending admission keeps its text and images in place.
    */
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /**

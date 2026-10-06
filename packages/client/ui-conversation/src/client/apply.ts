@@ -237,10 +237,14 @@ export function apply(ctx: Context): void {
         const nextId = await workspaces.connectWorkspace(workspaceId)
         if (sessionId !== undefined && nextId !== sessionId) {
           const from = inputHub.shell(sessionId)
-          const draft = from.snapshot.draft
-          const imageIds = from.snapshot.imageIds
           const next = inputHub.shell(nextId)
-          if (imageIds.length === 0 || next.addImages(imageIds)) {
+          const source = from.snapshot
+          const target = next.snapshot
+          const draft = source.draft
+          const imageIds = source.imageIds
+          if ((source.phase === 'plain' || source.phase === 'claimed')
+            && (target.phase === 'plain' || target.phase === 'claimed')
+            && (imageIds.length === 0 || next.addImages(imageIds))) {
             if (draft !== '') {
               next.setDraft(draft)
               from.setDraft('')

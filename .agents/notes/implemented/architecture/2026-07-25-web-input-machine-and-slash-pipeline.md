@@ -88,6 +88,8 @@ skill/@subagent references skip the placeholder + occurrence identity chain — 
 - Sending is the literal text (no more `<skill>` serialization); on the bubble side MessageItem decorates both shapes (the legacy `<skill>` tag + plain-text tokens).
 - The old occurrence/paste/serialize chain stays on disk in full, undeleted (additive; deletion is a separate future cut). Decoration reactivity: InputBar subscribes to the shell's lexicon source (uSES), so a roll that settles after the scope-birth prewarm lights existing draft tokens up without any menu interaction or unrelated re-render.
 
+Workspace navigation may finish while either composer owns an admission. Draft transfer therefore requires both input machines to be plain or claimed; adjudication and submission keep their text and image identities on the original shell. Navigation remains available, and rejected admission retains its retry input. This also prevents a reusable blank destination with a pending first prompt from having its draft overwritten.
+
 ### Per-session provide contributions and the private keyboard surface
 
 - ui-conversation (the hub doubling as a contributor) supplies through `sessions.provide` the `'input'` hook (machine state + the queue overlay) plus the `inputActions` prop (`setDraft`/`submit`, stable void callbacks).

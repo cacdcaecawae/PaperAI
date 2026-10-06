@@ -312,6 +312,112 @@ describe('conversation slot inject API', () => {
     await b.runtime.dispose()
   })
 
+  it.each([true, false])('keeps a pending source admission on its session while workspace navigation completes (accepted=%s)', async (accepted) => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:workspace-transfer')
+    const revoked = vi.spyOn(URL, 'revokeObjectURL')
+    try {
+      const OTHER = 'pending-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      let connect!: (id: SessionId) => void
+      b.runtime.workspaces.stub('connectWorkspace', () => new Promise<SessionId>((resolve) => { connect = resolve }))
+      let settle!: (result: Awaited<ReturnType<ISession['prompt']>>) => void
+      b.sessionFake.prompt.mockImplementationOnce(() => new Promise((resolve) => { settle = resolve }))
+      const source = b.composerApi(ROOT)
+      const target = b.composerApi(OTHER)
+      const file = new File([Uint8Array.of(1, 2, 3)], 'pending.png', { type: 'image/png' })
+      expect(source.addImages!([file])).toBeNull()
+      const imageId = source.keyboard!.snapshot.imageIds[0]!
+      source.keyboard!.setDraft('pending source text')
+      const switching = b.residentApi(ROOT).selectWorkspace('pending-workspace' as never)
+      source.keyboard!.submit('queue')
+      await vi.waitFor(() => { expect(b.sessionFake.prompt).toHaveBeenCalledOnce() })
+      connect(OTHER)
+      await switching
+      expect(b.runtime.sessions.calls).toContainEqual({ method: 'open', args: [OTHER] })
+      expect(target.keyboard!.snapshot).toMatchObject({ draft: '', imageIds: [] })
+      expect(source.keyboard!.snapshot).toMatchObject({ draft: 'pending source text', imageIds: [imageId] })
+      expect(revoked).not.toHaveBeenCalled()
+      settle(accepted
+        ? { ok: true, value: { accepted: true } }
+        : { ok: false, error: { code: 'internal', message: 'retry source', details: {} } })
+      await vi.waitFor(() => { expect(source.keyboard!.snapshot.phase).toBe('plain') })
+      expect(source.keyboard!.snapshot.draft).toBe(accepted ? '' : 'pending source text')
+      expect(source.keyboard!.snapshot.imageIds).toEqual(accepted ? [] : [imageId])
+      expect(source.draftImages!([imageId])).toHaveLength(accepted ? 0 : 1)
+      if (!accepted) {
+        source.keyboard!.submit('queue')
+        await vi.waitFor(() => { expect(source.keyboard!.snapshot.imageIds).toEqual([]) })
+        expect(b.sessionFake.prompt.mock.calls[1]?.[0]).toEqual(b.sessionFake.prompt.mock.calls[0]?.[0])
+      }
+      expect(target.keyboard!.snapshot).toMatchObject({ draft: '', imageIds: [] })
+    } finally {
+      await b.runtime.dispose()
+      created.mockRestore()
+      revoked.mockRestore()
+    }
+  })
+
+  it('retains the source draft while a slash command is being adjudicated during workspace selection', async () => {
+    const b = await bench()
+    try {
+      const OTHER = 'adjudication-target' as SessionId
+      await b.runtime.sessions.add({ id: OTHER }, { current: false })
+      let adjudicate!: (outcome: 'handled') => void
+      const pending = new Promise<'handled'>((resolve) => { adjudicate = resolve })
+      b.runtime.provide('inputTriggers', { sessionOf: () => ({ adjudicate: () => pending, track: vi.fn() }) } as never)
+      let connect!: (id: SessionId) => void
+      b.runtime.workspaces.stub('connectWorkspace', () => new Promise<SessionId>((resolve) => { connect = resolve }))
+      const source = b.composerApi(ROOT).keyboard!
+      source.setDraft('/inspect')
+      const switching = b.residentApi(ROOT).selectWorkspace('adjudication-workspace' as never)
+      source.submit('queue')
+      expect(source.snapshot.phase).toBe('adjudicating')
+      connect(OTHER)
+      await switching
+      expect(source.snapshot.draft).toBe('/inspect')
+      expect(b.composerApi(OTHER).keyboard!.snapshot.draft).toBe('')
+      adjudicate('handled')
+      await vi.waitFor(() => { expect(source.snapshot.phase).toBe('plain') })
+      expect(b.sessionFake.prompt).not.toHaveBeenCalled()
+    } finally {
+      await b.runtime.dispose()
+    }
+  })
+
+  it.each([false, true])('preserves both drafts when the selected destination has pending admission (image=%s)', async (withImage) => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:busy-target')
+    try {
+      const OTHER = 'busy-target' as SessionId
+      const targetSession = sessionFakeFor()
+      let settle!: (result: Awaited<ReturnType<ISession['prompt']>>) => void
+      targetSession.prompt.mockImplementationOnce(() => new Promise((resolve) => { settle = resolve }))
+      await b.runtime.sessions.add({ id: OTHER, session: targetSession }, { current: false })
+      const source = b.composerApi(ROOT)
+      const target = b.composerApi(OTHER)
+      target.keyboard!.setDraft('target pending text')
+      target.keyboard!.submit('queue')
+      await vi.waitFor(() => { expect(targetSession.prompt).toHaveBeenCalledOnce() })
+      source.keyboard!.setDraft('source unsent text')
+      if (withImage) {
+        expect(source.addImages!([new File([Uint8Array.of(1)], 'source.png', { type: 'image/png' })])).toBeNull()
+      }
+      const imageIds = source.keyboard!.snapshot.imageIds
+      b.runtime.workspaces.stub('connectWorkspace', () => Promise.resolve(OTHER))
+      await b.residentApi(ROOT).selectWorkspace('busy-workspace' as never)
+      expect(b.runtime.sessions.calls).toContainEqual({ method: 'open', args: [OTHER] })
+      expect(source.keyboard!.snapshot).toMatchObject({ draft: 'source unsent text', imageIds })
+      expect(target.keyboard!.snapshot).toMatchObject({ draft: 'target pending text', imageIds: [] })
+      settle({ ok: false, error: { code: 'internal', message: 'retry target', details: {} } })
+      await vi.waitFor(() => { expect(target.keyboard!.snapshot.phase).toBe('plain') })
+      expect(target.keyboard!.snapshot.draft).toBe('target pending text')
+    } finally {
+      await b.runtime.dispose()
+      created.mockRestore()
+    }
+  })
+
   it('selectWorkspace edge arms: no-session resident, empty-draft move, connect failure retryable', async () => {
     const b = await bench()
     // No-session resident (hero before any session): connect resolves and

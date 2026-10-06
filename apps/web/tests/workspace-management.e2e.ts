@@ -22,7 +22,7 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { newEnglishPage, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/workspace-management', import.meta.url))
 // The seed is another scenario's committed fixture, reused read-only: this
@@ -612,8 +612,119 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
 
   it.skipIf(MODE === 'record')('issued zero model calls and stayed clean', async () => {
     expect(tripwire.warnings).toEqual([])
-    // The directory-browser aria golden is this spec's one owned artifact;
+    // The browser and pending-transfer goldens are owned by this spec;
     // the seed it reuses is owned (and inventory-guarded) by seeded-history.
-    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md', 'pending-draft-transfer.expected.md'])
   })
 })
+
+
+it('keeps a pending image admission on its source while a delayed workspace pick completes', async () => {
+  const world = await launchWebScaffold({})
+  const browser = await chromium.launch()
+  const page = await newEnglishPage(browser)
+  const tripwire = watchConsole(page)
+  const connecting = Promise.withResolvers<undefined>()
+  const connectRelease = Promise.withResolvers<undefined>()
+  const submitting = Promise.withResolvers<undefined>()
+  const promptRelease = Promise.withResolvers<undefined>()
+  const rejected = Promise.withResolvers<undefined>()
+  const routeErrors: unknown[] = []
+  const submitted = 'Keep this draft on the source'
+  const retryError = 'Admission rejected for workspace transfer coverage'
+  try {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-pending-draft'))
+    await page.goto(world.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    const welcome = page.getByRole('dialog').filter({ hasText: 'Internal Testing Notice' })
+    if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'Continue', exact: true }).click()
+    await connectFreshWorkspace(page, world.workspaceCwd, 'source-workspace')
+    const targetPath = join(world.workspaceCwd, 'target-workspace')
+    await mkdir(targetPath, { recursive: true })
+    const targetWorkspace = await world.ctx.workspaceRegistry.create(targetPath, 'target-workspace')
+    await page.route('**/api/session.create', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { payload: { workspaceId?: string } }
+        if (request.payload.workspaceId === targetWorkspace.id) {
+          connecting.resolve(undefined)
+          await connectRelease.promise
+        }
+        await route.continue()
+      } catch (error) { routeErrors.push(error) }
+    })
+    await page.route('**/api/session.prompt', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { rpcId: string }
+        submitting.resolve(undefined)
+        await promptRelease.promise
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            type: 'server-response', rpcId: request.rpcId,
+            result: { ok: false, error: { code: 'internal', message: retryError, details: {} } },
+          }),
+        })
+        rejected.resolve(undefined)
+      } catch (error) { routeErrors.push(error) }
+    })
+    const composer = page.locator('textarea').first()
+    await composer.fill(submitted)
+    await composer.evaluate((element) => {
+      const clipboardData = new DataTransfer()
+      clipboardData.items.add(new File([Uint8Array.of(
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+        0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+        137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
+        31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69,
+        78, 68, 174, 66, 96, 130,
+      )], 'pending.png', { type: 'image/png' }))
+      element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))
+    })
+    await page.getByRole('button', { name: 'Remove image pending.png' }).waitFor()
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'target-workspace', exact: true }).click()
+    await connecting.promise
+    expect(await composer.inputValue()).toBe(submitted)
+    await composer.press('Enter')
+    await submitting.promise
+    connectRelease.resolve(undefined)
+    const targetBack = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await targetBack.isVisible()) await targetBack.click()
+    await page.getByRole('treeitem', { name: 'target-workspace', exact: true }).click()
+    const targetSessions = page.getByRole('tree', { name: 'Workspace sessions' })
+    await expect.poll(
+      () => targetSessions.getByRole('treeitem', { selected: true }).count(),
+      { timeout: 15_000 },
+    ).toBe(1)
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe('')
+    expect(await page.locator('[aria-label="Pending images"]').count()).toBe(0)
+    const destination = { draft: await composer.inputValue(), pendingImages: await page.locator('[aria-label="Pending images"]').count() }
+    promptRelease.resolve(undefined)
+    await rejected.promise
+    // The sidebar action reuses A's still-blank session after rejection.
+    const back = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await back.isVisible()) await back.click()
+    const sourceRow = page.getByRole('treeitem', { name: 'source-workspace', exact: true })
+    await sourceRow.hover()
+    await sourceRow.getByRole('button', { name: 'New session in source-workspace' }).click()
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe(submitted)
+    await page.getByRole('alert').filter({ hasText: retryError }).waitFor()
+    await expect.poll(() => composer.getAttribute('readonly')).toBeNull()
+    await page.getByRole('button', { name: 'Remove image pending.png' }).waitFor()
+    const source = { draft: await composer.inputValue(), pendingImages: await page.locator('[aria-label="Pending images"]').count() }
+    await compareOrRefreshGolden(
+      join(SNAPSHOT_DIR, 'pending-draft-transfer.expected.md'),
+      `destination ${JSON.stringify(destination)}\nsource ${JSON.stringify(source)}`,
+      MODE,
+    )
+    expect(routeErrors).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  } finally {
+    connectRelease.resolve(undefined)
+    promptRelease.resolve(undefined)
+    await page.unrouteAll({ behavior: 'wait' })
+    await browser.close()
+    await world.close()
+  }
+}, 120_000)
