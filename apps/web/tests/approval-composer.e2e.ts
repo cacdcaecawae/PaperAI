@@ -12,14 +12,18 @@
 // Geometry is the point of the scenario. The command is unbounded model text,
 // and an uncapped card grows with it until the refuse/allow buttons leave the
 // viewport — an approval the user could see and not answer.
+// Replay also reconnects while this real Host wait is pending: mux replay
+// precedes host.describe readiness, and the resulting history resync must
+// leave the replayed card answerable through the same server-request id.
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Browser, Page } from 'playwright'
+import type { Browser, Page, WebSocketRoute } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { MuxFrame, RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 // Empty type import: carries the approval package's session-event merge, so
 // the decided-outcome assertion below type-checks against the real union.
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -31,9 +35,10 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/approval-composer', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
-// The scenario's one golden: the waiting panel. Everything the answered state
-// proves is asserted directly — see the world-state block at the end.
+// The waiting panel and the replay/readiness/answer milestones. The completed
+// command is checked against real Host events and the workspace file below.
 const UI_EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
+const RECOVERY_EXPECTED = join(SNAPSHOT_DIR, 'recovery.expected.md')
 const MODE = webSnapshotMode()
 
 // Irreducible payload: the command has to be long enough to pass the card's
@@ -136,6 +141,20 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
   let replayFixture = FIXTURE
   let derivedFixtureDir: string | undefined
   const sessionEvents: SessionEvent[] = []
+  const muxes: { client: WebSocketRoute; server: WebSocketRoute }[] = []
+  const approvalRequests: {
+    generation: number
+    rpcId: string
+    sessionId: string
+    approvalId: string
+  }[] = []
+  const recovery: {
+    phase: string
+    approvalCards: number
+    answerEnabled: boolean
+    decisions: string[]
+  }[] = []
+  let releaseDescribe: (() => void) | undefined
 
   beforeAll(async () => {
     if (WINDOWS_REPLAY) {
@@ -147,6 +166,22 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
+    if (MODE !== 'record') {
+      await page.routeWebSocket('**/api/events.mux', (client) => {
+        const server = client.connectToServer()
+        const generation = muxes.push({ client, server })
+        server.onMessage((message) => {
+          const envelope = JSON.parse(typeof message === 'string' ? message : message.toString('utf8')) as RpcRequest<MuxFrame>
+          const frame = envelope.payload
+          if (frame.type === 'approval/requested') {
+            approvalRequests.push({
+              generation, rpcId: envelope.rpcId, sessionId: frame.sessionId, approvalId: frame.approvalId,
+            })
+          }
+          client.send(message)
+        })
+      })
+    }
     tripwire = watchConsole(page)
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -155,6 +190,12 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
 
   afterAll(async () => {
     const failures: unknown[] = []
+    releaseDescribe?.()
+    await page?.unrouteAll({ behavior: 'wait' }).catch((error: unknown) => failures.push(error))
+    for (const { client, server } of muxes) {
+      await client.close().catch((error: unknown) => failures.push(error))
+      await server.close().catch((error: unknown) => failures.push(error))
+    }
     await browser?.close().catch((error: unknown) => failures.push(error))
     await scaffold?.close().catch((error: unknown) => failures.push(error))
     if (derivedFixtureDir !== undefined) {
@@ -165,7 +206,18 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
     if (failures.length > 1) throw new AggregateError(failures, 'approval-composer teardown failed')
   })
 
-  it('caps the long command, answers through the panel, and runs the escalated command', async () => {
+  async function captureRecovery(phase: string): Promise<void> {
+    const panel = page.locator('[data-approval-key]')
+    const approvalCards = await panel.count()
+    recovery.push({
+      phase,
+      approvalCards,
+      answerEnabled: approvalCards > 0 && await panel.getByRole('button', { name: 'Allow once' }).isEnabled(),
+      decisions: sessionEvents.filter(event => event.type === 'approval/decided').map(event => event.data.outcome),
+    })
+  }
+
+  it('caps the command, preserves its approval across readiness, and runs it after the answer', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-approval'))
     if (MODE !== 'record') {
       expect(fixtureUserPrompts(await readFile(replayFixture, 'utf8'))).toEqual([PROMPT])
@@ -206,8 +258,7 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
     await expect.poll(() => scroll.getByText(/tok/).count(), { timeout: 15_000 }).toBeGreaterThan(0)
 
     if (MODE !== 'record') {
-      // This golden owns the stable waiting surface; the answered golden below
-      // owns the resulting transcript.
+      // Pin the waiting surface before interruption and again after readiness.
       const snapshot = normalizeApprovalSnapshot(
         await captureStableAria(page, '[data-approval-key]', scaffold.workspaceCwd),
       )
@@ -248,6 +299,75 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
         expect(geometry.actionsBottom).toBeLessThanOrEqual(geometry.cardBottom)
       }
       await page.setViewportSize(original)
+
+      const request = approvalRequests[0]
+      const firstMux = muxes[0]
+      if (request === undefined || firstMux === undefined) throw new Error('approval has no live mux request')
+      expect(approvalRequests).toHaveLength(1)
+      expect(muxes).toHaveLength(1)
+      const approvalKey = await panel.getAttribute('data-approval-key')
+      expect(approvalKey).not.toBeNull()
+      const warningStart = tripwire.warnings.length
+      const describeGate = Promise.withResolvers<undefined>()
+      releaseDescribe = () => { describeGate.resolve(undefined) }
+      let describeHeld = false
+      let describeReturned = false
+      let historyRequests = 0
+      let historyReturned = false
+      await page.route('**/api/host.describe', async (route) => {
+        const response = await route.fetch()
+        describeHeld = true
+        await describeGate.promise
+        await route.fulfill({ response })
+        describeReturned = true
+      })
+      await page.route('**/api/session.history', async (route) => {
+        const body = route.request().postDataJSON() as { payload?: { sessionId?: string; beforeSeq?: number } }
+        if (body.payload?.sessionId !== request.sessionId || body.payload.beforeSeq !== undefined) {
+          await route.continue()
+          return
+        }
+        historyRequests++
+        const response = await route.fetch()
+        await route.fulfill({ response })
+        historyReturned = true
+      })
+      try {
+        // Both routed ends belong to the test. Closing only the browser end
+        // leaves the old Host subscription alive through scaffold teardown.
+        try {
+          await firstMux.client.close({ code: 1000, reason: 'pending approval reconnect' })
+        } finally {
+          await firstMux.server.close({ code: 1000, reason: 'pending approval reconnect' })
+        }
+        await expect.poll(() => describeHeld, { timeout: 15_000 }).toBe(true)
+        await expect.poll(() => approvalRequests.length, { timeout: 15_000 }).toBe(2)
+        expect(approvalRequests[1]).toEqual({ ...request, generation: 2 })
+        await expect.poll(() => panel.getAttribute('data-approval-key'), { timeout: 10_000 }).toBe(approvalKey)
+        expect(historyRequests).toBe(0)
+        await captureRecovery('replayed before readiness')
+
+        releaseDescribe()
+        await expect.poll(() => describeReturned, { timeout: 15_000 }).toBe(true)
+        // This request is issued by onConnected -> Session.resync. Seeing its
+        // response proves readiness was consumed before checking the card;
+        // merely fulfilling describe could snapshot the pre-handshake UI.
+        await expect.poll(() => historyReturned, { timeout: 15_000 }).toBe(true)
+        await page.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => { requestAnimationFrame(() => { resolve() }) })
+        }))
+        await expect.poll(() => panel.getAttribute('data-approval-key'), { timeout: 10_000 }).toBe(approvalKey)
+        await captureRecovery('after readiness and history')
+        await compareOrRefreshGolden(UI_EXPECTED, normalizeApprovalSnapshot(
+          await captureStableAria(page, '[data-approval-key]', scaffold.workspaceCwd),
+        ), MODE)
+        expect(muxes).toHaveLength(2)
+        expect(tripwire.warnings.splice(warningStart)).toEqual(['[web-runtime] connection lost, retry #1'])
+      } finally {
+        releaseDescribe()
+        await page.unrouteAll({ behavior: 'wait' })
+        releaseDescribe = undefined
+      }
     }
 
     await panel.getByRole('button', { name: 'Allow once' }).click()
@@ -293,11 +413,13 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
     await expect.poll(() => page.getByText('DONE', { exact: true }).count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(1)
     expect(await page.locator('[data-approval-key]').count()).toBe(0)
     await expect.poll(() => page.locator('textarea').first().isEnabled(), { timeout: 10_000 }).toBe(true)
+    await captureRecovery('answered')
+    await compareOrRefreshGolden(RECOVERY_EXPECTED, JSON.stringify(recovery, null, 2), MODE)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 300_000)
 
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {
-    await assertFixtureInventory(SNAPSHOT_DIR, ['session.jsonl', 'ui.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['session.jsonl', 'ui.expected.md', 'recovery.expected.md'])
   })
 })

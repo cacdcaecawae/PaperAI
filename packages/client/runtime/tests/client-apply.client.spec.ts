@@ -55,6 +55,29 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('runtime client apply', () => {
+  it('routes every generation-loss signal to resident pending-wait cleanup', async () => {
+    const bench = await mount()
+    try {
+      const id = 'pending-runtime' as never
+      bench.sinks?.onHostEnvelope?.({
+        rpcId: 'added' as never, payload: { type: 'host/session-added', sessionId: id, blank: false },
+      })
+      const sessions = bench.ctx.get('sessions') as SessionRuntime
+      const session = sessions.binding(id)!.session
+      await session.open()
+      expect(bench.sinks?.onDisconnected).toBeTypeOf('function')
+      for (const rpcId of ['first', 'replayed']) {
+        bench.sinks?.onMuxEnvelope?.({
+          rpcId: rpcId as never,
+          payload: { type: 'question/requested', sessionId: id, questions: [{ id: 'q', question: 'Continue?' }] },
+        })
+        expect(session.getSnapshot().pending).toHaveLength(1)
+        bench.sinks?.onDisconnected?.()
+        expect(session.getSnapshot().pending).toEqual([])
+      }
+    } finally { await bench.ctx.fiber.dispose() }
+  })
+
   it('mounts slots, Sessions, and Workspaces and fans host frames into both managers', async () => {
     const bench = await mount()
     expect(bench.ctx.get('slots') !== undefined).toBe(true)

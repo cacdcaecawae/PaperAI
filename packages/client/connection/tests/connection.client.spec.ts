@@ -20,6 +20,52 @@ function subscribedFrame(lastSeq = 0) {
 }
 
 describe('connection lifecycle', () => {
+  it('notifies each failed generation independently of the coarse reconnecting state', async () => {
+    const api = new FakeApiClient()
+    let disconnected = 0
+    const attempts: number[] = []
+    const states: ConnectionState[] = []
+    api.onDescribe = () => {
+      attempts.push(disconnected)
+      return attempts.length < 3
+        ? Promise.reject(new Error('controlled handshake failure'))
+        : Promise.resolve(ok({ version: '0', cwd: '/f', attachedSessions: 0, home: '/h', canOpenPath: true }))
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++ },
+      onStateChange: state => states.push(state),
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(states.at(-1)).toBe('connected') })
+      expect(attempts).toEqual([0, 1, 2])
+      expect(disconnected).toBe(2)
+      expect(states).toEqual(['reconnecting', 'connected'])
+    } finally {
+      controller.stop()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('allows generation-loss cleanup to stop the loop before later state or retry publication', async () => {
+    const api = new FakeApiClient()
+    api.onDescribe = () => Promise.reject(new Error('controlled handshake failure'))
+    let disconnected = 0
+    const states: ConnectionState[] = []
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++; controller.stop() },
+      onStateChange: state => states.push(state),
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(disconnected).toBe(1) })
+      expect(states).toEqual([])
+      expect(api.callsOf('host.describe')).toHaveLength(1)
+      expect(api.openMuxCount).toBe(0)
+    } finally { controller.stop() }
+  })
+
   it('announces connected after describe + both streams open, then pumps frames to sinks', async () => {
     const api = new FakeApiClient()
     const muxSeen: string[] = []

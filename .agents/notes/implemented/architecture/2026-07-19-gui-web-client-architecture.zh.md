@@ -75,6 +75,8 @@ Notifier 微任务合批 ──► ConversationSnapshot 缓存 ──uSES──�
 - **ConversationNodeAssembler**（`runtime/src/client/conversation/`）：Session 拥有的增量引擎在原始事件上运行各自独立注册的 Definition。`match(event)` 无须扫描 Context 即可选出 `(kind, id)`；start/update 构造 Definition state；引擎计算的 Location 携带 Turn/Step 关闭信息；向前查询 Context 时记录依赖，并由后续 prepend 修复；`buildViewNode(target)` 只物化 dirty Context。Chat builder 保留结构顺序和 per-key value identity，`useSession` selector 负责消费隔离，Assistant token 发布则合并到每个 animation frame 一次。[Conversation Node 决策](2026-08-09-client-conversation-node-assembly.zh.md)拥有组装边界，[Tool 展示所有权](2026-08-08-client-tool-presentation-ownership.zh.md)拥有 Tool 递归渲染。
 - **ConnectionController**（在 `packages/client/connection`）：开 mux/host 双流、for-await 泵入，代际围栏之内指数退避重连（500ms 翻倍至 10s 封顶、抖动、无限重试）；sinks 单向注入（Controller 不认识 Session）。重连 = 重建：`onConnected` → 列表刷新 + 各已打开会话 resync。对象层只面向 `IApiClient`；Web 承载以 HTTP POST 载两个 client→server 象限、以[每逻辑流一条 WebSocket](2026-08-04-websocket-downlink-carrier.zh.md)载两个 server→client 象限，客户端类族归分层笔记属地。
 
+待处理交互属于流代际，而不属于历史窗口。每次失败尝试都触发代际丢失回调，不依赖经过去重的 UI 连接状态变化；该回调在下一代回放前清除常驻载体、侧栏状态和暂存请求。每个会话的 subscribed 基线也会取代此前的等待项。历史 resync 保留就绪前已经到达的回放；切换子代理历史路由也不会使其活动等待项失效。全局丢失清理仍不可少，因为重启后尚未挂载的持久 Host 会话没有 subscribed 基线。被取代的载体不标记为已解决：只有权威 resolved 帧才结算请求，调用方已持有的响应仍指向原 Host rpcId。
+
 ## React 面（`packages/client/ui-renderer`）
 
 动态 ui-renderer 插件持有 ctx↔React 适配器、应用级安装、根挂载与标题投影。业务组件通过 slot props 接收绑定后的钩子，不对渲染器做值 import。

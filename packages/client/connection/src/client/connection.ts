@@ -46,6 +46,8 @@ export interface ConnectionSinks {
   onHostEnvelope?: (envelope: RpcRequest<HostFrame>) => void
   /** After each connection generation is established (both streams open + describe succeeded), first connect included. */
   onConnected?: (description: HostDescription) => void
+  /** Every generation loss or failed handshake before retry; explicit stop does not call it. */
+  onDisconnected?: () => void
   /** Coarse state transitions (deduplicated: fires only on change). The initial pre-connect
    *  span reports nothing — the UI treats "no state yet" as connecting, not as an outage. */
   onStateChange?: (state: ConnectionState) => void
@@ -159,6 +161,8 @@ export class ConnectionController {
       }
 
       await failed
+      if (!this.isRunning()) return
+      this.callSink(() => { this.sinks.onDisconnected?.() })
       if (!this.isRunning()) return
       this.emitState('reconnecting')
       this.attempt += 1
