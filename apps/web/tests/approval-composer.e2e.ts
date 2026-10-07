@@ -15,6 +15,8 @@
 // Replay also reconnects while this real Host wait is pending: mux replay
 // precedes host.describe readiness, and the resulting history resync must
 // leave the replayed card answerable through the same server-request id.
+// Losing that mux while describe is still unanswered must clear its card and
+// reconnect without waiting for the obsolete unary response.
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -155,6 +157,8 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
     decisions: string[]
   }[] = []
   let releaseDescribe: (() => void) | undefined
+  let holdApprovalReplay = false
+  const heldApprovalReplay: (() => void)[] = []
 
   beforeAll(async () => {
     if (WINDOWS_REPLAY) {
@@ -177,6 +181,10 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
             approvalRequests.push({
               generation, rpcId: envelope.rpcId, sessionId: frame.sessionId, approvalId: frame.approvalId,
             })
+            if (holdApprovalReplay && generation === 3) {
+              heldApprovalReplay.push(() => { client.send(message) })
+              return
+            }
           }
           client.send(message)
         })
@@ -217,7 +225,7 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
     })
   }
 
-  it('caps the command, preserves its approval across readiness, and runs it after the answer', async () => {
+  it('caps the command, recovers its approval after interrupted readiness, and runs it after the answer', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-approval'))
     if (MODE !== 'record') {
       expect(fixtureUserPrompts(await readFile(replayFixture, 'utf8'))).toEqual([PROMPT])
@@ -308,18 +316,22 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
       const approvalKey = await panel.getAttribute('data-approval-key')
       expect(approvalKey).not.toBeNull()
       const warningStart = tripwire.warnings.length
-      const describeGate = Promise.withResolvers<undefined>()
-      releaseDescribe = () => { describeGate.resolve(undefined) }
-      let describeHeld = false
-      let describeReturned = false
+      const abandonedDescribe = Promise.withResolvers<undefined>()
+      const recoveredDescribe = Promise.withResolvers<undefined>()
+      releaseDescribe = () => {
+        abandonedDescribe.resolve(undefined)
+        recoveredDescribe.resolve(undefined)
+      }
+      let describeHeld = 0
+      let recoveredDescribeReturned = false
       let historyRequests = 0
       let historyReturned = false
       await page.route('**/api/host.describe', async (route) => {
         const response = await route.fetch()
-        describeHeld = true
-        await describeGate.promise
+        const attempt = ++describeHeld
+        await (attempt === 1 ? abandonedDescribe.promise : recoveredDescribe.promise)
         await route.fulfill({ response })
-        describeReturned = true
+        if (attempt === 2) recoveredDescribeReturned = true
       })
       await page.route('**/api/session.history', async (route) => {
         const body = route.request().postDataJSON() as { payload?: { sessionId?: string; beforeSeq?: number } }
@@ -340,15 +352,42 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
         } finally {
           await firstMux.server.close({ code: 1000, reason: 'pending approval reconnect' })
         }
-        await expect.poll(() => describeHeld, { timeout: 15_000 }).toBe(true)
+        await expect.poll(() => describeHeld, { timeout: 15_000 }).toBe(1)
         await expect.poll(() => approvalRequests.length, { timeout: 15_000 }).toBe(2)
         expect(approvalRequests[1]).toEqual({ ...request, generation: 2 })
         await expect.poll(() => panel.getAttribute('data-approval-key'), { timeout: 10_000 }).toBe(approvalKey)
         expect(historyRequests).toBe(0)
         await captureRecovery('replayed before readiness')
 
-        releaseDescribe()
-        await expect.poll(() => describeReturned, { timeout: 15_000 }).toBe(true)
+        // Hold only the next real Host approval replay, so a prompt replacement
+        // cannot conceal a stale card that was never cleared on disconnect.
+        holdApprovalReplay = true
+        const pendingMux = muxes[1]
+        if (pendingMux === undefined) throw new Error('pending handshake has no mux')
+        try {
+          await pendingMux.client.close({ code: 1000, reason: 'describe still pending' })
+        } finally {
+          await pendingMux.server.close({ code: 1000, reason: 'describe still pending' })
+        }
+        await expect.poll(() => panel.count(), { timeout: 5_000 }).toBe(0)
+        await captureRecovery('disconnected during readiness')
+        // Neither describe response has been released. A new physical mux and
+        // unary request prove the failed handshake did not block reconnection.
+        await expect.poll(() => describeHeld, { timeout: 5_000 }).toBe(2)
+        await expect.poll(() => approvalRequests.length, { timeout: 5_000 }).toBe(3)
+        expect(approvalRequests[2]).toEqual({ ...request, generation: 3 })
+        expect(heldApprovalReplay).toHaveLength(1)
+        expect(await panel.count()).toBe(0)
+        expect(historyRequests).toBe(0)
+        expect(sessionEvents.filter(event => event.type === 'approval/decided')).toHaveLength(0)
+        holdApprovalReplay = false
+        for (const forward of heldApprovalReplay.splice(0)) forward()
+        await expect.poll(() => panel.getAttribute('data-approval-key'), { timeout: 10_000 }).toBe(approvalKey)
+        await captureRecovery('new generation before readiness')
+        expect(historyRequests).toBe(0)
+
+        recoveredDescribe.resolve(undefined)
+        await expect.poll(() => recoveredDescribeReturned, { timeout: 15_000 }).toBe(true)
         // This request is issued by onConnected -> Session.resync. Seeing its
         // response proves readiness was consumed before checking the card;
         // merely fulfilling describe could snapshot the pre-handshake UI.
@@ -361,9 +400,15 @@ describe('web e2e: approval takeover keeps its actions reachable', () => {
         await compareOrRefreshGolden(UI_EXPECTED, normalizeApprovalSnapshot(
           await captureStableAria(page, '[data-approval-key]', scaffold.workspaceCwd),
         ), MODE)
-        expect(muxes).toHaveLength(2)
-        expect(tripwire.warnings.splice(warningStart)).toEqual(['[web-runtime] connection lost, retry #1'])
+        expect(muxes).toHaveLength(3)
+        expect(historyRequests).toBe(1)
+        expect(tripwire.warnings.splice(warningStart)).toEqual([
+          '[web-runtime] connection lost, retry #1',
+          '[web-runtime] connection lost, retry #2',
+        ])
       } finally {
+        holdApprovalReplay = false
+        heldApprovalReplay.length = 0
         releaseDescribe()
         await page.unrouteAll({ behavior: 'wait' })
         releaseDescribe = undefined

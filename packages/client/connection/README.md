@@ -14,7 +14,7 @@ The node half guards every entry under `/api` before bridging or upgrading (`src
 
 The keyless fixture transport represents an already configured workspace: it reports DeepSeek credential readiness and an acknowledged welcome notice in `settings.describe`. First-run onboarding and writable settings are exercised through the real HTTP transport.
 
-Each ended connection generation reports `onDisconnected` before retry, including repeated readiness failures while the coarse UI state remains `reconnecting`. Explicit stop does not report a reconnect loss. Consumers use this lifecycle callback to release generation-owned state before new stream frames arrive; `onConnected` remains the completed readiness notification.
+Each ended connection generation reports `onDisconnected` before retry, including repeated readiness failures while the coarse UI state remains `reconnecting`. Generation loss interrupts unfinished readiness, and its signal cancels the pending `host.describe` call without changing the unary deadline. Every readiness exit releases the stream-open timer. Explicit stop does not report a reconnect loss. Consumers use this lifecycle callback to release generation-owned state before new stream frames arrive; `onConnected` remains the completed readiness notification.
 
 ## Model Experience
 
