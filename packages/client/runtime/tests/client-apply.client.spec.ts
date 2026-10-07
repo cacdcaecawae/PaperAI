@@ -63,8 +63,10 @@ describe('runtime client apply', () => {
         rpcId: 'added' as never, payload: { type: 'host/session-added', sessionId: id, blank: false },
       })
       const sessions = bench.ctx.get('sessions') as SessionRuntime
+      await vi.waitFor(() => expect(sessions.binding(id)).toBeDefined())
       const session = sessions.binding(id)!.session
-      await session.open()
+      sessions.open(id)
+      await vi.waitFor(() => expect(session.getSnapshot().openState).toBe('open'))
       expect(bench.sinks?.onDisconnected).toBeTypeOf('function')
       for (const rpcId of ['first', 'replayed']) {
         bench.sinks?.onMuxEnvelope?.({
