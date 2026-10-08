@@ -67,7 +67,7 @@ describe('connection lifecycle', () => {
   it.each(['end', 'fail'] as const)('cancels pending readiness and retries when streams %s', async (ending) => {
     const api = new FakeApiClient()
     const firstDescribe = deferred<Awaited<ReturnType<FakeApiClient['onDescribe']>>>()
-    const describe = api.host.describe
+    const describe = api.host.describe.bind(api.host)
     let describeCalls = 0
     let handshakeSignal: AbortSignal | undefined
     api.host.describe = (_payload: unknown, signal?: AbortSignal) => {
