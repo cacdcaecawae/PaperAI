@@ -12,6 +12,61 @@ import { entries, ev, plainTurn } from './event-script.client.ts'
 const S1 = 'fk-m1' as SessionId
 const S2 = 'fk-m2' as SessionId
 
+describe('pending interaction generation ownership', () => {
+  it.each(['question', 'approval'] as const)('keeps resident %s replay and sidebar status through late readiness', async (kind) => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1)] as never[] }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+    const session = manager.get(S1)
+    await session.open()
+    manager.handleDisconnected()
+    manager.handleMuxEnvelope({ rpcId: 'baseline' as never, payload: { type: 'session/subscribed', sessionId: S1, lastSeq: -1 } })
+    manager.handleMuxEnvelope({
+      rpcId: 'replayed' as never,
+      payload: kind === 'question'
+        ? { type: 'question/requested', sessionId: S1, questions: [{ id: 'q', question: 'Continue?' }] }
+        : { type: 'approval/requested', sessionId: S1, approvalId: 'a' as never, toolName: 'example' },
+    })
+    manager.handleConnected()
+    await session.open()
+    expect(manager.getListSnapshot().items[0]?.pendingInteraction).toBe(kind)
+    expect(session.getSnapshot().pending).toHaveLength(1)
+    expect(session.getSnapshot().pending[0]?.kind).toBe(kind)
+  })
+
+  it.each([false, true])('removes resolved-offline waits without requiring a per-session baseline (resident=%s)', async (resident) => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1)] as never[] }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+    if (resident) await manager.get(S1).open()
+    manager.handleMuxEnvelope({
+      rpcId: 'gone' as never,
+      payload: { type: 'question/requested', sessionId: S1, questions: [{ id: 'q', question: 'Continue?' }] },
+    })
+    manager.handleDisconnected()
+    // A restarted Host lists detached persisted sessions but sends no subscribed baseline for them.
+    manager.handleConnected()
+    await manager.get(S1).open()
+    expect(manager.getListSnapshot().items[0]?.pendingInteraction).toBeUndefined()
+    expect(manager.get(S1).getSnapshot().pending).toEqual([])
+  })
+
+  it.each([false, true])('a fresh baseline retires prior replay even without another coarse disconnect edge (resident=%s)', async (resident) => {
+    const manager = new SessionManager(new FakeApiClient(), fakeRemote())
+    manager.handleHostEnvelope({ rpcId: 'added' as never, payload: { type: 'host/session-added', sessionId: S1, blank: false } })
+    if (resident) await manager.get(S1).open()
+    manager.handleMuxEnvelope({
+      rpcId: 'old' as never,
+      payload: { type: 'question/requested', sessionId: S1, questions: [{ id: 'q', question: 'Continue?' }] },
+    })
+    manager.handleMuxEnvelope({ rpcId: 'baseline' as never, payload: { type: 'session/subscribed', sessionId: S1, lastSeq: -1 } })
+    expect(manager.getListSnapshot().items[0]?.pendingInteraction).toBeUndefined()
+    expect(manager.get(S1).getSnapshot().pending).toEqual([])
+  })
+})
+
 type SummaryOver = Partial<{
   updatedAt: number
   running: boolean

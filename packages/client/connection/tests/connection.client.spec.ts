@@ -20,6 +20,172 @@ function subscribedFrame(lastSeq = 0) {
 }
 
 describe('connection lifecycle', () => {
+
+  it('retries a lost generation without waiting for unopened stream readiness', async () => {
+    const api = new FakeApiClient()
+    api.holdStreamOpen = true
+    let disconnected = 0
+    let connected = 0
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++; api.holdStreamOpen = false },
+      onConnected: () => { connected++ },
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(api.openMuxCount).toBe(1) })
+      api.endStreams()
+      await vi.waitFor(() => { expect(connected).toBe(1) }, { timeout: 200 })
+      expect(disconnected).toBe(1)
+      expect(api.callsOf('host.describe')).toHaveLength(2)
+    } finally {
+      controller.stop()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('releases the stream-readiness timer after a failed describe', async () => {
+    vi.useFakeTimers()
+    const api = new FakeApiClient()
+    api.suppressStreamOpen = true
+    api.onDescribe = () => Promise.reject(new Error('controlled describe failure'))
+    let disconnected = 0
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++; controller.stop() },
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(disconnected).toBe(1) })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      controller.stop()
+      vi.useRealTimers()
+    }
+  })
+
+
+  it.each(['end', 'fail'] as const)('cancels pending readiness and retries when streams %s', async (ending) => {
+    const api = new FakeApiClient()
+    const firstDescribe = deferred<Awaited<ReturnType<FakeApiClient['onDescribe']>>>()
+    const describe = api.host.describe.bind(api.host)
+    let describeCalls = 0
+    let handshakeSignal: AbortSignal | undefined
+    api.host.describe = (_payload: unknown, signal?: AbortSignal) => {
+      describeCalls++
+      if (describeCalls > 1) return describe({}, signal)
+      handshakeSignal = signal
+      signal?.addEventListener('abort', () => {
+        firstDescribe.reject(new Error('controlled handshake cancellation'))
+      }, { once: true })
+      return firstDescribe.promise
+    }
+    let pending = 0
+    let disconnected = 0
+    let connected = 0
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const controller = new ConnectionController(api, {
+      onMuxEnvelope: () => { pending++ },
+      onDisconnected: () => { disconnected++; pending = 0 },
+      onConnected: () => { connected++ },
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(api.openMuxCount).toBe(1) })
+      api.pushMux({ type: 'question/requested', sessionId: SID, questions: [] })
+      await vi.waitFor(() => { expect(pending).toBe(1) })
+      if (ending === 'end') api.endStreams()
+      else api.failStreams(new Error('controlled stream failure'))
+      await vi.waitFor(() => { expect(connected).toBe(1) })
+      expect(handshakeSignal?.aborted).toBe(true)
+      expect(describeCalls).toBe(2)
+      expect(disconnected).toBe(1)
+      expect(pending).toBe(0)
+    } finally {
+      controller.stop()
+      firstDescribe.resolve(ok({ version: '0', cwd: '/f', attachedSessions: 0, home: '/h', canOpenPath: true }))
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('aborts pending readiness on explicit stop without publishing loss or retrying', async () => {
+    const api = new FakeApiClient()
+    const firstDescribe = deferred<Awaited<ReturnType<FakeApiClient['onDescribe']>>>()
+    let handshakeSignal: AbortSignal | undefined
+    let describeCalls = 0
+    api.host.describe = (_payload: unknown, signal?: AbortSignal) => {
+      describeCalls++
+      handshakeSignal = signal
+      signal?.addEventListener('abort', () => {
+        firstDescribe.reject(new Error('controlled handshake cancellation'))
+      }, { once: true })
+      return firstDescribe.promise
+    }
+    let disconnected = 0
+    let connected = 0
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++ },
+      onConnected: () => { connected++ },
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(api.openMuxCount).toBe(1) })
+      controller.stop()
+      expect(handshakeSignal?.aborted).toBe(true)
+      await vi.waitFor(() => { expect(api.openMuxCount).toBe(0) })
+      await new Promise(resolve => setTimeout(resolve, 40))
+      expect({ disconnected, connected, describeCalls }).toEqual({ disconnected: 0, connected: 0, describeCalls: 1 })
+    } finally {
+      controller.stop()
+      firstDescribe.resolve(ok({ version: '0', cwd: '/f', attachedSessions: 0, home: '/h', canOpenPath: true }))
+    }
+  })
+
+  it('notifies each failed generation independently of the coarse reconnecting state', async () => {
+    const api = new FakeApiClient()
+    let disconnected = 0
+    const attempts: number[] = []
+    const states: ConnectionState[] = []
+    api.onDescribe = () => {
+      attempts.push(disconnected)
+      return attempts.length < 3
+        ? Promise.reject(new Error('controlled handshake failure'))
+        : Promise.resolve(ok({ version: '0', cwd: '/f', attachedSessions: 0, home: '/h', canOpenPath: true }))
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++ },
+      onStateChange: state => states.push(state),
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(states.at(-1)).toBe('connected') })
+      expect(attempts).toEqual([0, 1, 2])
+      expect(disconnected).toBe(2)
+      expect(states).toEqual(['reconnecting', 'connected'])
+    } finally {
+      controller.stop()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('allows generation-loss cleanup to stop the loop before later state or retry publication', async () => {
+    const api = new FakeApiClient()
+    api.onDescribe = () => Promise.reject(new Error('controlled handshake failure'))
+    let disconnected = 0
+    const states: ConnectionState[] = []
+    const controller = new ConnectionController(api, {
+      onDisconnected: () => { disconnected++; controller.stop() },
+      onStateChange: state => states.push(state),
+    }, FAST)
+    try {
+      controller.start()
+      await vi.waitFor(() => { expect(disconnected).toBe(1) })
+      expect(states).toEqual([])
+      expect(api.callsOf('host.describe')).toHaveLength(1)
+      expect(api.openMuxCount).toBe(0)
+    } finally { controller.stop() }
+  })
+
   it('announces connected after describe + both streams open, then pumps frames to sinks', async () => {
     const api = new FakeApiClient()
     const muxSeen: string[] = []

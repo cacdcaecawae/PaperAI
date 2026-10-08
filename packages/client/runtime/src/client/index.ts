@@ -220,13 +220,8 @@ export function apply(ctx: Context): void {
       workspaces.handleConnected()
       ctx.emit('connection/reset')
     },
-    onStateChange: (state) => {
-      // Generation death fires before any next-generation frame can arrive
-      // (reconnect replays flow from stream open, ahead of onConnected):
-      // the only safe moment to drop generation-scoped interaction state.
-      if (state === 'reconnecting') {
-        sessions.handleDisconnected()
-      }
+    onDisconnected: () => {
+      sessions.handleDisconnected()
     },
   })
   ctx.effect(() => () => { loop.stop() }, 'runtime: connection stream loop')

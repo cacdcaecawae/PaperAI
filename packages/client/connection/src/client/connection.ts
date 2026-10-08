@@ -46,6 +46,8 @@ export interface ConnectionSinks {
   onHostEnvelope?: (envelope: RpcRequest<HostFrame>) => void
   /** After each connection generation is established (both streams open + describe succeeded), first connect included. */
   onConnected?: (description: HostDescription) => void
+  /** Every generation loss or failed handshake before retry; explicit stop does not call it. */
+  onDisconnected?: () => void
   /** Coarse state transitions (deduplicated: fires only on change). The initial pre-connect
    *  span reports nothing — the UI treats "no state yet" as connecting, not as an outage. */
   onStateChange?: (state: ConnectionState) => void
@@ -81,7 +83,7 @@ export class ConnectionController {
     void this.loop()
   }
 
-  /** Stop the loop and abort the current generation's streams. */
+  /** Stop the loop and abort the current generation's streams and readiness request. */
   stop(): void {
     this.running = false
     this.current?.abort()
@@ -129,18 +131,22 @@ export class ConnectionController {
         void this.pumpStream(this.api.events.host({}, ac.signal, hostOpened), this.sinks.onHostEnvelope, settle)
       })
 
+      const timeout = new AbortController()
       try {
         // Strict readiness handshake: describe proves unary reachability, onOpen
         // proves each physical stream is established before any frame —
         // only then may onConnected fire, so the resync it triggers cannot outrun the
         // subscribed baseline. The timeout guards against a carrier that never fires onOpen
         // (see ConnectionConfig.streamOpenTimeoutMs).
-        const timeout = new AbortController()
-        const [description] = await Promise.all([
-          this.api.host.describe({}),
-          Promise.race([streamsOpen, sleep(this.config.streamOpenTimeoutMs, timeout.signal)]),
+        const readiness = await Promise.race([
+          Promise.all([
+            this.api.host.describe({}, ac.signal),
+            Promise.race([streamsOpen, sleep(this.config.streamOpenTimeoutMs, timeout.signal)]),
+          ]),
+          failed.then(() => null),
         ])
-        timeout.abort()
+        if (readiness === null) throw new Error('generation ended during readiness handshake')
+        const [description] = readiness
         const descriptionResult = description.result
         if (!descriptionResult.ok) {
           throw new Error(`host.describe failed: ${descriptionResult.error.code}: ${descriptionResult.error.message}`)
@@ -156,9 +162,13 @@ export class ConnectionController {
       } catch {
         // Transport failure: treat as generation failure, fall through to the shared backoff.
         if (!ac.signal.aborted) ac.abort()
+      } finally {
+        timeout.abort()
       }
 
       await failed
+      if (!this.isRunning()) return
+      this.callSink(() => { this.sinks.onDisconnected?.() })
       if (!this.isRunning()) return
       this.emitState('reconnecting')
       this.attempt += 1
