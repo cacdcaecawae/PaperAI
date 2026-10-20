@@ -17,6 +17,39 @@ import { deriveDecorations, scanTextRefs } from '../src/client/input/decorations
 
 const LEGACY_PLACEHOLDER = PLACEHOLDER
 
+describe('input-machine: explicit draft replacement', () => {
+  it('replaces equal display text without keeping occurrence identity and supports undo/redo', () => {
+    const m = new InputMachine()
+    m.dispatch({ type: 'draft-changed', draft: '@' })
+    m.dispatch({ type: 'insert-ref', reference: refOf('same'), span: spanOf(m, 0, 1) })
+    const before = m.state
+    m.dispatch({ type: 'draft-changed', draft: before.draft })
+    expect(m.state).toEqual(before)
+    m.dispatch({
+      type: 'draft-changed', draft: before.draft,
+      editRange: { start: 0, end: before.draft.length, insertedLength: before.draft.length },
+    })
+    expect(m.state.draftRev).toBeGreaterThan(before.draftRev)
+    expect(m.state.occurrences).toEqual([])
+    m.dispatch({ type: 'undo' })
+    expect(m.state).toMatchObject({ draft: before.draft, occurrences: before.occurrences })
+    m.dispatch({ type: 'redo' })
+    expect(m.state).toMatchObject({ draft: before.draft, occurrences: [] })
+  })
+
+  it('preserves literal text and invalidates an old paste attempt on explicit replacement', () => {
+    const m = new InputMachine()
+    m.dispatch({ type: 'paste-begin', text: 'old paste', selection: { start: 0, end: 0 } })
+    expect(m.state.paste).toBeDefined()
+    const draft = 'literal \uE100\uE11D\uFFFC text'
+    m.dispatch({ type: 'draft-changed', draft, editRange: { start: 0, end: m.state.draft.length, insertedLength: draft.length } })
+    expect(m.state.draft).toBe(draft)
+    expect(m.state.paste).toBeUndefined()
+    m.dispatch({ type: 'undo' })
+    expect(m.state.draft).toBe('old paste')
+  })
+})
+
 function claimOf(name: string, hint?: string): CommandClaim {
   return {
     token: `/${name} `,

@@ -17,12 +17,14 @@ import { join, sep } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-title'
 import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { newEnglishPage, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/workspace-management', import.meta.url))
 // The seed is another scenario's committed fixture, reused read-only: this
@@ -612,8 +614,300 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
 
   it.skipIf(MODE === 'record')('issued zero model calls and stayed clean', async () => {
     expect(tripwire.warnings).toEqual([])
-    // The directory-browser aria golden is this spec's one owned artifact;
+    // The browser and workspace-transfer goldens are owned by this spec;
     // the seed it reuses is owned (and inventory-guarded) by seeded-history.
-    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['.gitkeep', 'directory-browser.expected.md', 'pending-draft-transfer.expected.md', 'latest-workspace-choice.expected.md', 'reference-draft-transfer.expected.md'])
   })
 })
+
+
+it('keeps a pending image admission on its source while a delayed workspace pick completes', async () => {
+  const world = await launchWebScaffold({})
+  const browser = await chromium.launch()
+  const page = await newEnglishPage(browser)
+  const tripwire = watchConsole(page)
+  const connecting = Promise.withResolvers<undefined>()
+  const connectRelease = Promise.withResolvers<undefined>()
+  const submitting = Promise.withResolvers<undefined>()
+  const promptRelease = Promise.withResolvers<undefined>()
+  const rejected = Promise.withResolvers<undefined>()
+  const routeErrors: unknown[] = []
+  const submitted = 'Keep this draft on the source'
+  const retryError = 'Admission rejected for workspace transfer coverage'
+  try {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-pending-draft'))
+    await page.goto(world.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    const welcome = page.getByRole('dialog').filter({ hasText: 'Internal Testing Notice' })
+    if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'Continue', exact: true }).click()
+    await connectFreshWorkspace(page, world.workspaceCwd, 'source-workspace')
+    const targetPath = join(world.workspaceCwd, 'target-workspace')
+    await mkdir(targetPath, { recursive: true })
+    const targetWorkspace = await world.ctx.workspaceRegistry.create(targetPath, 'target-workspace')
+    await page.route('**/api/session.create', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { payload: { workspaceId?: string } }
+        if (request.payload.workspaceId === targetWorkspace.id) {
+          connecting.resolve(undefined)
+          await connectRelease.promise
+        }
+        await route.continue()
+      } catch (error) { routeErrors.push(error) }
+    })
+    await page.route('**/api/session.prompt', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { rpcId: string }
+        submitting.resolve(undefined)
+        await promptRelease.promise
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            type: 'server-response', rpcId: request.rpcId,
+            result: { ok: false, error: { code: 'internal', message: retryError, details: {} } },
+          }),
+        })
+        rejected.resolve(undefined)
+      } catch (error) { routeErrors.push(error) }
+    })
+    const composer = page.locator('textarea').first()
+    await composer.fill(submitted)
+    await composer.evaluate((element) => {
+      const clipboardData = new DataTransfer()
+      clipboardData.items.add(new File([Uint8Array.of(
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+        0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+        137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
+        31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69,
+        78, 68, 174, 66, 96, 130,
+      )], 'pending.png', { type: 'image/png' }))
+      element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))
+    })
+    await page.getByRole('button', { name: 'Remove image pending.png' }).waitFor()
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'target-workspace', exact: true }).click()
+    await connecting.promise
+    expect(await composer.inputValue()).toBe(submitted)
+    await composer.press('Enter')
+    await submitting.promise
+    connectRelease.resolve(undefined)
+    const targetBack = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await targetBack.isVisible()) await targetBack.click()
+    await page.getByRole('treeitem', { name: 'target-workspace', exact: true }).click()
+    const targetSessions = page.getByRole('tree', { name: 'Workspace sessions' })
+    await expect.poll(
+      () => targetSessions.getByRole('treeitem', { selected: true }).count(),
+      { timeout: 15_000 },
+    ).toBe(1)
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe('')
+    expect(await page.locator('[aria-label="Pending images"]').count()).toBe(0)
+    const destination = { draft: await composer.inputValue(), pendingImages: await page.locator('[aria-label="Pending images"]').count() }
+    promptRelease.resolve(undefined)
+    await rejected.promise
+    // The sidebar action reuses A's still-blank session after rejection.
+    const back = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await back.isVisible()) await back.click()
+    const sourceRow = page.getByRole('treeitem', { name: 'source-workspace', exact: true })
+    await sourceRow.hover()
+    await sourceRow.getByRole('button', { name: 'New session in source-workspace' }).click()
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe(submitted)
+    await page.getByRole('alert').filter({ hasText: retryError }).waitFor()
+    await expect.poll(() => composer.getAttribute('readonly')).toBeNull()
+    await page.getByRole('button', { name: 'Remove image pending.png' }).waitFor()
+    const source = { draft: await composer.inputValue(), pendingImages: await page.locator('[aria-label="Pending images"]').count() }
+    await compareOrRefreshGolden(
+      join(SNAPSHOT_DIR, 'pending-draft-transfer.expected.md'),
+      `destination ${JSON.stringify(destination)}\nsource ${JSON.stringify(source)}`,
+      MODE,
+    )
+    expect(routeErrors).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  } finally {
+    connectRelease.resolve(undefined)
+    promptRelease.resolve(undefined)
+    await page.unrouteAll({ behavior: 'wait' })
+    await browser.close()
+    await world.close()
+  }
+}, 120_000)
+
+
+it('keeps the latest workspace selected when an older connection replies afterward', async () => {
+  const world = await launchWebScaffold({})
+  const browser = await chromium.launch()
+  const page = await newEnglishPage(browser)
+  const tripwire = watchConsole(page)
+  const olderRequested = Promise.withResolvers<undefined>()
+  const latestRequested = Promise.withResolvers<undefined>()
+  const releaseOlder = Promise.withResolvers<undefined>()
+  const releaseLatest = Promise.withResolvers<undefined>()
+  const routeErrors: unknown[] = []
+  const draft = 'Carry this to the latest workspace'
+  try {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-latest-choice'))
+    await page.goto(world.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    const welcome = page.getByRole('dialog').filter({ hasText: 'Internal Testing Notice' })
+    if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'Continue', exact: true }).click()
+    await connectFreshWorkspace(page, world.workspaceCwd, 'source-choice')
+    const olderPath = join(world.workspaceCwd, 'older-workspace')
+    const latestPath = join(world.workspaceCwd, 'latest-workspace')
+    await mkdir(olderPath, { recursive: true })
+    await mkdir(latestPath, { recursive: true })
+    const olderWorkspace = await world.ctx.workspaceRegistry.create(olderPath, 'older-workspace')
+    const latestWorkspace = await world.ctx.workspaceRegistry.create(latestPath, 'latest-workspace')
+    await page.route('**/api/session.create', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { payload: { workspaceId?: string } }
+        const workspaceId = request.payload.workspaceId
+        if (workspaceId !== olderWorkspace.id && workspaceId !== latestWorkspace.id) {
+          await route.continue()
+          return
+        }
+        const older = workspaceId === olderWorkspace.id
+        const requested = older ? olderRequested : latestRequested
+        requested.resolve(undefined)
+        const response = await route.fetch()
+        await (older ? releaseOlder : releaseLatest).promise
+        await route.fulfill({ response })
+      } catch (error) { routeErrors.push(error) }
+    })
+    const composer = page.locator('textarea').first()
+    await composer.fill(draft)
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'older-workspace', exact: true }).click()
+    await olderRequested.promise
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'latest-workspace', exact: true }).click()
+    await latestRequested.promise
+    const latestReply = page.waitForResponse((response) => {
+      if (!response.url().endsWith('/api/session.create')) return false
+      const request = response.request().postDataJSON() as { payload: { workspaceId?: string } }
+      return request.payload.workspaceId === latestWorkspace.id
+    })
+    releaseLatest.resolve(undefined)
+    const latestResponse = await latestReply
+    expect((await latestResponse.json() as { result: { ok: boolean } }).result.ok).toBe(true)
+    await latestResponse.finished()
+    const back = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await back.isVisible()) await back.click()
+    await page.getByRole('treeitem', { name: 'latest-workspace', exact: true }).click()
+    const latestSessions = page.getByRole('tree', { name: 'Workspace sessions' })
+    const selected = latestSessions.getByRole('treeitem', { selected: true })
+    await expect.poll(() => selected.count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => composer.inputValue()).toBe(draft)
+    const olderReply = page.waitForResponse((response) => {
+      if (!response.url().endsWith('/api/session.create')) return false
+      const request = response.request().postDataJSON() as { payload: { workspaceId?: string } }
+      return request.payload.workspaceId === olderWorkspace.id
+    })
+    releaseOlder.resolve(undefined)
+    const olderResponse = await olderReply
+    expect((await olderResponse.json() as { result: { ok: boolean } }).result.ok).toBe(true)
+    await olderResponse.finished()
+    // Let response continuations and React's frame work commit before checking
+    // that the completed older request left the visible selection untouched.
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => { requestAnimationFrame(() => { resolve() }) })
+    }))
+    expect(await selected.count()).toBe(1)
+    expect(await composer.inputValue()).toBe(draft)
+    await compareOrRefreshGolden(
+      join(SNAPSHOT_DIR, 'latest-workspace-choice.expected.md'),
+      `latest selected ${await selected.count() === 1}\ndraft ${JSON.stringify(await composer.inputValue())}`,
+      MODE,
+    )
+    expect(routeErrors).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  } finally {
+    releaseOlder.resolve(undefined)
+    releaseLatest.resolve(undefined)
+    await page.unrouteAll({ behavior: 'wait' })
+    await browser.close()
+    await world.close()
+  }
+}, 120_000)
+
+it('keeps a selected session reference parseable after moving its draft to another workspace', async () => {
+  const world = await launchWebScaffold({})
+  const browser = await chromium.launch()
+  const page = await newEnglishPage(browser)
+  const tripwire = watchConsole(page)
+  const submitted = Promise.withResolvers<unknown>()
+  const routeErrors: unknown[] = []
+  const referenceId = 'workspace-transfer-reference'
+  const canonical = `@[Research notes](dsh-session:${Buffer.from(JSON.stringify(referenceId)).toString('base64url')})`
+  const retryError = 'Reference transfer admission rejected'
+  try {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-reference-transfer'))
+    const reference = Session.create(SessionId(referenceId))
+    reference.append('turn/start', { turn: 1 })
+    const user = reference.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'Source context for the workspace reference.' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    reference.append('session/title', { title: 'Research notes', messageSeqs: [user.seq], source: { kind: 'fallback' } })
+    reference.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    await seedSession(world, [
+      JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION, id: '{{sessionId}}', createdAt: 0, cwd: '{{cwd}}' }),
+      ...reference.events.map(event => JSON.stringify(event)), '',
+    ].join('\n'), referenceId)
+    await page.goto(world.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    const welcome = page.getByRole('dialog').filter({ hasText: 'Internal Testing Notice' })
+    if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'Continue', exact: true }).click()
+    await connectFreshWorkspace(page, world.workspaceCwd, 'reference-source')
+    const targetPath = join(world.workspaceCwd, 'reference-target')
+    await mkdir(targetPath, { recursive: true })
+    await world.ctx.workspaceRegistry.create(targetPath, 'reference-target')
+    await page.route('**/api/session.prompt', async (route) => {
+      try {
+        const request = route.request().postDataJSON() as { rpcId: string; payload: { content: unknown } }
+        submitted.resolve(request.payload.content)
+        await route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({
+            type: 'server-response', rpcId: request.rpcId,
+            result: { ok: false, error: { code: 'internal', message: retryError, details: {} } },
+          }),
+        })
+      } catch (error) { routeErrors.push(error) }
+    })
+    const composer = page.locator('textarea').first()
+    await composer.fill('@Research')
+    const menu = page.getByRole('listbox', { name: 'Trigger suggestions' })
+    await menu.getByRole('option', { name: /Session \u00b7 Research notes/ }).click()
+    await expect.poll(() => composer.inputValue()).toBe('@Research notes ')
+    await expect.poll(() => page.locator('[data-reference-appearance="session"]').count()).toBe(1)
+    await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'reference-target', exact: true }).click()
+    const back = page.getByRole('button', { name: 'Back to workspaces', exact: true })
+    if (await back.isVisible()) await back.click()
+    await page.getByRole('treeitem', { name: 'reference-target', exact: true }).click()
+    const selected = page.getByRole('tree', { name: 'Workspace sessions' }).getByRole('treeitem', { selected: true })
+    await expect.poll(() => selected.count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => composer.inputValue()).toBe(canonical + ' ')
+    const destination = { draft: await composer.inputValue(), selected: await selected.count() === 1 }
+    await composer.press('Enter')
+    const content = await submitted.promise
+    expect(content).toEqual([{ type: 'text', text: canonical }])
+    await page.getByRole('alert').filter({ hasText: retryError }).waitFor()
+    expect(await composer.inputValue()).toBe(canonical + ' ')
+    if (await back.isVisible()) await back.click()
+    const sourceRow = page.getByRole('treeitem', { name: 'reference-source', exact: true })
+    await sourceRow.hover()
+    await sourceRow.getByRole('button', { name: 'New session in reference-source' }).click()
+    await expect.poll(() => composer.inputValue(), { timeout: 15_000 }).toBe('')
+    await compareOrRefreshGolden(
+      join(SNAPSHOT_DIR, 'reference-draft-transfer.expected.md'),
+      `destination ${JSON.stringify(destination)}\nsubmitted ${JSON.stringify(content)}\nsource ${JSON.stringify({ draft: await composer.inputValue() })}`,
+      MODE,
+    )
+    expect(routeErrors).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' })
+    await browser.close()
+    await world.close()
+  }
+}, 120_000)
