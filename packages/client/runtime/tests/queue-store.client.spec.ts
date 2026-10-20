@@ -257,7 +257,7 @@ describe('manager buffering of queue snapshots', () => {
     expect(manager.get(SID).getSnapshot().queue.map(row => row.id)).toEqual(['q-new'])
   })
 
-  it('subscribed drops the prior-generation snapshot while preserving answerable frames', () => {
+  it.each([false, true])('subscribed retires prior-generation state and preserves later replay (replayed=%s)', (replayed) => {
     const manager = new SessionManager(new FakeApiClient(), fakeRemote())
     manager.handleMuxEnvelope({ rpcId: rid('g1a'), payload: queueFrame([{ id: 'q-g1', body: '第一代' }]) })
     manager.handleMuxEnvelope({
@@ -268,9 +268,16 @@ describe('manager buffering of queue snapshots', () => {
       rpcId: rid('g2a'),
       payload: { type: 'session/subscribed', sessionId: SID, lastSeq: 3 },
     })
+    if (replayed) {
+      manager.handleMuxEnvelope({
+        rpcId: rid('g1b'),
+        payload: { type: 'approval/requested', sessionId: SID, approvalId: 'ap-1' as never, toolName: 'bash' },
+      })
+    }
     manager.handleMuxEnvelope({ rpcId: rid('g2b'), payload: queueFrame([{ id: 'q-g2', body: '第二代' }]) })
     const snapshot = manager.get(SID).getSnapshot()
     expect(snapshot.queue.map(row => row.id)).toEqual(['q-g2'])
-    expect(snapshot.pending.map(pending => pending.kind)).toEqual(['approval'])
+    expect(snapshot.pending.map(pending => pending.kind)).toEqual(replayed ? ['approval'] : [])
+    expect(snapshot.pending.map(pending => pending.key)).toEqual(replayed ? ['a:g1b'] : [])
   })
 })

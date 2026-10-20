@@ -451,13 +451,21 @@ export class Session implements SessionFace {
     request?.complete()
   }
 
+  /** Drop stream-owned waits without settling their still-Host-addressable response carriers. */
+  handleDisconnected(): void {
+    if (this.pending.size === 0) return
+    this.pending.clear()
+    this.pendingRev++
+    this.notifier.markDirty()
+  }
+
   /** Reconnect rebuild (manager calls this on onConnected for instances that were opened):
-   *  reset the window and rerun open; pending waits for the baseline replay. Invalidates any
+   *  reset the window and rerun open. Stream-owned waits reset on generation loss or session/subscribed. Invalidates any
    *  in-flight open first — its history request rode the dead connection and must not settle
    *  the fresh generation into 'error'. */
   async resync(): Promise<void> {
-    // The queue mirror is NOT cleared here: onConnected (which drives resync)
-    // races the mux frames — the fresh generation's baseline may have landed
+    // Stream-owned queue and pending waits are not cleared here: onConnected
+    // (which drives resync) races the mux frames — the fresh generation's baseline may have landed
     // already, and the host never resends it. The mirror re-baselines on the
     // session/subscribed frame instead (same stream as the queue snapshot
     // that follows it, so ordering is guaranteed).
@@ -472,10 +480,6 @@ export class Session implements SessionFace {
     this.events = []
     this.views = []
     this.baseSeq = 0
-    // Superseded, not settled: the baseline replay re-sends still-pending requested frames verbatim
-    // (same rpcId), re-minting fresh waits; a stale reference's respond() still reaches the host.
-    this.pending.clear()
-    this.pendingRev++
     this.subscribedLastSeq = null
     this.liveBuffer = []
     this.notifier.markDirty()
@@ -526,6 +530,7 @@ export class Session implements SessionFace {
         // snapshot AFTER the subscribed frame on the same stream, so the
         // stale mirror clears here — race-free against onConnected/resync
         // timing (clearing there could wipe a baseline that already landed).
+        this.handleDisconnected()
         if (this.queueMirror.reset()) this.notifier.markDirty()
         return
       }

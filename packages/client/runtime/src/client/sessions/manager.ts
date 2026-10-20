@@ -748,18 +748,11 @@ export class SessionManager {
       // previous generation would survive as a phantom list.
       this.jobsBySession.delete(frame.sessionId)
       this.notifier.markDirty()
-      // New mux-generation baseline: discard the previous queue snapshot.
-      // The host omits session/queue when the live queue is empty, so retaining
-      // it could replay stale work when the Session is instantiated later.
-      // This is the same re-baseline signal Session uses for its own mirror.
-      const buffered = this.pendingBuffers.get(frame.sessionId)
-      if (buffered !== undefined) {
-        const kept = buffered.filter(item => item.payload.type !== 'session/queue')
-        if (kept.length !== buffered.length) {
-          if (kept.length === 0) this.pendingBuffers.delete(frame.sessionId)
-          else this.pendingBuffers.set(frame.sessionId, kept)
-        }
-      }
+      // Every mux generation replays live waits and the non-empty queue after
+      // this baseline. Reset both resident-list status and deferred frames;
+      // repeated failed handshakes may not emit another reconnecting state.
+      this.pendingInteractions.delete(frame.sessionId)
+      this.pendingBuffers.delete(frame.sessionId)
     }
     // List-level pending-interaction status (the sidebar amber dot): tracked
     // for every session, instantiated or not; stable keys make replays idempotent.
@@ -918,6 +911,7 @@ export class SessionManager {
    * request with its live rpcId.
   */
   handleDisconnected(): void {
+    for (const session of this.sessions.values()) session.handleDisconnected()
     if (this.pendingInteractions.size > 0) {
       this.pendingInteractions.clear()
       this.notifier.markDirty()

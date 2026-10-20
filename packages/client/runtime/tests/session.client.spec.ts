@@ -23,6 +23,47 @@ import { entries, ev, plainTurn } from './event-script.client.ts'
 const SID = 'fk-s1' as SessionId
 const PARENT = 'fk-parent' as SessionId
 
+describe('pending waits across stream generations', () => {
+  it.each(['question', 'approval'] as const)('retains an early replayed %s through history recovery', async (kind) => {
+    const { api, session } = makeSession()
+    await session.open()
+    const request = kind === 'question'
+      ? { type: 'question/requested' as const, sessionId: SID, questions: [{ id: 'q', question: 'Continue?' }] }
+      : { type: 'approval/requested' as const, sessionId: SID, approvalId: 'a' as never, toolName: 'example' }
+    session.handleMuxEnvelope('wait' as never, request)
+    const old = session.getSnapshot().pending[0]!
+    session.handleDisconnected()
+    expect(session.getSnapshot().pending).toEqual([])
+    session.handleMuxEnvelope('baseline' as never, { type: 'session/subscribed', sessionId: SID, lastSeq: -1 })
+    session.handleMuxEnvelope('wait' as never, request)
+    const replayed = session.getSnapshot().pending[0]!
+    expect(replayed).not.toBe(old)
+    expect(replayed.key).toBe(old.key)
+    await session.resync()
+    expect(session.getSnapshot().pending).toEqual([replayed])
+    await replayed.respond({ ok: false, error: { code: 'cancelled', message: 'test response', details: {} } })
+    await old.respond({ ok: false, error: { code: 'cancelled', message: 'late response', details: {} } })
+    expect(api.callsOf('respond')).toHaveLength(2)
+  })
+
+  it.each([false, true])('clears and publishes stale waits at a subscribed baseline (opened=%s)', async (opened) => {
+    const { session } = makeSession()
+    if (opened) await session.open()
+    session.handleMuxEnvelope('old' as never, {
+      type: 'question/requested', sessionId: SID, questions: [{ id: 'q', question: 'Continue?' }],
+    })
+    expect(session.getSnapshot().pending).toHaveLength(1)
+    await Promise.resolve()
+    const changed = vi.fn()
+    const stop = session.subscribe(changed)
+    session.handleMuxEnvelope('baseline' as never, { type: 'session/subscribed', sessionId: SID, lastSeq: -1 })
+    await Promise.resolve()
+    expect(session.getSnapshot().pending).toEqual([])
+    expect(changed).toHaveBeenCalledOnce()
+    stop()
+  })
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -1463,7 +1504,7 @@ describe('remaining branches', () => {
 })
 
 describe('resync', () => {
-  it('rebuilds the window and clears pending; cold instances no-op', async () => {
+  it('rebuilds the window without clearing stream-owned waits; cold instances no-op', async () => {
     const { api, session } = makeSession()
     api.onHistory = () => histResponse(plainTurn(0, 0, 'a', 'b'))
     await session.open()
@@ -1472,7 +1513,7 @@ describe('resync', () => {
     await session.resync()
     const snapshot = session.getSnapshot()
     expect(snapshot.openState).toBe('open')
-    expect(snapshot.pending).toEqual([]) // baseline replay re-sends still-pending frames
+    expect(snapshot.pending.map(wait => wait.key)).toEqual(['a:ra']) // history recovery does not own stream replay
     expect(snapshot.nodes).toHaveLength(4)
 
     const cold = makeSession()
@@ -1486,6 +1527,7 @@ describe('resync', () => {
     await session.open()
     session.handleMuxEnvelope('rq-replay' as never, { type: 'question/requested', sessionId: SID, questions: [] })
     const before = session.getSnapshot().pending[0]!
+    session.handleDisconnected()
     await session.resync()
     session.handleMuxEnvelope('rq-replay' as never, { type: 'question/requested', sessionId: SID, questions: [] })
     const after = session.getSnapshot().pending[0]!
