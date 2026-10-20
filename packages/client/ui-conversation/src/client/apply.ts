@@ -112,8 +112,9 @@ function selectApproval({ interactions }: ComposerChainProps): ApprovalWait | nu
 
 /** Mounts the conversation plugin.
  * @param ctx - Client root context.
+ * @returns resolves after the conversation service and its slot consumers are ready.
  */
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
   const sessions = ctx.sessions
   const workspaces = ctx.workspaces
   const layout = ctx.layout
@@ -194,6 +195,10 @@ export function apply(ctx: Context): void {
   // here, and the bar reads its own session's store. It cannot flow the other
   // way: this package must not import the plugins that would know.
   const composerBlocks = new ComposerBlockRegistry()
+
+  // Live session slots may render as soon as their entries are published.
+  // Settle the service child first so their inject factories can resolve it.
+  await ctx.plugin(ConversationController, { input: inputHub, blocks: composerBlocks })
 
   // The input machine feeds every session-scope slot
   // component through the standard provide channel — the 'input' hook plus
@@ -450,12 +455,6 @@ export function apply(ctx: Context): void {
 
   // Session stats stick with the composer (composer.dock = stats-line family).
   slots.register({ name: 'conversation.composer.dock', id: 'stats', order: 0, locale: NS }, StatsLine)
-
-  // Class-plugin mount (packages/AGENTS.md service form): the service
-  // registers itself as `conversation` and lives on its own child fiber.
-  // Presentation registrants depend directly on their slot declarations;
-  // this service remains only where conversation actions are required.
-  ctx.plugin(ConversationController, { input: inputHub, blocks: composerBlocks })
 
   // The plan strip rides the input dock above the queue rows (same posture).
   ctx.plugin(todoDockEntry)

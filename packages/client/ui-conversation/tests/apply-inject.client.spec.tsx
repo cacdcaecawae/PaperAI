@@ -19,7 +19,7 @@ import { SlotTestRuntime, usePinnedBrowserLanguages, stubSettingsScope } from '@
 import type { SessionBehaviorOverrides } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { ISession, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, inject } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import * as ConversationPlugin from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
   ChatViewInjected, ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
   ConversationSessionInjected, DetailsHostInjected,
@@ -70,7 +70,7 @@ async function bench() {
     'details': { kind: 'single', scope: 'session' },
   }, (_p: { renderSlot?: unknown }) => null)
 
-  const feature = await runtime.mount({ inject: [...inject], apply })
+  const feature = await runtime.mount(ConversationPlugin)
 
   // The host face (store resolution) exists only inside the installed
   // renderer, so materialize it the way the shell does.

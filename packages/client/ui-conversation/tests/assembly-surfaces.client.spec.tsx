@@ -7,7 +7,8 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { ISession, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime, usePinnedBrowserLanguages, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
-import { apply, inject, type EmptyWorkspaceOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import * as ConversationPlugin from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { EmptyWorkspaceOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 usePinnedBrowserLanguages('zh-CN')
 
@@ -71,7 +72,7 @@ async function bench(opts?: { blank?: boolean }) {
     },
   })
   await runtime.root.declare(LAYOUT_CHILDREN, AppRoot)
-  await runtime.mount({ inject: [...inject], apply })
+  await runtime.mount(ConversationPlugin)
   return runtime
 }
 
@@ -87,7 +88,7 @@ describe('resident composer', () => {
     runtime.provide('locale', locale)
     runtime.slots.installLocale(locale)
     await runtime.root.declare(LAYOUT_CHILDREN, AppRoot)
-    await runtime.mount({ inject: [...inject], apply })
+    await runtime.mount(ConversationPlugin)
     runtime.slots.register({ name: 'conversation.hero.workspace' }, WorkspaceProbe)
     const view = runtime.renderRoot()
     const textarea = view.container.querySelector('textarea')
@@ -120,7 +121,7 @@ describe('resident composer', () => {
       draft.items = [{ workspaceId: 'w1', title: 'Proj', path: '/proj', sessionIds: [SID] }] as never
     })
     await runtime.root.declare(LAYOUT_CHILDREN, AppRoot)
-    await runtime.mount({ inject: [...inject], apply })
+    await runtime.mount(ConversationPlugin)
     runtime.slots.register({ name: 'conversation.hero.workspace' }, WorkspaceProbe)
     const view = runtime.renderRoot()
 
@@ -194,7 +195,7 @@ describe('prompt rejection through the assembled composer', () => {
       session: { prompt, loadOlder: vi.fn<ISession['loadOlder']>() },
     })
     await runtime.root.declare(LAYOUT_CHILDREN, AppRoot)
-    await runtime.mount({ inject: [...inject], apply })
+    await runtime.mount(ConversationPlugin)
     const view = runtime.renderRoot()
 
     const composer = view.container.querySelector('textarea')!

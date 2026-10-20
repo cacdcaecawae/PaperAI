@@ -101,12 +101,13 @@ export class SessionInputShell implements SessionInput {
   private lastMirroredDraft = ''
   private imageIds: readonly DraftAttachmentId[] = []
   private disposed = false
+  private readonly unsubscribeQueue: (() => void) | undefined
   /** Draft persistence mirror (chat store write; receives the clipboard projection, never display-only ranges). */
   private mirrorFn: ((text: string) => void) | undefined
 
   constructor(private readonly deps: SessionInputDeps) {
     this.state = createSnapshotStore<InputState>(this.compose())
-    deps.queue?.subscribe(() => { this.publish() })
+    this.unsubscribeQueue = deps.queue?.subscribe(() => { this.publish() })
   }
 
   // ---- SessionInput face ----
@@ -121,8 +122,9 @@ export class SessionInputShell implements SessionInput {
     this.run(this.core.dispatch({ type: 'draft-changed', draft: text, ...(editRange !== undefined ? { editRange } : {}) }))
   }
 
-  /** Append ordered image ids unless an admission transaction is locked. */
+  /** Append ordered image ids unless admission is locked or the shell is disposed. */
   addImages(ids: readonly DraftAttachmentId[]): boolean {
+    if (this.disposed) return false
     if (this.snapshot.phase === 'adjudicating' || this.snapshot.phase === 'submitting') return false
     if (ids.length === 0) return true
     this.imageIds = [...this.imageIds, ...ids]
@@ -196,6 +198,7 @@ export class SessionInputShell implements SessionInput {
    * dismisses and the menu tracks frozen.
    */
   submit(mode: InputSubmitMode = 'queue'): void {
+    if (this.disposed) return
     // Claimed pre-gate: a claim that does not declare image acceptance never
     // submits while images are attached — one notice, everything retained.
     // Enter-time adjudication applies the same policy for unclaimed lines
@@ -240,6 +243,7 @@ export class SessionInputShell implements SessionInput {
    * empty-draft no-op.
    */
   steerQueue(): void {
+    if (this.disposed) return
     this.deps.steerQueue?.()
   }
 
@@ -362,9 +366,12 @@ export class SessionInputShell implements SessionInput {
 
   // ---- wiring-layer extras (not on the frozen SessionInput face) ----
 
-  /** Teardown: abort any in-flight attempt and stop accepting async settlements. */
+  /** Release subscriptions and persistence, abort admission, and stop new sends and async settlements. */
   dispose(): void {
+    if (this.disposed) return
     this.disposed = true
+    this.mirrorFn = undefined
+    this.unsubscribeQueue?.()
     this.run(this.core.dispatch({ type: 'release' }))
   }
 
@@ -382,6 +389,7 @@ export class SessionInputShell implements SessionInput {
    * @returns the unbind disposer.
    */
   bindMirror(write: (text: string) => void): () => void {
+    if (this.disposed) return () => {}
     this.mirrorFn = write
     return () => {
       if (this.mirrorFn === write) this.mirrorFn = undefined

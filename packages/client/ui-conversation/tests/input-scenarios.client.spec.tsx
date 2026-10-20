@@ -23,6 +23,8 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { DraftAttachmentId } from '../src/client/input/contract.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
+import type { SessionInputDeps } from '../src/client/input/facade.ts'
+import { InputHub } from '../src/client/input/hub.ts'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
 import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -103,7 +105,7 @@ const COMMANDS: FakeCommand[] = [
 const PNG: SubmitImageAttachment = { mediaType: 'image/png', data: 'AA==' }
 
 /** Real scope bench: SessionRuntime over one listed session + InputTriggerController + shell listeners (the hub wiring shape). */
-async function scopedBench(register?: (inputTriggers: InputTriggerService) => void) {
+async function scopedBench(register?: (inputTriggers: InputTriggerService) => void, useHub = false) {
   const ctx = new Context()
   const api = new FakeApiClient()
   api.onWorkspaceList = () => Promise.resolve(ok({ items: [] }))
@@ -119,14 +121,22 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
   register?.(inputTriggers)
   const actx = sessions.scope(sessionId)!
   const controller = inputTriggers.sessionOf(actx)
-  const sink = vi.fn(() => Promise.resolve<SubmitOutcome>({ kind: 'success' }))
+  const sink = vi.fn<SessionInputDeps['defaultSink']>(() => Promise.resolve<SubmitOutcome>({ kind: 'success' }))
   const serialize = vi.fn((ids: readonly DraftAttachmentId[]) => Promise.resolve(ids.map(() => PNG)))
   const release = vi.fn()
-  const shell = new SessionInputShell({ actx, inputTriggers: () => controller, defaultSink: sink, commandImages: { serialize, release, unsupportedNotice: (token: string) => `${token.trim()} images-unsupported` } })
-  // The hub's listener wiring, verbatim.
-  actx.on('slash/input-begin-command', req => shell.beginCommand(req.claim, req.span) ? true : undefined)
-  actx.on('slash/input-insert-reference', req => shell.insertReference(req.reference, req.span) ? true : undefined)
-  actx.on('slash/input-consume-token', req => shell.consumeToken(req.guard) ? true : undefined)
+  const mountHub = async () => {
+    let hub!: InputHub
+    const feature = ctx.plugin((pluginCtx) => { hub = new InputHub(pluginCtx, makeTranslate(zh, commonZh)) })
+    await feature
+    return { feature, shell: hub.shellFor(sessions.binding(sessionId)!) }
+  }
+  const owned = useHub ? await mountHub() : undefined
+  const shell = owned?.shell ?? new SessionInputShell({ actx, inputTriggers: () => controller, defaultSink: sink, commandImages: { serialize, release, unsupportedNotice: (token: string) => `${token.trim()} images-unsupported` } })
+  if (owned === undefined) {
+    actx.on('slash/input-begin-command', req => shell.beginCommand(req.claim, req.span) ? true : undefined)
+    actx.on('slash/input-insert-reference', req => shell.insertReference(req.reference, req.span) ? true : undefined)
+    actx.on('slash/input-consume-token', req => shell.consumeToken(req.guard) ? true : undefined)
+  }
   const wiring = shell
   const sessionStore = createSnapshotStore<ConversationSnapshot>({
     sessionId, views: EMPTY_CONVERSATION_VIEWS, chat: EMPTY_CHAT_SNAPSHOT,
@@ -187,7 +197,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
   }
   return {
     ctx, inputTriggers, controller, shell, wiring, view, textarea, type, sink, serialize, release,
-    api, session: sessions.sessionOf(actx)!, barProps,
+    api, session: sessions.sessionOf(actx)!, barProps, mountHub, feature: owned?.feature,
   }
 }
 
@@ -198,6 +208,35 @@ async function bench(executeImpl?: (line: string) => Promise<SubmitOutcome>) {
   const base = await scopedBench((inputTriggers) => { inputTriggers.registerSource(source) })
   return { ...base, execute, executed, envelopes }
 }
+
+describe('input plugin replacement', () => {
+  it('shows the selected reference in the replacement InputBar', async () => {
+    const b = await scopedBench(inputTriggers => inputTriggers.registerSource({
+      trigger: '@',
+      name: 'reference',
+      candidates: () => Promise.resolve([{ name: 'research', description: 'notes' }]),
+      onPick: () => ({ insert: { source: 'reference', ref: 'doc-a', label: 'Research notes', clipboardText: '@Research notes' } }),
+    }), true)
+    b.type('@res')
+    await act(async () => { await b.feature!.dispose() })
+    b.view.unmount()
+    const current = await b.mountHub()
+    current.shell.setDraft('@res')
+    const view = render(<InputBar {...b.barProps}
+      useInput={bindSnapshotSelector(current.shell.state)}
+      inputActions={current.shell.actions}
+      keyboard={current.shell}
+      useNotices={bindSnapshotSelector(current.shell.notices)}
+      useLexicon={bindSnapshotSelector(current.shell.lexicon)}
+    />)
+    act(() => { current.shell.track('@res', 4) })
+    await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().groups[0]?.items).toHaveLength(1) })
+    act(() => { b.controller.pick('reference', 0) })
+    expect(view.container.querySelector('textarea')!.value).toBe('@Research notes ')
+    expect(b.shell.snapshot.draft).toBe('@res')
+    await act(async () => { await current.feature.dispose() })
+  })
+})
 
 describe('stop recovery over the resident Session', () => {
   it('does not announce an older Stop rejection after a second click succeeds', async () => {
