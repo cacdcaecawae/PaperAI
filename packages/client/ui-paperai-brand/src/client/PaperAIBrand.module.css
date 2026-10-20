@@ -1,10 +1,15 @@
-/* Mark and wordmark are outlines painted in the surrounding text color, the
-   same contract as the DSH whale and wordmark they replace. */
+/* Mark and wordmark are outlines painted in a color property: the mark in the
+   brand gold, the wordmark in the surrounding ink. A host class may restate
+   the mark's color. */
 
 .mark,
 .wordmark {
   display: block;
   flex: none;
+}
+
+.mark {
+  color: var(--paperai-brand-gold);
 }
 
 .wordmark {

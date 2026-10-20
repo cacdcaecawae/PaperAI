@@ -16,9 +16,11 @@
   inset: 0;
   background: var(--dsw-alias-bg-mask-1);
   backdrop-filter: var(--dsw-mask-blur);
+  animation: dsh-modal-mask-in 200ms ease-out;
 }
 
-/* Dialog card: r24, shadow-lv3, layer-2 fill, inverted border, pb 24. */
+/* Dialog card in the iOS sheet recipe: r24, shadow-lv3, the grouped layer-2
+   ground, a hairline, pb 24. */
 .dialog {
   position: relative;
   z-index: 1;
@@ -29,12 +31,32 @@
   max-height: calc(100dvh - 48px);
   padding: 0 0 24px;
   overflow: hidden;
-  border: 1px solid var(--dsw-alias-border-inverted);
+  border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 24px;
   background: var(--dsw-alias-bg-layer-2);
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
   box-shadow: var(--dsw-shadow-lv3);
+  animation: dsh-modal-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* The iOS sheet presentation: the card rises a little and settles. */
+@keyframes dsh-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+}
+
+@keyframes dsh-modal-mask-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mask,
+  .dialog {
+    animation: none;
+  }
 }
 
 .content {
@@ -57,33 +79,36 @@
 
 .title {
   margin: 0;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 24px;
-  font-weight: 500; /* figma wt510, rendered 500 */
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--dsw-alias-label-primary);
 }
 
+/* The iOS sheet close: a 30 px gray-filled circle around the glyph. */
 .close {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
   border: none;
-  border-radius: 8px;
-  background: transparent;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-module-platform);
   cursor: pointer;
   color: var(--dsw-alias-label-secondary);
 }
 
 .close:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 .close:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 /* Description and body share the 332px content column (24px side pads). */

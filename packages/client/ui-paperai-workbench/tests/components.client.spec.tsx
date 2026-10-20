@@ -1214,7 +1214,9 @@ describe('DocumentWorkbench', () => {
     const rootView = render(<DocumentWorkbench {...b.props} />)
     const compared = screen.getByRole('complementary', { name: '版本' })
     expect(within(compared).getByText('初始版本收录了全部 2 段，没有更早的版本可比较。')).toBeTruthy()
-    expect(within(compared).getAllByRole('button', { pressed: true })).toHaveLength(1)
+    // The picked version row and the reading it is shown in.
+    expect(within(compared).getAllByRole('button', { pressed: true })).toHaveLength(2)
+    expect(within(compared).getByRole('button', { name: '这一版改了什么', pressed: true })).toBeTruthy()
     expect(rootView.container.querySelector('[role="document"]')!.shadowRoot!.querySelectorAll('[data-paperai-change]')).toHaveLength(0)
     expect(screen.getByText(/正在查看历史版本：/)).toBeTruthy()
     fireEvent.click(within(compared).getByRole('button', { name: '恢复到此版本' }))

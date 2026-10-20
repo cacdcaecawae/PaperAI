@@ -3,20 +3,26 @@
   display: inline-flex;
 }
 
-/* Dropdown card (figma MenuDropdown 122:9481 / 419:16920): menu surface,
- * r12, inverted hairline border, shadow-lv3, 4px inset padding. */
+/* Dropdown card in the iOS context-menu recipe: the translucent menu
+ * surface over a blurred backdrop, r14, a hairline, shadow-lv3, 5px inset. */
 .list,
 .submenu {
   /* min-widths below are the design's outer card widths — include the pad. */
   box-sizing: border-box;
-  padding: 4px;
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid var(--dsw-alias-border-inverted);
-  border-radius: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 14px;
   background: var(--dsw-specific-menu);
+  backdrop-filter: blur(40px) saturate(180%);
   box-shadow: var(--dsw-shadow-lv3);
+  /* The iOS menu presentation: the card grows out of the corner nearest its
+     anchor. Placement reads offsetWidth/offsetHeight, which a transform does
+     not change, so the animation never skews the measured size. */
+  transform-origin: top left;
+  animation: dsh-menu-in 180ms cubic-bezier(0.32, 0.72, 0, 1);
   /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens. The
      declaration sits on the card rather than on `.scrollable .viewport`
      because the elevation is a property of this surface, and the custom
@@ -51,11 +57,31 @@
 .sideTop {
   top: auto;
   bottom: calc(100% + 4px);
+  transform-origin: bottom left;
 }
 
 .alignEnd {
   left: auto;
   right: 0;
+  transform-origin: top right;
+}
+
+.sideTop.alignEnd {
+  transform-origin: bottom right;
+}
+
+@keyframes dsh-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .list,
+  .submenu {
+    animation: none;
+  }
 }
 
 /* Viewport fit: the card stops 12px short of the viewport's top/bottom edges
@@ -92,17 +118,17 @@
   position: relative;
 }
 
-/* Menu cell (figma .Menu_cell): min-h 40, r10, pad 10/8, 14/22 primary,
- * gap 8 between leading icon / label / trailing check. */
+/* Menu cell: min-h 38, r9, pad 12/8, 14/22 primary, gap 10 between
+ * leading icon / label / trailing check. */
 .item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  min-height: 40px;
-  padding: 8px 10px;
+  min-height: 38px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 10px;
+  border-radius: 9px;
   background: transparent;
   cursor: pointer;
   font-size: 14px;
@@ -113,6 +139,12 @@
 
 .item:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.item:focus-visible {
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 .denseList .item {
@@ -180,7 +212,7 @@
 
 .check {
   flex: none;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 /* Selected cell keeps the plain fill (marker is the trailing check); the
@@ -204,16 +236,17 @@
 
 /* Heading row: non-interactive small grey text, padding aligned with items. */
 .label {
-  padding: 8px 10px;
+  padding: 8px 12px 4px;
   font-size: 12px;
+  font-weight: 500;
   line-height: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* Separator cell (figma 122:9481): py 4 / px 2 around the hairline. */
+/* Group separator: the iOS menu's wide gap band between action groups. */
 .separator {
-  height: 1px;
-  margin: 4px 2px;
+  height: 6px;
+  margin: 4px -5px;
   background: var(--dsw-alias-border-l1);
 }
 

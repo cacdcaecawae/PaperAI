@@ -148,9 +148,9 @@
   min-width: 0;
   height: 24px;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 24px;
-  letter-spacing: 0.04em;
+  letter-spacing: -0.01em;
 }
 
 .fallbackBrandName {
@@ -171,11 +171,17 @@
   padding: 0;
   background: transparent;
   cursor: pointer;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .iconButton:hover {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.iconButton:focus-visible,
+.newSession:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .collapsed .iconButton {
@@ -204,10 +210,9 @@
   justify-content: center;
 }
 
-/* Rail icons ride the primary ink (figma rail spec); expanded keeps the
-   secondary icon-button ink. */
+/* Rail icons ride the tint like every iOS toolbar glyph, the same as expanded. */
 .collapsed .iconButton {
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .buildRevision {
@@ -224,8 +229,8 @@
   line-height: 16px;
 }
 
-/* New Session: 38px bar, 12px radius (figma 133:7634 geometry, squared-off
-   corners); collapsed it renders as the rail's plain icon control. */
+/* New Session: the iOS tinted button, a 38px bar at r12 in the tint's own
+   tinted fill; collapsed it renders as the rail's plain icon control. */
 .newSession {
   flex: none;
   display: flex;
@@ -236,19 +241,24 @@
   padding: 8px 16px;
   margin: 0 2px 8px;
   box-sizing: border-box;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 1px solid transparent;
   border-radius: 12px;
-  background: var(--dsw-alias-button-elevated-fill);
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 22px;
   cursor: pointer;
   overflow: hidden;
+  transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .newSession:hover {
-  background: var(--dsw-alias-button-floating-hover);
+  background: var(--dsw-specific-sidebar-nav-item-active-accent);
+}
+
+.newSession:active {
+  opacity: 0.7;
 }
 
 .collapsed .newSession {

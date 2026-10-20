@@ -1,6 +1,6 @@
-/* One row of document commands: 28px quiet controls on the base surface,
+/* One row of document commands in the iOS bar material: 28px quiet controls,
    hairline dividers between groups, a menu for every choice. Pressed and
-   selected states take the gold accent; disabled controls quiet to tertiary. */
+   selected states take the tint; disabled controls quiet to tertiary. */
 .ribbon {
   display: flex;
   flex-wrap: wrap;
@@ -9,8 +9,9 @@
   min-height: 40px;
   padding: 4px 12px;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-base);
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-material-bar);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
   flex-shrink: 0;
   font-size: 13px;
   line-height: 20px;
@@ -28,7 +29,7 @@
   border-radius: 8px;
   padding: 0 6px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -49,7 +50,7 @@
    label at 2.5:1 on the base surface. Kept after the pressed rule, of equal specificity,
    so a disabled pressed control quiets with it. */
 .tool:disabled, .select:disabled { cursor: default; color: var(--dsw-alias-label-tertiary); }
-.tool:focus-visible, .select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.tool:focus-visible, .select:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring); }
 .select { padding: 0 4px 0 8px; color: var(--dsw-alias-label-primary); }
 .select > span { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 .select[data-muted] > span { color: var(--dsw-alias-label-tertiary); }

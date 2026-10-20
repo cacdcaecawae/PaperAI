@@ -1,5 +1,5 @@
-/* Transient top-center banner (DeepSeek Chat toast look): contrast fill,
-   inverted label, slide-in, then hold-and-fade. The fade delay/duration MUST
+/* Transient top-center banner in the iOS HUD look: thick material, label
+   ink, slide-in, then hold-and-fade. The fade delay/duration MUST
    agree with HOLD_MS/FADE_MS in Toast.tsx: the component unmounts at their
    sum, so a mismatched sheet either cuts the fade or leaves an invisible
    banner blocking nothing. */
@@ -19,11 +19,15 @@
   align-items: center;
   gap: 10px;
   max-width: min(560px, calc(100vw - 48px));
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: var(--dsw-alias-button-contrast-fill);
-  color: var(--dsw-alias-label-primary-inverted);
+  padding: 11px 18px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 22px;
+  /* The iOS HUD: the thick material over a saturated blur, in the label ink. */
+  background: var(--dsw-alias-material-thick);
+  backdrop-filter: blur(30px) saturate(180%);
+  color: var(--dsw-alias-label-primary);
   font-size: 14px;
+  font-weight: 500;
   line-height: 22px;
   box-shadow: var(--dsw-shadow-lv3);
   transform: translateX(-50%);

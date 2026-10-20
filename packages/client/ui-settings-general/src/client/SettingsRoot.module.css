@@ -62,6 +62,7 @@
   inset: 0;
   background: var(--dsw-alias-bg-mask-1);
   backdrop-filter: var(--dsw-mask-blur);
+  animation: settings-mask-in 200ms ease-out;
 }
 
 /* Panel (figma Settings 501:29947): r24, white, lv3 shadow (figma effects
@@ -88,6 +89,26 @@
      styles/scrollbar.css for the rebinding contract). */
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  animation: settings-panel-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* The Modal primitive's sheet presentation: the panel rises a little and settles. */
+@keyframes settings-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+}
+
+@keyframes settings-mask-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mask,
+  .panel {
+    animation: none;
+  }
 }
 
 /* Nav rail (figma .Setting-nav 501:29958): 188 wide, pad (12,22,12,0),
@@ -102,12 +123,13 @@
   box-sizing: border-box;
 }
 
-/* Title row (figma 501:29959): 16/500 lh24, 12px side padding. */
+/* Title row: the iOS Settings large title, 12px side padding. */
 .navTitle {
   padding: 0 12px;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 500;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--dsw-alias-label-primary);
 }
 
@@ -118,8 +140,8 @@
   gap: 4px;
 }
 
-/* Nav cell (figma .Setting-nav-cell 501:29962): 164x40, r12, pad
-   (12,9,16,9), gap 8; label 14/400 lh22; selected fill #EBEEF2. */
+/* Nav cell: 164x40, r10, pad (12,9,16,9), gap 8; label 14/400 lh22; the
+   selected cell is the iPadOS Settings selection, tint fill and white type. */
 .navCell {
   display: flex;
   align-items: center;
@@ -128,7 +150,7 @@
   padding: 9px 16px 9px 12px;
   box-sizing: border-box;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   cursor: pointer;
   font-family: inherit;
@@ -143,8 +165,16 @@
   background: var(--dsw-specific-sidebar-nav-item-hover);
 }
 
+.navCell:focus-visible,
+.close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
+}
+
 .navCell.active {
-  background: var(--dsw-specific-sidebar-nav-item-active);
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-weight: 500;
 }
 
 .navIcon {
@@ -188,7 +218,7 @@
   margin-left: auto;
 }
 
-/* Close button (figma .Icon_container 501:29982): 28x28, r28, 14px glyph. */
+/* Close button: the iOS sheet close, a 28 px gray-filled circle. */
 .close {
   display: inline-flex;
   align-items: center;
@@ -198,13 +228,13 @@
   padding: 0;
   border: none;
   border-radius: 28px;
-  background: transparent;
+  background: var(--dsw-alias-bg-module-platform);
   cursor: pointer;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .close:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 /* Options area (figma Options 501:29983): pad (24,0,24,24), scrolls. */

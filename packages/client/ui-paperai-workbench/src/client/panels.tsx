@@ -280,7 +280,7 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
     <Panel title={t('gate.title')} onClose={onClose} t={t}>
       <p className={css.panelNote}>{t(document.template === null ? 'gate.noTemplate' : 'gate.description')}</p>
       {document.template !== null && (
-        <>
+        <div className={css.panelSection}>
           <div className={css.gateStatus}>
             <StateDot
               state={document.gate.status === 'passed' ? 'done' : document.gate.status === 'failed' ? 'error' : 'warning'}
@@ -303,7 +303,7 @@ export function GatePanel({ document, state, validate, onSendFix, onClose, t }: 
               {document.gate.findings.map(finding => <FindingRow key={finding.id} finding={finding} t={t} />)}
             </ul>
           )}
-        </>
+        </div>
       )}
     </Panel>
   )
@@ -363,9 +363,9 @@ export function VersionsPanel({ document, state, showDiff, restore, onClose, t }
         ? <p className={css.panelNote}>{t('versions.empty')}</p>
         : (
           <>
-            <div className={css.panelActions} role="group" aria-label={t('versions.title')}>
-              <Pill active={mode === 'own'} disabled={busy} onClick={() => { switchMode('own') }}>{t('versions.modeOwn')}</Pill>
-              <Pill active={mode === 'current'} disabled={busy} onClick={() => { switchMode('current') }}>{t('versions.modeCurrent')}</Pill>
+            <div className={css.segmented} role="group" aria-label={t('versions.title')}>
+              <button type="button" aria-pressed={mode === 'own'} disabled={busy} onClick={() => { switchMode('own') }}>{t('versions.modeOwn')}</button>
+              <button type="button" aria-pressed={mode === 'current'} disabled={busy} onClick={() => { switchMode('current') }}>{t('versions.modeCurrent')}</button>
             </div>
             <p className={css.panelNote} aria-live="polite">{caption}</p>
             {formattingEditCount > 0 && (

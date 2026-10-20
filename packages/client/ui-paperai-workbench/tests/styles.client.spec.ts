@@ -33,16 +33,19 @@ describe('PaperAI DSH-native styling', () => {
     expect(workbench).not.toMatch(/\n\s*\.preview \{\s*padding: 0;/u)
   })
 
-  it('follows the sidebar row and heading metrics of the DSH session list', () => {
+  it('follows the sidebar row and heading metrics of the DSH session list, in the iOS sidebar selection', () => {
     expect(sidebar).toContain('min-height: 36px')
-    expect(sidebar).toContain('border-radius: 8px')
+    expect(sidebar).toContain('border-radius: 10px')
     expect(sidebar).toContain('font-size: 14px')
     expect(sidebar).toContain('min-height: 34px')
     expect(sidebar).toContain('var(--dsw-alias-interactive-bg-hover)')
+    expect(sidebar).toMatch(/\n\.selected,\n\.selected:hover \{[^}]*background: var\(--dsw-alias-state-business-primary\);/u)
     expect(diagnostics).toContain('min-height: 36px')
-    expect(diagnostics).toContain('border-radius: 8px')
-    expect(start).toContain('font-size: 20px')
+    expect(diagnostics).toContain('border-radius: 10px')
+    // The start page heads with an iOS large title over an inset grouped list.
+    expect(start).toContain('font-size: 28px')
     expect(start).toContain('min-height: 48px')
+    expect(start).toMatch(/\n\.group \{[^}]*border-radius: 12px;/u)
   })
 
   it('paints only through theme tokens: no literal colors, and elevation only through the brand shadow tokens', () => {
@@ -58,7 +61,7 @@ describe('PaperAI DSH-native styling', () => {
     // Editability drops on every save and format read, so the disabled row is read many times an hour: 0.4 opacity left it at 2.5:1.
     expect(ribbon).toContain('.tool:disabled, .select:disabled { cursor: default; color: var(--dsw-alias-label-tertiary); }')
     expect(ribbon).not.toContain('opacity')
-    expect(library).toContain('var(--dsw-alias-border-l2)')
+    expect(library).toContain('background: var(--dsw-alias-bg-layer-1)')
   })
 
   it('keeps the Host preview inert: no scripts, no inline handlers, no editable HTML', () => {

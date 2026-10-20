@@ -31,7 +31,7 @@
   padding: 0;
   background: transparent;
   cursor: pointer;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .iconButton:hover {
@@ -43,8 +43,8 @@
 .clearButton:focus-visible,
 .detailBack:focus-visible,
 .detailNewSession:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 /* Section header: title, an inline search control, and the two trailing
@@ -61,7 +61,7 @@
   box-sizing: border-box;
   border-radius: 12px;
   overflow: hidden;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .root:not(.rail) .sectionHeader {
@@ -79,7 +79,11 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 22px;
   opacity: 1;
   visibility: visible;
   transition:
@@ -237,7 +241,7 @@
   border-radius: 50%;
   background: transparent;
   cursor: text;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-state-business-primary);
   overflow: hidden;
   transition:
     width 180ms var(--ds-ease-in-out),
@@ -251,10 +255,10 @@
   height: 30px;
   margin-inline: -2px;
   padding: 0 4px 0 0;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 1px solid transparent;
   border-radius: 10px;
-  background: transparent;
-  color: var(--dsw-alias-label-caption);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .searchButton {
@@ -347,7 +351,7 @@
 .rail .iconButton {
   width: 36px;
   height: 36px;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .rail .search {
@@ -363,7 +367,7 @@
 .rail .searchButton {
   width: 36px;
   height: 36px;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .rail .searchButton:hover {
@@ -485,15 +489,15 @@
   align-items: center;
   gap: 6px;
   padding: 5px 8px 3px;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
 }
 
 .detailSectionTitle h3 {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -505,7 +509,7 @@
   height: 18px;
   flex: none;
   place-items: center;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 /* Separated by space rather than a rule: at sidebar width a divider stacked
@@ -532,10 +536,11 @@
   border-radius: 8px;
   padding: 4px 6px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 18px;
   transition:
     background 120ms var(--ds-ease-in-out),
@@ -544,7 +549,6 @@
 
 .detailNewSession:hover {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
 .detailSessions {

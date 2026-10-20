@@ -55,10 +55,11 @@ describe('ModelsSection theme styles', () => {
   it('separates the row card from the editor it expands into', () => {
     // `bg-layer-3` and `bg-module-platform` both resolve to neutral-bluish-800
     // under the dark theme, so filling the row with either erases the nested
-    // editor's boundary. The row is outlined; the fill is the editor's alone.
+    // editor's boundary. The row is a layer-1 grouped card; the module fill is
+    // the editor's alone.
     expect(block('.editor')).toContain('background: var(--dsw-alias-bg-module-platform)')
-    expect(block('.rowCard')).toContain('border: 1px solid var(--dsw-alias-border-l2)')
-    expect(block('.rowCard')).not.toMatch(/\bbackground\s*:/)
+    expect(block('.rowCard')).toContain('background: var(--dsw-alias-bg-layer-1)')
+    expect(block('.rowCard')).not.toMatch(/module-platform|layer-3/)
   })
 
   it('gives every dropdown the shared chevron instead of the OS arrow', () => {

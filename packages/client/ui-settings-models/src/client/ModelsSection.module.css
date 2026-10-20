@@ -18,9 +18,10 @@
 
 .title {
   margin: 0;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 500;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--dsw-alias-label-primary);
 }
 
@@ -28,7 +29,7 @@
   margin: 0;
   font-size: 14px;
   line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .notice {
@@ -55,11 +56,11 @@
   gap: 8px;
 }
 
-/* A configured provider: outlined on the panel fill, so the filled editor
-   card it expands into reads as the nested object. */
+/* A configured provider: a grouped card on the panel's grouped ground, so the
+   filled editor module it expands into reads as the nested object. */
 .rowCard {
-  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -148,17 +149,24 @@
 .primaryButton {
   background: var(--dsw-alias-button-primary-fill);
   color: var(--dsw-alias-label-primary-foreground);
+  font-weight: 600;
 }
 
 .primaryButton:hover:not(:disabled) {
   background: var(--dsw-alias-button-primary-hover);
 }
 
-.secondaryButton,
+/* The iOS gray button: a translucent fill capsule with tint text. */
+.secondaryButton {
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 500;
+}
+
 .addButton {
   border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .secondaryButton:hover:not(:disabled),
@@ -167,7 +175,7 @@
 }
 
 .secondaryButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 .dangerButton {
@@ -334,7 +342,7 @@
 .addCard,
 .setupCard {
   border-radius: 12px;
-  background: var(--dsw-alias-bg-module-platform);
+  background: var(--dsw-alias-bg-layer-1);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -550,10 +558,10 @@
 .input {
   box-sizing: border-box;
   width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
   font: inherit;
   font-size: 14px;
   line-height: 22px;
@@ -571,10 +579,11 @@ select.input {
 .input:focus {
   outline: none;
   border-color: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .input::placeholder {
-  color: var(--dsw-alias-label-dimmed);
+  color: var(--dsw-alias-label-quaternary);
 }
 
 .input:disabled {

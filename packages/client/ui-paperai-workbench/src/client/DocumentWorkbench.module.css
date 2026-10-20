@@ -1,6 +1,7 @@
 /* Facts and actions sit in the details header, commands in one row below,
-   and every control over the page floats. Colors are semantic tokens;
-   elevation comes from the brand layer's shadow tokens. */
+   and every control over the page floats in the iOS thick material. Colors
+   are semantic tokens; elevation comes from the brand layer's shadow tokens.
+   Buttons are capsules; the side panel is an inspector of grouped cards. */
 
 .root {
   container-name: paperai-workbench;
@@ -57,8 +58,8 @@
 }
 
 .fact:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .fact[data-kind='gate'][data-status='failed'] {
@@ -94,35 +95,40 @@
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 8px;
-  padding: 0 10px;
+  border-radius: 16px;
+  padding: 0 12px;
   overflow: hidden;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
   transition:
     background 120ms var(--ds-ease-in-out),
-    color 120ms var(--ds-ease-in-out);
+    color 120ms var(--ds-ease-in-out),
+    opacity 120ms var(--ds-ease-in-out);
+}
+
+.chip:active:not(:disabled) {
+  opacity: 0.7;
 }
 
 .chip:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
 .chip:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .chip:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .chip[aria-pressed='true'] {
@@ -134,13 +140,13 @@
   flex: none;
 }
 
-/* Export and save are the filled actions: gold, and only one is enabled at a time. */
+/* Export and save are the filled actions: the tint capsule, and only one is enabled at a time. */
 .chip[data-kind='export'],
 .chip[data-kind='save'] {
   padding: 0 14px;
   background: var(--dsw-alias-button-primary-fill);
   color: var(--dsw-alias-label-primary-foreground);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .chip[data-kind='export']:hover:not(:disabled),
@@ -240,19 +246,20 @@
   min-width: 0;
 }
 
-/* Pills floating over the page: a translucent base with blur, r16, a hairline,
-   and the brand's float shadow. The change navigator keeps left so an open
-   panel never covers it; the pending bar centres; zoom sits top right. */
+/* Pills floating over the page: the iOS thick material over a saturated blur,
+   capsule ends, a hairline, and the brand's float shadow. The change navigator
+   keeps left so an open panel never covers it; the pending bar centres; zoom
+   sits top right. */
 .floating {
   position: absolute;
   z-index: 1;
   display: flex;
   align-items: center;
   gap: 2px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--dsw-alias-bg-base) 82%, transparent);
-  backdrop-filter: blur(12px);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  background: var(--dsw-alias-material-thick);
+  backdrop-filter: blur(24px) saturate(180%);
   box-shadow: var(--paperai-float-shadow);
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
@@ -288,8 +295,8 @@
 
 .zoomPill button:focus-visible,
 .changeNav button:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 .zoomPill {
@@ -320,15 +327,16 @@
 }
 
 .selectionBar > button {
-  min-height: 28px;
+  min-height: 30px;
   border: 0;
-  border-radius: 12px;
-  padding: 0 10px;
+  border-radius: 999px;
+  padding: 0 12px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
 }
 
 .selectionBar > button:hover {
@@ -336,8 +344,8 @@
 }
 
 .selectionBar > button:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 .changeNav {
@@ -382,10 +390,10 @@
 }
 
 .pending > .chip {
-  height: 28px;
-  border-radius: 14px;
-  padding: 0 10px;
-  font-size: 12px;
+  height: 30px;
+  border-radius: 15px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .pending > .chip[data-kind='save'] {
@@ -396,11 +404,11 @@
   display: inline-flex;
 }
 
-/* A conflict is a choice waiting on the page, not a loss, so it wears the band's gold rather than the
+/* A conflict is a choice waiting on the page, not a loss, so it wears the tint rather than the
    alert red. Pressing it walks the bands. */
 .conflicts > .chip {
-  height: 28px;
-  border-radius: 14px;
+  height: 30px;
+  border-radius: 15px;
   padding: 0 10px;
   color: var(--dsw-alias-state-business-primary);
   font-size: 12px;
@@ -432,33 +440,36 @@
   line-height: 20px;
 }
 
-/* The panel is a column of its own beside the page, with the same hairline
-   and layer tone as the details header. */
+/* The panel is an iOS inspector beside the page: the grouped ground, a bar
+   header in the material, and each section a rounded card on it. */
 .panel {
   display: flex;
   width: min(360px, 42%);
   min-height: 0;
   flex: none;
   flex-direction: column;
-  border-left: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .panelHeader {
   display: flex;
   flex: none;
-  min-height: 44px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 0 12px 0 16px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-material-bar);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 
 .panelHeader h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 20px;
 }
 
@@ -470,19 +481,19 @@
   border-radius: 50%;
   padding: 0;
   place-items: center;
-  background: transparent;
+  background: var(--dsw-alias-bg-module-platform);
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
 .panelClose:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
   color: var(--dsw-alias-label-primary);
 }
 
 .panelClose:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .panelBody {
@@ -490,22 +501,23 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   overflow: auto;
-  padding: 14px 16px 24px;
+  padding: 16px 16px 24px;
 }
 
 .panelSection {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
 }
 
 .panelSection h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 20px;
 }
@@ -530,10 +542,58 @@
   gap: 6px;
 }
 
+/* A two-way reading switch: the iOS segmented control. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-segment-track);
+}
+
+.segmented > button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.segmented > button:hover:not(:disabled, [aria-pressed='true']) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.segmented > button[aria-pressed='true'] {
+  background: var(--dsw-alias-segment-fill);
+  box-shadow: var(--dsw-shadow-segment);
+  font-weight: 600;
+}
+
+.segmented > button:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.segmented > button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
+}
+
 .templateCurrent {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
 }
 
 .templateHeading {
@@ -610,21 +670,22 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 14px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
   padding: 0 10px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 18px;
 }
 
 .select:hover:not(:disabled),
 .select[aria-expanded='true'] {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 .select:disabled {
@@ -635,7 +696,7 @@
 .select:focus-visible,
 .linkButton:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--dsw-alias-border-l3);
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .linkButton {
@@ -648,7 +709,8 @@
   color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 18px;
 }
 
@@ -724,14 +786,27 @@
   line-height: 18px;
 }
 
-/* The history reads as a timeline: one row per version with a dot on a
-   hairline rail, the author and time beside the summary. The picked row is
-   raised on the layer tone; its changes show on the document itself. */
+/* The history reads as a timeline inside one grouped card: one row per
+   version with a dot on a hairline rail, the author and time beside the
+   summary. The picked row wears the tint's tinted fill; its changes show on
+   the document itself. */
 .versionList {
+  position: relative;
   margin: 0;
-  padding: 0 0 0 12px;
-  border-left: 1px solid var(--dsw-alias-border-l2);
+  padding: 6px 6px 6px 24px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
   list-style: none;
+}
+
+.versionList::before {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 11px;
+  width: 1px;
+  background: var(--dsw-alias-border-l2);
+  content: '';
 }
 
 .version {
@@ -775,8 +850,7 @@
 }
 
 .versionRow[aria-pressed='true'] {
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: 0 0 0 1px var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-state-business-tertiary);
 }
 
 .versionRow:disabled {
@@ -785,8 +859,8 @@
 }
 
 .versionRow:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 .versionRow > time {
@@ -838,8 +912,8 @@
   gap: 8px;
   margin-top: auto;
   padding: 12px 0 0;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .versionFooter > button {

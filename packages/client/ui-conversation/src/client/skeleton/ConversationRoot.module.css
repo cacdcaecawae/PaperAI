@@ -1,7 +1,7 @@
 /* Conversation column skeleton: header (breadcrumb row only for subagents not fork + tabs) over the view
    area, composer InputBar at the bottom. Column width/squeeze is layout's;
-   this fills its cell. Figma: Header 39:27730 (83px two-row), tabs 13px with
-   a 2px active bar. */
+   this fills its cell. The header is an iOS navigation bar: a hairline under
+   the title row and the view switch as a segmented control. */
 
 .root {
   display: flex;
@@ -40,7 +40,7 @@
   left: 0;
   z-index: 0;
   height: 1px;
-  background: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-border-l1);
   pointer-events: none;
 }
 
@@ -113,7 +113,7 @@
 }
 
 .crumbCurrent {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--dsw-alias-label-primary);
   cursor: default;
 }
@@ -137,49 +137,46 @@
   display: none;
 }
 
-/* figma Tab_Group 34:11441: 35px strip, gap 36, pad-left 8, tabs bottom-aligned. */
+/* The view switch: an iOS segmented control under the title row. */
 .tabs {
   position: relative;
   z-index: 1;
   display: flex;
-  gap: 36px;
-  margin-top: 4px;
-  padding-left: 8px;
+  width: fit-content;
+  gap: 2px;
+  margin: 6px 0 10px 8px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-segment-track);
 }
 
-/* figma .Tab 34:11442: 13/16 text (figma wt510, rendered 500), gap 8 to the 2px bar. */
 .tab {
   position: relative;
-  padding: 0 0 11px;
+  min-width: 72px;
+  padding: 4px 14px;
   border: none;
+  border-radius: 7px;
   background: transparent;
   font-size: 13px;
-  line-height: 16px;
+  line-height: 18px;
   font-weight: 500;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
 
-.tab::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 1px;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
+.tab:hover:not(.tabActive) {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* Selected tab is blue, not ink: brand-primary resolves to neutral black in
-   this token sheet, so the selected state rides the business blue — the
-   nearest semantic token that stays blue in both themes. */
+.tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
+}
+
 .tabActive {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.tabActive::after {
-  background: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-segment-fill);
+  box-shadow: var(--dsw-shadow-segment);
+  font-weight: 600;
 }
 
 .viewArea {
@@ -236,10 +233,9 @@
   /* The column scrolls on ONE axis. Stating `hidden` rather than leaving the
      initial `visible` is what removes the horizontal bar: a box that scrolls in
      one axis computes `visible` to `auto` in the other, so any bleed becomes
-     user-scrollable. `.heroGlow` bleeds by construction (1051/776 of the hero
-     box), which put a horizontal scrollbar under every center column narrower
-     than the glow. Clipping is unchanged — `overflow-y: auto` already made this
-     a scroll container that clips both axes, so this only takes away the bar. */
+     user-scrollable. Clipping is unchanged — `overflow-y: auto` already made
+     this a scroll container that clips both axes, so this only takes away the
+     bar. */
   overflow-x: hidden;
   /* Reserved unconditionally: the composer seat rides this box's content box in
      Chat and its padding box under a view's composer overlay, so an `auto`
@@ -317,7 +313,7 @@
    NOT absolute+transform: a transform would make this box the containing
    block for position:fixed descendants (pickers/modals), shrinking them. */
 .composerHero {
-  position: relative; /* .heroGlow positioning context */
+  position: relative;
   align-self: center;
   /* figma 75:8208 drew 12 between all three rows; the workspace row now sits
      8 above the card (its margin-top restores 12 under the hero chrome). */
@@ -328,22 +324,6 @@
      width as the docked composer at every viewport. */
   width: min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);
   z-index: 1;
-}
-
-/* Blue backdrop ellipse (figma 313:14109), centered on the input card: the
-   card's resting center sits ~92px above the stack bottom (32 foot pad +
-   half of the ~120px two-row card); width tracks the card (glow asset 1051
-   vs design card 776) so blur scales in userSpace with it. z-index -1 keeps
-   it behind the in-flow hero content inside this stacking context. */
-.heroGlow {
-  position: absolute;
-  left: 50%;
-  bottom: 92px;
-  z-index: -1;
-  width: calc(100% * 1051 / 776);
-  aspect-ratio: 1051 / 468;
-  transform: translate(-50%, 50%);
-  pointer-events: none;
 }
 
 .heroWorkspaceRow {

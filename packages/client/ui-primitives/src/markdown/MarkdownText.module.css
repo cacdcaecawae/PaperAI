@@ -131,10 +131,13 @@
   background: var(--dsw-alias-border-l2);
 }
 
+/* The quote rule is a 3 px tint bar; the padding gives back the extra pixel so
+   quoted text keeps its 16 px offset. */
 .markdown blockquote {
-  border-left: 2px solid var(--dsw-alias-label-caption);
+  border-left: 3px solid var(--dsw-alias-state-business-primary);
   margin: 16px 0 0;
-  padding-left: 14px;
+  padding-left: 13px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .markdown pre {

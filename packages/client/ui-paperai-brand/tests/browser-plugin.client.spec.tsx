@@ -63,7 +63,7 @@ describe('PaperAI browser-brand plugin', () => {
     expect(inject).toEqual(['slots', 'locale', 'theme'])
   })
 
-  it('stacks the ink-and-gold token layer over the shipped palette and lifts it on teardown', async () => {
+  it('stacks the iOS token layer over the shipped palette and lifts it on teardown', async () => {
     const { ctx, layers } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
@@ -74,7 +74,7 @@ describe('PaperAI browser-brand plugin', () => {
       expect(modes.light).not.toBe('')
       expect(modes.dark).not.toBe('')
     }
-    // Ink primary on paper, gold primary on slate.
+    // The tint resolves per scheme: #0071e3 on light, the brighter #0a84ff on dark.
     expect(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.light).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
     // The workbench badges read one accent and one tint per document type.
     for (const type of ['proposal', 'midterm', 'manuscript', 'final', 'other']) {
@@ -142,7 +142,7 @@ describe('PaperAI browser-brand plugin', () => {
     expect(after.slots.entries(ACP_CHANNEL_MARK)).toHaveLength(2)
   })
 
-  it('renders the outlined wordmark and the host-sized golden-ratio mark in the surrounding ink', () => {
+  it('renders the outlined wordmark and the host-sized golden-ratio mark', () => {
     const name = render(<PaperAIBrandName />)
     const wordmark = name.container.querySelector('svg')
     expect(wordmark?.getAttribute('aria-hidden')).toBe('true')

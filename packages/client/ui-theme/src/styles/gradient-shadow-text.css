@@ -7,6 +7,7 @@ body {
   --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
   --dsw-shadow-lv3:
     0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+  --dsw-shadow-segment: 0 1px 3px 0 rgba(0, 0, 0, 0.12);
   /* blur filter */
   --dsw-mask-blur: blur(2px);
 }

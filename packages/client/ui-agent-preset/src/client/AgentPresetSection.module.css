@@ -8,14 +8,16 @@
 
 .title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 28px;
 }
 
 .intro {
   margin: 0;
-  font-size: 13px;
-  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* Cards, not rows: a preset is a thing you pick, and the description is the
@@ -34,11 +36,10 @@
 
 .groupHead {
   margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--dsw-alias-label-tertiary);
+  padding-left: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .cards {
@@ -54,7 +55,7 @@
 }
 
 .card {
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 1px solid transparent;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -64,13 +65,13 @@
 
 
 .card:hover:not(.cardActive) {
-  border-color: var(--dsw-alias-label-dimmed);
+  border-color: var(--dsw-alias-border-l2);
 }
 
-/* The default preset reads as selected, not merely badged. */
+/* The default preset reads as selected, not merely badged: the tint ring. */
 .cardActive {
-  background: var(--dsw-alias-bg-layer-2);
-  border-color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary);
 }
 
 /* A broken preset reads as damaged before anything else: the card cannot be
@@ -124,8 +125,8 @@
 }
 
 .cardMain:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 .cardHead {
@@ -151,14 +152,14 @@
 }
 
 .badge {
-  border: 1px solid var(--dsw-alias-border-l2);
-  color: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .inUse {
   margin-left: auto;
-  background: var(--dsw-alias-label-primary);
-  color: var(--dsw-alias-bg-layer-3);
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary-foreground);
 }
 
 /* Bounded to four lines. A preset publishes its own description, so one long

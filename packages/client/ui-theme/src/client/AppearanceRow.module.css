@@ -1,12 +1,12 @@
-/* Appearance row (figma 'Frame 2117131228': title + cube row, column gap 8,
- * pad 16/0, hairline separator; the section column strips it when last). */
+/* Appearance row: title + an iOS segmented control, column gap 8, pad 16/0,
+ * hairline separator; the section column strips it when last. */
 
 .group {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 16px 0;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
 .title {
@@ -19,28 +19,30 @@
 .cubeRow {
   display: flex;
   align-items: stretch;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-segment-track);
 }
 
-/* Appearance cube (figma '.Selector Cube' 276x82 r16, pad 20/32, centered
- * icon-over-label column, gap 4); flexed down from the figma width so all
- * three sit on one row in the 800 panel, wrapping when narrower. */
+/* One segment: icon beside label, the three sharing the track equally. */
 .themeCube {
   box-sizing: border-box;
-  flex: 1 1 180px;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 20px 32px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 16px;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
   background: transparent;
   font: inherit;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
@@ -49,9 +51,14 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* Selected cube: #F5F6F7 fill + #ADB2B8 border (static token — the bluish-400
- * step has no alias-layer name). */
+.themeCube:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
+}
+
+/* The picked segment: the raised segment fill. */
 .selected {
-  background: var(--dsw-alias-bg-module-platform);
-  border-color: var(--dsw-static-neutral-bluish-400);
+  background: var(--dsw-alias-segment-fill);
+  box-shadow: var(--dsw-shadow-segment);
+  font-weight: 600;
 }

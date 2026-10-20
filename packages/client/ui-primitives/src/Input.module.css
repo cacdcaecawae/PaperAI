@@ -2,15 +2,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-1);
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module-platform);
 }
 
+/* iOS text field: the gray fill stays; focus adds the tint ring. */
 .wrap:focus-within {
-  border-color: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .icon {
@@ -34,5 +35,5 @@
 }
 
 .input::placeholder {
-  color: var(--dsw-alias-label-dimmed);
+  color: var(--dsw-alias-label-quaternary);
 }
