@@ -40,7 +40,7 @@ describe('reference submission', () => {
       defaultSink: vi.fn(),
       commandImages,
     })
-    first.bindMirror(mirror)
+    first.connectDraftStore('', mirror)
     first.setDraft('@res')
     expect(first.insertReference({
       source: 'reference',

@@ -88,10 +88,12 @@ skill/@subagent 引用不走占位符 + occurrence 身份链——纯文本引�
 - 发送即原文（不再 `<skill>` 序列化）；气泡侧 MessageItem 双形状装饰（legacy `<skill>` 标签 + 纯文本 token）。
 - 旧 occurrence/paste/serialize 链全部保留在盘未删（additive；删除另成将来一刀）。装饰响应性：InputBar 以 uSES 订阅 shell 的 lexicon source，scope 出生预热后才 settle 的名录会直接点亮已有 draft token，无需菜单交互或无关重渲染。
 
+草稿持久化连接随常驻输入存在，不随严格会话视图卸载：待处理的发送可能在导航后完成，仅在返回时同步会让此前的页面刷新恢复已发送文本。首次连接只为尚未修改或提交的输入采纳存储文本；之后由状态机拥有空草稿、引用身份与撤销状态，并向缓存 store 写入剪贴板投影。视图回调捕获自己的输入外壳，不在释放后重新查找它。UI 插件卸载会永久释放该外壳与连接，即使运行时会话仍在，迟到的效果或发送结算也不能覆盖替换 store 的草稿。由于输入的资源释放可能让出执行，会话作用域清理同步终止 store 的持久化：已排队的发送结算不能重建已移除的存储键，重复的旧清理也不能删除替换实例的键。
+
 ### 每会话供数贡献与键盘私面
 
 - ui-conversation（hub 兼贡献者）经 `sessions.provide` 供 `'input'` hook（机器状态 + queue overlay）+ `inputActions` prop（`setDraft`/`submit`，稳定 void 回调）。
-- 公私分界：公共 provide 只放 React 语汇成员；键盘/DOM 命令面（track/arbitrate/space/undo/redo/paste/dismissPopup/bindMirror——同步返回值、disposer 语义）是 InputBar 独占，走 InputBar entry 自己的 inject 包内私递，不出插件边界。
+- 公私分界：公共 provide 只放 React 语汇成员；键盘/DOM 命令面（track/arbitrate/space/undo/redo/paste/dismissPopup——同步返回值）是 InputBar 独占，走 InputBar entry 自己的 inject 包内私递，不出插件边界。
 
 输入外壳只在会话作用域和 conversation 插件都存活时存在。任一所有者的 effect 都会释放另一侧登记，避免存活的作用域把选择事件发给已卸载插件，也避免存活插件保留失效作用域。清理移除作用域监听器、停止队列订阅、释放草稿图片并中止发送受理事务。后续选择交给替换外壳；旧回调不能启动发送或队列插话、接受图片，也不能重新连接持久化。已经开始的引用 codec 工作使用独立取消信号，但外壳释放后，其迟到结果不能到达消息发送入口。 slot 条目只在 conversation 服务激活后发布，对常驻会话进行插件重载时也如此。 Agent-preset 条目分别等待各自的 slot 声明；共享控制器的清理先登记，再开始条目注册。
 

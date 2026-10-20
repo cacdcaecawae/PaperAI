@@ -271,10 +271,11 @@ export async function apply(ctx: Context): Promise<void> {
     store: chatStore,
     inject: (sessionId: SessionId, _actions: BoundActions<typeof chatStore>): ConversationSessionInjected => {
       const conversation = concreteConversation(ctx)
+      const input = inputHub.shell(sessionId)
       return {
         views,
         releaseSessionImages: (id) => { conversation.releaseSessionImages(id) },
-        bindDraftMirror: write => inputHub.shell(sessionId).bindMirror(write),
+        connectDraftStore: (draft, write) => { input.connectDraftStore(draft, write) },
       }
     },
   }, ConversationSession)

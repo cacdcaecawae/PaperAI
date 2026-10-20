@@ -6,7 +6,7 @@
 // history ImageGallery loading real fixture bytes through the authorized
 // sessions.attachment route, the single-click ImageLightbox, and the composer
 // intake chain (paste → ordered thumbnail rail → image-only send enablement → remove).
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import {
   installAssembledBootEnv, mountAssembledApp, openAssembledFixtureHistory, startAssembledFixtureSession,
@@ -277,4 +277,54 @@ it('keeps the same preview after interrupted image preparation and permits retry
   fireEvent.keyDown(textarea, { key: 'Enter' })
   await waitFor(() => { expect(document.querySelector('[aria-label="Pending images"]')).toBeNull() })
   expect(read).toHaveBeenCalledTimes(2)
+})
+
+it('keeps admitted text empty after completing an image send in another session', async () => {
+  mountAssembledApp()
+  await openFixtureSession()
+  const composer = () => {
+    const textarea = document.querySelector('textarea')
+    if (textarea === null) throw new Error('composer missing')
+    return textarea
+  }
+  const submitted = 'Describe the offscreen admission image'
+  fireEvent.change(composer(), { target: { value: submitted } })
+  const image = new File([Uint8Array.of(1)], 'offscreen.png', { type: 'image/png' })
+  let finish!: (bytes: ArrayBuffer) => void
+  const read = vi.spyOn(image, 'arrayBuffer').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  await pasteDeferredImage(composer(), image)
+  fireEvent.keyDown(composer(), { key: 'Enter' })
+  expect(composer().readOnly).toBe(true)
+  expect(read).toHaveBeenCalledOnce()
+
+  fireEvent.click(await screen.findByRole('button', { name: 'New session in fixture' }))
+  await waitFor(() => { expect(composer().value).toBe('') })
+  fireEvent.change(composer(), { target: { value: 'Other session draft' } })
+  await act(async () => { finish(Uint8Array.of(1).buffer) })
+  await waitFor(() => {
+    const chatDrafts = Object.keys(localStorage)
+      .filter(key => key.startsWith('dsh.conversation.chat.'))
+      .map(key => (JSON.parse(localStorage.getItem(key)!) as { draft: string }).draft)
+    expect(chatDrafts).not.toContain(submitted)
+  })
+  expect(composer().value).toBe('Other session draft')
+
+  const sessions = await screen.findByRole('tree', { name: 'Workspace sessions' })
+  fireEvent.click(await within(sessions).findByText('Fixture 历史会话'))
+  await waitFor(() => {
+    expect(composer().readOnly).toBe(false)
+    expect(composer().value).toBe('')
+    expect(screen.queryAllByText(submitted, { exact: true })).toHaveLength(1)
+  })
+  expect({
+    draft: composer().value,
+    pendingImages: document.querySelectorAll('[aria-label="Pending images"]').length,
+    admittedMessages: screen.queryAllByText(submitted, { exact: true }).length,
+  }).toMatchInlineSnapshot(`
+    {
+      "admittedMessages": 1,
+      "draft": "",
+      "pendingImages": 0,
+    }
+  `)
 })

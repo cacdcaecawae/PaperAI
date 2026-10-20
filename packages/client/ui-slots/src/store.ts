@@ -65,9 +65,10 @@ export interface StoreInstance<T, A extends ActionsDecl<T>> {
    */
   subscribe(fn: () => void): () => void
   /**
-   * Drop this instance's persisted value (no-op for non-persist specs). The
-   * framework calls it when the owning scope dies for good — a pruned session
-   * must not leave orphaned storage keys behind.
+   * Permanently stop this instance's persistence and drop its stored value
+   * (no-op for non-persist specs). The framework calls it when the owning
+   * scope dies for good. Repeated calls leave a replacement instance's key
+   * untouched; retained actions may still update this instance in memory.
    */
   clearPersisted(): void
 }

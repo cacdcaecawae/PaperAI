@@ -512,8 +512,8 @@ export interface ConversationSessionInjected {
   }
   /** Release historical image URLs when this rendered session scope unmounts. */
   releaseSessionImages: (sessionId: SessionId) => void
-  /** Bind the input machine's draft persistence mirror to the session store. */
-  bindDraftMirror: (write: (text: string) => void) => () => void
+  /** Restore only fresh input and retain its cached persistence writer until the session scope ends. */
+  connectDraftStore: (persistedDraft: string, write: (text: string) => void) => void
 }
 
 /** Business callbacks injected into the strict session header seat. */

@@ -106,7 +106,7 @@ describe('input hub lifetime', () => {
     const b = await bench()
     const old = await b.mount()
     const writes: string[] = []
-    old.shell.bindMirror(text => writes.push(text))
+    old.shell.connectDraftStore('', text => writes.push(text))
     old.shell.setDraft('old pending')
     old.shell.submit()
     await old.feature.dispose()
@@ -117,7 +117,7 @@ describe('input hub lifetime', () => {
     const checkpoint = writes.length
     expect(old.shell.addImages(['late-image' as DraftAttachmentId])).toBe(false)
     expect(old.shell.snapshot.imageIds).toEqual([])
-    old.shell.bindMirror(text => writes.push(text))
+    old.shell.connectDraftStore('', text => writes.push(text))
     old.shell.actions.setDraft('obsolete edit')
     old.shell.actions.submit()
     b.setQueue([{ id: 'q1', placement: 'queued' }])
