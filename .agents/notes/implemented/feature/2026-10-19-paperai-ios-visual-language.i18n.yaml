@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-19-paperai-ios-visual-language.md
-2026-10-19-paperai-ios-visual-language.md: 8fbff0272a55273b19621736dddef798ce087ed7
-2026-10-19-paperai-ios-visual-language.zh.md: c8e2af72cf476c6595959b73a882c8d9221db3fe
+2026-10-19-paperai-ios-visual-language.md: cdffd8d385d786fbaac954ac1aa5391dfae6b150
+2026-10-19-paperai-ios-visual-language.zh.md: 4835185d51fa88d972692274612d700da93c81b3

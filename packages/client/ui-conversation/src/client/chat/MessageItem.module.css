@@ -1,6 +1,7 @@
-/* User bubble: right-aligned column (bubble + IconActions). The bubble is an
-   iMessage sent bubble — bubble fill, white type, the tail corner tightened to
-   6px at the bottom right — with the actions 6 below. */
+/* User bubble: right-aligned column (bubble + IconActions). The bubble takes
+   the iMessage sent shape — the tail corner tightened to 6px at the bottom
+   right — with the actions 6 below. Fill and type are a token pair, so a theme
+   that tints the fill (PaperAI's blue) sets the type that reads on it. */
 
 .userRow {
   display: flex;
@@ -26,7 +27,7 @@
   padding: 10px 16px;
   font-size: 16px;
   line-height: 24px;
-  color: var(--dsw-alias-label-primary-foreground);
+  color: var(--dsw-specific-bubble-foreground);
 }
 
 /* Content nested in the filled bubble takes the bubble's own type colour. */

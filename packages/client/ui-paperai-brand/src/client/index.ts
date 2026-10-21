@@ -1,7 +1,7 @@
 /**
  * PaperAI occupants for the generic browser-brand slots, the product's
  * vocabulary overlay (what DSH calls a workspace is a project here), and the
- * ink-and-gold token layer stacked over the shipped DSH palette.
+ * iOS token layer stacked over the shipped DSH palette.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -83,13 +83,13 @@ export const PROJECT_COPY = {
 
 /**
  * Fill every shipped brand slot, overlay the project vocabulary, and stack the
- * ink-and-gold token layer over the active theme.
+ * iOS token layer over the active theme.
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.override('workspace', PROJECT_COPY.workspace), 'paperai-brand: project vocabulary')
   ctx.effect(() => ctx.locale.override('conversation', PROJECT_COPY.conversation), 'paperai-brand: hero vocabulary')
-  ctx.effect(() => ctx.theme.overrideTokens(PAPERAI_THEME_SOURCE, PAPERAI_TOKENS), 'paperai-brand: ink-and-gold token layer')
+  ctx.effect(() => ctx.theme.overrideTokens(PAPERAI_THEME_SOURCE, PAPERAI_TOKENS), 'paperai-brand: iOS token layer')
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', () =>
       ctx.slots.inject('conversation.hero.brand.mark', function* () {

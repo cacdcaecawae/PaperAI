@@ -13,3 +13,13 @@
   --ds-transition-duration-fast: 0.1s;
   --ds-transition-duration-slow: 0.3s;
 }
+
+/* Forced colors (Windows high contrast) drop box-shadow, and controls draw their
+ * focus ring as a shadow over `outline: none`, which would leave keyboard focus
+ * invisible there. Put a system-color outline back on whatever has focus. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: -2px;
+  }
+}

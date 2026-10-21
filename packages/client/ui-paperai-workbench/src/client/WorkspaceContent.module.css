@@ -82,8 +82,8 @@
 /* The iPadOS sidebar selection: a tint-filled row; icon, badge, and caption go white with it. */
 .selected,
 .selected:hover {
-  background: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-button-primary-foreground);
 }
 
 .selected .slot,

@@ -39,7 +39,9 @@ describe('PaperAI DSH-native styling', () => {
     expect(sidebar).toContain('font-size: 14px')
     expect(sidebar).toContain('min-height: 34px')
     expect(sidebar).toContain('var(--dsw-alias-interactive-bg-hover)')
-    expect(sidebar).toMatch(/\n\.selected,\n\.selected:hover \{[^}]*background: var\(--dsw-alias-state-business-primary\);/u)
+    // The filled selection reads the primary-fill pair, whose type the theme keeps legible on it.
+    expect(sidebar).toMatch(/\n\.selected,\n\.selected:hover \{[^}]*background: var\(--dsw-alias-button-primary-fill\);/u)
+    expect(sidebar).toMatch(/\n\.selected,\n\.selected:hover \{[^}]*color: var\(--dsw-alias-button-primary-foreground\);/u)
     expect(diagnostics).toContain('min-height: 36px')
     expect(diagnostics).toContain('border-radius: 10px')
     // The start page heads with an iOS large title over an inset grouped list.

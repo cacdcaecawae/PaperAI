@@ -41,14 +41,15 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-specific-sidebar-fill': pair('#f2f2f7', '#1c1c1e'),
   '--dsw-specific-sidebar-nav-item-hover': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
   '--dsw-specific-sidebar-nav-item-active': pair('rgba(118, 118, 128, 0.2)', 'rgba(118, 118, 128, 0.32)'),
-  '--dsw-specific-sidebar-nav-item-active-accent': pair('rgba(0, 113, 227, 0.12)', 'rgba(10, 132, 255, 0.24)'),
+  '--dsw-specific-sidebar-nav-item-active-accent': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
   '--dsw-specific-input-major': pair('#ffffff', '#1c1c1e'),
   '--dsw-specific-selector': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
   '--dsw-specific-menu': pair('rgba(249, 249, 249, 0.94)', 'rgba(37, 37, 37, 0.94)'),
   '--dsw-specific-tip': pair('#f2f2f7', '#1c1c1e'),
-  // The user's own message is an iMessage bubble: tint fill, white text.
-  '--dsw-specific-bubble': pair('#0071e3', '#0a84ff'),
-  '--dsw-specific-bubble-highlight': pair('#0062c4', '#409cff'),
+  // The user's own message is an iMessage bubble: the tint fill, white text.
+  '--dsw-specific-bubble': pair('#0066cc', '#0071e3'),
+  '--dsw-specific-bubble-highlight': pair('#0058b0', '#0062c4'),
+  '--dsw-specific-bubble-foreground': pair('#ffffff', '#ffffff'),
   '--dsw-alias-toast-bg': pair('rgba(30, 30, 30, 0.92)', 'rgba(58, 58, 60, 0.94)'),
   '--dsw-alias-tooltip-bg': pair('rgba(30, 30, 30, 0.92)', 'rgba(58, 58, 60, 0.94)'),
 
@@ -59,27 +60,31 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-border-l4': pair('rgba(60, 60, 67, 0.36)', 'rgba(84, 84, 88, 0.85)'),
 
   // Tint: system blue is the brand accent, the focus ring, and the one filled action. Light
-  // takes Apple's web blue #0071e3 rather than #007aff: blue type on white and white type on
-  // blue both clear AA at 4.7:1, where #007aff holds 4.0:1.
-  '--dsw-alias-brand-primary': pair('#0071e3', '#0a84ff'),
+  // takes #0066cc rather than #007aff: blue type holds 5.0:1 even on the #f2f2f7 grouped
+  // ground and white type on blue 5.6:1, where #007aff holds 4.0:1 on white. Dark splits the
+  // tint: type and marks take the accessible #409cff (4.9:1 on a #2c2c2e card), fills under
+  // white type take #0071e3 (4.7:1), and a hovered fill darkens instead of lightening.
+  '--dsw-alias-brand-primary': pair('#0066cc', '#409cff'),
   '--dsw-alias-brand-primary-invert': pair('#ffffff', '#ffffff'),
   '--dsw-alias-brand-text': pair('#000000', '#ffffff'),
-  '--dsw-alias-button-primary-fill': pair('#0071e3', '#0a84ff'),
-  '--dsw-alias-button-primary-hover': pair('#0062c4', '#409cff'),
+  '--dsw-alias-button-primary-fill': pair('#0066cc', '#0071e3'),
+  '--dsw-alias-button-primary-hover': pair('#0058b0', '#0062c4'),
+  '--dsw-alias-button-primary-foreground': pair('#ffffff', '#ffffff'),
   '--dsw-alias-button-primary-dimmed': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
-  '--dsw-alias-button-info-fill': pair('#0071e3', '#0a84ff'),
-  '--dsw-alias-button-info-hover': pair('#0062c4', '#409cff'),
+  '--dsw-alias-button-info-fill': pair('#0066cc', '#0071e3'),
+  '--dsw-alias-button-info-hover': pair('#0058b0', '#0062c4'),
   '--dsw-alias-button-elevated-fill': pair('#ffffff', '#2c2c2e'),
   '--dsw-alias-button-floating-fill': pair('#ffffff', '#2c2c2e'),
   '--dsw-alias-button-floating-hover': pair('#f2f2f7', '#3a3a3c'),
-  '--dsw-alias-label-primary-foreground': pair('#ffffff', '#ffffff'),
 
   // Selected, linked, and focused states.
-  '--dsw-alias-state-business-primary': pair('#0071e3', '#0a84ff'),
-  '--dsw-alias-state-business-tertiary': pair('rgba(0, 113, 227, 0.12)', 'rgba(10, 132, 255, 0.24)'),
+  '--dsw-alias-state-business-primary': pair('#0066cc', '#409cff'),
+  '--dsw-alias-state-business-tertiary': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
 
-  // System status colors.
-  '--dsw-alias-state-error-primary': pair('#ff3b30', '#ff453a'),
+  // System status colors. Error takes the increased-contrast reds, #d70015 and #ff6961: as
+  // error type #ff3b30 holds 3.6:1 on white and #ff453a 4.1:1 on a #2c2c2e card. The green
+  // and orange stay marks, as in DSH.
+  '--dsw-alias-state-error-primary': pair('#d70015', '#ff6961'),
   '--dsw-alias-state-error-secondary': pair('#ff6961', '#ff6961'),
   '--dsw-alias-state-success-primary': pair('#34c759', '#30d158'),
   '--dsw-alias-state-success-secondary': pair('#30d158', '#32d74b'),
@@ -116,7 +121,7 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   // The focus ring (the tint at half strength, drawn outside the control), the
   // bar and thick materials iOS lays over scrolling content, and a segmented
   // control's selected segment and track.
-  '--dsw-alias-focus-ring': pair('rgba(0, 113, 227, 0.5)', 'rgba(10, 132, 255, 0.6)'),
+  '--dsw-alias-focus-ring': pair('rgba(0, 102, 204, 0.5)', 'rgba(64, 156, 255, 0.6)'),
   '--dsw-alias-material-bar': pair('rgba(255, 255, 255, 0.78)', 'rgba(22, 22, 24, 0.78)'),
   '--dsw-alias-material-thick': pair('rgba(249, 249, 249, 0.86)', 'rgba(37, 37, 37, 0.86)'),
   '--dsw-alias-segment-fill': pair('#ffffff', '#636366'),
@@ -151,8 +156,8 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--paperai-page-ink': pair('#0058c6', '#0058c6'),
 
   // Document-type accents the workbench badges and icons read (iOS system hues).
-  '--paperai-type-proposal': pair('#0071e3', '#0a84ff'),
-  '--paperai-type-proposal-tint': pair('rgba(0, 113, 227, 0.12)', 'rgba(10, 132, 255, 0.22)'),
+  '--paperai-type-proposal': pair('#0066cc', '#409cff'),
+  '--paperai-type-proposal-tint': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
   '--paperai-type-midterm': pair('#af52de', '#bf5af2'),
   '--paperai-type-midterm-tint': pair('rgba(175, 82, 222, 0.12)', 'rgba(191, 90, 242, 0.22)'),
   '--paperai-type-manuscript': pair('#b8860b', '#e2b457'),

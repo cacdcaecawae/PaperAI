@@ -158,8 +158,8 @@
 
 .inUse {
   margin-left: auto;
-  background: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-button-primary-foreground);
 }
 
 /* Bounded to four lines. A preset publishes its own description, so one long

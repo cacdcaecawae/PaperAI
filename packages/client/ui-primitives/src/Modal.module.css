@@ -40,12 +40,11 @@
   animation: dsh-modal-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* The iOS sheet presentation: the card rises a little and settles. */
+/* The card fades in. No transform: a portaled Menu measures its trigger's
+   on-screen rect when it opens and only re-places on scroll or resize, so a
+   menu opened while the card still moved would stay offset after it settled. */
 @keyframes dsh-modal-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.98);
-  }
+  from { opacity: 0; }
 }
 
 @keyframes dsh-modal-mask-in {

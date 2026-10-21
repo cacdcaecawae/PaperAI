@@ -92,12 +92,10 @@
   animation: settings-panel-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* The Modal primitive's sheet presentation: the panel rises a little and settles. */
+/* The Modal primitive's entrance: a fade, never a transform, so a portaled
+   Menu opened during it (the language picker) lands on its trigger. */
 @keyframes settings-panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.98);
-  }
+  from { opacity: 0; }
 }
 
 @keyframes settings-mask-in {
@@ -172,8 +170,8 @@
 }
 
 .navCell.active {
-  background: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-button-primary-foreground);
   font-weight: 500;
 }
 

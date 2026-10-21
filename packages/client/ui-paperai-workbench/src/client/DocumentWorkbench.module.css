@@ -145,14 +145,14 @@
 .chip[data-kind='save'] {
   padding: 0 14px;
   background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
+  color: var(--dsw-alias-button-primary-foreground);
   font-weight: 600;
 }
 
 .chip[data-kind='export']:hover:not(:disabled),
 .chip[data-kind='save']:hover:not(:disabled) {
   background: var(--dsw-alias-button-primary-hover);
-  color: var(--dsw-alias-label-primary-foreground);
+  color: var(--dsw-alias-button-primary-foreground);
 }
 
 .notice {

@@ -74,8 +74,11 @@ describe('PaperAI browser-brand plugin', () => {
       expect(modes.light).not.toBe('')
       expect(modes.dark).not.toBe('')
     }
-    // The tint resolves per scheme: #0071e3 on light, the brighter #0a84ff on dark.
-    expect(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.light).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
+    // Dark splits the tint: type takes the brighter #409cff, fills under white type #0071e3.
+    expect(PAPERAI_TOKENS['--dsw-alias-state-business-primary']?.dark).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
+    // DSH reads label-primary-foreground as label-primary's inverse (a checked checkbox's
+    // mark); the layer leaves it alone and colors type on its blue fills through their own pairs.
+    expect(PAPERAI_TOKENS['--dsw-alias-label-primary-foreground']).toBeUndefined()
     // The workbench badges read one accent and one tint per document type.
     for (const type of ['proposal', 'midterm', 'manuscript', 'final', 'other']) {
       expect(PAPERAI_TOKENS[`--paperai-type-${type}`]).toBeDefined()
@@ -83,6 +86,28 @@ describe('PaperAI browser-brand plugin', () => {
     }
     await fiber.dispose()
     expect(layers.has(PAPERAI_THEME_SOURCE)).toBe(false)
+  })
+
+  it('keeps every blue fill and every tint or error label at WCAG AA 4.5:1 in both schemes', () => {
+    const luminance = (hex: string): number => [1, 3, 5]
+      .map(i => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0)
+    const pairs = [
+      ['--dsw-specific-bubble', '--dsw-specific-bubble-foreground'],
+      ['--dsw-alias-button-primary-fill', '--dsw-alias-button-primary-foreground'],
+      ['--dsw-alias-button-primary-hover', '--dsw-alias-button-primary-foreground'],
+      ...['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2'].flatMap(ground => [
+        [ground, '--dsw-alias-state-business-primary'],
+        [ground, '--dsw-alias-state-error-primary'],
+      ]),
+    ] as const
+    for (const scheme of ['light', 'dark'] as const) {
+      for (const [back, fore] of pairs) {
+        const [a, b] = [PAPERAI_TOKENS[back]![scheme], PAPERAI_TOKENS[fore]![scheme]].map(luminance).sort((x, y) => y - x)
+        expect((a! + 0.05) / (b! + 0.05), `${scheme} ${fore} on ${back}`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
   })
 
   it('renames the shell\'s workspace vocabulary to projects in both locales and lifts it on teardown', async () => {

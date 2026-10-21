@@ -50,7 +50,7 @@
 
 .primary {
   background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
+  color: var(--dsw-alias-button-primary-foreground);
   font-weight: 600;
 }
 
