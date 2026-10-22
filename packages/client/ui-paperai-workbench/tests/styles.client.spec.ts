@@ -50,6 +50,13 @@ describe('PaperAI DSH-native styling', () => {
     expect(start).toMatch(/\n\.group \{[^}]*border-radius: 12px;/u)
   })
 
+  it('separates the document focus indicator from the selected row fill', () => {
+    const focus = sidebar.match(/\n\.row:focus-visible \{([^}]*)\}/u)?.[1]
+    expect(focus).toContain('outline: 2px solid var(--dsw-alias-state-business-primary)')
+    expect(focus).toContain('outline-offset: 2px')
+    expect(focus).not.toContain('inset')
+  })
+
   it('paints only through theme tokens: no literal colors, and elevation only through the brand shadow tokens', () => {
     for (const sheet of [workbench, ribbon, diagnostics, sidebar, start, library]) {
       // Focus rings (0 0 0 2px) are fine; a literal offset or blurred shadow is not, the page and its pills take --paperai-*-shadow.

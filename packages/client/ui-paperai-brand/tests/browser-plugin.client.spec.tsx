@@ -26,6 +26,15 @@ const HOLES = [
 const AGENT_PRESET_MARK = 'conversation.hero.agentPreset.mark' as const
 const ACP_CHANNEL_MARK = 'paperai.acp.channel.mark' as const
 
+function contrastRatio(first: string, second: string): number {
+  const luminance = (hex: string): number => [1, 3, 5]
+    .map(i => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0)
+  const [a, b] = [first, second].map(luminance).sort((x, y) => y - x)
+  return (a! + 0.05) / (b! + 0.05)
+}
+
 async function bench(declare = true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
@@ -89,10 +98,6 @@ describe('PaperAI browser-brand plugin', () => {
   })
 
   it('keeps every blue fill and every tint or error label at WCAG AA 4.5:1 in both schemes', () => {
-    const luminance = (hex: string): number => [1, 3, 5]
-      .map(i => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
-      .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
-      .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0)
     const pairs = [
       ['--dsw-specific-bubble', '--dsw-specific-bubble-foreground'],
       ['--dsw-alias-button-primary-fill', '--dsw-alias-button-primary-foreground'],
@@ -104,9 +109,14 @@ describe('PaperAI browser-brand plugin', () => {
     ] as const
     for (const scheme of ['light', 'dark'] as const) {
       for (const [back, fore] of pairs) {
-        const [a, b] = [PAPERAI_TOKENS[back]![scheme], PAPERAI_TOKENS[fore]![scheme]].map(luminance).sort((x, y) => y - x)
-        expect((a! + 0.05) / (b! + 0.05), `${scheme} ${fore} on ${back}`).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(PAPERAI_TOKENS[back]![scheme], PAPERAI_TOKENS[fore]![scheme]), `${scheme} ${fore} on ${back}`).toBeGreaterThanOrEqual(4.5)
       }
+    }
+  })
+
+  it('keeps dark tertiary captions readable on the base, grouped grounds, and elevated cards', () => {
+    for (const ground of ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3']) {
+      expect(contrastRatio(PAPERAI_TOKENS['--dsw-alias-label-tertiary']!.dark, PAPERAI_TOKENS[ground]!.dark), ground).toBeGreaterThanOrEqual(4.5)
     }
   })
 

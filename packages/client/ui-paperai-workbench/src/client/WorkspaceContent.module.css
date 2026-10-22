@@ -1,7 +1,7 @@
 /* The document list follows the sidebar's own section and row vocabulary:
    the "sessions" heading (13/18 semibold, 34px band) and the session row
    (14/20, radius 10, hover fill, tint-filled when selected). Nothing here
-   draws a border or a shadow. */
+   draws a border or an elevation shadow. */
 
 .section {
   display: flex;
@@ -97,8 +97,8 @@
 }
 
 .row:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
 }
 
 .slot {

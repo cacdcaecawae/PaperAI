@@ -83,7 +83,7 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
 
   // System status colors. Error takes the increased-contrast reds, #d70015 and #ff6961: as
   // error type #ff3b30 holds 3.6:1 on white and #ff453a 4.1:1 on a #2c2c2e card. The green
-  // and orange stay marks, as in DSH.
+  // and orange also color status text; those pairs are not covered by the AA check.
   '--dsw-alias-state-error-primary': pair('#d70015', '#ff6961'),
   '--dsw-alias-state-error-secondary': pair('#ff6961', '#ff6961'),
   '--dsw-alias-state-success-primary': pair('#34c759', '#30d158'),
@@ -101,11 +101,11 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-interactive-bg-hover-solid': pair('#e5e5ea', '#2c2c2e'),
   '--dsw-alias-interactive-bg-hover-danger': pair('rgba(255, 59, 48, 0.1)', 'rgba(255, 69, 58, 0.18)'),
 
-  // Labels: system grays, the accessible variants where text has to read at 12–13 px.
+  // Dark tertiary captions keep 4.9:1 contrast on the elevated #2c2c2e cards.
   '--dsw-alias-label-primary': pair('#000000', '#ffffff'),
   '--dsw-alias-label-primary-dimmed': pair('#1c1c1e', '#ebebf5'),
   '--dsw-alias-label-secondary': pair('#6c6c70', '#aeaeb2'),
-  '--dsw-alias-label-tertiary': pair('#8a8a8e', '#8e8e93'),
+  '--dsw-alias-label-tertiary': pair('#8a8a8e', '#99999e'),
   '--dsw-alias-label-quaternary': pair('#aeaeb2', '#636366'),
   '--dsw-alias-label-caption': pair('#8e8e93', '#8e8e93'),
   '--dsw-alias-label-dimmed': pair('#c7c7cc', '#48484a'),
