@@ -1,12 +1,14 @@
 /**
- * PaperAI's ink-and-gold token layer. Light keeps the page metaphor: warm
- * paper surfaces, ink text, one gold primary button, old-gold accents. Dark
- * moves to deep slate surfaces with the same gold primary and champagne
- * hairlines. The layer
- * also names the document-type accents the workbench badges paint with. It
- * stacks over the shipped DSH palette through `ctx.theme.overrideTokens`, so
- * the base stylesheets stay untouched and the user's light/dark/system
- * preference keeps deciding which side applies.
+ * PaperAI's iOS token layer. Both schemes follow the iOS system palette:
+ * grouped gray grounds under white (light) or black (dark) content, system
+ * gray labels, translucent fills for hover and press, and system blue as the
+ * one tint every interactive element, selection, focus ring, and filled
+ * button paints with. Gold survives only as the brand mark and the
+ * manuscript type accent. The layer also names the document-type accents the
+ * workbench badges paint with and the elevation and material recipes the
+ * PaperAI sheets read. It stacks over the shipped DSH palette through
+ * `ctx.theme.overrideTokens`, so the base stylesheets stay untouched and the
+ * user's light/dark/system preference keeps deciding which side applies.
  */
 import type { ThemeTokenOverrides } from '@deepseek-ai/dsh-client-ui-theme/client'
 
@@ -18,100 +20,150 @@ function pair(light: string, dark: string): { light: string; dark: string } {
   return { light, dark }
 }
 
-/** Alias-token overrides plus the `--paperai-*` document-type accents. */
+/** The SF Pro stack first, then the platform's own UI faces for CJK and Windows. */
+const IOS_FONT_FAMILY = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'PingFang SC', 'Hiragino Sans GB', 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+
+/** Alias-token overrides plus the `--paperai-*` accents, shadows, and materials. */
 export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
-  // Surfaces: warm paper in light, deep slate in dark.
-  '--dsw-alias-bg-base': pair('#fbfaf7', '#0f1318'),
-  '--dsw-alias-bg-layer-1': pair('#ffffff', '#151a21'),
-  '--dsw-alias-bg-layer-2': pair('#f6f4ee', '#1b212a'),
-  '--dsw-alias-bg-layer-3': pair('#efece4', '#222a34'),
-  '--dsw-alias-bg-overlay': pair('#e9e5db', '#2a333f'),
-  '--dsw-alias-bg-module-platform': pair('#f6f4ee', '#1b212a'),
-  '--dsw-alias-bg-multi-select': pair('#f6f4ee', '#1b212a'),
-  '--dsw-specific-sidebar-fill': pair('#f4f1ea', '#0c1015'),
-  '--dsw-specific-sidebar-nav-item-hover': pair('#ebe6da', '#171d25'),
-  '--dsw-specific-sidebar-nav-item-active': pair('#e5dfd0', '#1f2730'),
-  '--dsw-specific-sidebar-nav-item-active-accent': pair('rgba(154, 106, 26, 0.14)', 'rgba(226, 180, 87, 0.16)'),
-  '--dsw-specific-input-major': pair('#ffffff', '#161c24'),
-  '--dsw-specific-selector': pair('#f6f4ee', '#1f2730'),
-  '--dsw-specific-menu': pair('#efece4', '#222a34'),
-  '--dsw-specific-tip': pair('#f6f4ee', '#1b212a'),
-  '--dsw-specific-bubble': pair('#f3ecdc', '#1f2937'),
-  '--dsw-specific-bubble-highlight': pair('#e9dbb9', '#2b3648'),
-  '--dsw-alias-toast-bg': pair('#2b2823', '#2a333f'),
-  '--dsw-alias-tooltip-bg': pair('#2b2823', '#2a333f'),
+  '--dsw-font-family': pair(IOS_FONT_FAMILY, IOS_FONT_FAMILY),
 
-  // Hairlines: warm ink alpha in light, champagne alpha in dark.
-  '--dsw-alias-border-l1': pair('rgba(78, 60, 24, 0.06)', 'rgba(226, 196, 140, 0.07)'),
-  '--dsw-alias-border-l2': pair('rgba(78, 60, 24, 0.12)', 'rgba(226, 196, 140, 0.13)'),
-  '--dsw-alias-border-l3': pair('rgba(78, 60, 24, 0.18)', 'rgba(226, 196, 140, 0.2)'),
-  '--dsw-alias-border-l4': pair('rgba(78, 60, 24, 0.24)', 'rgba(226, 196, 140, 0.28)'),
+  // Surfaces: systemBackground over systemGroupedBackground. Layer 2 is the grouped
+  // ground (the desk, the settings panel, the inspector); layers 1 and 3 are the cards
+  // on it, which in dark take the elevated #2c2c2e so a card still reads on the ground.
+  '--dsw-alias-bg-base': pair('#ffffff', '#000000'),
+  '--dsw-alias-bg-layer-1': pair('#ffffff', '#2c2c2e'),
+  '--dsw-alias-bg-layer-2': pair('#f2f2f7', '#1c1c1e'),
+  '--dsw-alias-bg-layer-3': pair('#ffffff', '#2c2c2e'),
+  '--dsw-alias-bg-overlay': pair('#e5e5ea', '#3a3a3c'),
+  '--dsw-alias-bg-module-platform': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-alias-bg-multi-select': pair('#f2f2f7', '#1c1c1e'),
+  '--dsw-alias-bg-mask-1': pair('rgba(0, 0, 0, 0.2)', 'rgba(0, 0, 0, 0.48)'),
+  '--dsw-specific-sidebar-fill': pair('#f2f2f7', '#1c1c1e'),
+  '--dsw-specific-sidebar-nav-item-hover': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-specific-sidebar-nav-item-active': pair('rgba(118, 118, 128, 0.2)', 'rgba(118, 118, 128, 0.32)'),
+  '--dsw-specific-sidebar-nav-item-active-accent': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
+  '--dsw-specific-input-major': pair('#ffffff', '#1c1c1e'),
+  '--dsw-specific-selector': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-specific-menu': pair('rgba(249, 249, 249, 0.94)', 'rgba(37, 37, 37, 0.94)'),
+  '--dsw-specific-tip': pair('#f2f2f7', '#1c1c1e'),
+  // The user's own message is an iMessage bubble: the tint fill, white text.
+  '--dsw-specific-bubble': pair('#0066cc', '#0071e3'),
+  '--dsw-specific-bubble-highlight': pair('#0058b0', '#0062c4'),
+  '--dsw-specific-bubble-foreground': pair('#ffffff', '#ffffff'),
+  '--dsw-alias-toast-bg': pair('rgba(30, 30, 30, 0.92)', 'rgba(58, 58, 60, 0.94)'),
+  '--dsw-alias-tooltip-bg': pair('rgba(30, 30, 30, 0.92)', 'rgba(58, 58, 60, 0.94)'),
 
-  // Brand stays ink on paper. The one filled action per screen is gold on both
-  // sides; the shipped primary-foreground tokens give white-on-gold in light and
-  // ink-on-gold in dark.
-  '--dsw-alias-brand-primary': pair('#1c1a17', '#e2b457'),
-  '--dsw-alias-brand-primary-invert': pair('#fbfaf7', '#0f1318'),
-  '--dsw-alias-brand-text': pair('#1c1a17', '#f3d99a'),
-  '--dsw-alias-button-primary-fill': pair('#9a6a1a', '#e2b457'),
-  '--dsw-alias-button-primary-hover': pair('#7a5410', '#edc26e'),
-  '--dsw-alias-button-primary-dimmed': pair('#e6e1d5', '#2a333f'),
+  // Separators: the iOS hairline, opaque enough to hold at 1 px on every ground.
+  '--dsw-alias-border-l1': pair('rgba(60, 60, 67, 0.12)', 'rgba(84, 84, 88, 0.36)'),
+  '--dsw-alias-border-l2': pair('rgba(60, 60, 67, 0.2)', 'rgba(84, 84, 88, 0.6)'),
+  '--dsw-alias-border-l3': pair('rgba(60, 60, 67, 0.29)', 'rgba(84, 84, 88, 0.72)'),
+  '--dsw-alias-border-l4': pair('rgba(60, 60, 67, 0.36)', 'rgba(84, 84, 88, 0.85)'),
 
-  // Accent for selected, linked, and focused states: old gold both ways.
-  '--dsw-alias-state-business-primary': pair('#9a6a1a', '#e2b457'),
-  '--dsw-alias-state-business-tertiary': pair('rgba(154, 106, 26, 0.14)', 'rgba(226, 180, 87, 0.18)'),
+  // Tint: system blue is the brand accent, the focus ring, and the one filled action. Light
+  // takes #0066cc rather than #007aff: blue type holds 5.0:1 even on the #f2f2f7 grouped
+  // ground and white type on blue 5.6:1, where #007aff holds 4.0:1 on white. Dark splits the
+  // tint: type and marks take the accessible #409cff (4.9:1 on a #2c2c2e card), fills under
+  // white type take #0071e3 (4.7:1), and a hovered fill darkens instead of lightening.
+  '--dsw-alias-brand-primary': pair('#0066cc', '#409cff'),
+  '--dsw-alias-brand-primary-invert': pair('#ffffff', '#ffffff'),
+  '--dsw-alias-brand-text': pair('#000000', '#ffffff'),
+  '--dsw-alias-button-primary-fill': pair('#0066cc', '#0071e3'),
+  '--dsw-alias-button-primary-hover': pair('#0058b0', '#0062c4'),
+  '--dsw-alias-button-primary-foreground': pair('#ffffff', '#ffffff'),
+  '--dsw-alias-button-primary-dimmed': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-alias-button-info-fill': pair('#0066cc', '#0071e3'),
+  '--dsw-alias-button-info-hover': pair('#0058b0', '#0062c4'),
+  '--dsw-alias-button-elevated-fill': pair('#ffffff', '#2c2c2e'),
+  '--dsw-alias-button-floating-fill': pair('#ffffff', '#2c2c2e'),
+  '--dsw-alias-button-floating-hover': pair('#f2f2f7', '#3a3a3c'),
 
-  // Interaction fills.
-  '--dsw-alias-interactive-bg-hover': pair('rgba(92, 72, 28, 0.07)', 'rgba(255, 255, 255, 0.07)'),
-  '--dsw-alias-interactive-bg-active': pair('rgba(92, 72, 28, 0.12)', 'rgba(226, 180, 87, 0.14)'),
-  '--dsw-alias-interactive-bg-hover-accent': pair('rgba(92, 72, 28, 0.16)', 'rgba(255, 255, 255, 0.16)'),
-  '--dsw-alias-interactive-bg-hover-solid': pair('#efece4', '#222a34'),
+  // Selected, linked, and focused states.
+  '--dsw-alias-state-business-primary': pair('#0066cc', '#409cff'),
+  '--dsw-alias-state-business-tertiary': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
 
-  // Text.
-  '--dsw-alias-label-primary': pair('#1c1a17', '#eef1f5'),
-  '--dsw-alias-label-primary-dimmed': pair('#2b2823', '#dfe4ea'),
-  '--dsw-alias-label-secondary': pair('#5c554a', '#b9c1cb'),
-  '--dsw-alias-label-tertiary': pair('#8a8272', '#8792a0'),
-  '--dsw-alias-label-quaternary': pair('#a8a091', '#6b7683'),
-  '--dsw-alias-label-caption': pair('#a8a091', '#6b7683'),
-  '--dsw-alias-label-dimmed': pair('#d9d3c6', '#3a4451'),
+  // System status colors. Error takes the increased-contrast reds, #d70015 and #ff6961: as
+  // error type #ff3b30 holds 3.6:1 on white and #ff453a 4.1:1 on a #2c2c2e card. The green
+  // and orange also color status text; those pairs are not covered by the AA check.
+  '--dsw-alias-state-error-primary': pair('#d70015', '#ff6961'),
+  '--dsw-alias-state-error-secondary': pair('#ff6961', '#ff6961'),
+  '--dsw-alias-state-success-primary': pair('#34c759', '#30d158'),
+  '--dsw-alias-state-success-secondary': pair('#30d158', '#32d74b'),
+  '--dsw-alias-state-success-tertiary': pair('rgba(52, 199, 89, 0.14)', 'rgba(48, 209, 88, 0.2)'),
+  '--dsw-alias-state-warn-primary': pair('#ff9500', '#ff9f0a'),
+  '--dsw-alias-state-warn-secondary': pair('#ffb340', '#ffb340'),
+  '--dsw-alias-state-warn-tertiary': pair('rgba(255, 149, 0, 0.14)', 'rgba(255, 159, 10, 0.2)'),
+  '--dsw-alias-state-warn-label': pair('#c93400', '#ffb340'),
+
+  // Fills: the iOS translucent gray fills for hover, press, and toggled controls.
+  '--dsw-alias-interactive-bg-hover': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-alias-interactive-bg-active': pair('rgba(118, 118, 128, 0.2)', 'rgba(118, 118, 128, 0.36)'),
+  '--dsw-alias-interactive-bg-hover-accent': pair('rgba(118, 118, 128, 0.24)', 'rgba(118, 118, 128, 0.4)'),
+  '--dsw-alias-interactive-bg-hover-solid': pair('#e5e5ea', '#2c2c2e'),
+  '--dsw-alias-interactive-bg-hover-danger': pair('rgba(255, 59, 48, 0.1)', 'rgba(255, 69, 58, 0.18)'),
+
+  // Dark tertiary captions keep 4.9:1 contrast on the elevated #2c2c2e cards.
+  '--dsw-alias-label-primary': pair('#000000', '#ffffff'),
+  '--dsw-alias-label-primary-dimmed': pair('#1c1c1e', '#ebebf5'),
+  '--dsw-alias-label-secondary': pair('#6c6c70', '#aeaeb2'),
+  '--dsw-alias-label-tertiary': pair('#8a8a8e', '#99999e'),
+  '--dsw-alias-label-quaternary': pair('#aeaeb2', '#636366'),
+  '--dsw-alias-label-caption': pair('#8e8e93', '#8e8e93'),
+  '--dsw-alias-label-dimmed': pair('#c7c7cc', '#48484a'),
 
   // Markdown surfaces in the conversation.
-  '--dsw-alias-markdown-code-block': pair('#f4f1ea', '#0b0f14'),
-  '--dsw-alias-markdown-code-block-banner': pair('#efece4', '#151a21'),
-  '--dsw-alias-markdown-inline-code': pair('#ede8dc', '#222a34'),
-  '--dsw-alias-markdown-citation': pair('#ede8dc', '#222a34'),
-  '--dsw-alias-markdown-tag': pair('#efece4', '#1b212a'),
-  '--dsw-alias-markdown-placeholder': pair('#f6f4ee', '#1b212a'),
+  '--dsw-alias-markdown-code-block': pair('#f2f2f7', '#1c1c1e'),
+  '--dsw-alias-markdown-code-block-banner': pair('#e5e5ea', '#2c2c2e'),
+  '--dsw-alias-markdown-inline-code': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-alias-markdown-citation': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-alias-markdown-tag': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
+  '--dsw-alias-markdown-placeholder': pair('#f2f2f7', '#1c1c1e'),
+
+  // The focus ring (the tint at half strength, drawn outside the control), the
+  // bar and thick materials iOS lays over scrolling content, and a segmented
+  // control's selected segment and track.
+  '--dsw-alias-focus-ring': pair('rgba(0, 102, 204, 0.5)', 'rgba(64, 156, 255, 0.6)'),
+  '--dsw-alias-material-bar': pair('rgba(255, 255, 255, 0.78)', 'rgba(22, 22, 24, 0.78)'),
+  '--dsw-alias-material-thick': pair('rgba(249, 249, 249, 0.86)', 'rgba(37, 37, 37, 0.86)'),
+  '--dsw-alias-segment-fill': pair('#ffffff', '#636366'),
+  '--dsw-alias-segment-track': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
 
   // Scrollbars.
-  '--dsw-alias-scrollbar-bg-l1': pair('#dcd6c8', '#2c3541'),
-  '--dsw-alias-scrollbar-bg-l2': pair('#dcd6c8', '#2c3541'),
-  '--dsw-alias-scrollbar-hover-l1': pair('#c9c1ae', '#3b4654'),
-  '--dsw-alias-scrollbar-hover-l2': pair('#c9c1ae', '#3b4654'),
+  '--dsw-alias-scrollbar-bg-l1': pair('#c7c7cc', '#48484a'),
+  '--dsw-alias-scrollbar-bg-l2': pair('#c7c7cc', '#48484a'),
+  '--dsw-alias-scrollbar-hover-l1': pair('#aeaeb2', '#636366'),
+  '--dsw-alias-scrollbar-hover-l2': pair('#aeaeb2', '#636366'),
 
-  // Elevation: the page over the desk, and the pills floating over the page.
-  '--paperai-page-shadow': pair('0 1px 2px rgba(28, 26, 23, 0.06), 0 12px 32px rgba(28, 26, 23, 0.08)', '0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.5)'),
-  '--paperai-float-shadow': pair('0 4px 16px rgba(28, 26, 23, 0.08)', '0 4px 16px rgba(0, 0, 0, 0.4)'),
+  // Shared DSH elevations, softened to the iOS lift.
+  '--dsw-shadow-lv1': pair('0 1px 3px rgba(0, 0, 0, 0.06)', '0 1px 3px rgba(0, 0, 0, 0.5)'),
+  '--dsw-shadow-lv2': pair('0 2px 10px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.04)', '0 2px 10px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06)'),
+  '--dsw-shadow-segment': pair('0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04)', '0 3px 8px rgba(0, 0, 0, 0.4)'),
+  '--dsw-shadow-lv3': pair('0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 10px 40px rgba(0, 0, 0, 0.14)', '0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 10px 40px rgba(0, 0, 0, 0.6)'),
+
+  // Elevation: the page over the desk, and the pills and menus floating over everything.
+  '--paperai-page-shadow': pair('0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 28px rgba(0, 0, 0, 0.08)', '0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 28px rgba(0, 0, 0, 0.6)'),
+  '--paperai-float-shadow': pair('0 4px 20px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.04)', '0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.08)'),
+  // An inset grouped row's resting lift: none in light (white on gray reads), a hairline glow in dark.
+  '--paperai-card-shadow': pair('0 0 0 0.5px rgba(0, 0, 0, 0.02)', '0 0 0 0.5px rgba(255, 255, 255, 0.04)'),
+  // The brand mark keeps its gold on both schemes.
+  '--paperai-brand-gold': pair('#b8860b', '#e2b457'),
 
   // Ink drawn ON the page. The sheet is white in both schemes, so a mark made on it holds one
-  // value instead of following the app: the gold aliases resolve to champagne #e2b457 in dark,
-  // which is 1.9:1 on white and unusable for a rule, an underline, or a label.
-  '--paperai-page-accent': pair('#9a6a1a', '#9a6a1a'),
-  '--paperai-page-loss': pair('#570c0c', '#570c0c'),
-  // Gold type on the page. The accent is a rule's colour: on a conflict band's own tint it reads 4.2:1,
-  // under AA for 13 px labels, where this holds 6.3:1 and still clears 4.5:1 on a pressed button's fill.
-  '--paperai-page-ink': pair('#765113', '#765113'),
+  // value instead of following the app: the dark tint is lighter and reads poorer on white.
+  '--paperai-page-accent': pair('#0071e3', '#0071e3'),
+  '--paperai-page-loss': pair('#c4001a', '#c4001a'),
+  // Tint type on the page: on a conflict band's own tint the accent reads 3.6:1, under AA for
+  // 13 px labels, where this holds 6.5:1 and still clears 4.5:1 on a pressed button's fill.
+  '--paperai-page-ink': pair('#0058c6', '#0058c6'),
 
-  // Document-type accents the workbench badges and icons read.
-  '--paperai-type-proposal': pair('#2563eb', '#7fb0ff'),
-  '--paperai-type-proposal-tint': pair('rgba(37, 99, 235, 0.12)', 'rgba(127, 176, 255, 0.16)'),
-  '--paperai-type-midterm': pair('#7c3aed', '#b794ff'),
-  '--paperai-type-midterm-tint': pair('rgba(124, 58, 237, 0.12)', 'rgba(183, 148, 255, 0.16)'),
-  '--paperai-type-manuscript': pair('#9a6a1a', '#e2b457'),
-  '--paperai-type-manuscript-tint': pair('rgba(154, 106, 26, 0.14)', 'rgba(226, 180, 87, 0.18)'),
-  '--paperai-type-final': pair('#15803d', '#5ad38f'),
-  '--paperai-type-final-tint': pair('rgba(21, 128, 61, 0.12)', 'rgba(90, 211, 143, 0.16)'),
-  '--paperai-type-other': pair('#8a8272', '#8792a0'),
-  '--paperai-type-other-tint': pair('rgba(92, 72, 28, 0.08)', 'rgba(255, 255, 255, 0.08)'),
+  // Document-type accents the workbench badges and icons read (iOS system hues).
+  '--paperai-type-proposal': pair('#0066cc', '#409cff'),
+  '--paperai-type-proposal-tint': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
+  '--paperai-type-midterm': pair('#af52de', '#bf5af2'),
+  '--paperai-type-midterm-tint': pair('rgba(175, 82, 222, 0.12)', 'rgba(191, 90, 242, 0.22)'),
+  '--paperai-type-manuscript': pair('#b8860b', '#e2b457'),
+  '--paperai-type-manuscript-tint': pair('rgba(255, 204, 0, 0.18)', 'rgba(255, 214, 10, 0.2)'),
+  '--paperai-type-final': pair('#248a3d', '#30d158'),
+  '--paperai-type-final-tint': pair('rgba(52, 199, 89, 0.14)', 'rgba(48, 209, 88, 0.2)'),
+  '--paperai-type-other': pair('#6c6c70', '#aeaeb2'),
+  '--paperai-type-other-tint': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
 })

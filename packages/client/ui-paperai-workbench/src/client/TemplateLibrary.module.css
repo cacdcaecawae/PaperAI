@@ -1,5 +1,5 @@
-/* Library sets in the settings-panel design language: 14/22 body, 12/18
-   caption, outlined row cards (r12, border-l2), capsule controls from the
+/* Library sets as iOS inset grouped cards: 14/22 body, 12/18 caption, each
+   set a borderless r12 card on the grouped ground, capsule controls from the
    Button primitive. Every color resolves through a --dsw-alias-* token. */
 
 .view {
@@ -23,14 +23,15 @@
 
 .settingsTitle {
   margin: 0;
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 24px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 28px;
 }
 
 .settingsIntro {
   margin: 0;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-size: 14px;
   line-height: 22px;
 }
@@ -39,16 +40,19 @@
   width: min(640px, 100%);
 }
 
-/* The set list scrolls inside the dialog; the header and its description stay put. */
+/* The set list scrolls inside the dialog; the header and its description stay
+   put. It scrolls on the dialog's elevated ground, so its thumb takes the l2 pair. */
 .dialogContent {
   max-height: min(60vh, 560px);
   overflow: auto;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -60,9 +64,11 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 1px solid transparent;
   border-radius: 12px;
   padding: 12px 14px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--paperai-card-shadow);
 }
 
 .noneRow {
@@ -73,6 +79,7 @@
 
 .cardCurrent {
   border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary);
 }
 
 .cardHead {
@@ -94,8 +101,8 @@
 .identity strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -118,13 +125,13 @@
 }
 
 .danger:not(:disabled) {
-  border-color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-interactive-bg-hover-danger);
   color: var(--dsw-alias-state-error-primary);
 }
 
 .description {
   margin: 0;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 18px;
 }
@@ -143,14 +150,15 @@
   line-height: 18px;
 }
 
-/* One format reads as a chip: the type it serves, then its usage in caption tone. */
+/* One format reads as a gray-filled chip: the type it serves, then its usage in caption tone. */
 .format {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--dsw-alias-border-l3);
+  border: 1px solid transparent;
   border-radius: 999px;
-  padding: 1px 4px 1px 9px;
+  padding: 1px 4px 1px 10px;
+  background: var(--dsw-alias-bg-module-platform);
   font-size: 12px;
   line-height: 18px;
 }
@@ -204,20 +212,21 @@
   align-items: center;
   gap: 6px;
   height: 32px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 14px;
+  border: 0;
+  border-radius: 8px;
   padding: 0 10px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
   line-height: 20px;
 }
 
 .select:hover:not(:disabled),
 .select[aria-expanded='true'] {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 .select:disabled {
@@ -225,12 +234,11 @@
   opacity: 0.4;
 }
 
-.select:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
+.select:focus-visible,
+.formatRemove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
-
-.formatRemove:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
 
 .message {
   margin: 0;

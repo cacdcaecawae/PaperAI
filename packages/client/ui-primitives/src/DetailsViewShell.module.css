@@ -17,7 +17,9 @@
   justify-content: space-between;
   gap: 10px;
   padding: 8px 12px 8px 16px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-material-bar);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 
 .heading {
@@ -36,8 +38,9 @@
 }
 
 .heading > strong {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 20px;
 }
 
@@ -61,6 +64,7 @@
   gap: 6px;
 }
 
+/* The iOS sheet close: a gray-filled circle around the glyph. */
 .close {
   display: grid;
   width: 28px;
@@ -69,63 +73,60 @@
   place-items: center;
   border: 0;
   border-radius: 999px;
-  background: transparent;
+  background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
 .close:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 .close:focus-visible,
 .tab:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
+/* Tabs are an iOS segmented control: a gray track, the picked segment a
+   raised white pill. */
 .tabs {
   position: relative;
   z-index: 1;
   display: flex;
-  min-height: 40px;
+  min-height: 32px;
   flex: none;
-  align-items: flex-end;
-  gap: 36px;
+  align-items: stretch;
+  gap: 2px;
   overflow-x: auto;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  margin: 8px 16px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-segment-track);
   scrollbar-width: none;
 }
 
 .tab {
   position: relative;
-  flex: none;
-  padding: 0 0 11px;
+  flex: 1 0 auto;
+  padding: 0 14px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-primary);
   font-size: 13px;
   font-weight: 500;
   line-height: 16px;
   cursor: pointer;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
-.tab::after {
-  position: absolute;
-  right: 0;
-  bottom: 1px;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-  content: '';
+.tab:hover:not(.tabActive) {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .tabActive {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.tabActive::after {
-  background: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-segment-fill);
+  box-shadow: var(--dsw-shadow-segment);
+  font-weight: 600;
 }

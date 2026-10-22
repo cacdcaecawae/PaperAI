@@ -1,10 +1,8 @@
-// Hero chrome for the blank-draft phase of ConversationRoot: fish headline,
-// glow backdrop, and the workspace row. Pure presentation — the resident
-// composer is NOT rendered here (it keeps its own stable tree position in
-// ConversationRoot so the textarea survives the hero → composer flip); CSS
-// positions it over this shell's glow area during the hero phase.
+// Hero chrome for the blank-draft phase of ConversationRoot: fish headline
+// and the workspace row. Pure presentation — the resident composer is NOT
+// rendered here (it keeps its own stable tree position in ConversationRoot so
+// the textarea survives the hero → composer flip).
 
-import { useId } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import {
   FishLogo, IconChevronDownOutline14, IconFolderClose16, IconFolderOpen16,
@@ -65,40 +63,6 @@ export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, t }
 }
 
 /**
- * The soft blue backdrop ellipse (figma 313:14109). Rendered by the hero
- * owner (ConversationRoot), not HeroShell, so it can center on the input
- * card; the owner's className supplies all positioning.
- * @param props.className - positioning class from the owner.
- * @returns the blurred-ellipse svg element.
- */
-export function HeroGlow({ className }: { className?: string | undefined }) {
-  // Stable filter id so multiple hero mounts do not collide in the DOM.
-  const glowFilterId = `empty-glow-${useId().replace(/:/g, '')}`
-  return (
-    <svg className={className} viewBox="0 0 1051 468" fill="none" aria-hidden="true">
-      <defs>
-        <filter
-          id={glowFilterId}
-          x="0"
-          y="0"
-          width="1051"
-          height="468"
-          filterUnits="userSpaceOnUse"
-          colorInterpolationFilters="sRGB"
-        >
-          <feFlood floodOpacity="0" result="BackgroundImageFix" />
-          <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape" />
-          <feGaussianBlur stdDeviation="50" result="effect1_foregroundBlur" />
-        </filter>
-      </defs>
-      <g filter={`url(#${glowFilterId})`}>
-        <ellipse cx="525.5" cy="234" rx="425.5" ry="134" fill="#6187D8" fillOpacity="0.08" />
-      </g>
-    </svg>
-  )
-}
-
-/**
  * The DSH headline: mark, title, preview badge. A component rather than an
  * element so the mark seat renders only when no product occupies the headline.
  */
@@ -130,9 +94,9 @@ export interface HeroShellProps {
 }
 
 /**
- * Render the hero chrome (headline only; no glow, no composer, no workspace
- * row — the glow is the owner's {@link HeroGlow}). The headline block is a
- * slot: without an occupant it is the DSH mark, title, and preview badge.
+ * Render the hero chrome (headline only; no composer, no workspace row).
+ * The headline block is a slot: without an occupant it is the DSH mark,
+ * title, and preview badge.
  * @param props - see {@link HeroShellProps}.
  * @returns the centered hero element tree.
  */

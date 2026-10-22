@@ -1,6 +1,7 @@
 /* The document list follows the sidebar's own section and row vocabulary:
-   the "sessions" heading (12/18 secondary, 34px band) and the 32px session
-   row (14/20, radius 8, hover fill). Nothing here draws a border or a shadow. */
+   the "sessions" heading (13/18 semibold, 34px band) and the session row
+   (14/20, radius 10, hover fill, tint-filled when selected). Nothing here
+   draws a border or an elevation shadow. */
 
 .section {
   display: flex;
@@ -17,15 +18,15 @@
   align-items: center;
   gap: 6px;
   padding: 5px 8px 3px;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
 }
 
 .heading h3 {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -37,12 +38,12 @@
   height: 18px;
   flex: none;
   place-items: center;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .count {
   margin-left: auto;
-  color: var(--dsw-alias-label-dimmed);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -61,7 +62,7 @@
   min-width: 0;
   align-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0 8px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
@@ -74,14 +75,30 @@
 
 .title small { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 
-.row:hover,
-.selected {
+.row:hover {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The iPadOS sidebar selection: a tint-filled row; icon, badge, and caption go white with it. */
+.selected,
+.selected:hover {
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-button-primary-foreground);
+}
+
+.selected .slot,
+.selected .title small {
+  color: inherit;
+}
+
+.selected .meta {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  color: inherit;
 }
 
 .row:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 .slot {
@@ -183,8 +200,8 @@
 }
 
 .outlineRow:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
 @media (prefers-reduced-motion: reduce) {

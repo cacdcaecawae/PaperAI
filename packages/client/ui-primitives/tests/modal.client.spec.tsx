@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
 import { useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -129,4 +130,15 @@ it.each(['preventDefault', 'stopPropagation'] as const)('lets a child editor con
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(parentEscape).not.toHaveBeenCalled()
   } finally { document.removeEventListener('keydown', parentEscape) }
+})
+
+it('enters by fading only, so a portaled menu opened mid-entrance lands on its trigger', () => {
+  // Menu places itself from the trigger's on-screen rect and re-places only on scroll or
+  // resize; a transformed entrance would leave it offset once the dialog settled.
+  for (const [file, name] of [['../src/Modal.module.css', 'dsh-modal-in'], ['../../ui-settings-general/src/client/SettingsRoot.module.css', 'settings-panel-in']] as const) {
+    const css = readFileSync(new URL(file, import.meta.url), 'utf8')
+    const keyframes = new RegExp(`@keyframes ${name} \\{[^}]*\\}`, 'u').exec(css)?.[0]
+    expect(keyframes).toBeDefined()
+    expect(keyframes).not.toMatch(/transform/u)
+  }
 })

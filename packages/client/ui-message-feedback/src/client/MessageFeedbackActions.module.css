@@ -114,7 +114,7 @@
 
 .noteSave {
   background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
+  color: var(--dsw-alias-button-primary-foreground);
 }
 
 .noteSave:hover:not(:disabled) {

@@ -23,7 +23,8 @@
   overflow: visible;
 }
 
-/* figma 34:10411: fish + title, gap 10, centered; 26/32 wt500. The preview
+/* figma 34:10411: fish + title, gap 10, centered; set as an iOS large title
+   (28/34 bold, tightened tracking). The preview
    badge is a product addition outside that source: a mono superscript pill
    riding the title's top-right. */
 .headline {
@@ -32,9 +33,10 @@
   column-gap: 10px;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
-  line-height: 32px;
-  font-weight: 500;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--dsw-alias-label-primary);
 }
 
@@ -96,9 +98,7 @@
   }
 }
 
-/* Workspace row sits 12px above the input card (figma y80 → y112). The blue
-   glow lives with the owner (ConversationRoot .heroGlow) so it can center on
-   the input card. */
+/* Workspace row sits 12px above the input card (figma y80 → y112). */
 .body {
   position: relative;
   display: flex;
@@ -113,7 +113,7 @@
   z-index: 1;
 }
 
-/* Must beat `.body > :not(.glow)` specificity so the open Menu (and its
+/* Must beat `.body > *` specificity so the open Menu (and its
    right-hand submenu) paints above the InputBar card. */
 .body > .workspaceRow {
   z-index: 10;
@@ -155,7 +155,7 @@
 
 .folder {
   flex: none;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .workspaceLabel {

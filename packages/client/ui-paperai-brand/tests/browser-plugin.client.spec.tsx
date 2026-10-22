@@ -26,6 +26,15 @@ const HOLES = [
 const AGENT_PRESET_MARK = 'conversation.hero.agentPreset.mark' as const
 const ACP_CHANNEL_MARK = 'paperai.acp.channel.mark' as const
 
+function contrastRatio(first: string, second: string): number {
+  const luminance = (hex: string): number => [1, 3, 5]
+    .map(i => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0)
+  const [a, b] = [first, second].map(luminance).sort((x, y) => y - x)
+  return (a! + 0.05) / (b! + 0.05)
+}
+
 async function bench(declare = true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
@@ -63,7 +72,7 @@ describe('PaperAI browser-brand plugin', () => {
     expect(inject).toEqual(['slots', 'locale', 'theme'])
   })
 
-  it('stacks the ink-and-gold token layer over the shipped palette and lifts it on teardown', async () => {
+  it('stacks the iOS token layer over the shipped palette and lifts it on teardown', async () => {
     const { ctx, layers } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
@@ -74,8 +83,11 @@ describe('PaperAI browser-brand plugin', () => {
       expect(modes.light).not.toBe('')
       expect(modes.dark).not.toBe('')
     }
-    // Ink primary on paper, gold primary on slate.
-    expect(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.light).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
+    // Dark splits the tint: type takes the brighter #409cff, fills under white type #0071e3.
+    expect(PAPERAI_TOKENS['--dsw-alias-state-business-primary']?.dark).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
+    // DSH reads label-primary-foreground as label-primary's inverse (a checked checkbox's
+    // mark); the layer leaves it alone and colors type on its blue fills through their own pairs.
+    expect(PAPERAI_TOKENS['--dsw-alias-label-primary-foreground']).toBeUndefined()
     // The workbench badges read one accent and one tint per document type.
     for (const type of ['proposal', 'midterm', 'manuscript', 'final', 'other']) {
       expect(PAPERAI_TOKENS[`--paperai-type-${type}`]).toBeDefined()
@@ -83,6 +95,29 @@ describe('PaperAI browser-brand plugin', () => {
     }
     await fiber.dispose()
     expect(layers.has(PAPERAI_THEME_SOURCE)).toBe(false)
+  })
+
+  it('keeps every blue fill and every tint or error label at WCAG AA 4.5:1 in both schemes', () => {
+    const pairs = [
+      ['--dsw-specific-bubble', '--dsw-specific-bubble-foreground'],
+      ['--dsw-alias-button-primary-fill', '--dsw-alias-button-primary-foreground'],
+      ['--dsw-alias-button-primary-hover', '--dsw-alias-button-primary-foreground'],
+      ...['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2'].flatMap(ground => [
+        [ground, '--dsw-alias-state-business-primary'],
+        [ground, '--dsw-alias-state-error-primary'],
+      ]),
+    ] as const
+    for (const scheme of ['light', 'dark'] as const) {
+      for (const [back, fore] of pairs) {
+        expect(contrastRatio(PAPERAI_TOKENS[back]![scheme], PAPERAI_TOKENS[fore]![scheme]), `${scheme} ${fore} on ${back}`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
+  it('keeps dark tertiary captions readable on the base, grouped grounds, and elevated cards', () => {
+    for (const ground of ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3']) {
+      expect(contrastRatio(PAPERAI_TOKENS['--dsw-alias-label-tertiary']!.dark, PAPERAI_TOKENS[ground]!.dark), ground).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   it('renames the shell\'s workspace vocabulary to projects in both locales and lifts it on teardown', async () => {
@@ -142,7 +177,7 @@ describe('PaperAI browser-brand plugin', () => {
     expect(after.slots.entries(ACP_CHANNEL_MARK)).toHaveLength(2)
   })
 
-  it('renders the outlined wordmark and the host-sized golden-ratio mark in the surrounding ink', () => {
+  it('renders the outlined wordmark and the host-sized golden-ratio mark', () => {
     const name = render(<PaperAIBrandName />)
     const wordmark = name.container.querySelector('svg')
     expect(wordmark?.getAttribute('aria-hidden')).toBe('true')

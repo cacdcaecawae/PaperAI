@@ -284,6 +284,24 @@ describe('web e2e: PaperAI project navigation', { concurrent: false }, () => {
     )
   }, 60_000)
 
+  it('keeps keyboard focus visible on the selected document row', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-paperai-document-focus'))
+    await page.getByRole('treeitem', { name: /Paper project/ }).click()
+    const documentRow = page.getByRole('region', { name: '文档', exact: true })
+      .getByRole('button', { name: '打开 Workspace brief.docx', exact: true })
+    await documentRow.click()
+    await expect.poll(() => documentRow.getAttribute('aria-current')).toBe('true')
+    await documentRow.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect.poll(() => documentRow.evaluate(element => element.matches(':focus-visible'))).toBe(true)
+    const indicator = await documentRow.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { outline: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset, shadow: style.boxShadow }
+    })
+    expect(indicator).toEqual({ outline: 'solid', width: '2px', offset: '2px', shadow: 'none' })
+    await page.getByRole('button', { name: '关闭文档', exact: true }).click()
+  })
+
   it('keeps its snapshot inventory closed', async () => {
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])

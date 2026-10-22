@@ -1,7 +1,7 @@
-/* The start page is the blank session's headline: the mark in the brand's gold,
-   the project name at 20/28, one line of facts, then the documents as a
-   hairline list whose last row creates or imports. It paints no card and no
-   glow; the composer below stays the visual anchor. */
+/* The start page is the blank session's headline in the iOS recipe: the gold
+   mark on an app-icon tile, the project name as a large title, one line of
+   facts, then the documents as an inset grouped list whose last row creates
+   or imports. The composer below stays the visual anchor. */
 
 .root {
   display: flex;
@@ -24,25 +24,31 @@
   gap: 6px;
 }
 
+/* The app-icon tile: a 64 px rounded square at the iOS icon corner ratio. */
 .markSeat {
   display: inline-flex;
-  height: 40px;
+  width: 64px;
+  height: 64px;
   align-items: center;
   justify-content: center;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  border-radius: 15px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--paperai-float-shadow);
 }
 
 .mark {
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--paperai-brand-gold);
 }
 
 .title {
   max-width: 100%;
   margin: 0;
   overflow: hidden;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 34px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -51,7 +57,7 @@
 .facts {
   margin: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 20px;
   text-align: center;
 }
@@ -65,27 +71,25 @@
   gap: 0 6px;
 }
 
-/* The template is one fact among the others; only its dotted underline says
-   it can be changed. */
+/* The template is one fact among the others; the tint says it can be changed. */
 .templateLink {
   border: 0;
   border-radius: 6px;
   padding: 0;
   background: transparent;
-  color: inherit;
+  color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
   font: inherit;
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
+  font-weight: 500;
 }
 
 .templateLink:hover:not(:disabled) {
-  color: var(--dsw-alias-label-primary);
+  opacity: 0.75;
 }
 
 .templateLink:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .templateLink:disabled {
@@ -93,6 +97,8 @@
   cursor: default;
 }
 
+/* The inset grouped list: the section header above, one rounded card of rows
+   on the grouped ground, each hairline inset past the icon column. */
 .documents {
   display: flex;
   width: 100%;
@@ -103,29 +109,46 @@
 .listHead {
   display: flex;
   justify-content: space-between;
-  padding: 0 4px 6px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  padding: 0 16px 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
   line-height: 18px;
+}
+
+.group {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.rows > * + * > .docRow::before,
+.rows + .menu .createRow::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 54px;
+  height: 1px;
+  background: var(--dsw-alias-border-l1);
+  content: '';
 }
 
 .docRow,
 .createRow {
+  position: relative;
   box-sizing: border-box;
   display: flex;
   width: 100%;
   min-height: 48px;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: 0;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  padding: 0 4px;
+  padding: 0 14px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 20px;
   text-align: left;
 }
@@ -139,13 +162,19 @@
 
 .docRow:focus-visible,
 .createRow:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-focus-ring);
 }
 
+/* The iOS Settings glyph tile: the type accent on its own tint, r7. */
 .docIcon {
-  display: inline-flex;
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
   flex: none;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--paperai-row-tint, var(--dsw-alias-interactive-bg-hover));
   color: var(--paperai-row-accent, var(--dsw-alias-label-tertiary));
 }
 
@@ -159,21 +188,32 @@
 
 .badge {
   flex: none;
-  border-radius: 6px;
-  padding: 0 6px;
+  border-radius: 999px;
+  padding: 0 8px;
   background: var(--paperai-row-tint, var(--dsw-alias-interactive-bg-hover));
   color: var(--paperai-row-accent, var(--dsw-alias-label-tertiary));
   font-size: 12px;
-  line-height: 18px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 .docDate {
-  width: 72px;
+  width: 64px;
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* The disclosure chevron every navigating iOS row ends with. */
+.docRow::after {
+  width: 7px;
+  height: 12px;
+  flex: none;
+  background: var(--dsw-alias-label-quaternary);
+  content: '';
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 12'%3E%3Cpath d='M1 1l5 5-5 5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 /* The create row is a menu anchor; the menu's inline wrapper spans the row. */
@@ -183,9 +223,14 @@
   width: 100%;
 }
 
+/* The add row reads in the tint, its glyph centred in the icon column. */
 .createRow {
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.createRow > svg {
+  width: 28px;
+  flex: none;
 }
 
 .createRow:disabled {

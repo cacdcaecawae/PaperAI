@@ -6,19 +6,24 @@
   height: 32px;
   padding: 6px 12px;
   gap: 4px;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: none;
   border-radius: 18px;
-  color: var(--dsw-alias-label-primary);
-  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-module-platform);
   font-family: var(--dsw-font-family);
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 20px;
   cursor: pointer;
 }
 
 .sessionLogButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+.sessionLogButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .sessionLogButton:disabled {

@@ -184,12 +184,14 @@ export function StartPage({
         <div className={css.documents}>
           {documents.length === 0 && <p className={css.lead}>{t('start.empty')}</p>}
           {documents.length > 0 && (
-            <>
-              <div className={css.listHead} aria-hidden="true">
-                <span>{t('documents.title')}</span>
-                <span>{t('start.recent')}</span>
-              </div>
-              <div role="list" aria-label={t('documents.title')}>
+            <div className={css.listHead} aria-hidden="true">
+              <span>{t('documents.title')}</span>
+              <span>{t('start.recent')}</span>
+            </div>
+          )}
+          <div className={css.group}>
+            {documents.length > 0 && (
+              <div role="list" aria-label={t('documents.title')} className={css.rows}>
                 {documents.map(row => (
                   <div role="listitem" key={row.id}>
                     <button
@@ -214,29 +216,29 @@ export function StartPage({
                   </div>
                 ))}
               </div>
-            </>
-          )}
-          <div className={css.menu}>
-            <Menu
-              portal
-              open={menuOpen}
-              items={items}
-              anchor={(
-                <button
-                  type="button"
-                  className={css.createRow}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  disabled={busy}
-                  onClick={() => { setMenuOpen(open => !open) }}
-                >
-                  <IconPlusOutline16 />
-                  <span>{busy && project.action === 'starting' ? t('start.working') : t('start.create')}</span>
-                </button>
-              )}
-              onSelect={start}
-              onClose={() => { setMenuOpen(false) }}
-            />
+            )}
+            <div className={css.menu}>
+              <Menu
+                portal
+                open={menuOpen}
+                items={items}
+                anchor={(
+                  <button
+                    type="button"
+                    className={css.createRow}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    disabled={busy}
+                    onClick={() => { setMenuOpen(open => !open) }}
+                  >
+                    <IconPlusOutline16 />
+                    <span>{busy && project.action === 'starting' ? t('start.working') : t('start.create')}</span>
+                  </button>
+                )}
+                onSelect={start}
+                onClose={() => { setMenuOpen(false) }}
+              />
+            </div>
           </div>
         </div>
       )}

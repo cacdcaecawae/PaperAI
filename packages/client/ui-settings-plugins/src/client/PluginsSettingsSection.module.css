@@ -1,4 +1,4 @@
-/* Plugins section: compact tabs plus the configurable plugin card list. */
+/* Plugins section: an iOS segmented control plus the configurable plugin card list. */
 
 .section {
   display: flex;
@@ -10,58 +10,56 @@
 
 .heading {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 28px;
 }
 
 .intro {
   margin: 0;
-  font-size: 13px;
-  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .tabs {
   display: flex;
-  align-items: flex-end;
-  gap: 22px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  align-self: flex-start;
+  gap: 2px;
   margin-top: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-segment-track);
 }
 
 .tab {
   position: relative;
+  min-width: 96px;
   border: 0;
-  padding: 7px 1px 9px;
+  border-radius: 7px;
+  padding: 5px 14px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-primary);
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
   line-height: 20px;
   cursor: pointer;
 }
 
-.tab:hover,
-.tab[data-active='true'] {
-  color: var(--dsw-alias-label-primary);
+.tab:hover:not([data-active='true']) {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.tab[data-active='true']::after,
-.tab:focus-visible::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--dsw-alias-label-primary);
-  content: '';
+.tab[data-active='true'] {
+  background: var(--dsw-alias-segment-fill);
+  box-shadow: var(--dsw-shadow-segment);
+  font-weight: 600;
 }
 
 .tab:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
-  border-radius: 2px;
-  color: var(--dsw-alias-label-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dsw-alias-focus-ring);
 }
 
 .panel {
