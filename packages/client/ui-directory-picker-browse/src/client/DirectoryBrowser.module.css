@@ -262,7 +262,7 @@
 
 .rowIconSelected {
   flex: none;
-  color: var(--dsw-alias-button-info-fill);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .rowName {

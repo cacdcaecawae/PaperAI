@@ -59,12 +59,12 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-border-l3': pair('rgba(60, 60, 67, 0.29)', 'rgba(84, 84, 88, 0.72)'),
   '--dsw-alias-border-l4': pair('rgba(60, 60, 67, 0.36)', 'rgba(84, 84, 88, 0.85)'),
 
-  // Tint: system blue is the brand accent, the focus ring, and the one filled action. Light
-  // takes #0066cc rather than #007aff: blue type holds 5.0:1 even on the #f2f2f7 grouped
-  // ground and white type on blue 5.6:1, where #007aff holds 4.0:1 on white. Dark splits the
-  // tint: type and marks take the accessible #409cff (4.9:1 on a #2c2c2e card), fills under
-  // white type take #0071e3 (4.7:1), and a hovered fill darkens instead of lightening.
-  '--dsw-alias-brand-primary': pair('#0066cc', '#409cff'),
+  // Tint: system blue is the brand accent, the focus ring, and the one filled action. Each
+  // scheme splits it. Fills under white type take #0066cc and #0071e3 (5.6:1 and 4.7:1, where
+  // #007aff holds 4.0:1), and a hovered fill darkens instead of lightening. Type and marks take
+  // #0060c0 and #64b0ff, which still clear 4.5:1 on the translucent tint and gray fills a
+  // badge, a current row, or a pop-up trigger lays under them on the grouped ground or a card.
+  '--dsw-alias-brand-primary': pair('#0060c0', '#64b0ff'),
   '--dsw-alias-brand-primary-invert': pair('#ffffff', '#ffffff'),
   '--dsw-alias-brand-text': pair('#000000', '#ffffff'),
   '--dsw-alias-button-primary-fill': pair('#0066cc', '#0071e3'),
@@ -76,23 +76,25 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-button-elevated-fill': pair('#ffffff', '#2c2c2e'),
   '--dsw-alias-button-floating-fill': pair('#ffffff', '#2c2c2e'),
   '--dsw-alias-button-floating-hover': pair('#f2f2f7', '#3a3a3c'),
+  '--dsw-alias-button-ghost-active-fill': pair('#e5e5ea', '#3a3a3c'),
 
   // Selected, linked, and focused states.
-  '--dsw-alias-state-business-primary': pair('#0066cc', '#409cff'),
+  '--dsw-alias-state-business-primary': pair('#0060c0', '#64b0ff'),
   '--dsw-alias-state-business-tertiary': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
 
-  // System status colors. Error takes the increased-contrast reds, #d70015 and #ff6961: as
-  // error type #ff3b30 holds 3.6:1 on white and #ff453a 4.1:1 on a #2c2c2e card. The green
-  // and orange also color status text; those pairs are not covered by the AA check.
-  '--dsw-alias-state-error-primary': pair('#d70015', '#ff6961'),
+  // System status colors. They color status type as well as marks, so each takes a value that
+  // holds 4.5:1 on the grounds and on its own tint, a danger button's hover fill included: deep
+  // reds #c80013 and #ff8a82 (#ff3b30 holds 3.6:1 on white), and in light a deep green and a
+  // burnt orange, since the iOS #34c759 and #ff9500 hold about 2:1 as type.
+  '--dsw-alias-state-error-primary': pair('#c80013', '#ff8a82'),
   '--dsw-alias-state-error-secondary': pair('#ff6961', '#ff6961'),
-  '--dsw-alias-state-success-primary': pair('#34c759', '#30d158'),
+  '--dsw-alias-state-success-primary': pair('#1b7031', '#30d158'),
   '--dsw-alias-state-success-secondary': pair('#30d158', '#32d74b'),
   '--dsw-alias-state-success-tertiary': pair('rgba(52, 199, 89, 0.14)', 'rgba(48, 209, 88, 0.2)'),
-  '--dsw-alias-state-warn-primary': pair('#ff9500', '#ff9f0a'),
+  '--dsw-alias-state-warn-primary': pair('#b83000', '#ff9f0a'),
   '--dsw-alias-state-warn-secondary': pair('#ffb340', '#ffb340'),
   '--dsw-alias-state-warn-tertiary': pair('rgba(255, 149, 0, 0.14)', 'rgba(255, 159, 10, 0.2)'),
-  '--dsw-alias-state-warn-label': pair('#c93400', '#ffb340'),
+  '--dsw-alias-state-warn-label': pair('#b83000', '#ffb340'),
 
   // Fills: the iOS translucent gray fills for hover, press, and toggled controls.
   '--dsw-alias-interactive-bg-hover': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
@@ -101,13 +103,16 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   '--dsw-alias-interactive-bg-hover-solid': pair('#e5e5ea', '#2c2c2e'),
   '--dsw-alias-interactive-bg-hover-danger': pair('rgba(255, 59, 48, 0.1)', 'rgba(255, 69, 58, 0.18)'),
 
-  // Dark tertiary captions keep 4.9:1 contrast on the elevated #2c2c2e cards.
+  // Labels: the iOS increased-contrast grays. Secondary, tertiary, and caption type sits on
+  // white and #2c2c2e cards, the grouped grounds, and the translucent gray fills of badges and
+  // hovered rows; each value holds 4.5:1 over all of them. Quaternary and dimmed are disabled
+  // and placeholder ink, which the contrast minimum exempts.
   '--dsw-alias-label-primary': pair('#000000', '#ffffff'),
   '--dsw-alias-label-primary-dimmed': pair('#1c1c1e', '#ebebf5'),
-  '--dsw-alias-label-secondary': pair('#6c6c70', '#aeaeb2'),
-  '--dsw-alias-label-tertiary': pair('#8a8a8e', '#99999e'),
+  '--dsw-alias-label-secondary': pair('#545458', '#c7c7cc'),
+  '--dsw-alias-label-tertiary': pair('#636366', '#aeaeb2'),
   '--dsw-alias-label-quaternary': pair('#aeaeb2', '#636366'),
-  '--dsw-alias-label-caption': pair('#8e8e93', '#8e8e93'),
+  '--dsw-alias-label-caption': pair('#636366', '#aeaeb2'),
   '--dsw-alias-label-dimmed': pair('#c7c7cc', '#48484a'),
 
   // Markdown surfaces in the conversation.
@@ -151,19 +156,21 @@ export const PAPERAI_TOKENS: ThemeTokenOverrides = Object.freeze({
   // value instead of following the app: the dark tint is lighter and reads poorer on white.
   '--paperai-page-accent': pair('#0071e3', '#0071e3'),
   '--paperai-page-loss': pair('#c4001a', '#c4001a'),
+  '--paperai-page-gain': pair('#1b7031', '#1b7031'),
   // Tint type on the page: on a conflict band's own tint the accent reads 3.6:1, under AA for
   // 13 px labels, where this holds 6.5:1 and still clears 4.5:1 on a pressed button's fill.
   '--paperai-page-ink': pair('#0058c6', '#0058c6'),
 
-  // Document-type accents the workbench badges and icons read (iOS system hues).
-  '--paperai-type-proposal': pair('#0066cc', '#409cff'),
+  // Document-type accents the workbench badges and icons read: iOS system hues, deepened in light
+  // and lifted in dark until the badge type holds 4.5:1 on its own tint.
+  '--paperai-type-proposal': pair('#0060c0', '#64b0ff'),
   '--paperai-type-proposal-tint': pair('rgba(0, 102, 204, 0.12)', 'rgba(64, 156, 255, 0.18)'),
-  '--paperai-type-midterm': pair('#af52de', '#bf5af2'),
+  '--paperai-type-midterm': pair('#8e3fb8', '#d99bf8'),
   '--paperai-type-midterm-tint': pair('rgba(175, 82, 222, 0.12)', 'rgba(191, 90, 242, 0.22)'),
-  '--paperai-type-manuscript': pair('#b8860b', '#e2b457'),
+  '--paperai-type-manuscript': pair('#8a6100', '#e8c06c'),
   '--paperai-type-manuscript-tint': pair('rgba(255, 204, 0, 0.18)', 'rgba(255, 214, 10, 0.2)'),
-  '--paperai-type-final': pair('#248a3d', '#30d158'),
+  '--paperai-type-final': pair('#1b7031', '#30d158'),
   '--paperai-type-final-tint': pair('rgba(52, 199, 89, 0.14)', 'rgba(48, 209, 88, 0.2)'),
-  '--paperai-type-other': pair('#6c6c70', '#aeaeb2'),
+  '--paperai-type-other': pair('#636366', '#aeaeb2'),
   '--paperai-type-other-tint': pair('rgba(118, 118, 128, 0.12)', 'rgba(118, 118, 128, 0.24)'),
 })

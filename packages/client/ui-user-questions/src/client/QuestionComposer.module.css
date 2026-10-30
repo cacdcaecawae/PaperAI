@@ -278,7 +278,7 @@
   padding: 0 4px;
   border-radius: 6px;
   background: var(--dsw-specific-sidebar-nav-item-active-accent);
-  color: var(--dsw-alias-button-info-fill);
+  color: var(--dsw-alias-state-business-primary);
   font-size: 11px;
   line-height: 18px;
   font-weight: 600;

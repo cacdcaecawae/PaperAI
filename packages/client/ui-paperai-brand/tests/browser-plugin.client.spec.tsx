@@ -26,9 +26,23 @@ const HOLES = [
 const AGENT_PRESET_MARK = 'conversation.hero.agentPreset.mark' as const
 const ACP_CHANNEL_MARK = 'paperai.acp.channel.mark' as const
 
-function contrastRatio(first: string, second: string): number {
-  const luminance = (hex: string): number => [1, 3, 5]
-    .map(i => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+type Rgba = [number, number, number, number]
+
+/** A `#rrggbb` or `rgba(r, g, b, a)` token value as channels. */
+function rgba(value: string): Rgba {
+  if (value.startsWith('#')) return [1, 3, 5].map(i => Number.parseInt(value.slice(i, i + 2), 16)).concat(1) as Rgba
+  const [r = 0, g = 0, b = 0, a = 1] = value.replace(/^rgba?\(|\)$/gu, '').split(',').map(Number)
+  return [r, g, b, a]
+}
+
+/** `top` painted over an opaque `ground`. */
+function over(top: Rgba, ground: Rgba): Rgba {
+  return [0, 1, 2].map(i => top[i]! * top[3] + ground[i]! * (1 - top[3])).concat(1) as Rgba
+}
+
+function contrastRatio(first: Rgba, second: Rgba): number {
+  const luminance = (color: Rgba): number => color.slice(0, 3)
+    .map(c => c / 255)
     .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
     .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0)
   const [a, b] = [first, second].map(luminance).sort((x, y) => y - x)
@@ -83,7 +97,7 @@ describe('PaperAI browser-brand plugin', () => {
       expect(modes.light).not.toBe('')
       expect(modes.dark).not.toBe('')
     }
-    // Dark splits the tint: type takes the brighter #409cff, fills under white type #0071e3.
+    // Each scheme splits the tint: type and marks take their own value, apart from the fills under white type.
     expect(PAPERAI_TOKENS['--dsw-alias-state-business-primary']?.dark).not.toBe(PAPERAI_TOKENS['--dsw-alias-button-primary-fill']?.dark)
     // DSH reads label-primary-foreground as label-primary's inverse (a checked checkbox's
     // mark); the layer leaves it alone and colors type on its blue fills through their own pairs.
@@ -97,27 +111,44 @@ describe('PaperAI browser-brand plugin', () => {
     expect(layers.has(PAPERAI_THEME_SOURCE)).toBe(false)
   })
 
-  it('keeps every blue fill and every tint or error label at WCAG AA 4.5:1 in both schemes', () => {
-    const pairs = [
+  it('keeps every text token at WCAG AA 4.5:1 on the grounds and fills it sits on, in both schemes', () => {
+    // [fill or '', type]: the fill is painted over each opaque ground, then the type over that.
+    const grounds = ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3', '--dsw-specific-sidebar-fill']
+    const grayFills = ['', '--dsw-alias-bg-module-platform', '--dsw-alias-interactive-bg-hover', '--dsw-alias-button-ghost-active-fill']
+    const neutralType = ['secondary', 'tertiary', 'caption'].map(label => `--dsw-alias-label-${label}`)
+      .concat('--dsw-alias-state-business-primary', '--dsw-alias-state-error-primary', '--dsw-alias-state-warn-label')
+    const pairs: (readonly [string, string])[] = [
       ['--dsw-specific-bubble', '--dsw-specific-bubble-foreground'],
       ['--dsw-alias-button-primary-fill', '--dsw-alias-button-primary-foreground'],
       ['--dsw-alias-button-primary-hover', '--dsw-alias-button-primary-foreground'],
-      ...['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2'].flatMap(ground => [
-        [ground, '--dsw-alias-state-business-primary'],
-        [ground, '--dsw-alias-state-error-primary'],
-      ]),
-    ] as const
+      ...grayFills.flatMap(fill => neutralType.map(type => [fill, type] as const)),
+      // Badges, the current row, and status strips set type in their own hue over its tint.
+      ...['--dsw-alias-state-business-tertiary', '--dsw-specific-sidebar-nav-item-active-accent']
+        .map(fill => [fill, '--dsw-alias-state-business-primary'] as const),
+      ['--dsw-alias-interactive-bg-hover-danger', '--dsw-alias-state-error-primary'],
+      ['', '--dsw-alias-state-success-primary'], ['--dsw-alias-state-success-tertiary', '--dsw-alias-state-success-primary'],
+      ['', '--dsw-alias-state-warn-primary'], ['--dsw-alias-state-warn-tertiary', '--dsw-alias-state-warn-primary'],
+      ['--dsw-alias-state-warn-tertiary', '--dsw-alias-state-warn-label'],
+      ...['proposal', 'midterm', 'manuscript', 'final', 'other']
+        .map(type => [`--paperai-type-${type}-tint`, `--paperai-type-${type}`] as const),
+    ]
+    const failures: string[] = []
     for (const scheme of ['light', 'dark'] as const) {
-      for (const [back, fore] of pairs) {
-        expect(contrastRatio(PAPERAI_TOKENS[back]![scheme], PAPERAI_TOKENS[fore]![scheme]), `${scheme} ${fore} on ${back}`).toBeGreaterThanOrEqual(4.5)
+      const token = (name: string): Rgba => rgba(PAPERAI_TOKENS[name]![scheme])
+      for (const [fill, type] of pairs) {
+        for (const ground of grounds) {
+          const back = fill === '' ? token(ground) : over(token(fill), token(ground))
+          const ratio = contrastRatio(over(token(type), back), back)
+          if (ratio < 4.5) failures.push(`${scheme} ${type} on ${fill || 'bare'} over ${ground}: ${ratio.toFixed(2)}`)
+        }
+      }
+      // Ink drawn on the sheet, which stays white in both schemes.
+      for (const ink of ['accent', 'loss', 'gain', 'ink'].map(name => `--paperai-page-${name}`)) {
+        const ratio = contrastRatio(token(ink), [255, 255, 255, 1])
+        if (ratio < 4.5) failures.push(`${scheme} ${ink} on the page: ${ratio.toFixed(2)}`)
       }
     }
-  })
-
-  it('keeps dark tertiary captions readable on the base, grouped grounds, and elevated cards', () => {
-    for (const ground of ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3']) {
-      expect(contrastRatio(PAPERAI_TOKENS['--dsw-alias-label-tertiary']!.dark, PAPERAI_TOKENS[ground]!.dark), ground).toBeGreaterThanOrEqual(4.5)
-    }
+    expect(failures).toEqual([])
   })
 
   it('renames the shell\'s workspace vocabulary to projects in both locales and lifts it on teardown', async () => {
