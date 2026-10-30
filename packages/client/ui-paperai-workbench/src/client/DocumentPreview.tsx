@@ -114,11 +114,11 @@ const PREVIEW_STYLE = `
 .paperai-doc { width: fit-content; margin: 0 auto; color: var(--dsw-static-neutral-1000); zoom: var(--paperai-page-zoom, 1); }
 .paperai-doc .page { border: 1px solid var(--dsw-alias-border-l2); border-radius: 2px; box-shadow: var(--paperai-page-shadow); }
 [data-paperai-change], [data-paperai-changed] { position: relative; }
-/* Marks drawn on the sheet take the page's own gold, not the app's: --dsw-alias-state-business-primary
-   resolves to champagne #e2b457 in dark, which is 1.9:1 on white paper. */
+/* Marks drawn on the sheet take the page's own ink, not the app's: the app's tint and error values
+   are lifted in dark to read on dark grounds, and the paper stays white, so they would fade on it. */
 [data-paperai-change]::before, [data-paperai-changed]::before { content: '✎'; position: absolute; left: -20px; top: 0; font: 12px sans-serif; color: var(--paperai-page-accent); }
-[data-paperai-conflicted]::before { content: '!'; font-weight: bold; color: var(--dsw-alias-state-error-primary); }
-[data-paperai-conflicted] { border-inline-start: 2px dashed var(--dsw-alias-state-error-primary); }
+[data-paperai-conflicted]::before { content: '!'; font-weight: bold; color: var(--paperai-page-loss); }
+[data-paperai-conflicted] { border-inline-start: 2px dashed var(--paperai-page-loss); }
 [data-paperai-change][data-paperai-current] { outline: 2px solid var(--paperai-page-accent); outline-offset: 2px; }
 [data-paperai-removed] { opacity: 0.85; }
 /* A version comparison keeps its own red-removed/green-added reading; what goes is the tint behind it.
@@ -126,8 +126,8 @@ const PREVIEW_STYLE = `
    and --dsw-alias-state-success-tertiary resolves to green-900 in dark: a near-black block on white
    paper. A background is also what turns dense Chinese into confetti and what breaks CJK line-breaking,
    so the strike and the underline carry the shape instead. */
-[data-paperai-change] del { color: var(--dsw-alias-state-error-primary); text-decoration: line-through; text-decoration-thickness: 0.06em; }
-[data-paperai-change] ins { color: var(--dsw-alias-state-success-primary); text-decoration: underline; text-decoration-skip-ink: none; text-decoration-thickness: 0.06em; text-underline-offset: 0.2em; }
+[data-paperai-change] del { color: var(--paperai-page-loss); text-decoration: line-through; text-decoration-thickness: 0.06em; }
+[data-paperai-change] ins { color: var(--paperai-page-gain); text-decoration: underline; text-decoration-skip-ink: none; text-decoration-thickness: 0.06em; text-underline-offset: 0.2em; }
 [data-paperai-block][contenteditable="true"] { cursor: text; outline: none; min-height: 1em; caret-color: var(--paperai-page-accent); }
 [data-paperai-paragraph] { display: block; min-height: 1em; }
 

@@ -19,7 +19,7 @@
   overflow-wrap: anywhere;
   border-radius: 22px;
   background: var(--dsw-specific-bubble);
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-specific-bubble-foreground);
   font: var(--dsw-font-markdown-code);
   white-space: pre-wrap;
 }
